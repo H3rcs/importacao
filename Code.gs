@@ -1,26 +1,30 @@
 /*******************************************************************************
- * GSL BARTOFIL · SISTEMA DE GESTÃO OPERACIONAL — AUTOMAÇÕES (v6)
+ * GSL BARTOFIL · SISTEMA DE GESTÃO OPERACIONAL — AUTOMAÇÕES (v7)
  * -----------------------------------------------------------------------------
  * PRÉ-REQUISITO: salvar como Planilhas Google (em .xlsx o script NÃO roda).
  *
- * O QUE MUDOU NA v6 (além de tudo da v4/v5):
- *   • MOTOR DE INSIGHTS — o script analisa OCORRÊNCIAS + abas mensais e escreve
- *     diagnósticos em português na aba INSIGHTS (tendência por setor,
- *     recorrências, absenteísmo fora da curva, concentração por dia da semana,
- *     colaborador recorrente, atrasos ativos e melhorias). Roda às quintas,
- *     entra no briefing do gerente e no relatório mensal.
- *   • RELATÓRIO EXECUTIVO MENSAL (PDF) — todo dia 1º às 6h o script fecha o
- *     mês anterior em PDF (KPIs, score, top setores, insights e gráficos do
- *     PAINEL), salva na pasta Relatórios do Drive e envia à gestão e à
- *     diretoria (CONFIG!D16).
- *   • SCORE DE TURNOS — a aba SCORE calcula nota 0–100 por turno/mês (pesos
- *     ajustáveis); o digesto carimba a marca interna de atraso (coluna U) que
- *     alimenta a pontualidade.
- *   • GOVERNANÇA — aba LOG com trilha de auditoria automática (quem, quando,
- *     de/para em campos críticos) + BACKUP mensal da planilha no Drive
- *     (mantém 12) + menu Diagnóstico do sistema.
- *   • Meses infinitos (dia 20), registro de ocorrências, digesto matinal
- *     único e briefing do gerente — tudo da v5 mantido.
+ * ESCOPO DA v7 — CALENDÁRIO PURO
+ *   Esta planilha controla APENAS atividades: o que foi programado, quem
+ *   entregou, quando e se o gerente aprovou. NENHUM dado individual de
+ *   colaborador (falta, atestado, erro, meta) é lido, escrito ou exibido aqui.
+ *   Esses dados vivem na planilha GSL-DADOS, que alimenta o BI e é totalmente
+ *   independente deste arquivo — não há IMPORTRANGE nem script entre as duas.
+ *
+ * O QUE SAIU DA v6:
+ *   • Registro de ocorrências (erro/falta/atestado) e a aba OCORRÊNCIAS.
+ *   • Score de turnos (aba SCORE) e os gráficos do PAINEL no relatório.
+ *   • Tabela de absenteísmo do briefing (aba GERÊNCIA).
+ *   • Trilha de auditoria na aba LOG.
+ *
+ * O QUE PERMANECE:
+ *   • Digesto matinal único por coordenador + briefing do gerente na véspera
+ *     e no dia da reunião (tabela agora montada a partir do próprio calendário).
+ *   • Anexo de entregas no Drive, cancelamento, validação e avisos em tempo real.
+ *   • Meses infinitos (dia 20) a partir da aba oculta MODELO_MES.
+ *   • MOTOR DE INSIGHTS reescrito: analisa só o calendário (atrasos, reprovações,
+ *     pontualidade por turno, gargalo de validação, dia da semana crítico).
+ *   • Relatório executivo mensal em PDF (dia 1º) com os KPIs de atividades.
+ *   • Backup mensal da planilha no Drive (mantém 12) + Diagnóstico do sistema.
  *
  * Ativação: CONFIG (B5:C9 e D12:D16) > colar este arquivo > executar
  * instalarGatilhos 1 vez > autorizar. NUNCA exclua a aba MODELO_MES.
@@ -50,8 +54,9 @@ function chaveMes_(nome) {                  // "AGO 2026" -> 2026*12+7
 }
 
 var LINHA_INI = 22;
+// K(11) e L(12) eram FALTAS/ATESTADOS — removidas do calendário na v7.
 var COL = { ID:1, SEMANA:2, PRAZO:3, ATIVIDADE:4, TURNO:7, COORD:8, SETOR:10,
-            FALTAS:11, ATEST:12, ANEXO:13, ENTREGUE:16, VALIDACAO:17,
+            ANEXO:13, ENTREGUE:16, VALIDACAO:17,
             MOTIVO:18, STATUS:19, F_LEMBRETE:20, F_ATRASO:21, F_ENTREGA:22 };
 var CEL_PASTA = 'D15';               // CONFIG!D15 — ID da pasta do Drive
 var MAX_MB    = 25;
@@ -148,7 +153,6 @@ function bloco_(i) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('GSL Bartofil')
     .addItem('Anexar entrega (linha selecionada)', 'abrirAnexo')
-    .addItem('Registrar ocorrência (erro/falta/atestado)', 'registrarOcorrencia')
     .addSeparator()
     .addItem('Gerar aba do próximo mês', 'gerarProximoMes')
     .addItem('Gerar insights agora', 'gerarInsights')
@@ -176,7 +180,7 @@ function instalarGatilhos() {
     '• 7h — digesto matinal por coordenador + briefing do gerente (véspera e dia da reunião; insights às quintas)\n' +
     '• Dia 20, 6h — gera sozinho a aba do mês seguinte (meses infinitos)\n' +
     '• Dia 1º, 6h — BACKUP da planilha no Drive + RELATÓRIO MENSAL em PDF para gestão/diretoria\n' +
-    '• Monitoramento de edições com trilha de auditoria na aba LOG\n' +
+    '• Monitoramento de edições (avisos em tempo real de entrega e validação)\n' +
     '• Pasta "GSL Bartofil — Entregas" criada no Drive (ID na CONFIG!D15)');
 }
 
@@ -266,8 +270,8 @@ function digestoMatinal() {
       secaoDigesto_('VENCE AMANHÃ', COR_AZUL, amanha, hoje) +
       secaoDigesto_('PRÓXIMOS ' + conf.janelaDias + ' DIAS', COR_VERDE, proximos, hoje) +
       '<p style="margin-top:14px">Para entregar: abra a aba do mês, selecione a linha e use ' +
-      '<b>GSL Bartofil &gt; Anexar entrega</b>. Erros, faltas e atestados: registre pelo menu ' +
-      '<b>GSL Bartofil &gt; Registrar ocorrência</b> — as colunas FALTAS/ATESTADOS e o PAINEL somam sozinhos.</p>';
+      '<b>GSL Bartofil &gt; Anexar entrega</b>. O status da linha e o andamento na aba CENTRAL ' +
+      'se atualizam sozinhos assim que o anexo entra.</p>';
 
     // cc à gestão só quando há atraso persistente
     var ccGestao = atrasadas.some(function (i) {
@@ -299,18 +303,19 @@ function briefingGerente_(forcado) {
   });
   if (!alvo && !forcado) return;
 
-  var ss = SpreadsheetApp.getActive();
-  var ger = ss.getSheetByName('GERÊNCIA');
-  var semana = ger ? String(ger.getRange('C4').getValue()) : '';
-  var t = ger ? ger.getRange('A8:H10').getValues() : [];
-
+  // v7: a tabela do briefing sai do próprio calendário (mês corrente), não da aba GERÊNCIA
+  var mesAtual = SIGLAS[new Date().getMonth()] + ' ' + new Date().getFullYear();
+  var semana = mesAtual;
+  var linhas = linhasDoMes_(mesAtual);
   var tabela = '<table style="font-size:13px;border-collapse:collapse;width:100%">' +
     '<tr style="background:' + COR_AZUL + ';color:#fff">' +
-    ['Turno','Relatório (QUI)','Vistoria (QUA)','Faltas','Atest.','Atrasadas','Aguard. validação','Reprovadas']
+    ['Turno','Programadas','Entregues','Aguard. validação','Atrasadas','Reprovadas','% conclusão']
       .map(function (h) { return '<th style="padding:5px 8px;text-align:left">' + h + '</th>'; }).join('') + '</tr>' +
-    t.map(function (l, k) {
+    ['A','B','C'].map(function (tn, k) {
+      var m = resumoTurno_(linhas, tn, hoje);
       return '<tr style="background:' + (k % 2 ? '#f8f9fc' : '#fff') + '">' +
-        l.map(function (v) { return '<td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">' + v + '</td>'; }).join('') + '</tr>';
+        ['Turno ' + tn, m.total, m.entregues, m.aguardando, m.atrasadas, m.reprovadas, m.pct + '%']
+          .map(function (v) { return '<td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">' + v + '</td>'; }).join('') + '</tr>';
     }).join('') + '</table>';
 
   var atrasadas = itens.filter(function (i) {
@@ -343,7 +348,8 @@ function briefingGerente_(forcado) {
           }).join('') + '</ul>';
       } catch (err) { return ''; }
     })() +
-    '<p style="margin-top:10px">Pauta sugerida e absenteísmo mês a mês: aba <b>GERÊNCIA</b> · análises completas: abas <b>PAINEL</b>, <b>SCORE</b> e <b>INSIGHTS</b>. ' +
+    '<p style="margin-top:10px">Andamento mês a mês: aba <b>CENTRAL</b> · leitura automática do calendário: aba <b>INSIGHTS</b>. ' +
+    'Faltas, erros e metas: painel do <b>BI</b> (base GSL-DADOS). ' +
     'Após a reunião, marque <b>Aprovado</b> na linha da reunião (coluna VALIDAÇÃO) — ata opcional no anexo.</p>';
 
   enviar_(gestores_(conf), 'Briefing da reunião — ' + (semana || 'semana atual'), corpo, conf);
@@ -508,7 +514,6 @@ function reaplicarListaSetores() {
 function aoEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
-  registrarLog_(e, sh);                       // trilha de auditoria (aba LOG)
   if (!ehAbaMes_(sh.getName())) return;
   var r = e.range.getRow(), c = e.range.getColumn();
   if (r < LINHA_INI || e.range.getNumRows() > 1) return;
@@ -593,7 +598,7 @@ function aoEditar(e) {
 function gerarProximoMes() {
   var criado = criarProximoMes_();
   var ui = SpreadsheetApp.getUi();
-  if (criado) ui.alert('Aba "' + criado + '" criada!\n\nCalendário, atividades, IDs e prazos já estão calculados. CENTRAL, GERÊNCIA e PAINEL passam a enxergar o mês automaticamente.');
+  if (criado) ui.alert('Aba "' + criado + '" criada!\n\nCalendário, atividades, IDs e prazos já estão calculados. A aba CENTRAL passa a enxergar o mês automaticamente.');
   else ui.alert('Nada a criar — verifique se a aba oculta MODELO_MES existe.');
 }
 
@@ -646,110 +651,55 @@ function criarProximoMes_() {
   return nome;
 }
 
-// ================================================================ v5 · REGISTRO DE OCORRÊNCIAS
-/** Diálogo para lançar erro operacional, falta ou atestado na aba OCORRÊNCIAS. */
-function registrarOcorrencia() {
-  var setores = SpreadsheetApp.getActive().getSheetByName('CONFIG')
-    .getRange('A12:A40').getValues()
-    .map(function (v) { return String(v[0] || '').trim(); })
-    .filter(Boolean);
-  var t = HtmlService.createTemplate(
-    '<div style="font-family:Arial;font-size:13px">' +
-    '<style>label{display:block;margin:8px 0 2px;color:#374151;font-weight:bold;font-size:12px}' +
-    'input,select,textarea{width:100%;box-sizing:border-box;padding:6px;border:1px solid #d1d5db;border-radius:3px;font-size:13px}</style>' +
-    '<label>Tipo</label><select id="tipo">' +
-    '<option>Erro operacional</option><option>Falta</option><option>Atestado</option></select>' +
-    '<div style="display:flex;gap:10px"><div style="flex:1"><label>Turno</label>' +
-    '<select id="turno"><option>A</option><option>B</option><option>C</option></select></div>' +
-    '<div style="flex:1"><label>Data</label><input type="date" id="data" value="<?= hoje ?>"></div>' +
-    '<div style="flex:1"><label>Qtde / dias</label><input type="number" id="qtde" min="0" value="1"></div></div>' +
-    '<label>Setor</label><select id="setor"><? for (var k = 0; k < setores.length; k++) { ?>' +
-    '<option><?= setores[k] ?></option><? } ?></select>' +
-    '<label>Colaborador (opcional)</label><input id="colab">' +
-    '<label>Descrição / causa</label><textarea id="desc" rows="2"></textarea>' +
-    '<button id="btn" onclick="gv()" style="margin-top:12px;background:' + COR_AZUL +
-    ';color:#fff;border:0;padding:9px 18px;border-radius:3px;cursor:pointer;font-size:13px">Registrar</button>' +
-    '<p id="st" style="color:#6b7280;min-height:16px"></p>' +
-    '<script>\n' +
-    'function msg(t, c) { var s = document.getElementById("st"); s.textContent = t; s.style.color = c || "#6b7280"; }\n' +
-    'function gv() {\n' +
-    '  var d = document.getElementById("data").value;\n' +
-    '  if (!d) { msg("Informe a data.", "#D71920"); return; }\n' +
-    '  document.getElementById("btn").disabled = true;\n' +
-    '  msg("Gravando...");\n' +
-    '  google.script.run\n' +
-    '    .withSuccessHandler(function () { msg("Registrado! Pode lançar outro ou fechar.", "#1E8E3E"); document.getElementById("btn").disabled = false; })\n' +
-    '    .withFailureHandler(function (e) { msg("Erro: " + e.message, "#D71920"); document.getElementById("btn").disabled = false; })\n' +
-    '    .gravarOcorrencia(d, document.getElementById("tipo").value, document.getElementById("turno").value,\n' +
-    '      document.getElementById("setor").value, document.getElementById("qtde").value,\n' +
-    '      document.getElementById("colab").value, document.getElementById("desc").value);\n' +
-    '}\n' +
-    '</script></div>');
-  t.setores = setores;
-  t.hoje = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd');
-  SpreadsheetApp.getUi().showModalDialog(
-    t.evaluate().setWidth(420).setHeight(430), 'Registrar ocorrência — GSL Bartofil');
+// ================================================================ v7 · LEITURA DO CALENDÁRIO
+/** Todas as linhas de uma aba mensal, inclusive aprovadas e canceladas. */
+function linhasDoMes_(nome) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(nome);
+  var out = [];
+  if (!sh) return out;
+  var last = sh.getLastRow();
+  if (last < LINHA_INI) return out;
+  var dados = sh.getRange(LINHA_INI, 1, last - LINHA_INI + 1, COL.F_ATRASO).getValues();
+  dados.forEach(function (v, k) {
+    var prazo = v[COL.PRAZO-1], atividade = v[COL.ATIVIDADE-1];
+    if (!(prazo instanceof Date) || !atividade) return;
+    var val = String(v[COL.VALIDACAO-1] || '');
+    out.push({ mes: nome, linha: LINHA_INI + k, id: String(v[COL.ID-1] || ''),
+               semana: v[COL.SEMANA-1], prazo: prazo, atividade: String(atividade),
+               turno: String(v[COL.TURNO-1] || ''), setor: String(v[COL.SETOR-1] || ''),
+               entregue: String(v[COL.ANEXO-1] || '') !== '',
+               validacao: val, aprovada: val === 'Aprovado',
+               reprovada: val === 'Reprovado', cancelada: val === 'Cancelada',
+               carimboAtraso: v[COL.F_ATRASO-1] });
+  });
+  return out;
 }
 
-function gravarOcorrencia(dataISO, tipo, turno, setor, qtde, colab, desc) {
-  var sh = SpreadsheetApp.getActive().getSheetByName('OCORRÊNCIAS');
-  if (!sh) throw new Error('Aba OCORRÊNCIAS não encontrada.');
-  var col = sh.getRange('A6:A605').getValues();
-  var linha = -1;
-  for (var k = 0; k < col.length; k++) {
-    if (String(col[k][0] || '') === '') { linha = 6 + k; break; }
-  }
-  if (linha < 0) throw new Error('A aba OCORRÊNCIAS está cheia (600 registros). Avise o administrador.');
-  var p = String(dataISO).split('-');                 // yyyy-mm-dd sem sofrer com fuso
-  var data = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
-  sh.getRange(linha, 1, 1, 7).setValues([[
-    data, String(tipo), String(turno), String(setor),
-    Number(qtde) || 0, String(colab || ''), String(desc || '')
-  ]]);
-  return linha;
+/** Varre TODAS as abas mensais existentes. */
+function linhasTodas_() {
+  var out = [];
+  abasMes_().forEach(function (n) { out = out.concat(linhasDoMes_(n)); });
+  return out;
 }
 
-// ================================================================ v6 · TRILHA DE AUDITORIA
-var LOG_COLS_MES = { 3:'PRAZO', 4:'ATIVIDADE', 10:'SETOR', 13:'LINK DO ANEXO',
-                     17:'VALIDAÇÃO', 18:'MOTIVO' };
-
-function registrarLog_(e, sh) {
-  try {
-    var nome = sh.getName();
-    if (nome === 'LOG' || nome === 'INSIGHTS') return;
-    var r = e.range.getRow(), c = e.range.getColumn();
-    var campo = null, ref = '';
-    if (ehAbaMes_(nome)) {
-      if (r < LINHA_INI || !LOG_COLS_MES[c]) return;
-      campo = LOG_COLS_MES[c];
-      ref = String(sh.getRange(r, COL.ID).getValue() || '');
-    } else if (nome === 'OCORRÊNCIAS') {
-      if (r < 6 || c > 7) return;
-      campo = ['DATA','TIPO','TURNO','SETOR','QTDE','COLABORADOR','DESCRIÇÃO'][c - 1];
-      ref = 'OC-' + r;
-    } else if (nome === 'CONFIG') {
-      if (r < 4) return;
-      campo = 'CONFIG';
-    } else return;
-
-    var log = SpreadsheetApp.getActive().getSheetByName('LOG');
-    if (!log) return;
-    var quem = String(Session.getActiveUser().getEmail() || '') || 'não identificado';
-    var multi = e.range.getNumRows() > 1 || e.range.getNumColumns() > 1;
-    log.appendRow([
-      new Date(), quem, nome, e.range.getA1Notation(),
-      multi ? campo + ' (intervalo)' : campo,
-      multi ? '—' : String(e.oldValue !== undefined ? e.oldValue : ''),
-      multi ? '(vários)' : String(e.value !== undefined ? e.value : ''),
-      ref
-    ]);
-    var ult = log.getLastRow();
-    log.getRange(ult, 1).setNumberFormat('dd/mm/yyyy hh:mm:ss');
-    log.getRange(ult, 1, 1, 8).setFontSize(9).setFontFamily('Arial');
-  } catch (err) { /* o log nunca pode travar a edição */ }
+/** Resumo de um turno num conjunto de linhas (o turno "Todos" conta para os três). */
+function resumoTurno_(linhas, turno, hojeN) {
+  var m = { total: 0, entregues: 0, aguardando: 0, atrasadas: 0, reprovadas: 0, aprovadas: 0, pct: 0 };
+  linhas.forEach(function (i) {
+    if (i.cancelada) return;
+    if (i.turno !== turno && i.turno !== 'Todos') return;
+    m.total++;
+    if (i.aprovada) { m.aprovadas++; return; }
+    if (i.reprovada) m.reprovadas++;
+    if (i.entregue) { m.entregues++; m.aguardando++; }
+    else if (diaNum_(i.prazo) < hojeN) m.atrasadas++;
+  });
+  m.pct = m.total ? Math.round(m.aprovadas / m.total * 100) : 0;
+  return m;
 }
 
-// carimbo interno de pontualidade (SCORE lê a coluna U)
+// carimbo interno de pontualidade — a coluna U guarda a 1ª data em que a
+// atividade foi vista em atraso; o motor de insights usa isso para pontualidade.
 function carimbarAtraso_(item) {
   try {
     var sh = SpreadsheetApp.getActive().getSheetByName(item.mes);
@@ -759,13 +709,13 @@ function carimbarAtraso_(item) {
   } catch (err) {}
 }
 
-// ================================================================ v6 · MOTOR DE INSIGHTS
+// ================================================================ v7 · MOTOR DE INSIGHTS
 function gerarInsights() {
   var n = atualizarInsights_();
   SpreadsheetApp.getUi().alert('Análise concluída: ' + n + ' insight(s) na aba INSIGHTS.');
 }
 
-/** Lê OCORRÊNCIAS + abas mensais, escreve a aba INSIGHTS e devolve a lista. */
+/** Lê as abas mensais, escreve a aba INSIGHTS e devolve a lista. */
 function atualizarInsights_() {
   var lista = insightsMotor_();
   var sh = SpreadsheetApp.getActive().getSheetByName('INSIGHTS');
@@ -785,134 +735,127 @@ function atualizarInsights_() {
   return lista.length;
 }
 
+/**
+ * v7 — analisa SOMENTE o calendário. Nenhum dado de pessoa entra aqui:
+ * as unidades de análise são turno, atividade, setor de vistoria e prazo.
+ */
 function insightsMotor_() {
-  var ss = SpreadsheetApp.getActive();
-  var oc = ss.getSheetByName('OCORRÊNCIAS');
   var out = [];
   var hoje = new Date();
   var hojeN = diaNum_(hoje);
-  var dowHoje = Number(Utilities.formatDate(hoje, tz_(), 'u'));   // 1=SEG
-  var segAtual = hojeN - (dowHoje - 1);                            // segunda desta semana
+  var linhas = linhasTodas_().filter(function (i) { return !i.cancelada; });
+  var jan56 = linhas.filter(function (i) { return diaNum_(i.prazo) > hojeN - 56; });
 
-  var regs = [];
-  if (oc) {
-    oc.getRange('A6:F605').getValues().forEach(function (v) {
-      if (!(v[0] instanceof Date)) return;
-      var n = diaNum_(v[0]);
-      regs.push({ n: n, seg: n - ((Number(Utilities.formatDate(v[0], tz_(), 'u')) - 1)),
-                  dow: Number(Utilities.formatDate(v[0], tz_(), 'u')),
-                  tipo: String(v[1] || ''), turno: String(v[2] || ''),
-                  setor: String(v[3] || ''), q: Number(v[4]) || 0,
-                  colab: String(v[5] || '').trim(),
-                  am: Utilities.formatDate(v[0], tz_(), 'yyyy-MM') });
-    });
-  }
-  var erros = regs.filter(function (r) { return r.tipo === 'Erro operacional'; });
-  var absen = regs.filter(function (r) { return r.tipo === 'Falta' || r.tipo === 'Atestado'; });
-
-  function somaPor(arr, chave, filtro) {
-    var m = {};
-    arr.forEach(function (r) { if (!filtro || filtro(r)) m[r[chave]] = (m[r[chave]] || 0) + r.q; });
-    return m;
-  }
-
-  // 1) tendência de alta por setor: últimas 4 semanas vs 4 anteriores
-  var rec = somaPor(erros, 'setor', function (r) { return r.seg > segAtual - 28; });
-  var ant = somaPor(erros, 'setor', function (r) { return r.seg > segAtual - 56 && r.seg <= segAtual - 28; });
-  Object.keys(rec).forEach(function (st) {
-    if (!st) return;
-    var a = ant[st] || 0;
-    if (rec[st] >= 3 && rec[st] >= 1.5 * Math.max(a, 1)) {
-      out.push({ nivel: '🔴', texto: 'Setor ' + st + ': ' + rec[st] + ' erro(s) nas últimas 4 semanas, contra ' +
-        a + ' nas 4 anteriores — tendência de ALTA.',
-        rec: 'Priorizar o setor na próxima Vistoria Setorial e tratar a causa raiz na reunião de sexta.' });
-    }
-  });
-
-  // 2) recorrência: setor com erro em 3+ semanas distintas nas últimas 6
-  var semanasPorSetor = {};
-  erros.forEach(function (r) {
-    if (r.seg <= segAtual - 42 || !r.setor) return;
-    (semanasPorSetor[r.setor] = semanasPorSetor[r.setor] || {})[r.seg] = true;
-  });
-  Object.keys(semanasPorSetor).forEach(function (st) {
-    var n = Object.keys(semanasPorSetor[st]).length;
-    if (n >= 3) out.push({ nivel: '🟡', texto: 'Setor ' + st + ' registrou erros em ' + n +
-      ' semanas diferentes nas últimas 6 — problema recorrente, não pontual.',
-      rec: 'Investigar processo/treinamento do setor em vez de tratar caso a caso.' });
-  });
-
-  // 3) absenteísmo fora da curva por turno (mês atual vs média dos 3 anteriores)
-  var amAtual = Utilities.formatDate(hoje, tz_(), 'yyyy-MM');
+  // 1) atrasos ativos por turno
   ['A', 'B', 'C'].forEach(function (t) {
-    var atual = 0, hist = {};
-    absen.forEach(function (r) {
-      if (r.turno !== t) return;
-      if (r.am === amAtual) atual += r.q; else hist[r.am] = (hist[r.am] || 0) + r.q;
-    });
-    var meses = Object.keys(hist).sort().slice(-3);
-    if (!meses.length) return;
-    var media = meses.reduce(function (s, k) { return s + hist[k]; }, 0) / meses.length;
-    if (atual >= 3 && atual >= media * 1.3) {
-      out.push({ nivel: '🔴', texto: 'Turno ' + t + ': absenteísmo do mês já em ' + atual +
-        ' (média dos últimos meses: ' + media.toFixed(1) + ') — alta de ' +
-        Math.round((atual / Math.max(media, 0.1) - 1) * 100) + '%.',
-        rec: 'Conversar com o coordenador do turno e checar escala/sobreaviso antes que afete o CD.' });
-    }
-  });
-
-  // 4) concentração por dia da semana (últimas 8 semanas)
-  var porDow = [0, 0, 0, 0, 0, 0, 0, 0], totDow = 0;
-  erros.forEach(function (r) { if (r.n > hojeN - 56) { porDow[r.dow] += r.q; totDow += r.q; } });
-  if (totDow >= 5) {
-    var nomes = ['', 'segundas', 'terças', 'quartas', 'quintas', 'sextas', 'sábados', 'domingos'];
-    for (var d = 1; d <= 7; d++) {
-      if (porDow[d] / totDow >= 0.4) {
-        out.push({ nivel: '🟡', texto: 'As ' + nomes[d] + ' concentram ' +
-          Math.round(porDow[d] / totDow * 100) + '% dos erros das últimas 8 semanas.',
-          rec: 'Revisar volume, quadro e rotina desse dia — pode ser pico de demanda ou lacuna de cobertura.' });
-      }
-    }
-  }
-
-  // 5) colaborador com faltas/atestados recorrentes (8 semanas)
-  var porColab = {};
-  absen.forEach(function (r) {
-    if (r.n > hojeN - 56 && r.colab) porColab[r.colab] = (porColab[r.colab] || 0) + 1;
-  });
-  Object.keys(porColab).forEach(function (nm) {
-    if (porColab[nm] >= 3) out.push({ nivel: '🟡', texto: 'Colaborador "' + nm + '" acumula ' +
-      porColab[nm] + ' registros de falta/atestado nas últimas 8 semanas.',
-      rec: 'Encaminhar ao RH/gestor direto para acompanhamento — pode haver questão de saúde ou de escala.' });
-  });
-
-  // 6) atrasos ativos por turno
-  var pend = pendencias_();
-  ['A', 'B', 'C'].forEach(function (t) {
-    var n = pend.filter(function (i) {
-      return i.turno === t && !i.entregue && diaNum_(i.prazo) < hojeN;
+    var n = linhas.filter(function (i) {
+      return (i.turno === t || i.turno === 'Todos') && !i.entregue && !i.aprovada &&
+             diaNum_(i.prazo) < hojeN;
     }).length;
     if (n >= 3) out.push({ nivel: '🔴', texto: 'Turno ' + t + ' está com ' + n +
-      ' atividades atrasadas AGORA.',
-      rec: 'Cobrança direta na reunião; se houver sobrecarga real, redistribuir ou renegociar prazos.' });
+      ' atividade(s) atrasada(s) AGORA.',
+      rec: 'Cobrança direta na reunião de sexta; se houver sobrecarga real, redistribuir ou renegociar prazos.' });
   });
 
-  // 7) melhoria: setor que zerou
-  Object.keys(ant).forEach(function (st) {
-    if (!st) return;
-    var duasSem = erros.some(function (r) { return r.setor === st && r.seg > segAtual - 14; });
-    if (ant[st] >= 3 && !rec[st] && !duasSem) {
-      out.push({ nivel: '🟢', texto: 'Setor ' + st + ' zerou os erros nas últimas semanas (tinha ' +
-        ant[st] + ' no período anterior) — a correção funcionou.',
-        rec: 'Reconhecer o time na reunião e documentar o que mudou para replicar nos demais setores.' });
+  // 2) reprovações por turno nas últimas 8 semanas
+  ['A', 'B', 'C'].forEach(function (t) {
+    var n = jan56.filter(function (i) {
+      return (i.turno === t || i.turno === 'Todos') && i.reprovada;
+    }).length;
+    if (n >= 2) out.push({ nivel: '🟡', texto: 'Turno ' + t + ' teve ' + n +
+      ' entrega(s) reprovada(s) nas últimas 8 semanas — o problema é qualidade, não prazo.',
+      rec: 'Revisar o modelo do documento com o coordenador antes de cobrar nova entrega.' });
+  });
+
+  // 3) atividade que mais atrasa (independente de turno)
+  var atrPorAtiv = {};
+  jan56.forEach(function (i) {
+    var atrasou = (i.carimboAtraso instanceof Date) ||
+                  (!i.entregue && !i.aprovada && diaNum_(i.prazo) < hojeN);
+    if (!atrasou) return;
+    var chave = String(i.atividade).split('(')[0].trim();
+    atrPorAtiv[chave] = (atrPorAtiv[chave] || 0) + 1;
+  });
+  Object.keys(atrPorAtiv).forEach(function (a) {
+    if (atrPorAtiv[a] >= 3) out.push({ nivel: '🔴', texto: '"' + a + '" atrasou ' +
+      atrPorAtiv[a] + ' vez(es) nas últimas 8 semanas — é a atividade mais problemática do período.',
+      rec: 'Checar se o prazo é realista ou se falta insumo/informação para o coordenador conseguir entregar.' });
+  });
+
+  // 4) gargalo de validação: entregue há mais de 5 dias sem resposta do gerente
+  var parados = linhas.filter(function (i) {
+    return i.entregue && !i.aprovada && !i.reprovada && diaNum_(i.prazo) < hojeN - 5;
+  });
+  if (parados.length >= 3) out.push({ nivel: '🟡', texto: parados.length +
+    ' entrega(s) estão anexadas há mais de 5 dias aguardando validação da gerência.',
+    rec: 'A fila de validação virou o gargalo — reservar um horário fixo na semana para aprovar/reprovar.' });
+
+  // 5) concentração de atraso por dia da semana do prazo
+  var porDow = [0, 0, 0, 0, 0, 0, 0, 0], tot = 0;
+  jan56.forEach(function (i) {
+    if (!(i.carimboAtraso instanceof Date)) return;
+    var d = Number(Utilities.formatDate(i.prazo, tz_(), 'u'));
+    porDow[d]++; tot++;
+  });
+  if (tot >= 5) {
+    var nomes = ['', 'segundas', 'terças', 'quartas', 'quintas', 'sextas', 'sábados', 'domingos'];
+    for (var d = 1; d <= 7; d++) {
+      if (porDow[d] / tot >= 0.4) out.push({ nivel: '🟡', texto: 'Atividades com prazo nas ' +
+        nomes[d] + ' concentram ' + Math.round(porDow[d] / tot * 100) +
+        '% dos atrasos das últimas 8 semanas.',
+        rec: 'Rever a carga desse dia — pode ser pico de operação no CD ou prazo mal posicionado na semana.' });
     }
+  }
+
+  // 6) pontualidade por turno (últimas 12 semanas, atividades já encerradas)
+  ['A', 'B', 'C'].forEach(function (t) {
+    var base = linhas.filter(function (i) {
+      return (i.turno === t || i.turno === 'Todos') && diaNum_(i.prazo) > hojeN - 84 &&
+             diaNum_(i.prazo) <= hojeN && (i.entregue || i.aprovada);
+    });
+    if (base.length < 5) return;
+    var noPrazo = base.filter(function (i) { return !(i.carimboAtraso instanceof Date); }).length;
+    var pct = Math.round(noPrazo / base.length * 100);
+    if (pct < 70) out.push({ nivel: '🔴', texto: 'Turno ' + t + ' entregou no prazo apenas ' +
+      pct + '% das ' + base.length + ' atividades das últimas 12 semanas.',
+      rec: 'Pontualidade abaixo do aceitável — tratar como ponto de acompanhamento semanal, não pontual.' });
+    else if (pct >= 95) out.push({ nivel: '🟢', texto: 'Turno ' + t + ' está com ' + pct +
+      '% de entregas no prazo nas últimas 12 semanas.',
+      rec: 'Reconhecer o coordenador na reunião e mapear o que ele faz de diferente para replicar nos outros turnos.' });
+  });
+
+  // 7) setor de vistoria com reincidência de reprovação
+  var porSetor = {};
+  jan56.forEach(function (i) {
+    if (!i.reprovada || !i.setor || i.setor === '—') return;
+    porSetor[i.setor] = (porSetor[i.setor] || 0) + 1;
+  });
+  Object.keys(porSetor).forEach(function (st) {
+    if (porSetor[st] >= 2) out.push({ nivel: '🟡', texto: 'Vistorias do setor ' + st +
+      ' foram reprovadas ' + porSetor[st] + ' vez(es) nas últimas 8 semanas.',
+      rec: 'Acompanhar o setor de perto na próxima vistoria e verificar se o checklist está sendo aplicado por inteiro.' });
+  });
+
+  // 8) melhoria: turno que zerou os atrasos nas últimas 3 semanas
+  ['A', 'B', 'C'].forEach(function (t) {
+    var antes = jan56.filter(function (i) {
+      return (i.turno === t || i.turno === 'Todos') && diaNum_(i.prazo) <= hojeN - 21 &&
+             (i.carimboAtraso instanceof Date);
+    }).length;
+    var agora = linhas.filter(function (i) {
+      return (i.turno === t || i.turno === 'Todos') && diaNum_(i.prazo) > hojeN - 21 &&
+             diaNum_(i.prazo) <= hojeN && (i.carimboAtraso instanceof Date);
+    }).length;
+    if (antes >= 3 && agora === 0) out.push({ nivel: '🟢', texto: 'Turno ' + t +
+      ' zerou os atrasos nas últimas 3 semanas (tinha ' + antes + ' no período anterior).',
+      rec: 'Registrar o que mudou na rotina do turno e levar como referência para os demais.' });
   });
 
   var peso = { '🔴': 0, '🟡': 1, '🟢': 2 };
   out.sort(function (a, b) { return peso[a.nivel] - peso[b.nivel]; });
   if (!out.length) out.push({ nivel: '🟢',
-    texto: 'Nenhum padrão preocupante detectado nos registros atuais.',
-    rec: 'Continue lançando as ocorrências — quanto mais dados, mais cedo os desvios aparecem.' });
+    texto: 'Nenhum padrão preocupante no calendário — prazos, entregas e validações em dia.',
+    rec: 'Manter o ritmo. Faltas, erros e metas são analisados no BI, sobre a base GSL-DADOS.' });
   return out.slice(0, 25);
 }
 
@@ -942,65 +885,28 @@ function relatorioMensalPDF() {
   var hoje = new Date();
   var alvo = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);   // mês fechado
   var nomeMes = SIGLAS[alvo.getMonth()] + ' ' + alvo.getFullYear();
-  var amAlvo = Utilities.formatDate(alvo, tz_(), 'yyyy-MM');
 
-  // --- números do mês (OCORRÊNCIAS)
-  var oc = ss.getSheetByName('OCORRÊNCIAS');
-  var eT = { A: 0, B: 0, C: 0 }, aT = { A: 0, B: 0, C: 0 }, porSetor = {};
-  var totE = 0, totA = 0;
-  if (oc) {
-    oc.getRange('A6:F605').getValues().forEach(function (v) {
-      if (!(v[0] instanceof Date)) return;
-      if (Utilities.formatDate(v[0], tz_(), 'yyyy-MM') !== amAlvo) return;
-      var tipo = String(v[1] || ''), t = String(v[2] || ''), q = Number(v[4]) || 0;
-      if (tipo === 'Erro operacional') {
-        totE += q; if (eT[t] !== undefined) eT[t] += q;
-        var st = String(v[3] || '');
-        if (st) porSetor[st] = (porSetor[st] || 0) + q;
-      } else if (tipo === 'Falta' || tipo === 'Atestado') {
-        totA += q; if (aT[t] !== undefined) aT[t] += q;
-      }
-    });
-  }
-  var topSet = Object.keys(porSetor).map(function (k) { return [k, porSetor[k]]; })
-    .sort(function (a, b) { return b[1] - a[1]; }).slice(0, 5);
+  // --- números do mês, direto da aba mensal
+  var linhas = linhasDoMes_(nomeMes);
+  var hojeN = diaNum_(hoje);
+  var porTurno = { A: resumoTurno_(linhas, 'A', hojeN),
+                   B: resumoTurno_(linhas, 'B', hojeN),
+                   C: resumoTurno_(linhas, 'C', hojeN) };
+  var reprovadas = linhas.filter(function (i) { return i.reprovada; });
+  var atrasadas = linhas.filter(function (i) {
+    return !i.cancelada && !i.aprovada && !i.entregue && diaNum_(i.prazo) < hojeN;
+  });
 
-  // --- andamento (CENTRAL) e score (SCORE) da linha do mês fechado
+  // --- andamento (CENTRAL) da linha do mês fechado
   var cen = ss.getSheetByName('CENTRAL');
   var linCen = null;
   if (cen) cen.getRange('A8:H25').getValues().forEach(function (v) {
     if (String(v[0]) === nomeMes) linCen = v;
   });
-  var scoreTxt = '';
-  var sc = ss.getSheetByName('SCORE');
-  if (sc) {
-    var datas = sc.getRange('P10:P27').getValues();
-    var vals = sc.getRange('K10:N27').getValues();
-    for (var k = 0; k < datas.length; k++) {
-      var d = datas[k][0];
-      if (d instanceof Date && Utilities.formatDate(d, tz_(), 'yyyy-MM') === amAlvo) {
-        scoreTxt = 'Turno A: <b>' + vals[k][0] + '</b> · Turno B: <b>' + vals[k][1] +
-                   '</b> · Turno C: <b>' + vals[k][2] + '</b> — líder do mês: <b>' + vals[k][3] + '</b>';
-      }
-    }
-  }
 
   // --- insights atuais
   var insights = [];
   try { insights = insightsMotor_().slice(0, 6); } catch (err) {}
-
-  // --- gráficos do PAINEL como imagens
-  var imgs = '';
-  try {
-    var pan = ss.getSheetByName('PAINEL');
-    if (pan) pan.getCharts().forEach(function (ch) {
-      try {
-        var b64 = Utilities.base64Encode(ch.getAs('image/png').getBytes());
-        imgs += '<img src="data:image/png;base64,' + b64 +
-                '" style="width:100%;max-width:640px;margin:8px 0;display:block"/>';
-      } catch (e2) {}
-    });
-  } catch (err) {}
 
   function linhaTab(rot, a, b, c) {
     return '<tr><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">' + rot +
@@ -1008,6 +914,14 @@ function relatorioMensalPDF() {
       '</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">' + b +
       '</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">' + c + '</td></tr>';
   }
+  function listaAtiv(arr) {
+    if (!arr.length) return '<p style="color:#6b7280">Nenhuma. ✔</p>';
+    return '<ul>' + arr.slice(0, 12).map(function (i) {
+      return '<li style="margin:4px 0">' + i.atividade + ' — Turno ' + i.turno +
+        ' <span style="color:#6b7280">(' + i.semana + ' · prazo ' + fmt_(i.prazo) + ')</span></li>';
+    }).join('') + (arr.length > 12 ? '<li>… e mais ' + (arr.length - 12) + '</li>' : '') + '</ul>';
+  }
+
   var html =
     '<html><body style="font-family:Arial,sans-serif;color:#222;font-size:13px">' +
     '<div style="background:' + COR_AZUL + ';color:#fff;padding:16px 20px;font-size:19px;font-weight:bold">' +
@@ -1017,26 +931,32 @@ function relatorioMensalPDF() {
     '<td style="background:' + COR_VERDE + ';height:6px"></td>' +
     '<td style="background:' + COR_AMAR + ';height:6px"></td></tr></table>' +
     '<h3 style="color:' + COR_AZUL + '">1 · Resumo do mês</h3>' +
-    '<p>Erros operacionais: <b>' + totE + '</b> · Faltas + atestados: <b>' + totA + '</b>' +
-    (linCen ? ' · Atividades programadas: <b>' + linCen[1] + '</b> · aprovadas: <b>' + linCen[2] +
-      '</b> · em atraso: <b>' + linCen[5] + '</b> · conclusão: <b>' +
-      Math.round(Number(linCen[7]) * 100) + '%</b>' : '') + '</p>' +
+    (linCen ? '<p>Atividades programadas: <b>' + linCen[1] + '</b> · aprovadas: <b>' + linCen[2] +
+      '</b> · em atraso: <b>' + linCen[5] + '</b> · reprovadas: <b>' + linCen[6] +
+      '</b> · conclusão: <b>' + Math.round(Number(linCen[7]) * 100) + '%</b></p>'
+      : '<p>Total de atividades no mês: <b>' + linhas.length + '</b></p>') +
+    '<h3 style="color:' + COR_AZUL + '">2 · Desempenho por turno</h3>' +
     '<table style="border-collapse:collapse;width:100%;font-size:12.5px">' +
     '<tr style="background:' + COR_AZUL + ';color:#fff"><th style="padding:5px 8px;text-align:left"></th>' +
     '<th style="padding:5px 8px">Turno A</th><th style="padding:5px 8px">Turno B</th><th style="padding:5px 8px">Turno C</th></tr>' +
-    linhaTab('Erros operacionais', eT.A, eT.B, eT.C) +
-    linhaTab('Faltas + atestados', aT.A, aT.B, aT.C) + '</table>' +
-    (scoreTxt ? '<h3 style="color:' + COR_AZUL + '">2 · Score dos turnos</h3><p>' + scoreTxt + '</p>' : '') +
-    (topSet.length ? '<h3 style="color:' + COR_AZUL + '">3 · Onde o CD mais errou</h3><ol>' +
-      topSet.map(function (x) { return '<li>' + x[0] + ' — <b>' + x[1] + '</b></li>'; }).join('') + '</ol>' : '') +
-    (insights.length ? '<h3 style="color:' + COR_AZUL + '">4 · Leitura dos dados (insights)</h3><ul>' +
+    linhaTab('Programadas', porTurno.A.total, porTurno.B.total, porTurno.C.total) +
+    linhaTab('Aprovadas', porTurno.A.aprovadas, porTurno.B.aprovadas, porTurno.C.aprovadas) +
+    linhaTab('Atrasadas', porTurno.A.atrasadas, porTurno.B.atrasadas, porTurno.C.atrasadas) +
+    linhaTab('Reprovadas', porTurno.A.reprovadas, porTurno.B.reprovadas, porTurno.C.reprovadas) +
+    linhaTab('% conclusão', porTurno.A.pct + '%', porTurno.B.pct + '%', porTurno.C.pct + '%') + '</table>' +
+    '<h3 style="color:' + COR_AZUL + '">3 · Atividades encerradas com pendência</h3>' +
+    '<p style="margin:6px 0 2px;font-weight:bold;color:' + COR_VERM + '">Não entregues (' + atrasadas.length + ')</p>' +
+    listaAtiv(atrasadas) +
+    '<p style="margin:10px 0 2px;font-weight:bold;color:#B45309">Reprovadas (' + reprovadas.length + ')</p>' +
+    listaAtiv(reprovadas) +
+    (insights.length ? '<h3 style="color:' + COR_AZUL + '">4 · Leitura do calendário (insights)</h3><ul>' +
       insights.map(function (i) {
         return '<li style="margin:5px 0">' + i.nivel + ' ' + i.texto +
                '<br><span style="color:#6b7280;font-size:12px">→ ' + i.rec + '</span></li>';
       }).join('') + '</ul>' : '') +
-    (imgs ? '<h3 style="color:' + COR_AZUL + '">5 · Gráficos</h3>' + imgs : '') +
-    '<p style="color:#6b7280;font-size:11px;margin-top:18px">Gerado automaticamente pelo sistema GSL Bartofil. ' +
-    'Trilha de auditoria na aba LOG · backup mensal no Drive.</p></body></html>';
+    '<p style="color:#6b7280;font-size:11px;margin-top:18px">Gerado automaticamente pelo sistema GSL Bartofil ' +
+    '(escopo: atividades do calendário). Indicadores de RH, erros e metas: painel do BI, base GSL-DADOS. ' +
+    'Backup mensal no Drive.</p></body></html>';
 
   var pdf = Utilities.newBlob(html, 'text/html', 'rel.html')
     .getAs('application/pdf')
@@ -1067,7 +987,7 @@ function diagnosticoSistema() {
                  /@/.test(conf.gerente.email) && /@/.test(conf.adm.email);
   chk(emailsOk, 'CONFIG: e-mails da equipe preenchidos');
   chk(!!ss.getSheetByName(ABA_MODELO), 'Aba MODELO_MES presente (motor de meses)');
-  ['OCORRÊNCIAS','PAINEL','SCORE','INSIGHTS','LOG','CENTRAL','GERÊNCIA'].forEach(function (n) {
+  ['INÍCIO','INSIGHTS','CENTRAL','CONFIG'].forEach(function (n) {
     chk(!!ss.getSheetByName(n), 'Aba ' + n + ' presente');
   });
   var fns = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
@@ -1079,12 +999,8 @@ function diagnosticoSistema() {
   var prox = new Date(); prox = SIGLAS[(prox.getMonth() + 1) % 12] + ' ' +
     (prox.getMonth() === 11 ? prox.getFullYear() + 1 : prox.getFullYear());
   chk(!!ss.getSheetByName(prox), 'Aba do próximo mês (' + prox + ') já existe');
-  var ocx = ss.getSheetByName('OCORRÊNCIAS');
-  if (ocx) {
-    var usados = ocx.getRange('A6:A605').getValues().filter(function (v) { return v[0] !== ''; }).length;
-    chk(usados < 540, 'OCORRÊNCIAS: ' + usados + '/600 registros usados' +
-        (usados >= 540 ? ' — AMPLIE a aba (arraste as fórmulas H:J)' : ''));
-  }
+  var vaz = linhasTodas_().filter(function (i) { return !i.turno; }).length;
+  chk(vaz === 0, 'Todas as atividades têm turno definido' + (vaz ? ' — ' + vaz + ' sem turno' : ''));
   var links = ss.getSheetByName('INÍCIO').getRange('C12:C13').getValues();
   chk(links.every(function (v) { return String(v[0]).indexOf('http') === 0; }),
       'Links dos modelos Word colados na aba INÍCIO');

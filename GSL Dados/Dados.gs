@@ -116,9 +116,14 @@ function loc_(f) {
   if (sep === ',') return f;
   var out = '', dentro = false;
   for (var i = 0; i < f.length; i++) {
-    var ch = f.charAt(i);
+    var ch = f.charAt(i), ant = f.charAt(i - 1), prox = f.charAt(i + 1);
     if (ch === '"') dentro = !dentro;
-    out += (ch === ',' && !dentro) ? sep : ch;
+    if (!dentro && ch === ',') { out += sep; continue; }
+    // Ponto entre dois dígitos e fora de texto é separador DECIMAL: em planilha
+    // pt-BR precisa virar vírgula. Sem isto, "$F$7*1.3" entra como #ERROR! e
+    // volta a quebrar toda vez que o script reescreve a aba.
+    if (!dentro && ch === '.' && /[0-9]/.test(ant) && /[0-9]/.test(prox)) { out += ','; continue; }
+    out += ch;
   }
   return out;
 }
@@ -955,7 +960,7 @@ function cartao_(sh, linha, col, larg, rot, fValor, formato, fDelta, nt) {
   var v = sh.getRange(linha + 1, col, 1, larg).merge();
   v.setFormula(loc_(fValor)).setNumberFormat(formato)
    .setFontSize(20).setFontWeight('bold').setFontColor(AZUL).setFontFamily('Arial')
-   .setVerticalAlignment('middle');
+   .setVerticalAlignment('middle').setHorizontalAlignment('left');
   var d = sh.getRange(linha + 2, col, 1, larg).merge();
   if (fDelta) d.setFormula(loc_(fDelta));
   d.setFontSize(8).setFontColor(CINZA).setFontFamily('Arial').setVerticalAlignment('middle');
@@ -1052,7 +1057,7 @@ function montarPainelGeral_(lista) {
   campo_(p, 'F7');
   formula_(p, 'H7',
     '=IF($T$12=0,"— sem dados",IF($T$12<=$F$7,"🟢  dentro da meta",' +
-    'IF($T$12<=$F$7*1.3,"🟡  atenção","🔴  fora da meta")))');
+    'IF($T$12<=$F$7*13/10,"🟡  atenção","🔴  fora da meta")))');
   p.getRange('H7:I7').merge().setFontFamily('Arial').setFontSize(11).setFontWeight('bold')
    .setHorizontalAlignment('center').setVerticalAlignment('middle').setBackground(CLARO);
   formula_(p, 'K7', '=IFERROR(MAX(ARQUIVOS_RH!$E:$E),"—")');
@@ -1081,12 +1086,28 @@ function montarPainelGeral_(lista) {
   p.getRange(10, 19, chaves.length, 1).setValues(chaves.map(function (k) { return [k]; }));
   formulas_(p, 10, 20, chaves.map(function (k) { return [kpiF_(k, '$B$7'), kpiF_(k, '$S$2')]; }));
 
-  p.getRange(25, 19, 3, 2).setValues([['charttype', 'bar'], ['max', ''], ['color1', VERM]]);
-  formula_(p, 'T26', '=IFERROR(MAX($I$23:$I$28),1)');
-  p.getRange(30, 19, 3, 2).setValues([['charttype', 'bar'], ['max', ''], ['color1', AZUL]]);
-  formula_(p, 'T31', '=IFERROR(MAX($D$96:$D$126),1)');
-  p.getRange(34, 19, 3, 2).setValues([['charttype', 'bar'], ['max', ''], ['color1', '#C2620A']]);
-  formula_(p, 'T35', '=IFERROR(MAX($L$62:$L$92),1)');
+  // Barras: em vez de confiar na opção "max" do SPARKLINE — que o Sheets ignora
+  // quando os dados são uma célula só, e a barra sai sempre cheia —, cada barra
+  // recebe DUAS células: o valor e o que falta até o maior da coluna. A proporção
+  // fica correta sempre, e a segunda cor pinta o fundo da barra.
+  p.getRange(25, 19, 3, 2).setValues([['charttype', 'bar'], ['color1', VERM], ['color2', '#EDEFF7']]);
+  p.getRange(30, 19, 3, 2).setValues([['charttype', 'bar'], ['color1', AZUL], ['color2', '#EDEFF7']]);
+  p.getRange(34, 19, 3, 2).setValues([['charttype', 'bar'], ['color1', '#C2620A'], ['color2', '#EDEFF7']]);
+  // Y/Z = pares (valor, resto) das barras do termômetro, da série diária e do mapa
+  formulas_(p, 23, 25, [0, 1, 2, 3, 4, 5].map(function (i) {
+    return ['=IF($D$' + (23 + i) + '=0,"",$I$' + (23 + i) + ')',
+            '=IF($D$' + (23 + i) + '=0,"",MAX($I$23:$I$28)-$I$' + (23 + i) + ')'];
+  }));
+  formulas_(p, 96, 25, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]
+    .map(function (i) {
+      return ['=IF($B$' + (96 + i) + '="","",$D$' + (96 + i) + ')',
+              '=IF($B$' + (96 + i) + '="","",MAX($D$96:$D$126)-$D$' + (96 + i) + ')'];
+    }));
+  formulas_(p, 62, 27, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]
+    .map(function (i) {
+      return ['=IF($L$' + (62 + i) + '="","",$L$' + (62 + i) + ')',
+              '=IF($L$' + (62 + i) + '="","",MAX($L$62:$L$92)-$L$' + (62 + i) + ')'];
+    }));
 
   p.getRange(38, 19, CATEGORIAS.length, 1).setValues(CATEGORIAS.map(function (x) { return [x]; }));
   formulas_(p, 38, 20, CATEGORIAS.map(function (x, i) {
@@ -1130,8 +1151,8 @@ function montarPainelGeral_(lista) {
       tipoF_('TURNO_TRAB', '$B$7', cel), tipoF_('TURNO_AUS', '$B$7', cel),
       tipoF_('TURNO_INJ', '$B$7', cel), tipoF_('TURNO_ATEST', '$B$7', cel),
       '=IFERROR($F' + r + '/$D' + r + ',0)',
-      '=IF($D' + r + '=0,"",SPARKLINE($I' + r + ',$S$25:$T$27))',
-      '=IF($D' + r + '=0,"",IF($I' + r + '<=$F$7,"🟢",IF($I' + r + '<=$F$7*1.3,"🟡","🔴")))'
+      '=IF($D' + r + '=0,"",SPARKLINE($Y' + r + ':$Z' + r + ',$S$25:$T$27))',
+      '=IF($D' + r + '=0,"",IF($I' + r + '<=$F$7,"🟢",IF($I' + r + '<=$F$7*13/10,"🟡","🔴")))'
     ];
   });
   formulas_(p, 23, 3, mTurno);
@@ -1194,7 +1215,7 @@ function montarPainelGeral_(lista) {
     lin.push('=IF(' + w + '="","",IFERROR(SUMIFS(AGREGADO!$E:$E,AGREGADO!$A:$A,$B$7,' +
       'AGREGADO!$B:$B,"DIA",AGREGADO!$C:$C,' + w + ',AGREGADO!$D:$D,"AUS"),0))');
     lin.push('=IF($J' + r2 + '="","",IFERROR($K' + r2 + '/$J' + r2 + ',0))');
-    lin.push('=IF($L' + r2 + '="","",SPARKLINE($L' + r2 + ',$S$34:$T$36))');
+    lin.push('=IF($L' + r2 + '="","",SPARKLINE($AA' + r2 + ':$AB' + r2 + ',$S$34:$T$36))');
     mHeat.push(lin);
   }
   formulas_(p, 62, 2, mHeat);
@@ -1216,7 +1237,7 @@ function montarPainelGeral_(lista) {
       '=IF($B' + r3 + '="","",$J$' + (62 + d2) + ')',
       '=IF($B' + r3 + '="","",$K$' + (62 + d2) + ')',
       '=IF($B' + r3 + '="","",IFERROR($D' + r3 + '/$C' + r3 + ',0))',
-      '=IF($B' + r3 + '="","",SPARKLINE($D' + r3 + ',$S$30:$T$32))'
+      '=IF($B' + r3 + '="","",SPARKLINE($Y' + r3 + ':$Z' + r3 + ',$S$30:$T$32))'
     ]);
   }
   formulas_(p, 96, 2, mDia);
@@ -1502,8 +1523,7 @@ function montarPeriodo_() {
     '"and A >= date \'"&' + dDe + '&"\' and A <= date \'"&' + dAte + '&"\' ';
 
   // ---- área de apoio (colunas R..X, ocultas)
-  w.getRange(4, 23, 3, 2).setValues([['charttype', 'bar'], ['max', ''], ['color1', VERM]]);
-  formula_(w, 'X5', '=IFERROR(MAX($E$' + L1 + ':$E$' + F1 + '),1)');
+  w.getRange(4, 23, 3, 2).setValues([['charttype', 'bar'], ['color1', VERM], ['color2', '#EDEFF7']]);
 
   formula_(w, 'R' + L1,
     '=IFERROR(QUERY(FATO_ASSIDUIDADE!$A:$H,"select D, count(A), min(A), max(A) where H = \'Sim\' ' +
@@ -1565,7 +1585,7 @@ function montarPeriodo_() {
   for (var k = 0; k < N1; k++) {
     var r = L1 + k;
     mLinhas.push([
-      '=IF($E' + r + '="","",SPARKLINE($E' + r + ',$W$4:$X$6))',                       // F · barra
+      '=IF($E' + r + '="","",SPARKLINE($Y' + r + ':$Z' + r + ',$W$4:$X$6))',           // F · barra
       '',                                                                              // G · vem do ARRAYFORMULA
       '',                                                                              // H · idem
       '=IF($B' + r + '="","",TEXTJOIN(", ",1,IFERROR(FILTER(' + dataTxt +
@@ -1574,6 +1594,12 @@ function montarPeriodo_() {
         ',$S$' + L2 + ':$S$' + F2 + '=$B' + r + '&"")),"")))'                          // J · tipos
     ]);
   }
+  // pares (valor, resto) que dão a escala das barras — ver comentário no PAINEL
+  formulas_(w, L1, 25, mLinhas.map(function (l, k) {
+    var rr2 = L1 + k;
+    return ['=IF($E' + rr2 + '="","",$E' + rr2 + ')',
+            '=IF($E' + rr2 + '="","",MAX($E$' + L1 + ':$E$' + F1 + ')-$E' + rr2 + ')'];
+  }));
   // grava só as colunas F, I e J (G e H já são array das colunas de apoio)
   formulas_(w, L1, 6, mLinhas.map(function (l) { return [l[0]]; }));
   formulas_(w, L1, 9, mLinhas.map(function (l) { return [l[3], l[4]]; }));

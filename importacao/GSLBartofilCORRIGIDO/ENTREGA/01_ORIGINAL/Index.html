@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23111785%22/%3E%3Crect%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%2301973A%22/%3E%3Crect%20x%3D%2232%22%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%23FFEE03%22/%3E%3Ctext%20x%3D%2232%22%20y%3D%2242%22%20font-family%3D%22Archivo%2CArial%2Csans-serif%22%20font-size%3D%2240%22%20font-weight%3D%22800%22%20fill%3D%22%23fff%22%20text-anchor%3D%22middle%22%3EB%3C/text%3E%3C/svg%3E">
+  <?!= include('Estilo'); ?>
+  <?!= include('Marca'); ?>
+</head>
+<body>
+
+  <!-- O ceu. Claro: aurora, ondas, cristais e bolhas.
+       Escuro: espaco, duas camadas de estrelas, nebulosas e poeira subindo.
+       Cada camada tem classe propria — nth-of-type conta por TAG, e como
+       sao todas <div> ele nunca casava. -->
+  <div class="ceu" aria-hidden="true">
+    <div class="aurora"></div>
+    <div class="aurora-onda topo-ceu"></div>
+    <div class="aurora-onda base-ceu"></div>
+    <div class="cristal c1"></div>
+    <div class="cristal c2"></div>
+    <div class="cristal c3"></div>
+    <div class="bolha b1"></div><div class="bolha b2"></div><div class="bolha b3"></div>
+    <div class="bolha b4"></div><div class="bolha b5"></div><div class="bolha b6"></div>
+
+    <div class="espaco"></div>
+    <div class="estrelas"></div>
+    <div class="estrelas-brilho"></div>
+    <div class="nebulosa azul"></div>
+    <div class="nebulosa verde"></div>
+    <div class="nebulosa amarela"></div>
+    <div class="particula p1"></div><div class="particula p2"></div><div class="particula p3"></div>
+    <div class="particula p4"></div><div class="particula p5"></div><div class="particula p6"></div>
+    <div class="particula p7"></div><div class="particula p8"></div><div class="particula p9"></div>
+    <div class="particula p10"></div><div class="particula p11"></div><div class="particula p12"></div>
+  </div>
+  </div>
+
+  <div id="carregando" class="tela-espera">
+    <div class="logo-icone grande" role="img" aria-label="Bartofil"></div>
+    <p>Abrindo o sistema…</p>
+  </div>
+
+  <div id="falha" class="tela-espera oculto">
+    <div class="marca-espera falha">!</div>
+    <h1>Nao foi possivel abrir</h1>
+    <p id="falha-texto"></p>
+    <button class="botao" onclick="location.reload()">Tentar de novo</button>
+  </div>
+
+  <!-- Pessoa reconhecida, mas ainda sem nivel definido -->
+  <div id="aguardando" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Acesso em analise</h1>
+    <p>
+      Sua conta foi registrada e esta na fila do administrador. Assim que o nivel de acesso
+      for definido, o sistema abre normalmente — e so recarregar a pagina.
+    </p>
+    <p id="aguardando-conta" class="dica"></p>
+    <button class="botao secundario" onclick="location.reload()">Verificar de novo</button>
+  </div>
+
+  <!-- Primeira execucao: o sistema monta a propria estrutura -->
+  <div id="instalacao" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Instalar o sistema</h1>
+    <p>
+      O GSL vai criar no seu Drive a pasta <strong>GSL Bartofil</strong>, com a planilha de banco
+      de dados e a pasta de anexos. Ninguem precisa abrir esses arquivos: tudo passa a ser feito
+      por aqui. Voce entra como administrador.
+    </p>
+    <p id="instalacao-conta" class="dica"></p>
+    <div class="login-caixa">
+      <input id="instalacao-email" type="email" inputmode="email" placeholder="seu-email-de-admin@exemplo.com">
+      <button id="botao-instalar" class="botao" onclick="instalarSistema()">Criar banco de dados</button>
+    </div>
+  </div>
+
+  <!-- Identificacao sem senha: a pessoa informa o e-mail cadastrado -->
+  <div id="login" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Entrar no sistema</h1>
+    <p>Informe o e-mail que o administrador cadastrou para voce. Ele fica salvo neste aparelho — voce so faz isso uma vez.</p>
+    <div class="login-caixa">
+      <input id="login-email" type="email" inputmode="email" autocomplete="email"
+             placeholder="seu-email@exemplo.com" onkeydown="if(event.key==='Enter')fazerLogin()">
+      <div id="login-erro" class="login-erro oculto"></div>
+      <button id="login-botao" class="botao" onclick="fazerLogin()">Entrar</button>
+    </div>
+  </div>
+
+  <div id="aplicacao" class="oculto">
+    <aside class="lateral">
+      <div class="marca">
+        <div class="marca-linha">
+          <div class="logo-icone" role="img" aria-label="Bartofil"></div>
+          <div>
+            <div class="marca-sigla">GSL</div>
+            <div class="marca-nome">Bartofil Distribuidora</div>
+          </div>
+        </div>
+        <div class="marca-espectro" aria-hidden="true"><span></span><span></span></div>
+      </div>
+      <nav id="menu" class="menu"></nav>
+      <div class="rodape-lateral">
+        <div id="usuario-nome" class="usuario-nome"></div>
+        <div id="usuario-papel" class="usuario-papel"></div>
+        <button class="botao-texto" onclick="recarregarDados()">Atualizar dados</button>
+        <button class="botao-texto" onclick="sair()">Sair</button>
+      </div>
+    </aside>
+
+    <main class="conteudo">
+      <header class="topo">
+        <div>
+          <h1 id="titulo-pagina">Inicio</h1>
+          <p id="subtitulo-pagina" class="subtitulo"></p>
+        </div>
+        <div class="acoes-topo">
+          <div id="acoes-topo" class="acoes-topo"></div>
+          <button id="tema-alternar" class="tema-alternar" onclick="alternarTema()"
+                  title="Alternar tema" aria-label="Alternar tema claro e escuro">☾</button>
+        </div>
+      </header>
+
+      <div id="aviso-simulacao" class="faixa-aviso oculto">
+        Voce esta vendo o sistema como outro nivel de acesso.
+        <button class="botao-texto" onclick="pararSimulacao()">Voltar ao meu perfil</button>
+      </div>
+
+      <section id="pagina" class="pagina"></section>
+    </main>
+  </div>
+
+  <!-- Janela de cadastro/edicao -->
+  <div id="janela" class="fundo-janela oculto" onclick="if(event.target===this) fecharJanela()">
+    <div class="janela">
+      <div class="janela-topo">
+        <h2 id="janela-titulo"></h2>
+        <button class="fechar" onclick="fecharJanela()">&times;</button>
+      </div>
+      <div id="janela-corpo" class="janela-corpo"></div>
+      <div id="janela-rodape" class="janela-rodape"></div>
+    </div>
+  </div>
+
+  <div id="recado" class="recado oculto"></div>
+
+  <script>
+    /* Resposta do servidor entregue junto com a pagina — zero ida e volta. */
+    var CARGA_INICIAL = <?!= inicial ?>;
+  </script>
+  <?!= include('App'); ?>
+</body>
+</html>

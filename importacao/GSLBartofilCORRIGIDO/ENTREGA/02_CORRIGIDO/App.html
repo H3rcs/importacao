@@ -1,0 +1,2886 @@
+<script>
+/* Cliente do GSL Bartofil.
+   Leitura: carregarTela(id, params) · Escrita: executarAcao(nome, params) */
+
+let SESSAO = null, paginaAtual = 'inicio', paramsAtual = {}, DADOS = null, TEMA = 'claro';
+let paginaAnterior = null;   // qual tela ja estava desenhada — ver pintar()
+
+/* Quem esta usando — guardado no navegador da pessoa, some so se ela sair. */
+const CHAVE_EMAIL = 'gsl_email';
+function emailSalvo() { try { return localStorage.getItem(CHAVE_EMAIL) || ''; } catch (e) { return ''; } }
+function salvarEmail(e) { try { localStorage.setItem(CHAVE_EMAIL, e); } catch (x) {} }
+function limparEmail() { try { localStorage.removeItem(CHAVE_EMAIL); } catch (x) {} }
+
+const chamar = (f, ...a) => new Promise((ok, erro) => {
+  google.script.run.withSuccessHandler(ok).withFailureHandler(erro)[f](...a);
+});
+const chamarJSON = async (f, ...a) => {
+  const bruto = await chamar(f, ...a);
+  if (!bruto) throw new Error('O servidor não respondeu. Recarregue a página.');
+  return typeof bruto === 'string' ? JSON.parse(bruto) : bruto;
+};
+/* Toda leitura/escrita leva o email de quem esta usando como 1o argumento. */
+const carregarTelaSrv = (id, params) => chamarJSON('carregarTela', emailSalvo(), id, params || {});
+const executarAcaoSrv = (nome, params) => chamarJSON('executarAcao', emailSalvo(), nome, params || {});
+const esc = (t) => String(t == null ? '' : t)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const el = (id) => document.getElementById(id);
+const val = (id) => (el(id) ? el(id).value : '');
+const marcado = (id) => (el(id) ? el(id).checked : false);
+
+/* ------------------------------------------------------------------ */
+/* FLUIDEZ                                                             */
+/*                                                                     */
+/* Reclamacao real de quem usa no CD: "as telas abrem rapido, mas as    */
+/* animacoes dao uma sensacao de lentidao". Nao da para saber daqui que */
+/* maquina a pessoa tem — entao o app mede.                            */
+/*                                                                     */
+/* Nos primeiros segundos ele conta os quadros. Se o navegador nao      */
+/* estiver entregando quadros de sobra, liga o MODO LEVE: o visual      */
+/* continua igual (cores, vidro, sombras, layout), mas o ceu para de    */
+/* animar, os desfoques de fundo saem e os cartoes deixam de entrar     */
+/* deslizando. A decisao fica guardada no navegador da pessoa, entao a  */
+/* medicao so acontece uma vez.                                        */
+/* ------------------------------------------------------------------ */
+
+const CHAVE_LEVE = 'gsl_modo_leve';
+
+function lerModoLeve() {
+  try { return localStorage.getItem(CHAVE_LEVE); } catch (e) { return null; }
+}
+function aplicarModoLeve(ligado) {
+  document.documentElement.classList.toggle('modo-leve', !!ligado);
+  const b = el('modo-leve-alternar');
+  if (b) b.title = ligado
+    ? 'Modo leve LIGADO — fundo animado desligado. Clique para voltar as animacoes.'
+    : 'Modo leve desligado. Clique para desligar o fundo animado e ganhar fluidez.';
+  try { localStorage.setItem(CHAVE_LEVE, ligado ? '1' : '0'); } catch (e) {}
+}
+function alternarModoLeve() {
+  const agora = !document.documentElement.classList.contains('modo-leve');
+  aplicarModoLeve(agora);
+  avisar(agora ? 'Modo leve ligado — animacoes desligadas.'
+               : 'Modo leve desligado — animacoes de volta.');
+  if (paginaAtual === 'config') abrir('config', paramsAtual);
+}
+
+/*
+ * Mede quantos quadros o navegador entrega em ~1,1 s. Um monitor comum
+ * dá 60 por segundo; abaixo de ~45 a animacao ja "pula" a olho nu.
+ * Antes de medir, dois atalhos que evitam a espera: a pessoa pediu menos
+ * movimento no sistema operacional, ou a maquina declara poucos nucleos
+ * / pouca memoria.
+ */
+function medirFluidez() {
+  const salvo = lerModoLeve();
+  if (salvo !== null) {                       // ja decidido nesta maquina
+    aplicarModoLeve(salvo === '1');
+    return;
+  }
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return aplicarModoLeve(true);
+    }
+    const nucleos = navigator.hardwareConcurrency || 8;
+    const memoria = navigator.deviceMemory || 8;
+    if (nucleos <= 2 || memoria <= 2) return aplicarModoLeve(true);
+  } catch (e) { /* navegador sem essas informacoes: mede na marra */ }
+
+  /*
+   * A medicao comeca 400 ms depois, ja com o ceu animando e a fonte
+   * carregada — medir durante a montagem da pagina daria um numero
+   * pessimista em qualquer maquina.
+   *
+   * O que estamos procurando: numa maquina SEM aceleracao de video (GPU
+   * antiga, driver bloqueado, area de trabalho remota — o cenario comum
+   * num escritorio), um fundo animando em tela cheia derruba a pagina
+   * para menos de 20 quadros por segundo, e isso independe de quantas
+   * camadas estao animando: uma ja custa o mesmo que doze. Com
+   * aceleracao, passa de 60. Nao existe meio-termo util entre os dois,
+   * entao a decisao e binaria mesmo.
+   */
+  setTimeout(function () {
+    let quadros = 0;
+    const inicio = performance.now();
+    const contar = function () {
+      quadros++;
+      const decorrido = performance.now() - inicio;
+      if (decorrido < 1000) return requestAnimationFrame(contar);
+      aplicarModoLeve(quadros / (decorrido / 1000) < 45);
+    };
+    requestAnimationFrame(contar);
+  }, 400);
+}
+
+/*
+ * Aba em segundo plano: congela o ceu. O app fica aberto o dia inteiro
+ * numa aba de fundo; sem isto ele continua gastando quadros (e bateria,
+ * no notebook) desenhando um fundo que ninguem esta vendo.
+ */
+function vigiarVisibilidade() {
+  const ajustar = function () {
+    document.documentElement.classList.toggle('aba-oculta', document.hidden);
+  };
+  document.addEventListener('visibilitychange', ajustar);
+  ajustar();
+}
+
+/* --- Tema (gravado no servidor: o iframe do HtmlService nao guarda local) --- */
+function aplicarTema(tema) {
+  TEMA = (tema === 'escuro') ? 'escuro' : 'claro';
+  document.documentElement.setAttribute('data-tema', TEMA);
+  const b = el('tema-alternar');
+  if (b) b.textContent = TEMA === 'escuro' ? '\u2600' : '\u263E';
+}
+function alternarTema() {
+  aplicarTema(TEMA === 'escuro' ? 'claro' : 'escuro');
+  chamar('salvarTema', TEMA).catch(function () {});
+}
+
+window.addEventListener('load', iniciar);
+
+async function iniciar() {
+  try {
+    /*
+     * O tema padrao do GSL e CLARO — e a identidade da Bartofil no papel.
+     * Antes o app abria seguindo o `prefers-color-scheme` do aparelho:
+     * quem tem o celular no modo escuro entrava num app escuro sem nunca
+     * ter pedido. O escuro continua disponivel no botao do topo, e a
+     * escolha da pessoa (guardada no servidor) sobrepoe este padrao logo
+     * que o bootstrap responde.
+     */
+    aplicarTema('claro');
+    medirFluidez();
+    vigiarVisibilidade();
+    const inicio = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true };
+    if (!inicio.ok) return mostrarFalha(inicio.erro);
+
+    // Sistema ainda nao instalado: quem abrir primeiro instala.
+    if (inicio.instalado === false) {
+      el('carregando').classList.add('oculto');
+      el('instalacao-conta').textContent = 'Você será cadastrado como administrador.';
+      return el('instalacao').classList.remove('oculto');
+    }
+
+    // Ja tem email salvo neste navegador? Entra direto. Senao, tela de login.
+    const salvo = emailSalvo();
+    if (salvo) return entrarCom(salvo, true);
+    mostrarLogin();
+  } catch (e) { mostrarFalha(e.message || e); }
+}
+
+/* ------------------------------------------------------------------ */
+/* PEDIDO DE ACESSO                                                    */
+/*                                                                     */
+/* Ninguem entra sozinho e ninguem fica de fora sem saber por que:     */
+/*   1. a pessoa informa o e-mail;                                     */
+/*   2. se nao tem cadastro, ela PEDE (nome, funcao, turno);           */
+/*   3. a gestao recebe o pedido por e-mail e decide na tela Pessoas;  */
+/*   4. a pessoa recebe a resposta por e-mail.                          */
+/* ------------------------------------------------------------------ */
+
+function mostrarPedido(email) {
+  el('carregando').classList.add('oculto');
+  el('aplicacao').classList.add('oculto');
+  el('login').classList.add('oculto');
+  el('aguardando').classList.add('oculto');
+  el('pedido').classList.remove('oculto');
+  el('pedido-email').value = email || '';
+  const n = el('pedido-nome'); if (n) n.focus();
+}
+
+function voltarAoLogin() {
+  el('pedido').classList.add('oculto');
+  el('aguardando').classList.add('oculto');
+  mostrarLogin();
+}
+
+function mostrarEspera(email, msg) {
+  el('carregando').classList.add('oculto');
+  el('aplicacao').classList.add('oculto');
+  el('login').classList.add('oculto');
+  el('pedido').classList.add('oculto');
+  el('aguardando').classList.remove('oculto');
+  el('aguardando-conta').textContent = msg ||
+    ('Pedido enviado com o e-mail ' + (email || '') + '.');
+}
+
+async function enviarPedido() {
+  const b = el('pedido-botao');
+  const dados = {
+    email: String(val('pedido-email') || '').trim().toLowerCase(),
+    nome: String(val('pedido-nome') || '').trim(),
+    papel: String(val('pedido-papel') || '').trim(),
+    turno: String(val('pedido-turno') || '').trim(),
+    observacao: String(val('pedido-obs') || '').trim()
+  };
+  const erro = el('pedido-erro');
+  if (!dados.nome) { erro.textContent = 'Informe o seu nome completo.'; erro.classList.remove('oculto'); return; }
+  if (!dados.email || dados.email.indexOf('@') === -1) {
+    erro.textContent = 'Informe um e-mail válido.'; erro.classList.remove('oculto'); return;
+  }
+  erro.classList.add('oculto');
+  b.disabled = true; b.textContent = 'Enviando…';
+  try {
+    const r = await chamarJSON('solicitarAcesso', dados);
+    if (!r.ok) {
+      erro.textContent = r.motivo || 'Não consegui enviar o pedido.';
+      erro.classList.remove('oculto');
+      return;
+    }
+    if (r.jaLiberado) { salvarEmail(dados.email); return entrarCom(dados.email, false); }
+    mostrarEspera(dados.email, r.motivo);
+  } catch (e) {
+    erro.textContent = e.message || e; erro.classList.remove('oculto');
+  } finally { b.disabled = false; b.textContent = 'Enviar pedido'; }
+}
+
+/* Tela de identificacao (login sem senha). */
+function mostrarLogin(msg) {
+  el('carregando').classList.add('oculto');
+  el('aplicacao').classList.add('oculto');
+  el('pedido').classList.add('oculto');
+  el('aguardando').classList.add('oculto');
+  el('login').classList.remove('oculto');
+  el('login-erro').textContent = msg || '';
+  el('login-erro').classList.toggle('oculto', !msg);
+  const inp = el('login-email');
+  inp.value = emailSalvo();
+  inp.focus();
+}
+
+async function fazerLogin() {
+  const email = String(el('login-email').value || '').trim().toLowerCase();
+  if (!email || email.indexOf('@') === -1) return mostrarLogin('Digite um e-mail valido.');
+  const b = el('login-botao');
+  b.disabled = true; b.textContent = 'Entrando…';
+  try {
+    await entrarCom(email, false);
+  } catch (e) {
+    b.disabled = false; b.textContent = 'Entrar';
+    mostrarLogin(e.message || e);
+  }
+}
+
+async function entrarCom(email, silencioso) {
+  const r = await chamarJSON('identificar', email);
+  if (!r.ok) {
+    limparEmail();
+    const b = el('login-botao'); if (b) { b.disabled = false; b.textContent = 'Entrar'; }
+    /*
+     * E-mail sem cadastro: em vez de uma mensagem seca, a tela abre o
+     * formulario de pedido. Antes a pessoa era cadastrada em silencio
+     * como PENDENTE e caia numa tela de espera sem ter pedido nada.
+     */
+    if (r.semCadastro) return mostrarPedido(email);
+    if (r.aguardando) return mostrarEspera(email, r.motivo);
+    return mostrarLogin(r.motivo || 'Não consegui entrar.');
+  }
+  salvarEmail(email);
+  aplicarTema(r.tema || TEMA);
+  el('login').classList.add('oculto');
+  el('carregando').classList.add('oculto');
+
+  SESSAO = r;
+  montarMenu(r.telas);
+  /*
+   * O rodape mostrava "hercullito123" — o comeco do e-mail — porque o
+   * cadastro nao tinha nome preenchido. Agora o nome e obrigatorio no
+   * pedido e no cadastro; aqui, se ainda faltar, mostramos a funcao ou o
+   * nivel em vez de um pedaco de e-mail.
+   */
+  const u = r.usuario;
+  el('usuario-nome').textContent = u.nome || u.papel || u.email;
+  el('usuario-papel').textContent = [u.papel, u.perfil, u.turno ? 'turno ' + u.turno : '']
+    .filter(Boolean).join(' · ');
+  el('usuario-papel').title = u.email;
+  const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
+  el('aplicacao').classList.remove('oculto');
+
+  if (r.primeiraTela && r.telas.length) {
+    CACHE_TELAS[chaveTela(r.telas[0].id, {})] = { resposta: r.primeiraTela, quando: Date.now() };
+  }
+  abrirModulos();
+}
+
+/*
+ * A faixa "voce esta vendo como outro nivel" tem um botao que chamava
+ * pararSimulacao() — funcao que nunca existiu no cliente. Clicar nela
+ * dava erro no console e nada acontecia.
+ */
+async function pararSimulacao() {
+  try {
+    await chamar('encerrarSimulacao');
+    location.reload();
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+function sair() {
+  limparEmail();
+  esquecerTelas();
+  SESSAO = null;
+  el('aplicacao').classList.add('oculto');
+  mostrarLogin();
+}
+
+async function instalarSistema() {
+  const email = String(el('instalacao-email').value || '').trim().toLowerCase();
+  if (!email || email.indexOf('@') === -1) { avisar('Informe seu e-mail de administrador.', true); return; }
+  const b = el('botao-instalar');
+  b.disabled = true; b.textContent = 'Criando…';
+  try {
+    await chamar('instalar', email);
+    salvarEmail(email);   // o admin ja entra logado
+    location.reload();
+  } catch (e) { b.disabled = false; b.textContent = 'Criar banco de dados'; avisar(e.message || e, true); }
+}
+
+function mostrarFalha(t) {
+  el('carregando').classList.add('oculto');
+  el('falha-texto').textContent = t;
+  el('falha').classList.remove('oculto');
+}
+
+/*
+ * MODULOS.
+ *
+ * O sistema abre no menu de modulos. A barra lateral so lista as telas do
+ * modulo em que a pessoa esta — antes ela despejava as seis telas de uma
+ * vez, misturando calendario com acessos.
+ */
+let moduloAtual = null;
+
+const ICONES = {
+  calendario: '\u{1F4C5}', pessoas: '\u{1F465}', tela: '\u{1F4FD}', engrenagem: '\u2699'
+};
+
+function montarMenu(telas) {
+  const dentro = moduloAtual
+    ? telas.filter((t) => t.modulo === moduloAtual)
+    : [];
+  el('menu').innerHTML =
+    (moduloAtual ? `<button class="voltar-modulos" onclick="abrirModulos()">Voltar aos modulos</button>` : '') +
+    dentro.map((t) => `
+    <button class="item-menu" data-pagina="${t.id}" onclick="abrir('${t.id}')">
+      <span class="tag-cor ${t.cor}"></span>${esc(t.nome)}
+    </button>`).join('');
+}
+
+/** Tela inicial: os holocards. Nao chama o servidor. */
+function abrirModulos() {
+  moduloAtual = null;
+  paginaAtual = 'modulos'; paramsAtual = {};
+  montarMenu(SESSAO.telas || []);
+
+  el('titulo-pagina').textContent = 'Sistema de Gestão Operacional';
+  el('subtitulo-pagina').textContent = 'CD Feira de Santana \u00b7 ' + SESSAO.usuario.nome;
+  el('acoes-topo').innerHTML = '';
+  el('pagina').classList.remove('sem-entrada');
+  paginaAnterior = 'modulos';
+
+  const mods = SESSAO.modulos || [];
+  el('pagina').innerHTML = `
+    <div class="tela-modulos">
+      <div class="modulos-titulo">Selecione um modulo para continuar</div>
+      <div class="grade-modulos">
+        ${mods.map((m) => `
+          <button class="holocard ${m.cor}" onclick="entrarModulo('${m.id}')">
+            <div class="holo-icone">${ICONES[m.icone] || '\u25C6'}</div>
+            <div class="holo-titulo">${esc(m.nome)}</div>
+            <div class="holo-frase">${esc(m.frase)}</div>
+            <div class="holo-rodape">
+              <span class="holo-acao">${esc(m.acao)}</span>
+              <span class="holo-seta">\u2192</span>
+            </div>
+            <span class="holo-marca">${ICONES[m.icone] || ''}</span>
+          </button>`).join('') ||
+          '<div class="vazio">Nenhum modulo liberado para o seu perfil.</div>'}
+      </div>
+    </div>`;
+}
+
+function entrarModulo(id) {
+  const m = (SESSAO.modulos || []).find((x) => x.id === id);
+  if (!m || !m.telas.length) return;
+  moduloAtual = id;
+  montarMenu(SESSAO.telas || []);
+  abrir(m.telas[0]);
+  // As demais telas DESTE modulo vao chegando por tras, sem atrapalhar.
+  setTimeout(() => prebuscarModulo(id), 2500);
+}
+
+/*
+ * CACHE DE TELAS.
+ *
+ * Cada chamada ao servidor do Apps Script custa de 1 a 3 segundos, e isso
+ * NAO depende do tamanho da resposta: e o custo de acordar o ambiente.
+ * Sem cache, voltar para uma tela ja vista pagava esse preco de novo — era
+ * a lentidao que se sentia no menu.
+ *
+ * Estrategia: mostra o que ja tem na hora e revalida por tras. A tela
+ * aparece instantanea; se o servidor devolver algo diferente, ela se
+ * corrige sozinha em silencio. Qualquer gravacao limpa o cache inteiro.
+ */
+const CACHE_TELAS = {};
+const chaveTela = (id, params) => id + '|' + JSON.stringify(params || {});
+function esquecerTelas() { Object.keys(CACHE_TELAS).forEach((k) => delete CACHE_TELAS[k]); }
+
+/*
+ * ENVELHECER em vez de APAGAR.
+ *
+ * Depois de uma gravacao, as outras telas podem ter mudado — mas apagar o
+ * cache delas obrigava o app a buscar TODAS de novo na hora (era o que a
+ * prebusca fazia depois de cada clique: 6 chamadas por botao apertado).
+ * Envelhecendo, a tela guardada continua servindo para pintar na hora e
+ * so revalida quando a pessoa realmente abre. Zero chamada extra agora,
+ * dado fresco quando importa.
+ */
+function envelhecerTelas() {
+  Object.keys(CACHE_TELAS).forEach((k) => { CACHE_TELAS[k].quando = 0; });
+}
+
+/*
+ * FILA DO USUARIO.
+ *
+ * O Apps Script serializa as chamadas de uma mesma pessoa: se a prebusca
+ * disparou seis, o clique dela entra atras das seis. Este contador marca
+ * quando existe pedido do usuario em voo — a prebusca so anda com a fila
+ * vazia, entao ela nunca mais atrasa um clique.
+ */
+let pedidosDoUsuario = 0;
+const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+async function filaLivre(limite) {
+  for (let i = 0; i < (limite || 40) && pedidosDoUsuario > 0; i++) await esperar(300);
+  return pedidosDoUsuario === 0;
+}
+
+async function abrir(idTela, params) {
+  paginaAtual = idTela; paramsAtual = params || {};
+
+  // Entrar por atalho (um botao da Central, por exemplo) tem que acender o
+  // modulo certo na lateral, senao a pessoa fica sem saber onde esta.
+  const dona = (SESSAO.telas || []).find((t) => t.id === idTela);
+  if (dona && dona.modulo !== moduloAtual) { moduloAtual = dona.modulo; montarMenu(SESSAO.telas || []); }
+
+  document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === idTela));
+
+  // O titulo muda ANTES da chamada. Se a tela falhar, o cabecalho tem que
+  // mostrar onde voce esta, nao onde estava.
+  const menu = (SESSAO.telas || []).find((t) => t.id === idTela);
+  el('titulo-pagina').textContent = menu ? menu.nome : idTela;
+  el('subtitulo-pagina').textContent = '';
+  el('acoes-topo').innerHTML = '';
+
+  const chave = chaveTela(idTela, paramsAtual);
+  const guardado = CACHE_TELAS[chave];
+
+  if (guardado) {
+    // Vindo do cache do navegador: entra deslizando so quando a tela
+    // MUDA de verdade; voltar para a mesma tela nao reanima nada.
+    pintar(idTela, guardado.resposta, paginaAnterior === idTela);
+    paginaAnterior = idTela;
+    if (Date.now() - guardado.quando < 20000) return;  // fresco: nem revalida
+    revalidar(idTela, paramsAtual, chave);      // por tras, sem "Carregando"
+    return;
+  }
+
+  el('pagina').innerHTML = '<div class="vazio">Carregando…</div>';
+  pedidosDoUsuario++;
+  try {
+    const r = await carregarTelaSrv(idTela, paramsAtual);
+    CACHE_TELAS[chave] = { resposta: r, quando: Date.now() };
+    pintar(idTela, r, paginaAnterior === idTela);
+    paginaAnterior = idTela;
+  } catch (e) {
+    el('pagina').innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+  } finally {
+    pedidosDoUsuario--;
+  }
+}
+
+/*
+ * PREBUSCA — reescrita.
+ *
+ * Como era: logo depois do login, e de novo depois de CADA acao, o app
+ * pedia TODAS as telas ao servidor, uma a uma. Sete telas = sete idas de
+ * 1 a 3 s cada. E como o Apps Script atende uma chamada por vez para o
+ * mesmo usuario, o clique da pessoa ficava atras dessa fila: o app abria
+ * rapido e travava logo em seguida. Era a lentidao principal.
+ *
+ * Como ficou:
+ *   - so as telas do MODULO em que a pessoa entrou (as outras ela pode
+ *     nem abrir na sessao inteira);
+ *   - so depois de a tela pedida ja estar na frente dela;
+ *   - so com a fila do usuario vazia, e cedendo a vez a cada item;
+ *   - para na hora se a pessoa trocar de modulo.
+ */
+async function prebuscarModulo(idModulo) {
+  const alvo = (SESSAO && SESSAO.telas || []).filter((t) => t.modulo === idModulo);
+  for (const t of alvo) {
+    if (moduloAtual !== idModulo) return;            // a pessoa saiu do modulo
+    const chave = chaveTela(t.id, {});
+    if (CACHE_TELAS[chave]) continue;
+    if (!(await filaLivre())) return;                // usuario ocupado: desiste
+    try {
+      CACHE_TELAS[chave] = { resposta: await carregarTelaSrv(t.id, {}), quando: Date.now() };
+    } catch (e) { /* tela sem permissao ou com erro: fica para o clique */ }
+    await esperar(400);                              // deixa a fila respirar
+  }
+}
+
+/** Busca de novo em segundo plano e so repinta se mudou de verdade. */
+async function revalidar(idTela, params, chave) {
+  try {
+    const r = await carregarTelaSrv(idTela, params);
+    const antes = CACHE_TELAS[chave];
+    CACHE_TELAS[chave] = { resposta: r, quando: Date.now() };
+    // Se o usuario ja saiu desta tela, atualiza so o cache.
+    if (paginaAtual !== idTela || chaveTela(paginaAtual, paramsAtual) !== chave) return;
+    if (!antes || JSON.stringify(antes.resposta) !== JSON.stringify(r)) pintar(idTela, r, true);
+  } catch (e) { /* revalidacao e silenciosa: a tela em uso continua valida */ }
+}
+
+/* Resolvido na hora do uso, nao na leitura do arquivo. Uma tela sem pintor
+   vira uma mensagem na tela — nao a pagina inteira em branco. */
+const TELAS_PINTA = {
+  inicio: 'pintarCentral', calendario: 'pintarCalendario', assiduidade: 'pintarAssiduidade',
+  config: 'pintarConfig', acessos: 'pintarPessoas',
+  apresentacao: 'pintarApresentacao'
+};
+
+/*
+ * `silencioso` = esta e a repintura de fundo da revalidacao, nao uma
+ * troca de tela. Sem esta distincao, o conteudo entrava deslizando UMA
+ * VEZ ao abrir e DE NOVO meio segundo depois, quando o servidor
+ * confirmava os dados — que e a "sensacao de lentidao" relatada: nao era
+ * demora, era a animacao de entrada rodando duas vezes.
+ */
+function pintar(idTela, r, silencioso) {
+  DADOS = r.dados;
+  paginaAtual = idTela;
+  document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === idTela));
+  el('titulo-pagina').textContent = r.titulo;
+
+  const pagina = el('pagina');
+  pagina.classList.toggle('sem-entrada', !!silencioso);
+
+  const pintor = window[TELAS_PINTA[idTela]];
+  if (typeof pintor !== 'function') {
+    pagina.innerHTML = `<div class="erro-caixa">A tela "${esc(idTela)}" ainda nao tem visual montado.</div>`;
+    return;
+  }
+  pintor(r);
+}
+
+/*
+ * Uma acao custava TRES viagens ao servidor: a acao, a remontagem da tela
+ * e a prebusca de TODAS as outras telas. No Apps Script cada viagem custa
+ * segundos — por isso o botao parecia travar.
+ *
+ * Agora:
+ *   - so a tela ATUAL e invalidada (as outras revalidam sozinhas ao abrir);
+ *   - a prebusca sai do caminho critico (roda depois, sem segurar ninguem);
+ *   - o botao clicado mostra que esta trabalhando, entao a espera nao
+ *     parece travamento.
+ */
+async function agir(acao, params, recado) {
+  const botao = (typeof event !== 'undefined' && event && event.target)
+    ? event.target.closest('button') : null;
+  // Guarda o innerHTML, nao o texto: varios botoes tem icone dentro e
+  // voltavam sem ele depois da acao.
+  const rotulo = botao ? botao.innerHTML : '';
+  if (botao) { botao.disabled = true; botao.textContent = 'Aguarde…'; }
+
+  pedidosDoUsuario++;
+  try {
+    const r = await executarAcaoSrv(acao, params);
+
+    /*
+     * Invalida a tela atual (essa tem que voltar do servidor) e apenas
+     * ENVELHECE as outras. Antes daqui saia um `esquecerTelas()` seguido
+     * de uma prebusca de todas as telas: aprovar uma atividade custava
+     * oito idas ao servidor e ~15 s de fila. Agora custa duas.
+     */
+    esquecerTela(paginaAtual);
+    envelhecerTelas();
+    fecharJanela();
+    if (recado) avisar(recado);
+    await abrir(paginaAtual, paramsAtual);
+    return r;
+  } catch (e) {
+    const msg = e.message || String(e);
+    // Erro de permissao de e-mail nao vira um aviso que some em 7s: vira uma
+    // janela com o passo a passo e o botao que leva direto para autorizar.
+    if (/MailApp|send_mail|permiss|autoriz/i.test(msg)) janelaAutorizarEmail(msg);
+    else avisar(msg, true);
+    throw e;
+  } finally {
+    pedidosDoUsuario--;
+    if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
+  }
+}
+
+/* Apaga do cache do cliente so as entradas de uma tela. */
+function esquecerTela(idTela) {
+  Object.keys(CACHE_TELAS).forEach(function (k) {
+    if (k.indexOf(idTela + '|') === 0) delete CACHE_TELAS[k];
+  });
+}
+const recarregarDados = () => agir('atualizarDados', {}, 'Dados atualizados');
+
+/*
+ * Guia de autorizacao de e-mail. Aparece quando um envio falha por falta de
+ * permissao. O botao abre a pagina de permissoes da conta Google: la a
+ * pessoa remove o acesso antigo e, ao voltar, o sistema pede a permissao
+ * nova (incluindo o Gmail) automaticamente.
+ */
+function gerarProximoMes() {
+  const hoje = new Date();
+  const meses = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+  // proximos 6 meses como opcoes
+  const opcoes = [];
+  for (let i = 0; i <= 6; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    opcoes.push(meses[d.getMonth()] + ' ' + d.getFullYear());
+  }
+  abrirJanela('Gerar um mês', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      Cria as atividades do mês escolhido a partir das rotinas, sem esperar a geração automática do dia 20.
+      Se o mês já existe, nada muda.
+    </p>
+    <div class="campo"><label>Mes</label>
+      <select id="gm-comp">${opcoes.map((c) => `<option>${c}</option>`).join('')}</select></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('gerarMes',{competencia:val('gm-comp')},'Mes gerado')">Gerar mês</button>`);
+}
+
+function restaurarPerfis() {
+  abrirJanela('Restaurar níveis de acesso', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      Reescreve os niveis padrao (Admin, Gerente, Coordenador, Consulta) para o correto:
+      o <b>Coordenador</b> volta a so entregar — sem validar, sem ver assiduidade nem configuracao.
+      As pessoas continuam nos seus niveis; so a definicao de cada nivel volta ao certo.
+    </p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="confirmarRestauro()">Restaurar</button>`);
+}
+
+async function confirmarRestauro() {
+  try {
+    const r = await executarAcaoSrv('restaurarPerfis', {});
+    fecharJanela();
+    avisar('Níveis restaurados — Coordenador agora e escopo ' + (r.coordenadorEscopo || '?') +
+           '. Peca para o coordenador recarregar.');
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+async function diagnosticarAcesso() {
+  abrirJanela('Diagnostico de acesso', '<div class="vazio">Analisando…</div>', '');
+  try {
+    const d = await executarAcaoSrv('diagnosticoAcesso', {});
+    const problema = d.diagnostico.indexOf('PROBLEMA') === 0;
+    abrirJanela('Diagnostico de acesso', `
+      <div class="${problema ? 'erro-caixa' : 'cartao'}" style="margin-bottom:14px">
+        <strong>${problema ? '\u26A0 ' : '\u2713 '}${esc(d.diagnostico)}</strong>
+      </div>
+      <table><tbody>
+        <tr><td>Seu e-mail</td><td class="mono">${esc(d.voceEh.email)}</td></tr>
+        <tr><td>Perfil</td><td><strong>${esc(d.voceEh.perfil)}</strong></td></tr>
+        <tr><td>Seu turno (em Acessos)</td><td><strong>${esc(d.voceEh.turno)}</strong></td></tr>
+        <tr><td>Escopo do perfil</td><td>${esc(d.voceEh.escopo)}</td></tr>
+        <tr><td>Competência</td><td>${esc(d.competencia)}</td></tr>
+        <tr><td>Atividades no mês</td><td>${d.totalNoMes}</td></tr>
+        <tr><td>Visiveis para você</td><td><strong>${d.visiveisParaVoce}</strong></td></tr>
+        <tr><td>Turnos das atividades</td><td>${esc(d.turnosDasAtividades.join(' · '))}</td></tr>
+      </tbody></table>
+      <p class="dica" style="margin-top:12px">Se o problema for de turno, corrija na aba <b>Acessos</b>: a coluna Turno da pessoa precisa bater (A, B ou C) com o turno das atividades.</p>`,
+      '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+function janelaAutorizarEmail(msg) {
+  abrirJanela('Falta autorizar o envio de e-mail', `
+    ${msg ? `<div class="erro-caixa" style="margin:0 0 14px">${esc(msg)}</div>` : ''}
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      O sistema tentou avisar por e-mail, mas o Google ainda não liberou o envio
+      para esta conta. E rápido de resolver e só precisa ser feito <b>uma vez</b>.
+    </p>
+    <ol style="margin:0 0 16px;padding-left:22px;line-height:1.9">
+      <li>Clique no botao <b>Abrir página de autorização</b> abaixo.</li>
+      <li>Na lista, ache o app <b>GSL Bartofil</b> e clique nele.</li>
+      <li>Clique em <b>Remover acesso</b>.</li>
+      <li>Volte aqui, recarregue a página e o Google vai pedir a permissão de novo — aceite tudo, inclusive o <b>Gmail</b>.</li>
+    </ol>
+    <p class="dica">Isso vale só para você, o dono do sistema. Os coordenadores e o gerente não precisam autorizar nada — eles só recebem os e-mails.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
+    <button class="botao" onclick="window.open('https://myaccount.google.com/permissions','_blank')">Abrir página de autorização</button>`);
+}
+
+function avisar(texto, erro) {
+  const r = el('recado');
+  r.textContent = texto;
+  r.className = 'recado' + (erro ? ' erro' : '');
+  r.classList.remove('oculto');
+  setTimeout(() => r.classList.add('oculto'), erro ? 7000 : 2600);
+}
+
+function abrirJanela(titulo, corpo, rodape) {
+  el('janela-titulo').textContent = titulo;
+  el('janela-corpo').innerHTML = corpo;
+  el('janela-rodape').innerHTML = rodape;
+  el('janela').classList.remove('oculto');
+}
+const fecharJanela = () => el('janela').classList.add('oculto');
+
+/* ================= CENTRAL ================= */
+function pintarCentral(r) {
+  const d = r.dados, u = d.urgencias, g = d.geral;
+  el('subtitulo-pagina').textContent = d.hoje + ' · ' + d.escopo;
+  el('acoes-topo').innerHTML = '';
+
+  el('pagina').innerHTML = `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${kpi(u.atrasadas, 'Atrasadas agora', 'vermelho')}
+      ${kpi(u.hoje, 'Vencem hoje', 'amarelo')}
+      ${kpi(u.aguardando, 'Aguardando validacao', 'azul')}
+      ${kpi(g.percentual + '%', 'Aprovadas no geral', 'verde')}
+    </div>
+
+    <div class="grade grade-dupla" style="margin-bottom:14px">
+      <div class="cartao">
+        <div class="cartao-titulo">Sua semana — ${esc(d.semana.inicio)} a ${esc(d.semana.fim)}</div>
+        ${d.semana.itens.length ? d.semana.itens.map((a) => `
+          <div class="linha-atividade">
+            <div class="data-atividade"><div class="data-dia">${esc(a.prazo.slice(0,5))}</div>
+              <div class="data-semana">${esc(a.diaSemana)}</div></div>
+            <div class="texto-atividade"><div class="nome-atividade">${esc(a.atividade)}</div>
+              <div class="meta-atividade">Turno ${esc(a.turno)}${a.setor ? ' · ' + esc(a.setor) : ''}</div></div>
+            ${etiqueta(a.status)}
+          </div>`).join('') : '<div class="vazio">Nada previsto para esta semana.</div>'}
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo">Desempenho por turno</div>
+        <table><thead><tr><th>Turno</th><th class="numero">Total</th><th class="numero">Aprov.</th>
+          <th class="numero">Atrás.</th><th class="numero">%</th></tr></thead><tbody>
+          ${d.porTurno.map((t) => `<tr><td><strong>${esc(t.turno)}</strong></td>
+            <td class="numero">${t.total}</td><td class="numero">${t.aprovadas}</td>
+            <td class="numero">${t.atrasadas}</td><td class="numero">${t.percentual}%</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+    </div>
+
+    ${d.insights.length ? `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Insights — o que os dados estão dizendo</div>
+      ${d.insights.map((i) => `
+        <div class="insight ${esc(i.nivel)}">
+          <div class="insight-texto">${esc(i.texto)}</div>
+          <div class="insight-rec">${esc(i.recomendacao)}</div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    <div class="cartao">
+      <div class="cartao-titulo">Andamento mês a mês</div>
+      <table><thead><tr><th>Competência</th><th class="numero">Total</th><th class="numero">Aprov.</th>
+        <th class="numero">Aguard.</th><th class="numero">Pend.</th><th class="numero">Atrás.</th>
+        <th class="numero">%</th><th>Situação</th></tr></thead><tbody>
+        ${d.porMes.map((m) => `<tr><td><strong>${esc(m.competencia)}</strong></td>
+          <td class="numero">${m.total}</td><td class="numero">${m.aprovadas}</td>
+          <td class="numero">${m.aguardando}</td><td class="numero">${m.pendentes}</td>
+          <td class="numero">${m.atrasadas}</td><td class="numero">${m.percentual}%</td>
+          <td>${esc(m.situacao)}</td></tr>`).join('')
+          || '<tr><td colspan="8" class="vazio">Nenhuma competência gerada ainda.</td></tr>'}
+      </tbody></table>
+    </div>`;
+}
+
+/* ================= CALENDARIO ================= */
+function pintarCalendario(r) {
+  const d = r.dados, p = d.permissoes;
+  el('subtitulo-pagina').textContent = d.competencia + ' · ' + r.escopo;
+
+  // O seletor de mes saiu do cabecalho. Agora e uma tira de cartoes de mes
+  // logo acima do calendario — da para ver todos os meses e trocar num toque.
+  el('acoes-topo').innerHTML = '';
+
+  const meses = d.competenciasDisponiveis.length ? d.competenciasDisponiveis : [d.competencia];
+
+  el('pagina').innerHTML = `
+    <div class="tira-meses">
+      ${meses.map((c) => `
+        <button class="chip-mes ${c === d.competencia ? 'ativo' : ''}"
+                onclick="abrir('calendario',{competencia:'${esc(c)}'})">${esc(c)}</button>`).join('')}
+    </div>
+
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${kpiFiltro(d.resumo.total, 'Programadas', 'azul', 'todas')}
+      ${kpiFiltro(d.resumo.aprovadas, 'Aprovadas', 'verde', 'aprovada')}
+      ${kpiFiltro(d.resumo.aguardando, 'Aguardando validacao', 'amarelo', 'aguardando')}
+      ${kpiFiltro(d.resumo.atrasadas, 'Atrasadas', 'vermelho', 'atrasada')}
+      ${kpiFiltro(d.resumo.reprovadas, 'Reprovadas', 'vermelho', 'reprovada')}
+    </div>
+
+    <div class="faixa-andamento ${esc(d.andamento.nivel)}">
+      <strong>${esc(d.andamento.titulo)}</strong> — ${esc(d.andamento.texto)}
+    </div>
+
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Calendário operacional</div>
+      <div class="grade-mes">
+        ${['DOM','SEG','TER','QUA','QUI','SEX','SAB'].map((n) => `<div class="dia-cabecalho">${n}</div>`).join('')}
+        ${d.grade.map((semana) => semana.map((dia) => `
+          <div class="dia${dia.doMes ? '' : ' fora'}${dia.hoje ? ' hoje' : ''}${
+                dia.temAtraso ? ' com-atraso' : (dia.temPrazo ? ' com-prazo' : '')}${
+                dia.reuniao ? ' reuniao' : ''}${
+                dia.itens.some((i) => i.entregue) ? ' tem-entrega' : ''}">
+            <div class="dia-numero">${dia.dia}</div>
+            ${dia.itens.map((i) => `
+              <button class="pilula ${classeStatus(i.status)}${i.entregue ? ' tem-anexo' : ''}" title="${esc(i.atividade)}${i.entregue ? ' — ENTREGUE (' + (i.qtdAnexos || 1) + ' arquivo)' : ''}"
+                      onclick="abrirAtividade('${i.id}')">${esc(i.tipo)}${i.turno !== 'Todos' ? ' ' + esc(i.turno) : ''}</button>`).join('')}
+          </div>`).join('')).join('')}
+      </div>
+      <div class="legenda-mes">
+        <span><i class="amostra hoje"></i>hoje</span>
+        <span><i class="amostra prazo"></i>dia com prazo</span>
+        <span><i class="amostra atraso"></i>dia com atraso</span>
+        <span><i class="amostra reuniao"></i>reunião com a gerência — o marco da semana</span>
+      </div>
+    </div>
+
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Gestao de atividades — ${d.atividades.length} no mes</span>
+        <span style="display:flex;gap:8px">
+          ${d.mesPassado && p.validar ? `<button class="botao secundario" onclick="encerrarMes('${esc(d.competencia)}')">Encerrar mês passado</button>` : ''}
+          ${p.programar ? `<button class="botao" onclick="formNovaAtividade('${esc(d.competencia)}')">+ Nova atividade</button>` : ''}
+        </span>
+      </div>
+      ${d.mesPassado ? '<p class="dica" style="margin:-4px 0 12px;color:var(--alerta)">Este mes ja passou. \"Encerrar mes passado\" cancela tudo que ficou pendente.</p>' : ''}
+      <p class="dica" style="margin:-4px 0 12px">Clique em <b>Abrir</b> na atividade para anexar entrega, remarcar, dar feedback, aprovar, reprovar ou cancelar.</p>
+      <div style="overflow-x:auto">
+        <table class="tabela-gestao"><thead><tr>
+          <th></th><th>ID</th><th>Sem.</th><th>Prazo</th><th>Atividade</th><th>Turno</th>
+          <th>Coordenador</th><th>Setor</th><th>Entrega</th><th>Entregue em</th>
+          <th>Validação</th><th>Motivo reprov./cancel.</th><th>Status</th>
+        </tr></thead><tbody>
+          ${d.atividades.map((a) => `
+            <tr class="linha-status ${classeStatus(a.status)}">
+              <td><button class="botao-abrir" onclick="abrirAtividade('${a.id}')">Abrir</button></td>
+              <td class="mono">${esc(a.id)}</td>
+              <td>${esc(a.semana)}</td>
+              <td>${esc(a.prazo)}</td>
+              <td>${esc(a.atividade)}</td>
+              <td>${esc(a.turno)}</td>
+              <td>${esc(a.coordenador || '—')}</td>
+              <td>${esc(a.setor || '—')}</td>
+              <td>${a.entregue
+                    ? `<span class="selo-entrega">\u{1F4CE} ${a.qtdAnexos || 1} arquivo(s)</span>`
+                    : '<span class="pendente-entrega">aguardando</span>'}</td>
+              <td>${esc(a.entregueEm || '—')}</td>
+              <td>${esc(a.validacao || '—')}</td>
+              <td class="motivo">${esc(a.motivo || '')}</td>
+              <td>${etiqueta(a.status)}${a.diasAtraso ? `<div class="meta-atividade">${a.diasAtraso} dia(s)</div>` : ''}</td>
+            </tr>`).join('') || '<tr><td colspan="13" class="vazio">Nenhuma atividade neste mês.</td></tr>'}
+        </tbody></table>
+      </div>
+    </div>
+
+    ${(d.treinamentos || []).length ? `
+    <div class="cartao bloco-treinamento">
+      <div class="cartao-titulo">Treinamentos programados pelo gerente</div>
+      <div class="dica" style="margin-bottom:10px">
+        Vaga que o gerente marca — preencha o tema, o turno e a data. O coordenador e avisado por e-mail na hora.
+      </div>
+      ${d.treinamentos.map((a) => `
+        <div class="linha-atividade">
+          <div class="data-atividade">
+            <div class="data-dia">${a.prazo ? esc(a.prazo.slice(0, 5)) : '--'}</div>
+            <div class="data-semana">${a.prazo ? esc(a.diaSemana) : 'sem data'}</div>
+          </div>
+          <div class="texto-atividade">
+            <div class="nome-atividade">${esc(a.atividade)}</div>
+            <div class="meta-atividade mono">${esc(a.id)}${a.turno ? ' \u00b7 turno ' + esc(a.turno) : ''}</div>
+          </div>
+          ${a.prazo ? etiqueta(a.status) : '<span class="etiqueta iniciar">Não agendado</span>'}
+          ${p.programar ? `<button class="icone-botao" onclick="formTreinamento('${a.id}')">${a.prazo ? 'Alterar' : 'Agendar'}</button>` : ''}
+          ${a.prazo ? `<button class="icone-botao" onclick="abrirAtividade('${a.id}')">Abrir</button>` : ''}
+        </div>`).join('')}
+    </div>` : ''}
+
+    ${(d.canceladas || []).length ? `
+    <div class="cartao bloco-arquivo" style="margin-top:14px">
+      <div class="cartao-titulo">Arquivo — atividades canceladas (${d.canceladas.length})</div>
+      <p class="dica" style="margin:-4px 0 12px">Ficam fora do calendário e das contagens. Reative se precisar de volta.</p>
+      ${d.canceladas.map((a) => `
+        <div class="linha-atividade">
+          <div class="texto-atividade">
+            <div class="nome-atividade" style="text-decoration:line-through;opacity:.7">${esc(a.atividade)}</div>
+            <div class="meta-atividade mono">${esc(a.id)} \u00b7 ${esc(a.prazo || 'sem data')} \u00b7 ${esc(a.motivo || '')}</div>
+          </div>
+          ${p.validar ? `<button class="icone-botao" onclick="agir('reativarAtividade',{id:'${a.id}'},'Atividade reativada')">Reativar</button>` : ''}
+        </div>`).join('')}
+    </div>` : ''}`;
+}
+
+function encerrarMes(competencia) {
+  abrirJanela('Encerrar ' + competencia, `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      Cancela todas as atividades ainda pendentes de <b>${esc(competencia)}</b>.
+      Elas somem do calendário e das contagens, mas ficam no arquivo — da para reativar depois.
+    </p>
+    <div class="campo"><label>Motivo</label>
+      <textarea id="em-motivo" placeholder="Ex.: mês encerrado, não será mais cobrado">Mês encerrado pela gestão.</textarea></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    <button class="botao perigo" onclick="agir('cancelarCompetencia',{competencia:'${esc(competencia)}',motivo:val('em-motivo')},'Mes encerrado')">Encerrar mês</button>`);
+}
+
+function todasAtividades() {
+  return [].concat(DADOS.atividades || [], DADOS.treinamentos || [], DADOS.naoAgendadas || []);
+}
+
+function abrirAtividade(id) {
+  const d = DADOS, p = d.permissoes;
+  const a = todasAtividades().find((x) => x.id === id);
+  if (!a) return;
+
+  // A entrega aparece na hora que a atividade abre — nada de "carregando",
+  // nada de procurar. Se ha PDF entregue, um botao grande abre ele direto.
+  const anexos = (a.entregue && a.anexoUrl)
+    ? `<a class="anexo-entregue" href="${esc(a.anexoUrl)}" target="_blank">
+         <span class="anexo-icone">\u{1F4C4}</span>
+         <span class="anexo-texto">
+           <span class="anexo-titulo">Entrega recebida</span>
+           <span class="anexo-sub">Entregue em ${esc(a.entregueEm || '—')} \u00b7 toque para abrir o PDF</span>
+         </span>
+         <span class="anexo-seta">\u2192</span>
+       </a>`
+    : '<div class="dica">Nenhum arquivo entregue ainda.</div>';
+
+  const setor = p.programar && a.tipo === 'VIS' ? `
+    <div class="campo">
+      <label>Setor da vistoria</label>
+      <select id="a-setor" onchange="agir('definirSetor',{id:'${a.id}',setor:this.value},'Setor definido — coordenador avisado')">
+        <option value="">Escolher…</option>
+        ${d.setores.map((s) => `<option ${a.setor === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+      </select>
+      <p class="dica">Ao definir, o coordenador do turno recebe o aviso na hora.</p>
+    </div>` : (a.setor ? `<div class="campo"><label>Setor</label><input value="${esc(a.setor)}" readonly></div>` : '');
+
+  // Ja decidida (aprovada, reprovada ou cancelada): mostra o veredito, nao os
+  // botoes de decidir de novo. So oferece "Reabrir" para desfazer.
+  const jaDecidida = a.validacao === 'Aprovado' || a.validacao === 'Reprovado' || a.validacao === 'Cancelada';
+
+  const validacao = p.validar ? (jaDecidida ? `
+    <div class="campo" style="border-top:1px solid var(--linha);padding-top:16px">
+      <label>Validação do gerente</label>
+      <div class="veredito ${classeStatus(a.status)}">
+        <span>${esc(a.validacao)}</span>
+        ${a.motivo ? `<div class="veredito-motivo">${esc(a.motivo)}</div>` : ''}
+      </div>
+      <button class="icone-botao" style="margin-top:10px" onclick="reabrirAtividade('${a.id}')">Reabrir para nova validação</button>
+    </div>` : `
+    <div class="campo" style="border-top:1px solid var(--linha);padding-top:16px">
+      <label>Validação do gerente</label>
+      <textarea id="a-motivo" placeholder="Feedback ou motivo (obrigatório para reprovar)">${esc(a.motivo)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="botao" style="background:var(--verde)" onclick="validar('${a.id}','Aprovado')">Aprovar</button>
+        <button class="botao perigo" onclick="validar('${a.id}','Reprovado')">Reprovar</button>
+        <button class="botao secundario" onclick="cancelarAtividade('${a.id}')">Cancelar atividade</button>
+      </div>
+    </div>`) : (a.motivo ? `<div class="campo"><label>Retorno da gerência</label>
+      <div class="erro-caixa" style="background:var(--azul-tenue);border-color:var(--linha);color:var(--tinta)">${esc(a.motivo)}</div></div>` : '');
+
+  abrirJanela(a.atividade, `
+    <div class="campo-duplo">
+      <div class="campo"><label>ID</label><input value="${esc(a.id)}" readonly></div>
+      <div class="campo"><label>Prazo</label><input value="${esc(a.prazo || 'nao agendado')}" readonly></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Turno</label><input value="${esc(a.turno)}" readonly></div>
+      <div class="campo"><label>Responsavel</label><input value="${esc(a.coordenador || coordenadorDoTurno(a.turno) || 'a definir')}" readonly></div>
+    </div>
+    ${setor}
+    <div class="campo">
+      <label>Status</label>
+      <div>${etiqueta(a.status)} ${a.entregueEm ? `<span class="meta-atividade">entregue em ${esc(a.entregueEm)}</span>` : ''}</div>
+    </div>
+    <div class="campo">
+      <label>Entrega</label>
+      ${anexos}
+      ${a.qtdAnexos ? `<div id="lista-anexos" class="vazio">Carregando anexos…</div>` : ''}
+      ${p.entregar ? `
+        <div class="area-envio" style="margin-top:10px">
+          <input type="file" id="a-arquivos" multiple
+                 accept="image/*,.heic,.heif,.hif,.tif,.tiff,.avif,.dng,.pdf,.docx,.doc,.odt,.rtf,.txt"
+                 onchange="listarEscolhidos()" style="display:none">
+          <button class="botao secundario" type="button" onclick="el('a-arquivos').click()">Escolher fotos ou arquivos</button>
+          <div id="a-lista" class="lista-envio"></div>
+          <button class="botao" id="a-enviar" type="button" style="margin-top:10px;display:none"
+                  onclick="enviarEntrega('${a.id}')">Gerar PDF e enviar entrega</button>
+          <p class="dica">Varias fotos viram um PDF único, uma por página. Aceita JPG, PNG, HEIC, PDF e documentos.
+             Ao enviar, a gestão e avisada e o status vira "Aguard. valid.".</p>
+        </div>` : ''}
+    </div>
+    ${validacao}`, `
+    ${p.programar && a.prazo ? `<button class="botao secundario" onclick="formRemarcar('${a.id}')">\u{1F4C5} Remarcar data</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Fechar</button>`);
+
+  /*
+   * carregarAnexos() existia e NUNCA era chamada — e o elemento que ela
+   * procurava (#lista-anexos) tinha saido da janela. Com isso as acoes
+   * `detalhesAtividade`, `removerAnexo` e a funcao `baixar()` ficaram
+   * inalcancaveis: quem anexou arquivo avulso nao conseguia mais ver nem
+   * remover. A chamada e feita depois de a janela existir, e so quando ha
+   * anexo — nenhuma ida ao Drive a mais nos outros casos.
+   */
+  if (a.qtdAnexos) carregarAnexos(a.id, !!p.entregar);
+}
+
+/* Nome e tamanho de arquivo custam uma chamada ao Drive cada. Buscar isso
+   para o mes inteiro travava a tela; aqui vem so da atividade aberta. */
+async function carregarAnexos(id, podeRemover) {
+  try {
+    const r = await executarAcaoSrv('detalhesAtividade', { id: id });
+    const alvo = el('lista-anexos');
+    if (!alvo) return;
+    alvo.className = '';
+    alvo.innerHTML = r.anexos.map((f) => `
+      <div class="anexo">
+        <span class="anexo-nome">${esc(f.nome)}</span>
+        <span class="anexo-tamanho">${esc(f.tamanho)}</span>
+        <button class="icone-botao" onclick="baixar('${f.id}')">Baixar</button>
+        ${f.url ? `<a class="icone-botao" href="${esc(f.url)}" target="_blank">Abrir</a>` : ''}
+        ${podeRemover ? `<button class="icone-botao perigo" onclick="agir('removerAnexo',{id:'${id}',idArquivo:'${f.id}'},'Anexo removido')">Remover</button>` : ''}
+      </div>`).join('');
+  } catch (e) {
+    const alvo = el('lista-anexos');
+    if (alvo) alvo.textContent = 'Não consegui listar os anexos: ' + (e.message || e);
+  }
+}
+
+// Coordenador do turno, vindo da EQUIPE cadastrada — a "teia": turno -> pessoa.
+function coordenadorDoTurno(turno) {
+  if (!turno || turno === 'Todos') return '';
+  const eq = (SESSAO && SESSAO.equipe) || (DADOS && DADOS.equipe) || [];
+  const p = eq.find((x) => String(x.turno).toUpperCase() === String(turno).toUpperCase());
+  return p ? p.nome : '';
+}
+
+function reabrirAtividade(id) {
+  agir('validar', { id: id, validacao: '', motivo: '' }, 'Atividade reaberta para nova validacao');
+}
+
+function validar(id, decisao) {
+  agir('validar', { id: id, validacao: decisao, motivo: val('a-motivo') },
+       decisao === 'Aprovado' ? 'Aprovada — coordenador avisado' : 'Registrado — coordenador avisado');
+}
+
+function cancelarAtividade(id) {
+  const a = todasAtividades().find((x) => x.id === id);
+  abrirJanela('Cancelar atividade', `
+    <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
+      Cancelar <b>${esc(a.atividade)}</b> (${esc(a.semana)} \u00b7 Turno ${esc(a.turno)})?
+      Ela sai do calendario e das contagens de atraso. O coordenador do turno e avisado.
+    </p>
+    <div class="campo"><label>Motivo do cancelamento</label>
+      <textarea id="c-motivo" placeholder="Por que a atividade não precisa mais ser entregue"></textarea></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    <button class="botao perigo" onclick="agir('cancelarAtividade',{id:'${id}',motivo:val('c-motivo')},'Atividade cancelada — coordenador avisado')">Confirmar cancelamento</button>`);
+}
+
+function formNovaAtividade(competencia) {
+  const d = DADOS;
+  abrirJanela('Nova atividade', `
+    <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
+      Atividade avulsa, fora das rotinas do mês. Ao salvar, o coordenador do turno recebe o aviso.
+    </p>
+    <div class="campo"><label>Nome da atividade</label>
+      <input id="n-atividade" placeholder="Ex.: Conferencia extra de inventario"></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Data</label><input type="date" id="n-data"></div>
+      <div class="campo"><label>Turno</label>
+        <select id="n-turno">
+          ${['Todos', 'A', 'B', 'C'].map((x) => `<option>${x}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="campo"><label>Setor (opcional)</label>
+      <select id="n-setor"><option value="">—</option>
+        ${(d.setores || []).map((s) => `<option>${esc(s)}</option>`).join('')}</select></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('criarAtividade',{atividade:val('n-atividade'),prazo:val('n-data'),turno:val('n-turno'),setor:val('n-setor')},'Atividade criada — coordenador avisado')">Criar atividade</button>`);
+}
+
+function formRemarcar(id) {
+  const a = todasAtividades().find((x) => x.id === id);
+  abrirJanela('Remarcar ' + a.id, `
+    <div class="campo"><label>Prazo atual</label><input value="${esc(a.prazo)}" readonly></div>
+    <div class="campo"><label>Novo prazo</label><input type="date" id="r-data" value="${esc(a.prazoISO)}"></div>
+    <div class="campo"><label>Motivo (obrigatorio)</label>
+      <textarea id="r-motivo" placeholder="Por que o prazo mudou"></textarea></div>
+    <label class="marcador"><input type="checkbox" id="r-avisar" checked> Avisar coordenador e gestão</label>`, `
+    <button class="botao secundario" onclick="abrirAtividade('${id}')">Voltar</button>
+    <button class="botao" onclick="agir('remarcar',{id:'${id}',prazo:val('r-data'),motivo:val('r-motivo'),avisar:marcado('r-avisar')},'Prazo remarcado')">Remarcar</button>`);
+}
+
+function formTreinamento(id) {
+  const a = todasAtividades().find((x) => x.id === id);
+  abrirJanela('Agendar treinamento', `
+    <div class="campo"><label>Tema</label>
+      <input id="t-atividade" value="${esc(a.atividade)}"></div>
+    <div class="campo"><label>Data</label>
+      <input type="date" id="t-data" value="${esc(a.prazoISO || '')}"></div>
+    <div class="campo"><label>Turno</label>
+      <select id="t-turno">
+        ${['Todos', 'A', 'B', 'C'].map((x) => `<option ${x === (a.turno || 'Todos') ? 'selected' : ''}>${x}</option>`).join('')}
+      </select></div>
+    <p class="dica">Ao salvar, os três coordenadores e a gestão recebem o aviso.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('agendarTreinamento',{id:'${id}',prazo:val('t-data'),atividade:val('t-atividade'),turno:val('t-turno')},'Treinamento agendado')">Agendar</button>`);
+}
+
+/*
+ * ENTREGA EM PDF — varias fotos/arquivos viram um PDF unico.
+ *
+ * Passo a passo, para nao estourar o limite de tamanho de uma chamada:
+ *   1. o servidor cria uma pasta temporaria (iniciarEntrega)
+ *   2. cada arquivo sobe sozinho (receberParte)
+ *   3. o servidor junta tudo num PDF, arquiva e avisa (finalizarEntrega)
+ */
+function listarEscolhidos() {
+  const fs = el('a-arquivos').files;
+  const lista = el('a-lista'), botao = el('a-enviar');
+  if (!fs.length) { lista.innerHTML = ''; botao.style.display = 'none'; return; }
+  let html = '';
+  for (let i = 0; i < fs.length; i++) {
+    const mb = (fs[i].size / 1048576).toFixed(1);
+    html += `<div class="item-envio"><span>${esc(fs[i].name)}</span><span class="item-mb">${mb} MB</span></div>`;
+  }
+  lista.innerHTML = html;
+  botao.style.display = '';
+  botao.textContent = fs.length > 1 ? `Gerar PDF com ${fs.length} arquivos e enviar` : 'Gerar PDF e enviar entrega';
+}
+
+const lerBase64 = (arquivo) => new Promise((ok, erro) => {
+  const r = new FileReader();
+  r.onload = () => ok(r.result.split(',')[1]);
+  r.onerror = () => erro(new Error('Não consegui ler ' + arquivo.name));
+  r.readAsDataURL(arquivo);
+});
+
+async function enviarEntrega(id) {
+  const fs = el('a-arquivos').files;
+  if (!fs.length) return;
+  const botao = el('a-enviar');
+  botao.disabled = true;
+  try {
+    avisar('Preparando envio…');
+    const inicio = await executarAcaoSrv('iniciarEntrega', { id: id });
+    const pasta = inicio.pasta;
+
+    for (let i = 0; i < fs.length; i++) {
+      botao.textContent = `Enviando ${i + 1} de ${fs.length}…`;
+      const b64 = await lerBase64(fs[i]);
+      await executarAcaoSrv('receberParte', { pasta: pasta, indice: i, nome: fs[i].name, mime: fs[i].type, b64: b64 });
+    }
+
+    botao.textContent = 'Montando o PDF — aguarde…';
+    await executarAcaoSrv('finalizarEntrega', { id: id, pasta: pasta });
+
+    esquecerTela(paginaAtual);
+    envelhecerTelas();
+    fecharJanela();
+    avisar('Entrega enviada em PDF — gestão avisada');
+    await abrir(paginaAtual, paramsAtual);
+  } catch (e) {
+    botao.disabled = false;
+    listarEscolhidos();
+    avisar(e.message || e, true);
+  }
+}
+
+async function baixar(idArquivo) {
+  avisar('Preparando download…');
+  try {
+    const f = await chamar('obterAnexo', idArquivo);
+    const link = document.createElement('a');
+    link.href = 'data:' + f.tipo + ';base64,' + f.dados;
+    link.download = f.nome; link.click();
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+/* ================= ASSIDUIDADE =================
+   Três abas, e só três:
+     PAINEL        — os números da competência escolhida + a tendência
+                     contínua, que atravessa todas as competências
+     COLABORADORES — a lista individual e os quadros que a tela de
+                     Ranking mostrava (ela deixou de existir: era a
+                     mesma informação em dois lugares)
+     PERÍODO       — consulta por intervalo de datas, contínua, sem
+                     quebra na virada de uma competência para a outra
+
+   A aba ANÁLISE saiu. O único quadro dela que dizia algo — a tendência
+   mês a mês — virou o gráfico contínuo do Painel.
+   ============================================== */
+let ABA_RH = 'painel';          // painel | colaboradores | periodo
+let COLAB_CACHE = null;         // resposta da aba Colaboradores
+
+function pintarAssiduidade(r) {
+  const d = r.dados;
+
+  if (d.semRH || d.semDados) {
+    el('subtitulo-pagina').textContent = d.semRH ? 'Nenhuma competência cadastrada'
+                                                 : 'Competência sem dados importados';
+    el('acoes-topo').innerHTML = '';
+    el('pagina').innerHTML = `
+      <div class="cartao">
+        <div class="cartao-titulo">${d.semRH ? 'Sem fonte de dados' : 'Importação pendente'}</div>
+        <p style="margin:0 0 16px;color:var(--tinta-media);line-height:1.7">
+          ${d.semRH
+            ? 'Cadastre a competencia do RH em Configuracao &rsaquo; Fontes do RH: link da planilha, aba e situacao.'
+            : (d.erroImport
+                ? 'Tentei importar a competencia <strong>' + esc(d.competencia) + '</strong> automaticamente, mas deu erro:<br><span style="color:var(--alerta)">' + esc(d.erroImport) + '</span><br><br>Confira em Configuracao se o link e a aba da folha estao certos (a aba costuma ser <b>FOLHA DE PONTO</b>).'
+                : 'A competencia <strong>' + esc(d.competencia) + '</strong> está cadastrada, mas a folha ainda nao foi lida.')}
+        </p>
+        ${d.podeGerir ? (d.semRH
+          ? `<button class="botao" onclick="abrir('config')">Ir para Configuração</button>`
+          : `<button class="botao" onclick="importar('${d.arquivo.id}')">Importar agora</button>
+             <button class="botao secundario" onclick="previa('${d.arquivo.id}')">Pré-visualizar</button>`)
+          : '<div class="vazio">Peça ao administrador.</div>'}
+      </div>`;
+    return;
+  }
+
+  COLAB_CACHE = null;
+  el('subtitulo-pagina').textContent =
+    `${d.competencia} · ${d.arquivo.situacao}` +
+    (d.arquivo.ultimaImportacao ? ` · lido em ${d.arquivo.ultimaImportacao.slice(0, 16).replace('T', ' ')}` : '');
+
+  el('acoes-topo').innerHTML = `
+    <select onchange="abrir('assiduidade',{competencia:this.value})" title="Competência do painel">
+      ${d.competencias.map((c) => `<option value="${esc(c.competencia)}" ${c.competencia === d.competencia ? 'selected' : ''}>
+        ${esc(c.competencia)} — ${esc(c.situacao)}</option>`).join('')}
+    </select>
+    ${d.podeGerir ? `<button class="botao secundario" onclick="atualizarRH()" title="Relê a planilha do RH agora">↻ Atualizar dados</button>` : ''}`;
+
+  const abas = [['painel', 'Painel'], ['colaboradores', 'Colaboradores'], ['periodo', 'Período']];
+  el('pagina').innerHTML = `
+    <div class="abas">
+      ${abas.map(([id, nome]) => `<button class="aba ${ABA_RH === id ? 'ativa' : ''}"
+        onclick="trocarAbaRH('${id}')">${nome}</button>`).join('')}
+    </div>
+    <div id="conteudo-rh"></div>`;
+
+  pintarAbaRH(d);
+}
+
+function pintarAbaRH(d) {
+  const alvo = el('conteudo-rh');
+  if (!alvo) return;
+  /*
+   * Cada aba dentro de um try. Antes, um erro no meio da montagem
+   * deixava a tela com o conteúdo da aba ANTERIOR e nenhuma mensagem —
+   * foi assim que a aba Colaborador "nao carregava": ela quebrava, e o
+   * painel continuava desenhado, como se o clique nao tivesse ocorrido.
+   */
+  try {
+    if (ABA_RH === 'painel')        { alvo.innerHTML = rhKpis(d) + rhPainel(d); return; }
+    if (ABA_RH === 'colaboradores') { rhColaboradoresTela(d); return; }
+    if (ABA_RH === 'periodo')       { rhPeriodoTela(d); return; }
+    alvo.innerHTML = rhKpis(d) + rhPainel(d);
+  } catch (e) {
+    alvo.innerHTML = `<div class="erro-caixa">Nao consegui montar esta aba: ${esc(e.message || e)}</div>`;
+  }
+}
+
+function trocarAbaRH(aba) {
+  ABA_RH = aba;
+  const botoes = document.querySelectorAll('.abas .aba');
+  const ordem = ['painel', 'colaboradores', 'periodo'];
+  botoes.forEach((b) => b.classList.remove('ativa'));
+  const i = ordem.indexOf(aba); if (botoes[i]) botoes[i].classList.add('ativa');
+  pintarAbaRH(DADOS);
+}
+
+/*
+ * Os quatro KPIs do topo.
+ *
+ * A legenda do RH separa falta INJUSTIFICADA (16), JUSTIFICADA (28) e
+ * DISCIPLINAR (18) de propósito — sao problemas de natureza diferente.
+ * Por isso o cartão mostra a injustificada, que é a que gera cobrança, e
+ * traz as outras duas na legenda em vez de somar tudo num numero so.
+ */
+function rhKpis(d) {
+  const k = d.kpis || {};
+  const temQuebra = k.faltasInjustificadas !== undefined;
+  const rotuloFaltas = temQuebra
+    ? 'Faltas injustificadas · ' + (k.faltasJustificadas || 0) + ' just. · ' +
+      (k.faltasDisciplinares || 0) + ' disc.'
+    : 'Faltas';
+  return `<div class="grade grade-kpi" style="margin-bottom:16px">
+      ${kpi(k.colaboradores, 'Colaboradores' + (k.registros ? ' · ' + k.registros + ' registros' : ''), 'azul')}
+      ${kpi(k.taxa + '%', 'Absenteísmo · meta ' + k.meta + '%', k.acimaDaMeta ? 'vermelho' : 'verde')}
+      ${kpi(temQuebra ? k.faltasInjustificadas : k.faltas, rotuloFaltas, 'vermelho')}
+      ${kpi(k.atestados, 'Atestados', 'amarelo')}
+    </div>` + avisoNaoDefinidos(d);
+}
+
+/*
+ * Codigo fora da legenda vira AVISO, nao barra de grafico. Antes ele
+ * aparecia como "A CONFIRMAR" no meio das categorias reais — na folha de
+ * agosto eram 530 lançamentos, a segunda maior barra do painel, dizendo
+ * exatamente nada.
+ */
+function avisoNaoDefinidos(d) {
+  const n = d.naoDefinidos || {};
+  if (!n.lancamentos) return '';
+  return `<div class="cartao" style="margin-bottom:14px;border-left:4px solid var(--alerta)">
+    <div class="cartao-titulo linha-titulo">
+      <span>${n.lancamentos} lançamento(s) com codigo fora da legenda</span>
+      ${DADOS.podeGerir ? `<button class="icone-botao" onclick="abrir('config')">Cadastrar no DE-PARA</button>` : ''}
+    </div>
+    <p class="dica" style="margin:0">
+      Ficaram de fora dos gráficos e das contagens, de propósito — entrar como categoria
+      inventada seria pior. Códigos:
+      ${(n.codigos || []).map((c) => `<b>${esc(c.codigo)}</b> (${c.total})`).join(' · ')}
+    </p></div>`;
+}
+
+function rhPainel(d) {
+  const maxTurno = Math.max(1, ...d.porTurno.map((t) => t.taxa));
+  const maxCat = Math.max(1, ...d.porCategoria.map((c) => c.total), 1);
+  const maxDow = Math.max(1, ...d.porDiaSemana.map((c) => c.total), 1);
+  const maxDia = Math.max(1, ...d.diaADia.map((c) => c.taxa), 1);
+  const t = d.tendencia || { serie: [] };
+
+  return `
+    ${t.serie.length > 1 ? `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Absenteísmo mês a mês — todas as competências</span>
+        <span style="color:${t.direcao === 'melhorando' ? 'var(--verde)' : (t.direcao === 'piorando' ? 'var(--alerta)' : 'var(--tinta-media)')};font-weight:800">
+          ${t.direcao === 'melhorando' ? '↓' : (t.direcao === 'piorando' ? '↑' : '→')} ${esc(t.direcao)}${t.variacao ? ' (' + (t.variacao > 0 ? '+' : '') + t.variacao + ' p.p.)' : ''}</span>
+      </div>
+      ${graficoLinha(t.serie, t.meta)}
+      <p class="dica">Cada ponto é uma competência importada. A série é contínua: ela não
+         começa nem termina na competência que está selecionada acima.</p>
+    </div>` : ''}
+
+    <div class="grade grade-dupla" style="margin-bottom:14px">
+      <div class="cartao"><div class="cartao-titulo">% de ausência por turno</div>
+        ${d.porTurno.map((t2) => barra(
+            t2.turno + (t2.pessoas ? ' (' + t2.pessoas + ')' : ''),
+            t2.taxa + '% de ' + (t2.registros || 0),
+            maxTurno, t2.taxa, 'vermelho')).join('')}
+        <p class="dica">% de ausência = ausências ÷ dias lançados do turno.</p></div>
+      <div class="cartao"><div class="cartao-titulo">Dias por categoria</div>
+        ${d.porCategoria.length
+          ? d.porCategoria.map((c) => barra(c.categoria, c.total, maxCat, c.total, '')).join('')
+          : '<div class="vazio">Sem categorias.</div>'}</div>
+    </div>
+
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">% de ausencia dia a dia — ${esc(d.competencia)}</div>
+      <div class="serie">
+        ${d.diaADia.map((x) => `
+          <div class="serie-col" title="${esc(x.data)} — ${x.ausencias} de ${x.total}">
+            <div class="serie-barra" style="height:${Math.max(2, Math.round(x.taxa / maxDia * 100))}%"></div>
+            <div class="serie-rotulo">${esc(String(x.data).slice(8, 10))}</div>
+          </div>`).join('')}
+      </div>
+      <p class="dica">Este quadro é da competência selecionada. Para ver um intervalo que
+         atravessa competências, use a aba <b>Período</b>.</p>
+    </div>
+
+    <div class="grade grade-dupla">
+      <div class="cartao"><div class="cartao-titulo">Ausências por dia da semana</div>
+        ${d.porDiaSemana.map((x) => barra(x.dia, x.total, maxDow, x.total, 'vermelho')).join('') || '<div class="vazio">Sem dados.</div>'}</div>
+      <div class="cartao"><div class="cartao-titulo">Códigos mais lançados</div>
+        <table><thead><tr><th>Cód.</th><th>Descrição</th><th>Categoria</th><th class="numero">Vezes</th></tr></thead>
+        <tbody>${d.codigosTop.map((c) => `<tr><td class="mono">${esc(c.codigo)}</td>
+          <td>${esc(c.descricao)}</td><td>${esc(c.categoria)}</td>
+          <td class="numero">${c.total}</td></tr>`).join('')}</tbody></table></div>
+    </div>`;
+}
+
+/* Linha do tempo em SVG — usada pela tendência e pelo Periodo. */
+function graficoLinha(serie, meta, rotulo) {
+  if (!serie || !serie.length) return '<div class="vazio">Sem histórico ainda.</div>';
+  const campo = rotulo || 'taxa';
+  const L = 660, A = 180, mL = 42, mB = 30, mT = 14;
+  const valores = serie.map((p) => Number(p[campo]) || 0);
+  const maxV = Math.max(...valores, (meta || 0) * 1.4, 1);
+  const px = (i) => mL + (serie.length === 1 ? (L - mL) / 2 : i * (L - mL - 12) / (serie.length - 1));
+  const py = (v) => mT + (A - mT - mB) * (1 - v / maxV);
+  const pts = valores.map((v, i) => `${px(i)},${py(v)}`).join(' ');
+  const passo = Math.ceil(serie.length / 12);
+
+  return `<svg viewBox="0 0 ${L} ${A}" style="width:100%;height:auto" role="img">
+    ${meta ? `<line x1="${mL}" y1="${py(meta)}" x2="${L - 6}" y2="${py(meta)}"
+      stroke="var(--verde)" stroke-dasharray="5 4" stroke-width="1.5"/>
+      <text x="${L - 8}" y="${py(meta) - 5}" text-anchor="end" font-size="10" fill="var(--verde)">meta ${meta}%</text>` : ''}
+    <polyline points="${pts}" fill="none" stroke="var(--azul-vivo)" stroke-width="2.5"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    ${serie.map((p, i) => `<circle cx="${px(i)}" cy="${py(valores[i])}" r="3.5"
+      fill="${meta && valores[i] > meta ? 'var(--alerta)' : 'var(--verde)'}"><title>${esc(p.competencia || p.data)}: ${valores[i]}</title></circle>`).join('')}
+    ${serie.map((p, i) => (i % passo === 0 || i === serie.length - 1)
+      ? `<text x="${px(i)}" y="${A - 8}" text-anchor="middle" font-size="9.5"
+           fill="var(--tinta-fraca)">${esc(String(p.competencia || p.data).slice(-5))}</text>` : '').join('')}
+  </svg>`;
+}
+
+/* ---------------- ABA COLABORADORES ----------------
+   Era uma pilha de quatro tabelas iguais, uma embaixo da outra, sem
+   hierarquia e sem cor — muita informação apinhada e nenhuma pista de
+   onde olhar primeiro. Agora são três sub-abas, cada uma com uma
+   pergunta:
+
+     TURNOS    — como está cada turno? (número grande + medidor + situação)
+     DESTAQUES — quem puxa para cima e quem puxa para baixo?
+     LISTA     — a tabela completa, para procurar uma pessoa
+
+   A cor segue a regra do painel: grandeza usa rampa sequencial (uma
+   matiz, mais é mais escuro) e situação vem sempre com ícone e palavra,
+   nunca só com cor.
+   ---------------------------------------------------- */
+let ABA_COLAB = 'turnos';   // turnos | destaques | lista
+
+async function rhColaboradoresTela(d) {
+  const alvo = el('conteudo-rh');
+  if (!d.mostraIndividual) {
+    alvo.innerHTML = rhKpis(d) +
+      '<div class="cartao"><div class="vazio">Seu nível de acesso vê apenas os números agregados.</div></div>';
+    return;
+  }
+  alvo.innerHTML = rhKpis(d) + '<div class="vazio">Carregando colaboradores…</div>';
+  try {
+    /*
+     * A lista vem do AGR_COLAB, sob demanda. Ela NÃO viaja mais dentro
+     * do payload do painel: com 341 pessoas aquilo dava 96 mil
+     * caracteres, e uma célula do Google Sheets aceita 50 mil. Era essa
+     * a razão de a aba não carregar.
+     */
+    COLAB_CACHE = COLAB_CACHE ||
+      await executarAcaoSrv('colaboradores', { competencia: d.competencia, minimo: 10 });
+    desenharColaboradores(d);
+  } catch (e) {
+    alvo.innerHTML = rhKpis(d) + `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+  }
+}
+
+function desenharColaboradores(d) {
+  const r = COLAB_CACHE;
+  const abas = [['turnos', 'Turnos'], ['destaques', 'Destaques'],
+                ['lista', 'Lista completa (' + r.lista.length + ')']];
+  el('conteudo-rh').innerHTML = rhKpis(d) + `
+    <div class="abas abas-internas">
+      ${abas.map(([id, nome]) => `<button class="aba ${ABA_COLAB === id ? 'ativa' : ''}"
+        onclick="trocarAbaColab('${id}')">${nome}</button>`).join('')}
+    </div>
+    <div id="conteudo-colab"></div>`;
+  pintarAbaColab();
+}
+
+function trocarAbaColab(aba) {
+  ABA_COLAB = aba;
+  document.querySelectorAll('.abas-internas .aba').forEach((b, i) => {
+    b.classList.toggle('ativa', ['turnos', 'destaques', 'lista'][i] === aba);
+  });
+  pintarAbaColab();
+}
+
+function pintarAbaColab() {
+  const alvo = el('conteudo-colab');
+  if (!alvo || !COLAB_CACHE) return;
+  const r = COLAB_CACHE;
+  if (ABA_COLAB === 'turnos')    alvo.innerHTML = colabTurnos(r);
+  else if (ABA_COLAB === 'destaques') alvo.innerHTML = colabDestaques(r);
+  else alvo.innerHTML = colabLista(r);
+}
+
+/*
+ * Situação de uma assiduidade. A cor é a última coisa: primeiro o ícone
+ * e a palavra, que é o que um daltônico (e uma impressão em preto e
+ * branco) enxerga.
+ */
+function situacaoAssid(pct, meta) {
+  const limite = 100 - (meta === undefined ? 5 : meta);   // meta de absenteísmo
+  if (pct >= limite) return { classe: 'bom', icone: '●', texto: 'dentro da meta' };
+  if (pct >= limite - 3) return { classe: 'atencao', icone: '▲', texto: 'atenção' };
+  return { classe: 'critico', icone: '■', texto: 'crítico' };
+}
+const selo = (s) => `<span class="situacao ${s.classe}"><b>${s.icone}</b>${s.texto}</span>`;
+
+/* Degrau da rampa sequencial (1 a 4) para um valor dentro de um máximo. */
+function degrau(valor, maximo) {
+  if (!maximo || valor <= 0) return 1;
+  const p = valor / maximo;
+  return p > .75 ? 4 : p > .5 ? 3 : p > .25 ? 2 : 1;
+}
+
+/* ---- Sub-aba 1: como está cada turno ---- */
+function colabTurnos(r) {
+  const meta = (DADOS.kpis && DADOS.kpis.meta) || 5;
+  const cartao = (t) => {
+    const s = situacaoAssid(t.media, meta);
+    const destaque = t.turno === 'CD';
+    return `<div class="cartao cartao-turno"${destaque ? ' style="border-color:var(--azul-vivo)"' : ''}>
+      <div class="turno-sigla">${destaque ? 'CD inteiro' : 'Turno ' + esc(t.turno)}</div>
+      <div class="turno-valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'critico'})">${t.media}%</div>
+      <div class="turno-legenda">de assiduidade</div>
+      <div class="medidor" title="${t.media}% — a marca é a meta de ${100 - meta}%">
+        <i style="width:${Math.max(2, Math.min(100, t.media))}%"></i>
+        <span class="medidor-meta" style="left:${100 - meta}%"></span>
+      </div>
+      <div style="margin-top:4px">${selo(s)}</div>
+      <div class="turno-numeros">
+        <div><strong>${t.pessoas}</strong>pessoas</div>
+        <div><strong>${t.registros}</strong>dias lanç.</div>
+        <div><strong>${t.ausencias}</strong>ausências</div>
+        <div><strong>${t.faltas}</strong>faltas inj.</div>
+        <div><strong>${t.atestados}</strong>atestados</div>
+      </div>
+    </div>`;
+  };
+
+  const semCD = r.porTurno.filter((t) => t.turno !== 'CD');
+  const cd = r.porTurno.filter((t) => t.turno === 'CD')[0];
+  const maxAus = Math.max(1, ...semCD.map((t) => t.ausencias));
+
+  return `
+    <div class="grade-turnos">${(cd ? [cd] : []).concat(semCD).map(cartao).join('')}</div>
+
+    <div class="cartao">
+      <div class="cartao-titulo">Onde estão as ausências</div>
+      <p class="dica" style="margin:-4px 0 12px">A barra compara o volume de ausências entre os
+         turnos. Quanto mais escura, maior o peso — é a mesma cor em quatro tons, não uma cor
+         por turno.</p>
+      ${semCD.map((t) => `
+        <div class="barra-linha">
+          <div class="barra-rotulo">Turno ${esc(t.turno)}</div>
+          <div class="barra-trilho">
+            <div class="barra-preenchida" style="width:${Math.round(t.ausencias / maxAus * 100)}%;
+                 background:var(--seq-ambar-${degrau(t.ausencias, maxAus)})"></div>
+          </div>
+          <div class="barra-valor">${t.ausencias}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+/* ---- Sub-aba 2: quem puxa para cima e para baixo ---- */
+function colabDestaques(r) {
+  const bloco = (titulo, dica, itens, campo, sufixo, rampa) => {
+    if (!itens.length) return `<div class="cartao"><div class="cartao-titulo">${titulo}</div>
+      <div class="vazio">Ninguém nesta lista.</div></div>`;
+    const max = Math.max(1, ...itens.map((p) => Number(p[campo]) || 0));
+    return `<div class="cartao">
+      <div class="cartao-titulo">${titulo}</div>
+      <p class="dica" style="margin:-4px 0 10px">${dica}</p>
+      ${itens.slice(0, 10).map((p, i) => {
+        const v = Number(p[campo]) || 0;
+        return `<div class="destaque" onclick="fichaColaborador('${esc(p.matricula)}')"
+                     title="Abrir a ficha de ${esc(p.nome)}">
+          <div class="pos">${i + 1}</div>
+          <div class="nome">${esc(p.nome || p.matricula)}<br><span>turno ${esc(p.turno || '—')}</span></div>
+          <div class="barra-trilho">
+            <div class="barra-preenchida" style="width:${Math.max(3, Math.round(v / max * 100))}%;
+                 background:var(--seq-${rampa}-${degrau(v, max)})"></div>
+          </div>
+          <div class="val">${v}${sufixo}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  };
+
+  return `
+    <div class="grade grade-dupla" style="margin-bottom:14px">
+      ${bloco('Maior assiduidade', 'Quem esteve presente em praticamente todos os dias lançados.',
+              r.melhores, 'assiduidade', '%', 'verde')}
+      ${bloco('Merecem atenção', 'Menor assiduidade do período. Vale uma conversa antes de virar processo.',
+              r.atencao, 'assiduidade', '%', 'ambar')}
+    </div>
+    <div class="grade grade-dupla">
+      ${bloco('Mais atestados', 'É saúde — trata-se de outro jeito que falta injustificada. Códigos 1, 21 e 130.',
+              r.maisAtestados, 'valor', ' dias', 'verde')}
+      ${bloco('Mais faltas injustificadas', 'É disciplina. Código 16 — faltou e não justificou.',
+              r.maisFaltas, 'valor', '', 'ambar')}
+    </div>`;
+}
+
+/* ---- Sub-aba 3: a tabela completa ---- */
+let ORDEM_COLAB = { campo: 'nome', desc: false };
+
+function colabLista(r) {
+  const meta = (DADOS.kpis && DADOS.kpis.meta) || 5;
+  const lista = r.lista.slice().sort((a, b) => {
+    const c = ORDEM_COLAB.campo;
+    const va = a[c], vb = b[c];
+    const n = (typeof va === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
+    return ORDEM_COLAB.desc ? -n : n;
+  });
+  const col = (campo, rotulo, num) =>
+    `<th class="${num ? 'numero' : ''}" style="cursor:pointer" onclick="ordenarColab('${campo}')"
+        title="Ordenar por ${rotulo}">${rotulo}${ORDEM_COLAB.campo === campo ? (ORDEM_COLAB.desc ? ' ↓' : ' ↑') : ''}</th>`;
+
+  return `
+    <div class="cartao">
+      <div class="cartao-titulo linha-titulo">
+        <span>${lista.length} colaborador(es) — clique numa linha para abrir a ficha</span>
+        <input id="busca-colab" placeholder="Buscar nome ou matrícula" oninput="filtrarColab()"
+               style="max-width:260px">
+      </div>
+      <p class="dica" style="margin:-4px 0 12px">Clique no título da coluna para ordenar.
+         A barra usa uma matiz só, em quatro tons: mais escura, maior o valor.</p>
+      <div style="overflow-x:auto"><table id="tabela-colab">
+        <thead><tr>
+          ${col('matricula', 'Matrícula')}${col('nome', 'Nome')}${col('turno', 'Turno')}
+          ${col('registros', 'Dias lanç.', 1)}${col('trabalhados', 'Trab.', 1)}
+          ${col('ausencias', 'Ausên.', 1)}${col('faltasInjustificadas', 'F. inj.', 1)}
+          ${col('atestados', 'Atest.', 1)}${col('ferias', 'Férias', 1)}
+          ${col('assiduidade', 'Assiduidade', 1)}<th>Situação</th>
+        </tr></thead>
+        <tbody>${lista.map((c) => {
+          const s = situacaoAssid(c.assiduidade, meta);
+          return `<tr style="cursor:pointer" data-busca="${esc((c.nome + ' ' + c.matricula).toLowerCase())}"
+              onclick="fichaColaborador('${esc(c.matricula)}')">
+            <td class="mono">${esc(c.matricula)}</td><td>${esc(c.nome)}</td><td>${esc(c.turno)}</td>
+            <td class="numero">${c.registros}</td><td class="numero">${c.trabalhados}</td>
+            <td class="numero">${c.ausencias}</td><td class="numero">${c.faltasInjustificadas}</td>
+            <td class="numero">${c.atestados}</td><td class="numero">${c.ferias}</td>
+            <td class="celula-medidor">
+              <div class="medidor-linha">
+                <div class="medidor" style="margin:0">
+                  <i style="width:${Math.max(2, Math.min(100, c.assiduidade))}%;
+                       background:var(--seq-verde-${degrau(c.assiduidade, 100)})"></i>
+                </div>
+                <span class="faixa-assid">${c.assiduidade}%</span>
+              </div>
+            </td>
+            <td>${selo(s)}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>
+    </div>`;
+}
+
+function ordenarColab(campo) {
+  if (ORDEM_COLAB.campo === campo) ORDEM_COLAB.desc = !ORDEM_COLAB.desc;
+  else ORDEM_COLAB = { campo: campo, desc: (campo !== 'nome' && campo !== 'matricula' && campo !== 'turno') };
+  pintarAbaColab();
+}
+
+function filtrarColab() {
+  const t = String(val('busca-colab') || '').toLowerCase().trim();
+  document.querySelectorAll('#tabela-colab tbody tr').forEach((tr) => {
+    tr.style.display = (!t || (tr.dataset.busca || '').indexOf(t) !== -1) ? '' : 'none';
+  });
+}
+
+
+/* ---------------- ABA PERÍODO ----------------
+   Consulta por intervalo de datas. Ela varre a base por DATA, entao um
+   intervalo que atravessa competencias vem inteiro, sem buraco na
+   virada de uma planilha do RH para a outra.
+   -------------------------------------------- */
+let periodoParams = null;
+
+async function rhPeriodoTela(d) {
+  const alvo = el('conteudo-rh');
+  const p = periodoParams || { de: '', ate: '', tipo: 'TODAS', turno: '' };
+  alvo.innerHTML = `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Faltas e ausências por período</div>
+      <p class="dica" style="margin:-4px 0 12px">O intervalo pode atravessar quantas
+         competências forem necessárias — a consulta é por data, não por planilha.</p>
+      <div class="periodo-atalhos">
+        <button class="botao secundario" onclick="periodoRapido('hoje')">Hoje</button>
+        <button class="botao secundario" onclick="periodoRapido('semana')">7 dias</button>
+        <button class="botao secundario" onclick="periodoRapido('mes')">Este mês</button>
+        <button class="botao secundario" onclick="periodoRapido('mespassado')">Mês passado</button>
+        <button class="botao secundario" onclick="periodoRapido('trimestre')">3 meses</button>
+        <button class="botao secundario" onclick="periodoRapido('semestre')">6 meses</button>
+        <button class="botao secundario" onclick="periodoRapido('ano')">Ano todo</button>
+        <button class="botao secundario" onclick="periodoRapido('tudo')">Tudo</button>
+      </div>
+      <div class="periodo-form">
+        <div class="campo"><label>De</label><input type="date" id="pd-de" value="${esc(p.de)}"></div>
+        <div class="campo"><label>Até</label><input type="date" id="pd-ate" value="${esc(p.ate)}"></div>
+        <div class="campo"><label>Tipo de ausência</label>
+          <select id="pd-tipo">
+            ${(d.tipos || [{ id: 'TODAS', nome: 'Todas as ausências' }])
+              .map((t) => `<option value="${esc(t.id)}" ${p.tipo === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}
+          </select></div>
+        <div class="campo"><label>Turno</label>
+          <select id="pd-turno">
+            <option value="">Todos os turnos</option>
+            ${(d.turnos || []).map((t) => `<option value="${esc(t)}" ${p.turno === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          </select></div>
+        <button class="botao" onclick="consultarPeriodo()">Consultar</button>
+      </div>
+      <p class="dica">“Outros” reúne as ausências que não são falta, atestado nem licença legal.
+         Um tipo zerado significa que não houve nenhum no intervalo — a opção continua na lista
+         de propósito, para você poder confirmar isso.</p>
+    </div>
+    <div id="periodo-resultado"><div class="vazio">Escolha um período e consulte.</div></div>`;
+  if (periodoParams) consultarPeriodo();
+}
+
+function periodoRapido(qual) {
+  const hoje = new Date();
+  const iso = (dt) => dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') +
+                      '-' + String(dt.getDate()).padStart(2, '0');
+  let de = hoje, ate = hoje;
+  if (qual === 'semana')     { de = new Date(hoje); de.setDate(hoje.getDate() - 6); }
+  if (qual === 'mes')        { de = new Date(hoje.getFullYear(), hoje.getMonth(), 1); }
+  if (qual === 'mespassado') {
+    de = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    ate = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+  }
+  if (qual === 'trimestre')  { de = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1); }
+  if (qual === 'semestre')   { de = new Date(hoje.getFullYear(), hoje.getMonth() - 5, 1); }
+  if (qual === 'ano')        { de = new Date(hoje.getFullYear(), 0, 1); }
+  if (qual === 'tudo')       { de = new Date(hoje.getFullYear() - 3, 0, 1); }
+  el('pd-de').value = iso(de); el('pd-ate').value = iso(ate);
+  consultarPeriodo();
+}
+
+async function consultarPeriodo() {
+  const de = val('pd-de'), ate = val('pd-ate');
+  const tipo = val('pd-tipo'), turno = val('pd-turno');
+  if (!de || !ate) return avisar('Escolha as duas datas.', true);
+  periodoParams = { de, ate, tipo, turno };
+  const alvo = el('periodo-resultado');
+  alvo.innerHTML = '<div class="vazio">Consultando…</div>';
+  try {
+    const r = await executarAcaoSrv('periodo', periodoParams);
+
+    /*
+     * ZERO NÃO É RESPOSTA — a tela precisa dizer POR QUE deu zero.
+     * O servidor conta quantas linhas varreu, quantas ficaram fora do
+     * intervalo e quantas tinham data ilegível; com isso dá para
+     * distinguir "não houve ausência" de "a base está vazia" e de
+     * "a base tem dado, mas de outras datas".
+     */
+    if (r.registros === 0) { alvo.innerHTML = periodoVazio(r); return; }
+
+    const maxDia = Math.max(1, ...(r.linhaDoTempo || []).map((x) => x.total));
+    alvo.innerHTML = `
+      <div class="grade grade-kpi" style="margin-bottom:14px">
+        ${kpi(r.registros, 'Registros de ausência', 'vermelho')}
+        ${kpi(r.colaboradores, 'Pessoas com ausência', 'azul')}
+        ${kpi(r.diasNoPeriodo, 'Dias no intervalo', 'verde')}
+        ${kpi((r.porCompetencia || []).length, 'Competências no intervalo', 'amarelo')}
+      </div>
+
+      ${(r.linhaDoTempo || []).length > 1 ? `
+      <div class="cartao" style="margin-bottom:14px">
+        <div class="cartao-titulo">Ausencias dia a dia — ${esc(r.de)} a ${esc(r.ate)}</div>
+        <div class="serie">
+          ${r.linhaDoTempo.map((x) => `
+            <div class="serie-col" title="${esc(x.data)} — ${x.total} ausência(s)">
+              <div class="serie-barra" style="height:${Math.max(1, Math.round(x.total / maxDia * 100))}%"></div>
+            </div>`).join('')}
+        </div>
+        <p class="dica">Uma coluna por dia do intervalo, sem interrupção na virada de uma
+           competência para a outra.</p>
+      </div>` : ''}
+
+      <div class="grade grade-dupla" style="margin-bottom:14px">
+        ${(r.porCategoria || []).length ? `
+        <div class="cartao"><div class="cartao-titulo">Por tipo de ausência</div>
+          ${(() => { const mx = Math.max(1, ...r.porCategoria.map((c) => c.total));
+             return r.porCategoria.map((c) => barra(c.categoria, c.total, mx, c.total,
+               /INJUST|DISCIPL/i.test(c.categoria) ? 'vermelha'
+               : /ATESTADO/i.test(c.categoria) ? 'amarela' : 'verde')).join(''); })()}
+        </div>` : ''}
+        ${(r.porTurno || []).length ? `
+        <div class="cartao"><div class="cartao-titulo">Por turno</div>
+          ${(() => { const mx = Math.max(1, ...r.porTurno.map((c) => c.total));
+             return r.porTurno.map((c) => barra(c.turno, c.total, mx, c.total, '')).join(''); })()}
+        </div>` : ''}
+      </div>
+
+      ${(r.porCompetencia || []).length > 1 ? `
+      <div class="cartao" style="margin-bottom:14px">
+        <div class="cartao-titulo">Por competencia — o intervalo cruza ${r.porCompetencia.length}</div>
+        ${(() => { const mx = Math.max(1, ...r.porCompetencia.map((c) => c.total));
+           return r.porCompetencia.map((c) =>
+             barra(c.competencia, c.total + ' ausencia(s)', mx, c.total, 'vermelha')).join(''); })()}
+      </div>` : ''}
+
+      <div class="cartao">
+        <div class="cartao-titulo linha-titulo">
+          <span>Colaboradores com ausencia (${r.colaboradores})</span>
+          <span class="dica">${esc(r.escopo)}${r.turno ? ' · turno ' + esc(r.turno) : ''} · ${esc(r.de)} a ${esc(r.ate)}</span>
+        </div>
+        ${r.mostraIndividual ? `<div style="overflow-x:auto"><table>
+          <thead><tr><th>Nome</th><th>Turno</th><th class="numero">Registros</th>
+            <th>Intensidade</th><th>Primeira</th><th>Última</th><th>Datas das ausências</th></tr></thead>
+          <tbody>${r.lista.map((p) => `<tr style="cursor:pointer" onclick="fichaColaborador('${esc(p.matricula)}')">
+            <td>${esc(p.nome)}</td><td>${esc(p.turno)}</td><td class="numero"><strong>${p.registros}</strong></td>
+            <td><div class="barra-trilho" style="max-width:120px"><div class="barra-preenchida vermelho" style="width:${p.barra}%"></div></div></td>
+            <td>${esc(p.primeira)}</td><td>${esc(p.ultima)}</td>
+            <td class="datas-aus">${p.datas.map((x) => esc(x.data)).join(', ')}</td>
+          </tr>`).join('') || '<tr><td colspan="7" class="vazio">Nenhuma ausência no período.</td></tr>'}
+          </tbody></table></div>`
+          : '<div class="vazio">Seu nível de acesso vê apenas os números agregados.</div>'}
+        ${r.mais ? `<p class="dica">… e mais ${r.mais} colaborador(es). Refine o periodo ou o turno.</p>` : ''}
+      </div>`;
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+/* O que dizer quando a consulta volta sem nada. */
+function periodoVazio(r) {
+  const q = r.porque || {};
+  let titulo, texto, acao = '';
+
+  if (q.baseVazia) {
+    titulo = 'A base de assiduidade está vazia';
+    texto = 'Não há nenhum lançamento importado. Provavelmente a última importação falhou no meio do caminho.';
+    acao = `<button class="botao" onclick="verDiagnosticoRH()">Ver o diagnóstico da base</button>
+            ${DADOS.podeGerir ? `<button class="botao secundario" onclick="atualizarRH()">↻ Importar de novo</button>` : ''}`;
+  } else if (q.tudoForaDoIntervalo) {
+    titulo = 'Nenhum lançamento neste intervalo';
+    texto = 'A base tem ' + q.linhasNaBase + ' lançamento(s), mas todos de outras datas. ' +
+            'Veja no diagnóstico qual período está importado e ajuste as datas.';
+    acao = `<button class="botao secundario" onclick="verDiagnosticoRH()">Ver o que está importado</button>`;
+  } else if (q.semDataValida && q.semDataValida === q.linhasNaBase) {
+    titulo = 'As datas da base não estão legíveis';
+    texto = 'Os ' + q.linhasNaBase + ' lançamentos existem, mas a coluna de data não está num ' +
+            'formato que dá para comparar. Reimportar a competência regrava as datas como texto.';
+    acao = `${DADOS.podeGerir ? `<button class="botao" onclick="atualizarRH()">↻ Reimportar</button>` : ''}
+            <button class="botao secundario" onclick="verDiagnosticoRH()">Ver o diagnóstico</button>`;
+  } else {
+    titulo = 'Nenhuma ausência no período';
+    texto = 'A consulta rodou e não encontrou ausência com estes filtros — o que é uma boa notícia. ' +
+            'Foram ' + (q.linhasNaBase || 0) + ' lançamento(s) verificados.' +
+            (r.tipo && r.tipo !== 'TODAS' ? ' Experimente “Todas as ausências” para conferir.' : '');
+    acao = `<button class="botao secundario" onclick="verDiagnosticoRH()">Ver o que está importado</button>`;
+  }
+
+  return `<div class="cartao vazio-explicado">
+    <div class="titulo">${esc(titulo)}</div>
+    <p>${esc(texto)}</p>
+    <p class="dica">Intervalo consultado: ${esc(r.de)} a ${esc(r.ate)}${r.turno ? ' · turno ' + esc(r.turno) : ''}</p>
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">${acao}</div>
+  </div>`;
+}
+
+/*
+ * Diagnóstico da base: o que existe de verdade no banco agora.
+ * Nasceu porque a consulta mostrou 0 sem dizer por quê, e não havia como
+ * saber de fora se a base estava vazia, com data ilegível ou fora do
+ * intervalo pedido.
+ */
+async function verDiagnosticoRH() {
+  abrirJanela('Diagnóstico da base de assiduidade', '<div class="vazio">Conferindo…</div>', '');
+  try {
+    const d = await executarAcaoSrv('diagnosticoRH', {});
+    abrirJanela('Diagnóstico da base de assiduidade', `
+      <div class="grade grade-kpi" style="margin-bottom:14px">
+        ${kpi(d.totalLinhas, 'Lançamentos na base', d.totalLinhas ? 'azul' : 'vermelho')}
+        ${kpi(d.colaboradores, 'Colaboradores', 'verde')}
+        ${kpi(d.agrColab, 'Linhas de agregado', 'amarelo')}
+      </div>
+      ${d.totalLinhas ? `<p class="dica" style="margin:0 0 12px">Período coberto pela base:
+        <b>${esc(d.intervalo.de)} a ${esc(d.intervalo.ate)}</b>.</p>` : ''}
+      ${d.semDataValida ? `<div class="erro-caixa" style="margin-bottom:12px">
+        ${d.semDataValida} lançamento(s) com data ilegível — reimporte a competência.</div>` : ''}
+      ${d.celulasComoData ? `<p class="dica" style="margin:0 0 12px">${d.celulasComoData} célula(s)
+        de data vieram como objeto de data em vez de texto. O sistema lida com as duas formas,
+        mas reimportar deixa tudo como texto.</p>` : ''}
+
+      <div class="cartao-titulo">Por competência</div>
+      <table><thead><tr><th>Competência</th><th class="numero">Lançamentos</th>
+        <th class="numero">Ausências</th><th>De</th><th>Até</th></tr></thead>
+      <tbody>${d.competencias.map((c) => `<tr><td><strong>${esc(c.competencia)}</strong></td>
+        <td class="numero">${c.linhas}</td><td class="numero">${c.ausencias}</td>
+        <td>${esc(c.de)}</td><td>${esc(c.ate)}</td></tr>`).join('')
+        || '<tr><td colspan="5" class="vazio">Nada importado.</td></tr>'}</tbody></table>
+
+      <div class="cartao-titulo" style="margin-top:14px">Competências cadastradas</div>
+      <table><thead><tr><th>Competência</th><th>Situação</th><th class="numero">Declarado</th>
+        <th class="numero">Na base</th><th>Última leitura</th></tr></thead>
+      <tbody>${d.arquivos.map((a) => `<tr>
+        <td><strong>${esc(a.competencia)}</strong></td><td>${esc(a.situacao)}</td>
+        <td class="numero">${a.linhasDeclaradas}</td>
+        <td class="numero"><strong style="color:${a.linhasNaBase === a.linhasDeclaradas ? 'var(--verde)' : 'var(--alerta)'}">${a.linhasNaBase}</strong></td>
+        <td class="meta-atividade">${esc(a.ultimaImportacao)}</td></tr>`).join('')}</tbody></table>
+      <p class="dica">Se “na base” não bater com “declarado”, a última importação não terminou.</p>
+
+      ${d.ultimosErros.length ? `
+        <div class="cartao-titulo" style="margin-top:14px">Últimos erros de importação</div>
+        ${d.ultimosErros.map((e) => `<div class="erro-caixa" style="margin-bottom:8px">
+          <b>${esc(e.competencia)}</b> — ${esc(e.quando)}<br>${esc(e.erro)}</div>`).join('')}`
+        : '<p class="dica" style="margin-top:14px">Nenhum erro de importação registrado.</p>'}`,
+      `<button class="botao secundario" onclick="fecharJanela()">Fechar</button>
+       ${DADOS.podeGerir ? `<button class="botao" onclick="fecharJanela();atualizarRH()">↻ Reimportar agora</button>` : ''}`);
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+/* ---------------- FICHA E IMPORTAÇÃO ---------------- */
+
+/* ---------------- FICHA DO COLABORADOR ----------------
+   Era um formulário: dois campos desabilitados e duas tabelas finas,
+   sem hierarquia. Virou um perfil, com quatro blocos e uma pergunta
+   cada:
+
+     quem é         — identidade, no topo
+     como está      — a assiduidade como número herói, com medidor e
+                      selo de situação (ícone + palavra)
+     como os dias   — barra de composição: trabalhados, outros dias,
+       se dividem     ausências, com rótulo direto em cada faixa
+     o que faltou   — só aparece quando há ausência: os números por
+                      família e a lista, com marcador de categoria
+
+   O histórico mês a mês só vira tabela quando há MAIS DE UMA
+   competência. Com uma só, uma tabela de uma linha não informa nada que
+   o herói já não tenha dito — vira gráfico e tabela quando houver série.
+   ------------------------------------------------------ */
+
+/* Iniciais para o avatar: primeira e última palavra do nome. */
+function iniciaisDe(nome) {
+  const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return '?';
+  return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+}
+
+/* Cor do marcador de categoria da ausência. Falta e atestado são coisas
+   diferentes e a gestão trata cada uma de um jeito. */
+function corCategoria(cat) {
+  const c = String(cat || '').toUpperCase();
+  if (c.indexOf('ATESTADO') === 0) return 'var(--faixa-outros)';
+  if (c.indexOf('FALTA') === 0) return 'var(--faixa-aus)';
+  return 'var(--tinta-fraca)';
+}
+
+async function fichaColaborador(matricula) {
+  abrirJanela('Ficha do colaborador', '<div class="vazio">Carregando…</div>', '');
+  try {
+    const f = await executarAcaoSrv('fichaColaborador', { matricula: matricula });
+    abrirJanela('', montarFicha(f),
+      '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+    // o título fica dentro do corpo, para caber o avatar e os chips
+    const t = el('janela-titulo'); if (t) t.textContent = '';
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+function montarFicha(f) {
+  const h = (f.historico || [])[f.historico.length - 1] || {
+    registros: 0, trabalhados: 0, ausencias: 0, outros: 0, ferias: 0, folgas: 0,
+    licencas: 0, faltasInjustificadas: 0, faltasJustificadas: 0,
+    faltasDisciplinares: 0, atestados: 0, assiduidade: 0, competencia: '—'
+  };
+  const meta = f.meta || 5;
+  const s = situacaoAssid(h.assiduidade, meta);
+  const total = Math.max(1, h.registros);
+  const pct = (n) => Math.round(n / total * 1000) / 10;
+
+  /* A ORDEM É PARTE DA CORREÇÃO: trabalhados e ausências nas pontas,
+     "outros dias" no meio. Verde e âmbar encostados são a mesma cor
+     para quem tem daltonismo protanope. */
+  const faixas = [
+    { classe: 'faixa-trabalhado', cor: 'var(--faixa-trab)',   n: h.trabalhados, rotulo: 'Trabalhados' },
+    { classe: 'faixa-outros',     cor: 'var(--faixa-outros)', n: h.outros + h.ferias + h.folgas + h.licencas, rotulo: 'Outros dias' },
+    { classe: 'faixa-ausencia',   cor: 'var(--faixa-aus)',    n: h.ausencias,   rotulo: 'Ausências' }
+  ];
+
+  const tile = (n, r, cor) => `<div class="ficha-tile">
+    <div class="n"${cor ? ` style="color:${cor}"` : ''}>${n}</div><div class="r">${r}</div></div>`;
+
+  const temAusencia = h.ausencias > 0 || (f.ausencias || []).length > 0;
+  const temSerie = (f.historico || []).length > 1;
+
+  return `
+    <div class="ficha-topo">
+      <div class="ficha-inicial">${esc(iniciaisDe(f.nome))}</div>
+      <div style="min-width:0">
+        <div class="ficha-nome">${esc(f.nome || f.matricula)}</div>
+        <div class="ficha-meta">
+          <span class="ficha-chip mono">${esc(f.matricula)}</span>
+          <span class="ficha-chip">Turno ${esc(f.turno || '—')}</span>
+          <span class="ficha-chip">${esc(h.competencia)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ficha-heroi">
+      <div>
+        <div class="valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'critico'})">${h.assiduidade}%</div>
+        <div style="font-size:11.5px;color:var(--tinta-media);margin-top:4px">de assiduidade</div>
+      </div>
+      <div class="lado">
+        <div class="rotulo">${h.trabalhados} de ${h.registros} dias lançados</div>
+        <div class="medidor" style="margin:0 0 8px">
+          <i style="width:${Math.max(2, Math.min(100, h.assiduidade))}%"></i>
+          <span class="medidor-meta" style="left:${100 - meta}%"></span>
+        </div>
+        ${selo(s)}
+      </div>
+    </div>
+
+    <div class="ficha-secao">Como os ${h.registros} dias se dividem</div>
+    <div class="faixas">
+      ${faixas.map((x) => x.n > 0
+        ? `<span class="${x.classe}" style="width:${pct(x.n)}%" title="${x.rotulo}: ${x.n} dia(s)">${pct(x.n) >= 12 ? x.n : ''}</span>`
+        : '').join('')}
+    </div>
+    <div class="legenda-faixas">
+      ${faixas.map((x) => `<div><i style="background:${x.cor}"></i>${x.rotulo} <b>${x.n}</b>
+        ${x.rotulo === 'Outros dias' && x.n
+          ? `<small>${h.ferias} férias · ${h.folgas} folgas · ${h.licencas} licenças${h.outros ? ' · ' + h.outros + ' ajustes' : ''}</small>`
+          : ''}</div>`).join('')}
+    </div>
+
+    ${temAusencia ? `
+      <div class="ficha-secao">O que faltou</div>
+      <div class="ficha-tiles">
+        ${tile(h.faltasInjustificadas, 'Falta injust.', h.faltasInjustificadas ? 'var(--faixa-aus)' : '')}
+        ${tile(h.faltasJustificadas, 'Falta justif.')}
+        ${tile(h.faltasDisciplinares, 'Falta discipl.')}
+        ${tile(h.atestados, 'Atestados', h.atestados ? 'var(--faixa-outros)' : '')}
+      </div>
+      ${(f.porCategoria || []).length ? `
+        <div style="margin-bottom:14px">
+          ${(() => { const mx = Math.max(1, ...f.porCategoria.map((c) => c.total));
+            return f.porCategoria.map((c) => `
+              <div class="barra-linha">
+                <div class="barra-rotulo">${esc(c.categoria)}</div>
+                <div class="barra-trilho"><div class="barra-preenchida"
+                  style="width:${Math.max(3, Math.round(c.total / mx * 100))}%;background:${corCategoria(c.categoria)}"></div></div>
+                <div class="barra-valor">${c.total}</div>
+              </div>`).join(''); })()}
+        </div>` : ''}
+      ${(f.ausencias || []).length ? `
+        <div style="max-height:220px;overflow-y:auto">
+          ${f.ausencias.map((a) => `
+            <div class="ausencia-linha">
+              <span class="ponto" style="background:${corCategoria(a.categoria)}"></span>
+              <span class="ausencia-dia">${esc(a.data)}</span>
+              <span class="cod">${esc(a.codigo)}</span>
+              <span>${esc(a.descricao || '—')}</span>
+              <span class="cat">${esc(a.categoria)}</span>
+            </div>`).join('')}
+        </div>
+        ${f.ausencias.length >= 60 ? '<p class="dica">Mostrando as 60 ausências mais recentes.</p>' : ''}`
+        : ''}`
+      : `<div class="ficha-secao">O que faltou</div>
+         <div class="cartao" style="text-align:center;padding:26px 22px">
+           <div style="font-size:30px;line-height:1;color:var(--sit-bom)">✓</div>
+           <p style="margin:10px 0 0;font-weight:600">Nenhuma ausência no período</p>
+           <p class="dica" style="margin:4px 0 0">Presença em todos os ${h.registros} dias lançados.</p>
+         </div>`}
+
+    ${temSerie ? `
+      <div class="ficha-secao">Mês a mês</div>
+      ${graficoLinha(f.historico.map((x) => ({ competencia: x.competencia, taxa: x.assiduidade })), null)}
+      <div style="overflow-x:auto;margin-top:10px"><table>
+        <thead><tr><th>Competência</th><th class="numero">Dias lanç.</th><th class="numero">Trab.</th>
+          <th class="numero">Ausên.</th><th class="numero">F. inj.</th><th class="numero">Atest.</th>
+          <th class="numero">Férias</th><th class="numero">Assid.</th></tr></thead>
+        <tbody>${f.historico.map((x) => `<tr>
+          <td><strong>${esc(x.competencia)}</strong></td>
+          <td class="numero">${x.registros}</td><td class="numero">${x.trabalhados}</td>
+          <td class="numero">${x.ausencias}</td><td class="numero">${x.faltasInjustificadas}</td>
+          <td class="numero">${x.atestados}</td><td class="numero">${x.ferias}</td>
+          <td class="numero"><strong>${x.assiduidade}%</strong></td>
+        </tr>`).join('')}</tbody></table></div>
+      <p class="dica">O histórico atravessa todas as competências já importadas — não para na
+         virada do mês.</p>`
+      : `<p class="dica" style="margin-top:16px">Só há uma competência importada para esta
+         pessoa. Quando houver mais, aparece aqui a evolução mês a mês.</p>`}`;
+}
+
+
+/* Botão "Atualizar dados": relê a planilha do RH agora. */
+/*
+ * Botão "Atualizar dados": relê a planilha do RH agora.
+ *
+ * Antes ele dizia "Dados atualizados:" mesmo quando a importação tinha
+ * falhado — o erro era engolido no servidor e a lista de competências
+ * voltava vazia. Agora a falha sobe com o motivo, e o sucesso diz
+ * quantos lançamentos entraram, para dar para conferir que mudou.
+ */
+async function atualizarRH() {
+  const antes = (DADOS && DADOS.kpis) ? DADOS.kpis.registros : null;
+  try {
+    avisar('Relendo a planilha do RH — isso leva alguns segundos…');
+    const r = await agir('atualizarRH', {}, '');
+    COLAB_CACHE = null;
+    const depois = (DADOS && DADOS.kpis) ? DADOS.kpis.registros : null;
+    let msg = (r && r.aviso) ? r.aviso : 'Dados atualizados.';
+    if (antes !== null && depois !== null) {
+      msg += (depois === antes)
+        ? ' · o total continua em ' + depois + ' lançamentos'
+        : ' · de ' + antes + ' para ' + depois + ' lançamentos';
+    }
+    avisar(msg);
+  } catch (e) { /* agir já mostrou o erro com o motivo */ }
+}
+
+async function importar(id) {
+  avisar('Importando a folha — isso pode levar um minuto…');
+  try {
+    const r = await executarAcaoSrv('importarCompetencia', { id: id });
+    COLAB_CACHE = null;
+    esquecerTela('assiduidade');
+    avisar(r.registros + ' lançamentos lidos. ' + (r.aviso || ''));
+    await abrir('assiduidade', paramsAtual);
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+async function previa(id) {
+  abrirJanela('Pré-visualização da folha', '<div class="vazio">Lendo a planilha…</div>', '');
+  try {
+    const p = await executarAcaoSrv('previewImportacao', { id: id });
+    abrirJanela('Pré-visualização da folha', `
+      ${p.erros.length ? `<div class="erro-caixa" style="margin-bottom:12px">
+        ${p.erros.map((x) => esc(x)).join('<br>')}</div>` : ''}
+      ${p.avisos.length ? `<p class="dica" style="margin:0 0 12px">${p.avisos.map((x) => esc(x)).join('<br>')}</p>` : ''}
+      <table><tbody>
+        <tr><td>Linha do cabeçalho</td><td><strong>${esc(p.linhaCabecalho)}</strong></td></tr>
+        <tr><td>Colunas de data</td><td><strong>${p.colunasData}</strong></td></tr>
+        <tr><td>Período</td><td><strong>${esc(p.primeiraData)} a ${esc(p.ultimaData)}</strong></td></tr>
+        <tr><td>Lançamentos</td><td><strong>${p.registros}</strong></td></tr>
+        <tr><td>Pessoas</td><td><strong>${p.pessoas}</strong></td></tr>
+      </tbody></table>
+      <div class="cartao-titulo" style="margin-top:14px">Por turno</div>
+      <table><thead><tr><th>Turno</th><th class="numero">Pessoas</th><th class="numero">Células</th></tr></thead>
+      <tbody>${p.porTurno.map((t) => `<tr><td><strong>${esc(t.turno)}</strong></td>
+        <td class="numero">${t.pessoas}</td><td class="numero">${t.celulas}</td></tr>`).join('')}</tbody></table>
+      ${p.codigosPendentes.length ? `
+        <div class="cartao-titulo" style="margin-top:14px">Códigos fora da legenda</div>
+        <p class="dica" style="margin:0 0 8px">Vão ficar de fora dos graficos ate serem
+           cadastrados em Configuracao &rsaquo; DE-PARA.</p>
+        <p>${p.codigosPendentes.map((c) => `<b>${esc(c.codigo)}</b> (${c.vezes})`).join(' · ')}</p>`
+        : '<p class="dica" style="margin-top:12px">Todos os códigos da folha estão na legenda.</p>'}`,
+      `<button class="botao secundario" onclick="fecharJanela()">Fechar</button>
+       <button class="botao" onclick="importar('${id}')">Importar</button>`);
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+
+/* ================= CONFIGURAÇÃO =================
+   Era um depósito: equipe, rotinas, setores, dezessete parâmetros
+   soltos, arquivos do RH, DE-PARA, links de apresentacao e botões de
+   sistema, tudo empilhado numa tela so. Agora sao quatro abas, cada uma
+   com um assunto — e as PESSOAS saíram daqui para uma tela propria.
+   =============================================== */
+let ABA_CFG = 'rh';   // rh | calendario | apresentacao | sistema
+
+function seloRotinas(r) {
+  if (!r) return '';
+  const mapa = {
+    ligado:      ['selo-verde', 'Ligadas'],
+    parcial:     ['selo-amarelo', 'Parciais'],
+    desligado:   ['selo-vermelho', 'Desligadas'],
+    desconhecido:['selo-cinza', 'Nao consegui verificar']
+  };
+  const s = mapa[r.estado] || mapa.desconhecido;
+  return `<span class="selo ${s[0]}"><i></i>${s[1]} — ${r.ligados} de ${r.total}</span>`;
+}
+
+function pintarConfig(r) {
+  const d = r.dados;
+  el('subtitulo-pagina').textContent = 'Fontes do RH, calendário e sistema';
+  el('acoes-topo').innerHTML = '';
+
+  const abas = [['rh', 'Fontes do RH'], ['calendario', 'Calendário'],
+                ['apresentacao', 'Apresentação'], ['sistema', 'Sistema']];
+  el('pagina').innerHTML = `
+    <div class="abas">
+      ${abas.map(([id, nome]) => `<button class="aba ${ABA_CFG === id ? 'ativa' : ''}"
+        onclick="trocarAbaCfg('${id}')">${nome}</button>`).join('')}
+    </div>
+    <div id="conteudo-cfg"></div>`;
+  pintarAbaCfg(d);
+}
+
+function trocarAbaCfg(aba) {
+  ABA_CFG = aba;
+  const botoes = document.querySelectorAll('.abas .aba');
+  const ordem = ['rh', 'calendario', 'apresentacao', 'sistema'];
+  botoes.forEach((b) => b.classList.remove('ativa'));
+  const i = ordem.indexOf(aba); if (botoes[i]) botoes[i].classList.add('ativa');
+  pintarAbaCfg(DADOS);
+}
+
+function pintarAbaCfg(d) {
+  const alvo = el('conteudo-cfg');
+  if (!alvo) return;
+  try {
+    if (ABA_CFG === 'rh')           alvo.innerHTML = cfgRH(d);
+    else if (ABA_CFG === 'calendario')   alvo.innerHTML = cfgCalendario(d);
+    else if (ABA_CFG === 'apresentacao') alvo.innerHTML = cfgApresentacao(d);
+    else alvo.innerHTML = cfgSistema(d);
+  } catch (e) {
+    alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+  }
+}
+
+const campoParam = (p) => `
+  <div class="campo"><label>${esc(p.descricao || p.chave)}</label>
+    <input id="par-${p.id}" value="${esc(p.valor)}"
+           onchange="agir('salvarParametro',{id:'${p.id}',valor:this.value},'Parâmetro salvo')">
+    <p class="dica mono" style="margin-top:4px">${esc(p.chave)}</p></div>`;
+
+/* ---- Aba 1: de onde vêm os dados de assiduidade ---- */
+function cfgRH(d) {
+  const pRh = (d.parametros || []).filter((p) => p.grupo === 'rh');
+  return `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Competências do RH — uma planilha por mês</span>
+        <button class="icone-botao" onclick="formArquivoRH()">Cadastrar competência</button>
+      </div>
+      <p class="dica" style="margin:-4px 0 12px">A competência marcada como <strong>Aberta</strong>
+         é relida automaticamente todo dia às ${esc(valorPar(d, 'HORA_ATUALIZACAO_RH') || '10')}h,
+         porque é a que o RH ainda atualiza. As fechadas ficam paradas.</p>
+      <div style="overflow-x:auto">
+        <table><thead><tr><th>Competência</th><th>Aba</th><th>Situação</th>
+          <th class="numero">Linhas</th><th>Última leitura</th><th></th></tr></thead>
+        <tbody>${d.arquivosRH.map((a) => `<tr>
+          <td><strong>${esc(a.competencia)}</strong>
+            <div class="meta-atividade">${esc(a.observacao)}</div></td>
+          <td>${esc(a.aba)}</td>
+          <td>${a.situacao.toUpperCase() === 'ABERTA'
+              ? '<span class="etiqueta aguardando">Aberta</span>'
+              : '<span class="etiqueta aprovada">Fechada</span>'}</td>
+          <td class="numero">${esc(a.linhas)}</td>
+          <td class="meta-atividade">${esc(a.ultimaImportacao)}</td>
+          <td><button class="icone-botao" onclick="formArquivoRH('${a.id}')">Editar</button>
+              <button class="icone-botao" onclick="previa('${a.id}')">Conferir</button>
+              <button class="icone-botao" onclick="importar('${a.id}')">Importar</button></td>
+        </tr>`).join('') || '<tr><td colspan="6" class="vazio">Nenhuma competência cadastrada.</td></tr>'}</tbody></table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="botao" onclick="atualizarRH()">↻ Atualizar agora</button>
+        <button class="botao secundario" onclick="verDiagnosticoRH()">Diagnóstico da base</button>
+      </div>
+    </div>
+
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo">
+        <span>DE-PARA — o que cada código da folha significa</span>
+        <button class="icone-botao" onclick="formDePara()">Novo código</button>
+      </div>
+      <p class="dica" style="margin:-4px 0 12px">
+        Esta tabela decide o BI inteiro: a <b>categoria</b> define se o dia conta como
+        trabalhado, e <b>conta como ausência</b> define se ele entra no absenteísmo.
+        Escreva a categoria sempre pela lista. Código que não estiver aqui vira
+        <b>“Não definido”</b> e fica fora dos gráficos.
+      </p>
+      <div style="overflow-x:auto;max-height:360px">
+        <table><thead><tr><th>Cód.</th><th>Descrição</th><th>Categoria</th>
+          <th>Ausência</th><th></th></tr></thead>
+        <tbody>${(d.dePara || []).map((c) => `<tr>
+          <td class="mono"><strong>${esc(c.codigo)}</strong></td>
+          <td>${esc(c.descricao)}</td>
+          <td>${esc(c.categoria)}</td>
+          <td>${c.ausencia ? '<span class="etiqueta atrasada">sim</span>' : '—'}</td>
+          <td><button class="icone-botao" onclick="formDePara('${c.id}')">Editar</button>
+              <button class="icone-botao perigo" onclick="agir('excluirDePara',{id:'${c.id}'},'Código removido')">Remover</button></td>
+        </tr>`).join('') || '<tr><td colspan="5" class="vazio">Nenhum código cadastrado.</td></tr>'}</tbody></table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="botao secundario" onclick="verCodigosPendentes()">Códigos fora da legenda</button>
+        <button class="botao secundario" onclick="confirmarRestaurarDePara()">Restaurar tabela padrão</button>
+        <button class="botao secundario" onclick="confirmarReclassificar()">Reclassificar a base</button>
+      </div>
+      <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
+         tradução em toda a folha já importada e refaz os painéis.</p>
+    </div>
+
+    <div class="cartao">
+      <div class="cartao-titulo">Como a folha é lida</div>
+      <p class="dica" style="margin:-4px 0 12px">Só mexa aqui se a pré-visualização acusar erro —
+         os valores já vêm certos para a folha da Bartofil.</p>
+      <div class="grade grade-dupla">${pRh.map(campoParam).join('')}</div>
+    </div>`;
+}
+
+/* ---- Aba 2: o que nasce em cada mês do calendário ---- */
+function cfgCalendario(d) {
+  const pCal = (d.parametros || []).filter((p) => p.grupo === 'calendario' || p.grupo === 'avisos');
+  return `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Rotinas — o que é gerado todo mês</span>
+        <button class="icone-botao" onclick="formRotina()">Nova rotina</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>Sigla</th><th>Atividade</th><th>Quando</th><th>Por turno</th><th>Ativa</th><th></th></tr></thead>
+      <tbody>${d.rotinas.map((t) => `<tr>
+        <td class="mono">${esc(t.tipo)}</td><td>${esc(t.atividade)}</td>
+        <td>${descreverQuando(t)}</td><td>${t.porTurno ? 'sim' : '—'}</td>
+        <td>${t.ativo ? '<span class="selo-entrega">ativa</span>' : '<span class="pendente-entrega">parada</span>'}</td>
+        <td><button class="icone-botao" onclick="formRotina('${t.id}')">Editar</button>
+            <button class="icone-botao perigo" onclick="agir('excluirRotina',{id:'${t.id}'},'Rotina removida')">Remover</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="dica">Remover uma rotina não apaga as atividades já geradas.</p>
+    </div>
+
+    <div class="grade grade-dupla">
+      <div class="cartao">
+        <div class="cartao-titulo">Setores do CD</div>
+        <p class="dica" style="margin:-4px 0 10px">São as opções do campo “setor da vistoria”.</p>
+        ${d.setores.map((s) => `<div class="anexo"><span class="anexo-nome">${esc(s.setor)}</span>
+          <button class="icone-botao perigo" onclick="agir('excluirSetor',{id:'${s.id}'},'Setor removido')">Remover</button></div>`).join('')}
+        <div class="campo" style="margin-top:12px"><input id="novo-setor" placeholder="Novo setor"></div>
+        <button class="botao secundario" onclick="agir('salvarSetor',{setor:val('novo-setor'),ativo:true},'Setor adicionado')">Adicionar</button>
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo">Prazos e avisos</div>
+        ${pCal.map(campoParam).join('') || '<div class="vazio">Sem parâmetros.</div>'}
+      </div>
+    </div>`;
+}
+
+/* ---- Aba 3: os links da reuniao ---- */
+function cfgApresentacao(d) {
+  return `
+    <div class="cartao">
+      <div class="cartao-titulo">Apresentações da reunião — um link por turno</div>
+      <p class="dica" style="margin:-4px 0 12px">Cole o link do Google Apresentações de cada turno.
+         Os botões da tela de Apresentação abrem estes links.</p>
+      <table><thead><tr><th>Turno</th><th>Link</th><th></th></tr></thead>
+      <tbody>${(d.apresentacoes || []).map((a) => `<tr>
+        <td><strong>${esc(a.turno)}</strong></td>
+        <td><input id="ap-${esc(a.turno)}" value="${esc(a.link)}"
+                   placeholder="https://docs.google.com/presentation/..." style="width:100%"></td>
+        <td><button class="icone-botao"
+              onclick="agir('salvarParametro',{id:'${esc(a.id)}',chave:'APRESENTACAO_${esc(a.turno)}',valor:val('ap-${esc(a.turno)}')},'Link do turno ${esc(a.turno)} salvo')">Salvar</button></td>
+      </tr>`).join('')}</tbody></table>
+    </div>`;
+}
+
+/* ---- Aba 4: manutenção ---- */
+function cfgSistema(d) {
+  const pSis = (d.parametros || []).filter((p) => p.grupo === 'sistema');
+  return `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Estado do sistema</div>
+      <table><tbody>
+        <tr><td>Fuso em uso</td><td><strong>${esc(d.fuso.atual)}</strong></td></tr>
+        <tr><td>Hora do sistema</td><td><strong>${esc(d.fuso.hora)}</strong></td></tr>
+        <tr><td>Rotinas automáticas</td><td>${seloRotinas(d.sistema.rotinas)}</td></tr>
+      </tbody></table>
+      <p class="dica">As rotinas rodam às 5h (digesto, fila de validacao, geracao do mes seguinte
+         no dia ${esc(valorPar(d, 'GERAR_MES_NO_DIA') || '20')}) e às
+         ${esc(valorPar(d, 'HORA_ATUALIZACAO_RH') || '10')}h (releitura da planilha do RH).</p>
+    </div>
+
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Manutenção</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="botao secundario" onclick="agir('ligarGatilhos',{},'Rotinas automáticas ligadas')">Ligar rotinas automáticas</button>
+        <button class="botao secundario" onclick="agir('corrigirFuso',{},'Fuso alinhado')">Corrigir fuso</button>
+        <button class="botao secundario" onclick="agir('enviarDigesto',{},'Digesto enviado')">Enviar digesto agora</button>
+        <button class="botao secundario" onclick="gerarProximoMes()">Gerar próximo mês</button>
+        <button class="botao secundario" onclick="restaurarPerfis()">Restaurar níveis de acesso</button>
+        <button class="botao secundario" onclick="janelaAutorizarEmail()">E-mail não chega?</button>
+        <button class="botao secundario" onclick="alternarModoLeve()">${document.documentElement.classList.contains('modo-leve') ? '⚡ Modo leve: LIGADO' : '⚡ Modo leve: desligado'}</button>
+        ${d.pastaAnexos ? `<button class="botao secundario" onclick="window.open('${esc(d.pastaAnexos)}','_blank')">📁 Abrir pasta das entregas</button>` : ''}
+      </div>
+      <p class="dica"><b>Modo leve</b>: desliga o fundo animado e os desfoques, mantendo cores e
+      layout. O app liga sozinho quando percebe que a maquina nao está dando conta dos quadros;
+      este botão serve para forçar ou desfazer, e vale so neste computador.</p>
+    </div>
+
+    ${pSis.length ? `<div class="cartao">
+      <div class="cartao-titulo">Outros parâmetros</div>
+      <div class="grade grade-dupla">${pSis.map(campoParam).join('')}</div>
+    </div>` : ''}`;
+}
+
+const valorPar = (d, chave) =>
+  ((d.parametrosTodos || d.parametros || []).find((p) => p.chave === chave) || {}).valor;
+
+function descreverQuando(t) {
+  const dias = { 1: 'segunda', 2: 'terça', 3: 'quarta', 4: 'quinta', 5: 'sexta' };
+  if (t.frequencia === 'SEMANAL') return 'toda ' + (dias[Number(t.dia)] || t.dia);
+  if (t.frequencia === 'MENSAL') return t.dia === 'PRIMEIRA_SEGUNDA' ? '1ª segunda do mês'
+    : t.dia === 'ULTIMA_SEXTA' ? 'última sexta do mês' : 'dia ' + t.dia;
+  return t.quantidade + ' vaga(s) sem data';
+}
+
+function formArquivoRH(id) {
+  const a = id ? DADOS.arquivosRH.find((x) => x.id === id) : null;
+  const agora = new Date();
+  const sugestao = agora.getFullYear() + '-' + String(agora.getMonth() + 1).padStart(2, '0');
+  abrirJanela(a ? ('Competencia ' + a.competencia) : 'Cadastrar competencia do RH', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Competencia (aaaa-mm)</label>
+        <input id="rh-comp" value="${esc(a ? a.competencia : sugestao)}" placeholder="2026-08"></div>
+      <div class="campo"><label>Situação</label>
+        <select id="rh-situacao">
+          <option ${a && a.situacao === 'Aberta' ? 'selected' : ''}>Aberta</option>
+          <option ${a && a.situacao !== 'Aberta' ? 'selected' : ''}>Fechada</option>
+        </select></div>
+    </div>
+    <div class="campo"><label>Link da planilha do RH</label>
+      <input id="rh-link" value="${esc(a ? a.link : '')}" placeholder="https://docs.google.com/spreadsheets/..."></div>
+    <div class="campo"><label>Aba da folha</label>
+      <input id="rh-aba" value="${esc(a ? a.aba : 'FOLHA DE PONTO')}"></div>
+    <div class="campo"><label>Observação</label>
+      <input id="rh-obs" value="${esc(a ? a.observacao : '')}" placeholder="Ex.: período de 21/07 a 20/08"></div>
+    <p class="dica"><b>Aberta</b> = o RH ainda mexe nela; o sistema relê essa competencia
+       automaticamente uma vez por dia. <b>Fechada</b> = mês encerrado, não é mais relido.</p>`, `
+    ${a ? `<button class="botao perigo" onclick="agir('excluirArquivoRH',{id:'${id}'},'Competência removida')">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarArquivoRH',{id:'${id || ''}',competencia:val('rh-comp'),link:val('rh-link'),aba:val('rh-aba'),situacao:val('rh-situacao'),observacao:val('rh-obs')},'Competência salva')">Salvar</button>`);
+}
+
+function formRotina(id) {
+  // Sem id = rotina nova.
+  const t = (id ? DADOS.rotinas.find((x) => x.id === id) : null) ||
+            { id: '', tipo: '', atividade: '', frequencia: 'SEMANAL', dia: '',
+              quantidade: '', porTurno: false, exigeSetor: false, ativo: true };
+  abrirJanela(id ? 'Editar rotina' : 'Nova rotina', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Sigla (entra no ID)</label><input id="ro-tipo" value="${esc(t.tipo)}" maxlength="3"></div>
+      <div class="campo"><label>Frequência</label>
+        <select id="ro-freq">${['SEMANAL', 'MENSAL', 'AVULSA'].map((f) =>
+          `<option ${t.frequencia === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
+    </div>
+    <div class="campo"><label>Atividade</label><input id="ro-atividade" value="${esc(t.atividade)}"></div>
+    <div class="campo"><label>Quando</label><input id="ro-dia" value="${esc(t.dia)}">
+      <p class="dica">Semanal: 1 a 5 (segunda a sexta). Mensal: PRIMEIRA_SEGUNDA, ULTIMA_SEXTA ou o numero do dia.</p></div>
+    <div class="campo"><label>Vagas (so para avulsa)</label><input id="ro-qtd" value="${esc(t.quantidade)}"></div>
+    <label class="marcador"><input type="checkbox" id="ro-turno" ${t.porTurno ? 'checked' : ''}> Uma por turno</label>
+    <label class="marcador" style="margin-top:8px"><input type="checkbox" id="ro-setor" ${t.exigeSetor ? 'checked' : ''}> Exige setor</label>
+    <label class="marcador" style="margin-top:8px"><input type="checkbox" id="ro-ativo" ${t.ativo ? 'checked' : ''}> Ativa</label>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarRotina',{id:'${t.id}',tipo:val('ro-tipo'),atividade:val('ro-atividade'),frequencia:val('ro-freq'),dia:val('ro-dia'),quantidade:val('ro-qtd'),porTurno:marcado('ro-turno'),exigeSetor:marcado('ro-setor'),ativo:marcado('ro-ativo')},'Rotina salva')">Salvar</button>`);
+}
+
+/* ---- DE-PARA ---- */
+
+function formDePara(id) {
+  const d = DADOS;
+  const c = id ? (d.dePara || []).find((x) => x.id === id) : null;
+  const cats = d.categorias || [];
+  abrirJanela(c ? ('Codigo ' + c.codigo) : 'Novo codigo do RH', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Código na folha</label>
+        <input id="dp-codigo" value="${esc(c ? c.codigo : '')}" placeholder="Ex.: 16"></div>
+      <div class="campo"><label>Categoria</label>
+        <select id="dp-categoria">
+          ${cats.map((x) => `<option ${c && c.categoria === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="campo"><label>Descrição</label>
+      <input id="dp-descricao" value="${esc(c ? c.descricao : '')}" placeholder="Como aparece na legenda do RH"></div>
+    <label class="marcador"><input type="checkbox" id="dp-ausencia" ${c && c.ausencia ? 'checked' : ''}>
+      Conta como ausencia (entra no absenteísmo)</label>
+    <p class="dica">Turnos (ADM, A, B, C, J, BC) tambem sao codigos: na folha, o dia trabalhado
+       vem com a letra do turno. Eles precisam estar aqui como <b>Presença</b>.
+       Use <b>Ignorar</b> para o que nao é lançamento (traço, anotação).</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarDePara',{id:'${id || ''}',codigo:val('dp-codigo'),descricao:val('dp-descricao'),categoria:val('dp-categoria'),ausencia:marcado('dp-ausencia')},'Código salvo')">Salvar</button>`);
+}
+
+async function verCodigosPendentes() {
+  abrirJanela('Códigos fora da legenda', '<div class="vazio">Procurando…</div>', '');
+  try {
+    const lista = await executarAcaoSrv('codigosPendentes', {});
+    abrirJanela('Códigos fora da legenda', lista.length ? `
+      <p class="dica" style="margin:0 0 12px">Estes códigos apareceram na folha importada e não
+         estão no DE-PARA. Eles ficam <b>fora dos gráficos e das contagens</b> — entrar como
+         categoria inventada seria pior que não entrar.</p>
+      <table><thead><tr><th>Código</th><th class="numero">Vezes</th></tr></thead>
+      <tbody>${lista.map((c) => `<tr><td class="mono"><strong>${esc(c.codigo)}</strong></td>
+        <td class="numero">${c.vezes}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="cartao">Nenhum código pendente — a folha inteira está traduzida.</div>',
+      '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+function confirmarRestaurarDePara() {
+  abrirJanela('Restaurar a tabela padrão do DE-PARA', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      Reaplica a legenda oficial da folha de ponto da Bartofil: corrige os códigos que
+      estiverem com categoria diferente da padrão e cria os que faltarem.
+    </p>
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      <b>Não apaga nada</b> que você tenha acrescentado. Se você editou algum código de
+      propósito, ele volta ao padrão — confira a lista depois.
+    </p>
+    <p class="dica">Em seguida rode <b>Reclassificar a base</b>: é ela que reaplica a
+       tradução na folha já importada.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="restaurarDePara()">Restaurar tabela</button>`);
+}
+
+async function restaurarDePara() {
+  try {
+    const r = await executarAcaoSrv('restaurarDePara', {});
+    fecharJanela();
+    esquecerTela('config');
+    avisar(r.corrigidos + ' codigo(s) corrigido(s), ' + r.criados +
+           ' criado(s) — ' + r.total + ' na tabela. Agora rode Reclassificar a base.');
+    await abrir('config', paramsAtual);
+  } catch (e) { avisar(e.message || e, true); }
+}
+
+function confirmarReclassificar() {
+  abrirJanela('Reclassificar a base', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      Reaplica o DE-PARA atual em toda a folha já importada e refaz o painel de cada
+      competência. Use depois de corrigir uma categoria. Pode demorar alguns minutos se
+      houver muitos meses importados — não feche a página.
+    </p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('reclassificar',{},'Base reclassificada')">Reclassificar</button>`);
+}
+
+/* ================= PESSOAS E ACESSOS =================
+   Uma tela so. Antes eram duas — o cartão “Equipe” da Configuracao (com
+   o botão “Nova pessoa”) e a tela “Acessos” (com “Novo usuario”) — para
+   as MESMAS pessoas, em dois cadastros que nao conversavam. Dava para
+   ter o Gerente cadastrado como COORDENADOR e ninguem percebia.
+   ==================================================== */
+let ABA_PESSOAS = 'pessoas';   // pessoas | niveis
+
+function pintarAcessos(r) { pintarPessoas(r); }
+
+function pintarPessoas(r) {
+  const d = r.dados;
+  const nPed = (d.pedidos || []).length;
+  el('subtitulo-pagina').textContent = nPed
+    ? `${nPed} pedido(s) aguardando você`
+    : 'Quem entra no sistema e o que cada nível enxerga';
+  el('acoes-topo').innerHTML =
+    `<button class="botao" onclick="formUsuario()">Cadastrar pessoa</button>`;
+
+  const abas = [['pessoas', 'Pessoas' + (nPed ? ' (' + nPed + ')' : '')],
+                ['niveis', 'Níveis de acesso']];
+  el('pagina').innerHTML = `
+    <div class="abas">
+      ${abas.map(([id, nome], i) => `<button class="aba ${ABA_PESSOAS === id ? 'ativa' : ''}"
+        onclick="trocarAbaPessoas('${id}')">${nome}</button>`).join('')}
+    </div>
+    <div id="conteudo-pessoas"></div>`;
+  pintarAbaPessoas(d);
+}
+
+function trocarAbaPessoas(aba) {
+  ABA_PESSOAS = aba;
+  const botoes = document.querySelectorAll('.abas .aba');
+  botoes.forEach((b) => b.classList.remove('ativa'));
+  const i = ['pessoas', 'niveis'].indexOf(aba); if (botoes[i]) botoes[i].classList.add('ativa');
+  pintarAbaPessoas(DADOS);
+}
+
+function pintarAbaPessoas(d) {
+  const alvo = el('conteudo-pessoas');
+  if (!alvo) return;
+  alvo.innerHTML = ABA_PESSOAS === 'niveis' ? blocoNiveis(d) : blocoPessoas(d);
+}
+
+/* --- Pedidos primeiro: são o que exige decisão --- */
+function blocoPessoas(d) {
+  const situacao = (p) => {
+    if (p.situacao === 'PENDENTE') return '<span class="etiqueta aguardando">aguardando</span>';
+    if (p.situacao === 'RECUSADO') return '<span class="etiqueta reprovada">recusado</span>';
+    if (!p.ativo) return '<span class="etiqueta cancelada">desativado</span>';
+    return '<span class="etiqueta aprovada">ativo</span>';
+  };
+
+  return `
+    ${(d.pedidos || []).length ? `
+    <div class="cartao" style="margin-bottom:14px;border-left:4px solid var(--alerta)">
+      <div class="cartao-titulo">${d.pedidos.length} pedido(s) de acesso aguardando</div>
+      <p class="dica" style="margin:-4px 0 12px">A pessoa informou o e-mail na tela de entrada e
+         pediu liberação. Enquanto você não decide, ela vê uma tela de espera.</p>
+      ${d.pedidos.map((p) => `
+        <div class="cartao" style="margin-bottom:10px">
+          <div class="linha-titulo">
+            <div>
+              <strong>${esc(p.nome || p.email)}</strong>
+              <div class="meta-atividade">${esc(p.email)}${p.papel ? ' · ' + esc(p.papel) : ''}${p.turno ? ' · turno ' + esc(p.turno) : ''}</div>
+              ${p.observacao ? `<div class="meta-atividade">“${esc(p.observacao)}”</div>` : ''}
+              ${p.pedidoEm ? `<div class="meta-atividade">pedido em ${esc(p.pedidoEm)}</div>` : ''}
+            </div>
+          </div>
+          <div class="periodo-form" style="margin-top:10px;align-items:flex-end">
+            <div class="campo"><label>Nível de acesso</label>
+              <select id="ap-perfil-${p.id}">
+                ${(d.niveis || []).map((n) => `<option ${n === 'COORDENADOR' ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+              </select></div>
+            <div class="campo"><label>Turno</label>
+              <select id="ap-turno-${p.id}">
+                <option value="">—</option>
+                ${(d.turnos || []).map((t) => `<option ${p.turno === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+              </select></div>
+            <button class="botao" onclick="agir('aprovarAcesso',{id:'${p.id}',perfil:val('ap-perfil-${p.id}'),turno:val('ap-turno-${p.id}')},'Acesso liberado — a pessoa foi avisada por e-mail')">Aprovar</button>
+            <button class="botao secundario" onclick="formRecusar('${p.id}','${esc(p.nome || p.email)}')">Recusar</button>
+          </div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    <div class="cartao">
+      <div class="cartao-titulo linha-titulo">
+        <span>${(d.pessoas || []).length} pessoa(s) no cadastro</span>
+        <input id="busca-pessoa" placeholder="Buscar nome, e-mail ou turno" oninput="filtrarPessoas()"
+               style="max-width:280px">
+      </div>
+      <p class="dica" style="margin:-4px 0 12px">Este é o cadastro único: o mesmo registro define
+         quem <b>entra</b> no sistema e quem <b>recebe</b> os avisos do turno.</p>
+      <div style="overflow-x:auto"><table id="tabela-pessoas">
+        <thead><tr><th>Nome</th><th>Função</th><th>E-mail</th><th>Turno</th>
+          <th>Nível</th><th>Situação</th><th></th></tr></thead>
+        <tbody>${(d.pessoas || []).map((p) => `<tr
+            data-busca="${esc((p.nome + ' ' + p.email + ' ' + p.turno + ' ' + p.perfil).toLowerCase())}">
+          <td><strong>${esc(p.nome || '—')}</strong></td>
+          <td>${esc(p.papel || '—')}</td>
+          <td class="mono">${esc(p.email)}</td>
+          <td>${p.turno ? '<strong>' + esc(p.turno) + '</strong>' : '<span class="pendente-entrega">sem turno</span>'}</td>
+          <td><span class="selo-entrega">${esc(p.perfil)}</span></td>
+          <td>${situacao(p)}</td>
+          <td><button class="icone-botao" onclick="formUsuario('${p.id}')">Editar</button>
+              ${p.email === d.eu ? '' :
+                `<button class="icone-botao" onclick="agir('alternarAtivo',{id:'${p.id}'},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}</td>
+        </tr>`).join('') || '<tr><td colspan="7" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
+      <p class="dica">O <b>turno</b> liga a pessoa às atividades: o coordenador do turno A recebe
+         o digesto do A e aparece como responsável nas atividades do A.</p>
+    </div>`;
+}
+
+function filtrarPessoas() {
+  const t = String(val('busca-pessoa') || '').toLowerCase().trim();
+  document.querySelectorAll('#tabela-pessoas tbody tr').forEach((tr) => {
+    tr.style.display = (!t || (tr.dataset.busca || '').indexOf(t) !== -1) ? '' : 'none';
+  });
+}
+
+function formRecusar(id, nome) {
+  abrirJanela('Recusar o pedido de ' + nome, `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
+      A pessoa continua no cadastro, sem acesso, e recebe um e-mail avisando.
+      Ela pode pedir de novo depois.
+    </p>
+    <div class="campo"><label>Motivo (vai no e-mail)</label>
+      <textarea id="rc-motivo" placeholder="Ex.: não faz parte do CD de Feira de Santana"></textarea></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    <button class="botao perigo" onclick="agir('recusarAcesso',{id:'${id}',motivo:val('rc-motivo')},'Pedido recusado')">Recusar</button>`);
+}
+
+function formUsuario(id) {
+  const d = DADOS;
+  const u = id ? (d.pessoas || []).concat(d.pedidos || []).find((x) => x.id === id) : null;
+  abrirJanela(u ? ('Editar ' + (u.nome || u.email)) : 'Cadastrar pessoa', `
+    ${u ? '' : `<p class="dica" style="margin:0 0 14px">Use isto para quem você já conhece — a
+       pessoa entra direto, sem precisar pedir. Quem chega sozinho pede pela tela de entrada e
+       aparece aqui em cima como pedido.</p>`}
+    <div class="campo-duplo">
+      <div class="campo"><label>Nome completo</label>
+        <input id="u-nome" value="${esc(u ? u.nome : '')}" placeholder="Como deve aparecer no sistema"></div>
+      <div class="campo"><label>Função</label>
+        <input id="u-papel" value="${esc(u ? u.papel : '')}" placeholder="Ex.: Coordenador · Turno A"></div>
+    </div>
+    <div class="campo"><label>E-mail</label>
+      <input id="u-email" type="email" value="${esc(u ? u.email : '')}" placeholder="nome@bartofil.com.br"
+        ${u ? 'readonly' : ''}></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Nível de acesso</label>
+        <select id="u-perfil">
+          ${(d.niveis || []).map((n) => `<option ${u && u.perfil === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+        </select></div>
+      <div class="campo"><label>Turno</label>
+        <select id="u-turno"><option value="">—</option>
+          ${(d.turnos || []).map((t) => `<option ${u && u.turno === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+        </select></div>
+    </div>
+    <label class="marcador"><input type="checkbox" id="u-ativo" ${!u || u.ativo ? 'checked' : ''}> Acesso liberado</label>
+    <p class="dica">O nome é obrigatório: é ele que aparece no rodapé da barra lateral e nos
+       e-mails. Sem ele, o sistema mostra o começo do e-mail.</p>`, `
+    ${u && u.email !== d.eu ? `<button class="botao perigo" onclick="agir('excluirUsuario',{id:'${id}',email:'${esc(u.email)}'},'Pessoa removida')">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarUsuario',{id:'${id || ''}',nome:val('u-nome'),papel:val('u-papel'),email:val('u-email'),perfil:val('u-perfil'),turno:val('u-turno'),ativo:marcado('u-ativo')},'Pessoa salva')">Salvar</button>`);
+}
+
+/* --- A matriz de permissões, agora numa aba própria --- */
+function blocoNiveis(d) {
+  const cabecalho = d.telas.map((t) => `<th class="numero">${esc(t.nome)}</th>`).join('') +
+                    d.capacidades.map((c) => `<th class="numero">${esc(c.replace(/_/g, ' '))}</th>`).join('');
+  return `
+    <div class="cartao">
+      <div class="cartao-titulo">Níveis de acesso</div>
+      <p class="dica" style="margin:-4px 0 12px">Clique numa célula para ligar ou desligar.
+         O <b>alcance</b> decide o quanto o nível enxerga: a operação inteira, o próprio turno,
+         ou só as atividades em que a pessoa é responsável.</p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>Nível</th><th>Alcance</th>${cabecalho}</tr></thead>
+        <tbody>${d.perfis.map((p) => `<tr>
+          <td><strong>${esc(p.perfil)}</strong><div class="meta-atividade">${esc(p.descricao)}</div></td>
+          <td><select onchange="agir('alterarPermissao',{id:'${p.id}',coluna:'ESCOPO',valor:this.value},'Alcance alterado')">
+            ${(d.escopos || ['TODOS', 'TURNO', 'PROPRIAS']).map((e) => `<option value="${e}" ${p.escopo === e ? 'selected' : ''}>${
+              e === 'TODOS' ? 'Operação inteira' : e === 'TURNO' ? 'O próprio turno' : 'Somente as suas'}</option>`).join('')}
+          </select></td>
+          ${d.telas.map((t) => celula(p, 'TELA_' + t.id.toUpperCase(), p.telas.indexOf(t.id) !== -1)).join('')}
+          ${d.capacidades.map((c) => celula(p, 'PODE_' + c, p.podes.indexOf(c) !== -1)).join('')}
+        </tr>`).join('')}</tbody></table></div>
+      <p class="dica">Se você bagunçar a matriz, <b>Configuracao &rsaquo; Sistema &rsaquo;
+         Restaurar niveis de acesso</b> devolve tudo ao padrão sem mexer nas pessoas.</p>
+    </div>`;
+}
+
+const celula = (p, coluna, ligado) => `<td class="numero">
+  <button class="celula-permissao ${ligado ? 'ligada' : ''}"
+    onclick="agir('alterarPermissao',{id:'${p.id}',coluna:'${coluna}',valor:${!ligado}},'Permissão alterada')"
+    title="${ligado ? 'Clique para desligar' : 'Clique para ligar'}">${ligado ? 'sim' : '—'}</button></td>`;
+
+
+/* ================= PECAS ================= */
+/*
+ * APRESENTACAO — modo reuniao.
+ *
+ * Mesmo conteudo do briefing que a planilha manda por e-mail na vespera:
+ * quadro por turno, atrasos a cobrar, fila de validacao e a leitura dos
+ * dados. Aqui em tela cheia, para projetar na reuniao de sexta.
+ */
+function pintarApresentacao(r) {
+  const d = r.dados, g = d.geral;
+  el('subtitulo-pagina').textContent = 'Semana de ' + d.semana.inicio + ' a ' + d.semana.fim;
+  el('acoes-topo').innerHTML = '';
+
+  const lista = (itens, sobra) => itens.length ? `
+    <div>${itens.map((a) => `
+      <div class="linha-atividade">
+        <div class="texto-atividade">
+          <div class="nome-atividade">${esc(a.atividade)}</div>
+          <div class="meta-atividade">Turno ${esc(a.turno)} \u00b7 prazo ${esc(a.prazo || '—')}</div>
+        </div>${etiqueta(a.status)}
+      </div>`).join('')}
+      ${sobra ? `<div class="vazio">\u2026 e mais ${sobra}</div>` : ''}
+    </div>` : '<div class="vazio">Nada por aqui.</div>';
+
+  el('pagina').innerHTML = `
+    <div class="cartao" style="margin-bottom:16px">
+      <div class="cartao-titulo">Apresentações da reunião</div>
+      <div class="cartoes-apresentacao">
+        ${(d.apresentacoes || []).map((a) => a.link
+          ? `<button class="card-apres turno-${esc(a.turno)}" onclick="window.open('${esc(a.link)}','_blank')">
+               <div class="card-capa">
+                 ${a.miniatura
+                    ? `<img src="${esc(a.miniatura)}" alt="Capa da apresentacao do turno ${esc(a.turno)}">`
+                    : `<div class="capa-vazia"><span>${esc(a.turno)}</span></div>`}
+                 <span class="card-selo">${esc(a.turno)}</span>
+               </div>
+               <div class="card-pe">
+                 <strong>${esc(a.titulo || ('Apresentacao — Turno ' + a.turno))}</strong>
+                 <small>Toque para abrir \u2192</small>
+               </div>
+             </button>`
+          : `<button class="card-apres sem-link" onclick="avisar('Cadastre o link da apresentação do turno ${esc(a.turno)} em Configuração.', true)">
+               <div class="card-capa"><div class="capa-vazia"><span>${esc(a.turno)}</span></div></div>
+               <div class="card-pe">
+                 <strong>Turno ${esc(a.turno)} — sem link</strong>
+                 <small>cadastre em Configuração</small>
+               </div>
+             </button>`).join('')}
+      </div>
+    </div>
+
+    <div class="grade grade-kpi">
+      ${kpi(g.total, 'Programadas', 'azul')}
+      ${kpi(g.aprovadas, 'Aprovadas', 'verde')}
+      ${kpi(g.atrasadas, 'Atrasadas', 'vermelho')}
+      ${kpi(g.percentual + '%', 'Conclusao', 'amarelo')}
+    </div>
+
+    <div class="cartao" style="margin-top:18px">
+      <div class="cartao-titulo">Desempenho por turno</div>
+      <table><thead><tr><th>Turno</th><th class="numero">Total</th><th class="numero">Aprov.</th>
+        <th class="numero">Atrás.</th><th class="numero">%</th></tr></thead><tbody>
+        ${d.porTurno.map((t) => `<tr><td><strong>${esc(t.turno)}</strong></td>
+          <td class="numero">${t.total}</td><td class="numero">${t.aprovadas}</td>
+          <td class="numero">${t.atrasadas}</td><td class="numero">${t.percentual}%</td></tr>`).join('')}
+      </tbody></table>
+    </div>
+
+    <div class="grade grade-dupla" style="margin-top:18px">
+      <div class="cartao">
+        <div class="cartao-titulo">Atrasos a cobrar (${d.atrasadas.length + d.maisAtrasadas})</div>
+        ${lista(d.atrasadas, d.maisAtrasadas)}
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo">Aguardando validacao (${d.aguardando.length + d.maisAguardando})</div>
+        ${lista(d.aguardando, d.maisAguardando)}
+      </div>
+    </div>
+
+    ${d.insights.length ? `
+    <div class="cartao" style="margin-top:18px">
+      <div class="cartao-titulo">O que os dados estão dizendo</div>
+      ${d.insights.map((i) => `
+        <div class="insight ${esc(i.nivel || '')}">
+          <div class="insight-texto">${esc(i.texto)}</div>
+          ${i.recomendacao ? `<div class="insight-rec">${esc(i.recomendacao)}</div>` : ''}
+        </div>`).join('')}
+    </div>` : ''}`;
+}
+
+let filtroAtivo = null;
+
+// KPI clicavel: ao tocar, ilumina as atividades daquele status no calendario
+// e na tabela; tocar de novo desliga. E o filtro pedido.
+const kpiFiltro = (valor, rotulo, cor, chave) => `<div class="cartao kpi ${cor} kpi-clicavel"
+  data-filtro="${chave}" onclick="alternarFiltro('${chave}')">
+  <div class="kpi-valor">${esc(valor)}</div><div class="kpi-rotulo">${esc(rotulo)}</div></div>`;
+
+function alternarFiltro(chave) {
+  filtroAtivo = (filtroAtivo === chave || chave === 'todas') ? null : chave;
+  aplicarFiltro();
+}
+
+function aplicarFiltro() {
+  const pagina = el('pagina');
+  document.querySelectorAll('.kpi-clicavel').forEach((k) =>
+    k.classList.toggle('kpi-ativo', k.dataset.filtro === filtroAtivo));
+
+  if (!filtroAtivo) {
+    pagina.classList.remove('filtrando');
+    document.querySelectorAll('.pilula.destacada').forEach((p) => p.classList.remove('destacada'));
+    document.querySelectorAll('.dia.tem-destaque').forEach((d) => d.classList.remove('tem-destaque'));
+    document.querySelectorAll('.tabela-gestao tr.apagada').forEach((r) => r.classList.remove('apagada'));
+    return;
+  }
+  pagina.classList.add('filtrando');
+
+  // calendario: destaca pilulas com a classe do status
+  document.querySelectorAll('.grade-mes .pilula').forEach((p) => {
+    const bate = p.classList.contains(filtroAtivo);
+    p.classList.toggle('destacada', bate);
+    if (bate) { const dia = p.closest('.dia'); if (dia) dia.classList.add('tem-destaque'); }
+  });
+
+  // tabela: apaga as linhas que nao batem
+  document.querySelectorAll('.tabela-gestao tbody tr').forEach((r) => {
+    const et = r.querySelector('.etiqueta');
+    const bate = et && et.classList.contains(filtroAtivo);
+    r.classList.toggle('apagada', !bate);
+  });
+}
+
+const kpi = (valor, rotulo, cor) => `<div class="cartao kpi ${cor}">
+  <div class="kpi-valor">${esc(valor)}</div><div class="kpi-rotulo">${esc(rotulo)}</div></div>`;
+
+function barra(rotulo, texto, maximo, numero, cor) {
+  const n = (numero === undefined) ? Number(texto) : Number(numero);
+  const larg = maximo ? Math.max(1, Math.round(n / maximo * 100)) : 0;
+  return `<div class="barra-linha">
+    <div class="barra-rotulo">${esc(rotulo)}</div>
+    <div class="barra-trilho"><div class="barra-preenchida ${cor || ''}" style="width:${larg}%"></div></div>
+    <div class="barra-valor">${esc(texto)}</div></div>`;
+}
+
+function classeStatus(s) {
+  if (s === 'Aprovada') return 'aprovada';
+  if (s === 'Aguard. valid.') return 'aguardando';
+  if (s === 'Atrasada') return 'atrasada';
+  if (s === 'Reprovada') return 'reprovada';
+  if (s === 'Cancelada') return 'cancelada';
+  return 'pendente';
+}
+const etiqueta = (s) => `<span class="etiqueta ${classeStatus(s)}">${esc(s)}</span>`;
+</script>

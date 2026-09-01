@@ -151,7 +151,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '5.0';   // 5.0: ACESSOS vira o cadastro unico de pessoas (fim da EQUIPE dupla)
+const VERSAO_ESQUEMA = '5.1';   // 5.1: COMPETENCIA e SEMANA alinhadas ao PRAZO de cada atividade
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de 10 abas. Rodar isso a cada
@@ -207,6 +207,21 @@ function garantirEsquema() {
 
   // 5 · EQUIPE e ACESSOS eram dois cadastros da mesma pessoa
   if (migrarEquipeParaAcessos()) mexeu = true;
+
+  /*
+   * 5.1 · rotulo de mes alinhado ao prazo.
+   *
+   * Atividade remarcada de um mes para o outro por uma versao antiga
+   * ficou com PRAZO em setembro e COMPETENCIA em agosto. A tela ja nao
+   * se guia mais pelo rotulo, mas o digesto, a Central e as contagens
+   * ainda leem a COMPETENCIA — deixa-la errada e guardar uma mentira no
+   * banco. Roda sozinho na primeira abertura depois da atualizacao;
+   * ninguem precisa apertar nada.
+   */
+  try {
+    const r = corrigirCompetencias('migracao');
+    if (r && r.corrigidas) mexeu = true;
+  } catch (e) { registrarLog('sistema', 'ERRO', 'COMPETENCIA', '', String(e)); }
 
   // 6 · o ADMIN nunca pode perder acesso quando uma tela nova aparece
   if (mexeu) { liberarTudoParaAdmin(); limparCache(); }

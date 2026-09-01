@@ -172,7 +172,13 @@ function acaoSalvarParametro(usuario, params) {
   else inserir('PARAMETROS', { CHAVE: chave, VALOR: valor, DESCRICAO: String(params.descricao || '') }, usuario.email);
 
   limparCache();
-  return { ok: true, valor: valor };
+  /*
+   * Um parametro vale para o sistema inteiro, nao so para a tela de
+   * Configuracao. Sem este aviso, o cliente guardava as outras telas e a
+   * Apresentacao continuava mostrando a versao de antes — o link estava
+   * salvo, mas a tela aparecia vazia.
+   */
+  return { ok: true, valor: valor, invalidarTudo: true };
 }
 
 function acaoCorrigirFuso(usuario) {

@@ -8,7 +8,16 @@
  * por coordenador por dia, com tudo que ele deve. Nao um por atividade.
  */
 
-const COR_AZUL = '#111785', COR_VERDE = '#01973A', COR_AMAR = '#FFEE03', COR_ALERTA = '#D71920';
+/*
+ * Cores da marca. NAO existe vermelho na Bartofil — nem para alerta.
+ * COR_ALERTA era #D71920 (vermelho puro) e aparecia no cabecalho da
+ * secao "ATRASADAS", no aviso de reprovacao e na caixa de motivo de
+ * todo e-mail que o sistema manda. Agora e o amarelo da marca escurecido
+ * ate ter contraste com texto branco.
+ */
+const COR_AZUL = '#111785', COR_VERDE = '#01973A', COR_AMAR = '#FFEE03';
+const COR_ALERTA = '#8A6A00';        /* ambar escuro — sinal, nunca vermelho */
+const COR_ALERTA_FUNDO = '#FFF3CC';  /* fundo claro da caixa de motivo */
 
 /* ------------------------------------------------------------------ */
 /* GATILHOS                                                            */
@@ -26,18 +35,32 @@ function instalarGatilhos() {
   ScriptApp.newTrigger('gerarMesSeNecessario').timeBased().atHour(5).everyDays(1).create();
   // Aquecimento: mantem as telas montadas no cache para quem chegar.
   ScriptApp.newTrigger('aquecerCache').timeBased().everyMinutes(15).create();
+  /*
+   * A planilha da competencia aberta e atualizada pelo RH uma vez por
+   * dia. Este gatilho reimporta so ela, de manha, para o painel ja
+   * abrir com o numero do dia. A hora vem do parametro
+   * HORA_ATUALIZACAO_RH (padrao 10).
+   */
+  ScriptApp.newTrigger('atualizarCompetenciaAberta').timeBased()
+    .atHour(Number(parametro('HORA_ATUALIZACAO_RH', 10)) || 10).everyDays(1).create();
 
-  registrarLog(usuario.email, 'GATILHOS', 'SISTEMA', '', 'Rotinas diaria, mensal, geracao do mes e aquecimento ligadas');
-  return { ok: true, gatilhos: ScriptApp.getProjectTriggers().length };
+  esquecerEstadoGatilhos();   // o selo "4 de 4" tem que acender na hora
+  registrarLog(usuario.email, 'GATILHOS', 'SISTEMA', '', 'Rotinas diaria, mensal, geracao do mes, aquecimento e atualizacao do RH ligadas');
+  return { ok: true, gatilhos: GATILHOS_ESPERADOS.length };
 }
 
 function removerGatilhos() {
   ScriptApp.getProjectTriggers().forEach(function (g) { ScriptApp.deleteTrigger(g); });
+  esquecerEstadoGatilhos();
   return { ok: true };
 }
 
 /** Roda de madrugada: digesto, geracao do mes e limpeza. */
 function rotinaDiaria() {
+  // Antes de qualquer coisa: rotulo de mes alinhado ao prazo. O digesto e
+  // as contagens leem a COMPETENCIA, e uma linha remarcada de um mes para
+  // o outro cobraria a pessoa no mes errado.
+  try { corrigirCompetencias('rotina diaria'); } catch (e) { registrarLog('sistema', 'ERRO', 'COMPETENCIA', '', String(e)); }
   try { gerarMesSeNecessario(); } catch (e) { registrarLog('sistema', 'ERRO', 'MES', '', String(e)); }
   try { if (marcado(parametro('ENVIAR_DIGESTO', 'SIM'))) digestoMatinal(); } catch (e) {
     registrarLog('sistema', 'ERRO', 'DIGESTO', '', String(e));
@@ -59,7 +82,7 @@ function rotinaMensal() {
 function digestoMatinal() {
   const janela = Number(parametro('JANELA_PRAZOS_DIAS', 1));
   const ccApos = Number(parametro('COPIAR_GESTAO_APOS_DIAS', 1));
-  const hojeN = diaNum(hoje());
+  const hojeN = hojeNum();
 
   const pendentes = atividadesVigentes().filter(function (a) {
     return a.prazoISO && !a.entregue &&
@@ -76,7 +99,7 @@ function digestoMatinal() {
     const atrasadas = [], hojeVence = [], amanha = [], proximos = [];
 
     meus.forEach(function (a) {
-      const dif = diaNum(paraData(a.prazoISO)) - hojeN;
+      const dif = a.prazoNum - hojeN;
       if (dif < 0) atrasadas.push(a);
       else if (dif === 0) hojeVence.push(a);
       else if (dif === 1) amanha.push(a);
@@ -96,7 +119,7 @@ function digestoMatinal() {
 
     // cc a gestao so quando o atraso persiste
     const ccGestao = atrasadas.some(function (a) {
-      return hojeN - diaNum(paraData(a.prazoISO)) >= ccApos;
+      return hojeN - a.prazoNum >= ccApos;
     }) ? emailsDaGestao() : null;
 
     const assunto = atrasadas.length ? 'Pendencias do Turno ' + turno + ' — ' + atrasadas.length + ' em atraso'
@@ -113,7 +136,7 @@ function secao(titulo, cor, itens, hojeN) {
   return '<p style="background:' + cor + ';color:#fff;padding:6px 10px;margin:14px 0 6px;' +
          'font-weight:bold;font-size:13px">' + titulo + ' (' + itens.length + ')</p><ul style="margin:0;padding-left:20px">' +
     itens.map(function (a) {
-      const dif = diaNum(paraData(a.prazoISO)) - hojeN;
+      const dif = a.prazoNum - hojeN;
       const atraso = dif < 0 ? ' · <b>' + (-dif) + ' dia(s) de atraso</b>' : '';
       const reprovada = a.status === STATUS.REPROVADA
         ? ' · <b style="color:' + COR_ALERTA + '">REPROVADA — corrigir e reanexar</b>' : '';
@@ -173,7 +196,7 @@ function avisarValidacao(a, validacao, usuario) {
   } else if (validacao === 'Reprovado') {
     enviar(destino, 'Reprovada — ' + a.atividade + ' (' + a.semana + ')',
       '<p>O gerente <b>reprovou</b> a entrega abaixo.</p>' + bloco(a) +
-      caixa('Motivo informado:', a.motivo, COR_ALERTA, '#FDE8E8') +
+      caixa('Motivo informado:', a.motivo, COR_ALERTA, COR_ALERTA_FUNDO) +
       '<p>Corrija e anexe novamente pelo sistema.</p>' + rodapeLink());
   } else {
     enviar(destino, 'Atividade cancelada — ' + a.atividade + ' (' + a.semana + ')',
@@ -206,12 +229,52 @@ function avisarEntregaEmPdf(a, qtdArquivos, url, usuario) {
     '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink());
 }
 
+/*
+ * Aviso de atividade nova.
+ *
+ * Dois defeitos moravam aqui:
+ *
+ * 1. Atividade de turno "Todos" e apresentada na tela como
+ *    "Gerencia + coordenadores", mas o aviso saia so para os
+ *    coordenadores. Quem criou nunca via o e-mail e concluia, com
+ *    razao, que nada tinha sido enviado.
+ * 2. `if (!destino.length) return;` — sem coordenador cadastrado com
+ *    turno em ACESSOS a lista vinha vazia e a funcao desistia EM
+ *    SILENCIO. A tela dizia "Atividade criada" e ninguem era avisado.
+ *    Agora a falta de destinatario e um erro: ele sobe como avisoEmail e
+ *    aparece na tela, dizendo exatamente o que falta cadastrar.
+ */
 function avisarNovaAtividade(a) {
-  const destino = emailsDoTurno(a);
-  if (!destino.length) return;
+  const gestao = emailsDaGestao();
+  const doTurno = emailsDoTurno(a);
+  // "Todos" e assunto de todo mundo: gerencia entra na lista, nao so na copia.
+  const destino = (a.turno === 'Todos') ? unicos_(doTurno.concat(gestao)) : doTurno;
+
+  if (!destino.length) {
+    throw new Error('Nao existe e-mail para avisar: ' + (a.turno === 'Todos'
+      ? 'nenhuma pessoa ativa com perfil de gerencia ou coordenacao em "Pessoas e acessos".'
+      : 'o turno ' + a.turno + ' nao tem coordenador ativo com e-mail em "Pessoas e acessos".'));
+  }
+
+  // A gerencia acompanha em copia o que sai para um turno especifico.
+  const copia = (a.turno === 'Todos') ? [] : gestao;
   enviar(destino, 'Nova atividade — ' + a.atividade + ' (' + a.semana + ')',
     '<p>O gerente adicionou uma atividade para voce:</p>' + bloco(a) +
-    '<p>Prazo: <b>' + a.prazo + '</b>. Entregue pelo sistema quando concluir.</p>' + rodapeLink());
+    '<p>Prazo: <b>' + a.prazo + '</b>. Entregue pelo sistema quando concluir.</p>' + rodapeLink(),
+    copia);
+  // Quem devolve a lista permite a tela dizer PARA QUEM foi. Sem isso a
+  // unica forma de conferir o envio era perguntar aos coordenadores.
+  return destino;
+}
+
+/** Tira repetidos de uma lista de e-mails, sem depender de Set. */
+function unicos_(lista) {
+  const visto = {}, saida = [];
+  (lista || []).forEach(function (e) {
+    const chave = String(e || '').toLowerCase().trim();
+    if (chave && !visto[chave]) { visto[chave] = true; saida.push(chave); }
+  });
+  return saida;
 }
 
 function avisarTreinamento(a) {
@@ -252,7 +315,7 @@ function enviar(para, assunto, corpoHtml, ccExtra) {
     registrarLog('sistema', 'ERRO', 'EMAIL', destinatarios.join(','), String(e));
     // Antes o erro morria no log e o usuario achava que tinha enviado.
     // Agora ele sobe: quem disparou a acao ve a falha na tela.
-    throw new Error('O aviso por e-mail nao saiu: ' + (e.message || e) +
+    throw new Error('O aviso por e-mail não saiu: ' + (e.message || e) +
       '. Verifique se voce autorizou o envio de e-mail (reautorize pelo botao de acesso).');
   }
 }
@@ -314,9 +377,99 @@ function emailsDoTurno(a) {
   return [atual || a.coordenadorEmail].filter(Boolean);
 }
 
+/*
+ * Quem e "a gestao": agora sai de ACESSOS (cadastro unico) e considera o
+ * NIVEL de acesso, nao so o texto do papel. Antes dependia da palavra
+ * "GERENTE" ou "ADMINISTRADOR" aparecer no campo PAPEL da EQUIPE — se
+ * alguem escrevesse "Gerencia" ou deixasse em branco, os avisos da
+ * gestao simplesmente nao saiam para ninguem.
+ */
 function emailsDaGestao() {
-  return listar('EQUIPE').filter(function (p) {
+  const nivel = { ADMIN: 1, GERENTE: 1 };
+  return listar('ACESSOS').filter(function (p) {
+    if (!marcado(p.ATIVO)) return false;
+    const perfil = String(p.PERFIL || '').toUpperCase().trim();
+    if (nivel[perfil]) return true;
     const papel = String(p.PAPEL || '').toUpperCase();
-    return marcado(p.ATIVO) && (papel.indexOf('GERENTE') !== -1 || papel.indexOf('ADMINISTRADOR') !== -1);
+    return papel.indexOf('GERENTE') !== -1 || papel.indexOf('ADMINISTRADOR') !== -1;
   }).map(function (p) { return String(p.EMAIL || '').toLowerCase().trim(); }).filter(Boolean);
+}
+
+/* ------------------------------------------------------------------ */
+/* ACESSO — pedido, liberacao e recusa                                 */
+/* ------------------------------------------------------------------ */
+
+/** Chega um pedido: a gestao precisa saber, senao ele dorme na fila. */
+function avisarPedidoDeAcesso(pedido) {
+  const destino = emailsDaGestao();
+  if (!destino.length) return;
+  enviar(destino, 'Pedido de acesso ao GSL — ' + (pedido.nome || pedido.email),
+    '<p>Uma pessoa pediu acesso ao sistema:</p>' +
+    '<table style="border-collapse:collapse;margin:10px 0;font-size:13px">' +
+    linha('Nome', pedido.nome || '—') + linha('E-mail', pedido.email) +
+    (pedido.papel ? linha('Função informada', pedido.papel) : '') +
+    (pedido.turno ? linha('Turno', pedido.turno) : '') +
+    (pedido.observacao ? linha('Observação', pedido.observacao) : '') +
+    '</table>' +
+    '<p>Abra <b>Configuração &rsaquo; Pessoas e acessos</b> para aprovar ou recusar. ' +
+    'Enquanto isso, ela vê uma tela de espera.</p>' + rodapeLink());
+}
+
+/** O acesso saiu: a pessoa precisa saber que ja pode entrar. */
+function avisarAcessoLiberado(pessoa) {
+  if (!pessoa || !pessoa.email) return;
+  enviar([pessoa.email], 'Seu acesso ao GSL Bartofil foi liberado',
+    '<p>Olá' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') + '!</p>' +
+    '<p>O seu acesso ao sistema foi liberado com o nível <b>' +
+    (pessoa.perfil || '—') + '</b>.</p>' +
+    '<p>Para entrar, abra o sistema e informe este e-mail: <b>' + pessoa.email + '</b>. ' +
+    'Não há senha — ele fica guardado no seu aparelho e você só faz isso uma vez.</p>' +
+    rodapeLink());
+}
+
+/** Recusado: dizer que foi, e por que, e melhor que deixar no vacuo. */
+function avisarAcessoRecusado(pessoa, motivo) {
+  if (!pessoa || !pessoa.email) return;
+  enviar([pessoa.email], 'Sobre o seu pedido de acesso ao GSL Bartofil',
+    '<p>Olá' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') + '.</p>' +
+    '<p>O seu pedido de acesso ao sistema não foi aprovado neste momento.</p>' +
+    (motivo ? caixa('Motivo:', motivo, COR_AZUL, '#EEF0FF') : '') +
+    '<p>Se achar que houve engano, procure a gerência do CD.</p>' + rodapeLink());
+}
+
+/**
+ * DIAGNOSTICO DE AVISOS — rode pelo editor: Executar > testarAvisos
+ *
+ * Responde por que um aviso nao chegou. Mostra, para cada turno, quem o
+ * sistema encontrou como coordenador e para qual e-mail o aviso iria.
+ * Se um turno aparecer "(ninguem)", e por isso que o e-mail nao saiu:
+ * falta preencher o TURNO na linha da pessoa em Acessos.
+ */
+function testarAvisos() {
+  const linhas = [];
+  linhas.push('COTA DE E-MAIL RESTANTE HOJE: ' + MailApp.getRemainingDailyQuota());
+  linhas.push('');
+
+  const equipe = coordenadoresPorTurno();
+  linhas.push('COORDENADOR ENCONTRADO POR TURNO:');
+  TURNOS.forEach(function (t) {
+    const p = equipe[t];
+    linhas.push('  Turno ' + t + ': ' + (p ? (p.nome + ' <' + p.email + '>') : '(ninguem — preencha o TURNO em Acessos)'));
+  });
+
+  linhas.push('');
+  linhas.push('GESTAO (recebe aviso de entrega): ' + (emailsDaGestao().join(', ') || '(ninguem)'));
+
+  linhas.push('');
+  linhas.push('PESSOAS ATIVAS EM ACESSOS:');
+  listar('ACESSOS').filter(function (p) { return marcado(p.ATIVO); }).forEach(function (p) {
+    linhas.push('  ' + String(p.NOME || '(sem nome)') +
+                ' | perfil: ' + String(p.PERFIL || '—') +
+                ' | turno: ' + (turnoDaPessoa(p) || '(VAZIO)') +
+                ' | ' + String(p.EMAIL || '(sem e-mail)'));
+  });
+
+  const texto = linhas.join('\n');
+  Logger.log(texto);
+  return texto;
 }

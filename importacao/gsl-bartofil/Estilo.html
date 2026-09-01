@@ -3,11 +3,12 @@
    GSL BARTOFIL — identidade visual
    Marca: Azul #111785, com tarja Verde #01973A e Amarela #FFEE03.
 
-   NAO EXISTE VERMELHO NESTE ARQUIVO — nem como identidade, nem como
-   sinal de alerta. Atraso, reprovacao e erro usam AMBAR, que e o
-   amarelo da marca escurecido ate ter contraste de texto. As classes
-   continuam chamando `vermelho`/`vermelha` porque elas aparecem em
-   dezenas de lugares no App.html; o que elas pintam e ambar.
+   Vermelho NAO faz parte da identidade — nao aparece no logo, nem em
+   cartao, botao, grafico ou cabecalho. Ele existe aqui com um unico
+   emprego: SINAL DE ALERTA. Atraso, reprovacao, falta e assiduidade
+   fora da meta sao vermelhos, e escurecem conforme pioram. Foi assim na
+   planilha e e o que se le de longe; a rodada que trocou tudo por ambar
+   empatou o alerta com o amarelo de "aguardando".
 
    Dois temas, cada um com seu ceu:
      claro  -> aurora, laveis de marca sobre papel
@@ -20,18 +21,22 @@
   --azul: #111785;
   --verde: #01973A;
   --amarelo: #FFEE03;
-  /* Sinal de alerta — ambar da marca, escurecido para ter contraste.
-     Nunca vermelho. */
-  --alerta: #A87A00;
-  --alerta-forte: #7A5800;   /* reprovada: um degrau mais grave */
-  --vermelho: var(--alerta); /* nome antigo das classes; pinta ambar */
+  /* Sinal de alerta — VERMELHO.
+     A regra da marca e que nao existe vermelho no LOGO; ele nunca deixou
+     de ser a cor de alerta. A rodada anterior trocou tudo por ambar e o
+     resultado foi o oposto do pretendido: atraso, reprovacao e falta
+     ficaram da mesma familia do amarelo de "aguardando", e a tela parou
+     de gritar. Aqui volta o vermelho, e ele ESCURECE conforme piora. */
+  --alerta: #C62828;
+  --alerta-forte: #8E1B1B;   /* reprovada: um degrau mais grave */
+  --vermelho: var(--alerta); /* nome antigo das classes */
 
   /* Tema claro — paleta da referencia (aurora pastel) */
   --azul-vivo: #4F46E5;
   --azul-tenue: #E7EAFE;
   --verde-tenue: #D9F5E6;
   --amarelo-tenue: #FFF8D6;
-  --alerta-tenue: #FFF3CC;
+  --alerta-tenue: #FDE7E5;
   --vermelho-tenue: var(--alerta-tenue);
 
   --tinta: #0F172A;
@@ -39,6 +44,9 @@
   --tinta-fraca: #64748B;
   --linha: rgba(99, 102, 241, .15);
   --linha-forte: rgba(99, 102, 241, .3);
+  /* Borda das pastilhas de aba: precisa ser vista sobre a aurora clara,
+     entao nao pode ser um fio translucido como o resto das linhas. */
+  --borda-aba: rgba(17, 23, 133, .38);
 
   --fundo: #F0F4FF;
   --vidro: rgba(255, 255, 255, .82);
@@ -82,9 +90,9 @@
   --azul-tenue: rgba(124, 139, 255, .16);
   --verde-tenue: rgba(1, 151, 58, .2);
   --amarelo-tenue: rgba(255, 238, 3, .14);
-  --alerta: #FFC43D;
-  --alerta-forte: #E0A200;
-  --alerta-tenue: rgba(255, 196, 61, .18);
+  --alerta: #FF6B5E;
+  --alerta-forte: #FF3B2E;
+  --alerta-tenue: rgba(255, 107, 94, .18);
   --vermelho-tenue: var(--alerta-tenue);
 
   --tinta: #F8FAFC;
@@ -92,6 +100,7 @@
   --tinta-fraca: #64748B;
   --linha: rgba(255, 255, 255, .08);
   --linha-forte: rgba(255, 255, 255, .2);
+  --borda-aba: rgba(255, 255, 255, .34);
 
   --fundo: #020617;
   --vidro: rgba(15, 23, 42, .8);
@@ -458,11 +467,10 @@ h2 { font-size: 17px; font-weight: 600; }
    1. Comparação de grandeza usa rampa SEQUENCIAL — uma matiz só, mais
       é mais escuro. Nunca uma cor por item: cor por item serve para
       dizer QUEM é, não QUANTO é.
-   2. Situação (dentro da meta / atenção / crítico) nunca é dita só pela
-      cor. Vem sempre com ÍCONE e PALAVRA. Sem vermelho na marca, verde
-      e âmbar ficam a uma distância que um daltônico protanope não
-      enxerga (medido: ΔE 4,6) — o ícone e o texto é que carregam o
-      significado, a cor só reforça.
+   2. Situação (dentro da meta / atenção / fora da meta) nunca é dita só
+      pela cor. Vem sempre com ÍCONE e PALAVRA — quem não distingue
+      verde de vermelho lê o ícone e a palavra, e a folha impressa em
+      preto e branco continua funcionando. A cor só reforça.
    3. As rampas foram conferidas: monotônicas em luminosidade, então
       funcionam em preto e branco e na impressão.
    ========================================================= */
@@ -472,34 +480,51 @@ h2 { font-size: 17px; font-weight: 600; }
   --seq-verde-2: #86DCAC;
   --seq-verde-3: #2FB871;
   --seq-verde-4: #01973A;
-  /* Sequencial âmbar — ausência (mais é pior) */
-  --seq-ambar-1: #FFF3CC;
-  --seq-ambar-2: #F0D274;
-  --seq-ambar-3: #C79200;
-  --seq-ambar-4: #8A6A00;
+  /* Sequencial VERMELHO — ausência, falta, atraso (mais é pior).
+     Quanto pior, mais escuro: a mesma leitura de longe que a planilha
+     tinha. O apelido --seq-ambar-* continua valendo para nao quebrar
+     nenhuma chamada antiga; ele aponta para esta rampa. */
+  --seq-vermelho-1: #FBD9D5;
+  --seq-vermelho-2: #F0958A;
+  --seq-vermelho-3: #D4483A;
+  --seq-vermelho-4: #9B1C11;
+  --seq-ambar-1: var(--seq-vermelho-1);
+  --seq-ambar-2: var(--seq-vermelho-2);
+  --seq-ambar-3: var(--seq-vermelho-3);
+  --seq-ambar-4: var(--seq-vermelho-4);
   /* Situação — sempre acompanhada de ícone e palavra */
   --sit-bom:     #15A855;
-  --sit-atencao: #B8860B;
-  --sit-critico: #7A5800;
+  --sit-atencao: #D98200;
+  --sit-fora:    #B3261E;
+  --sit-critico: var(--sit-fora);   /* nome antigo da classe */
 }
 [data-tema="escuro"] {
   --seq-verde-1: rgba(1,151,58,.18);
   --seq-verde-2: #2FB871;
   --seq-verde-3: #4FD68C;
   --seq-verde-4: #7BE8AB;
-  --seq-ambar-1: rgba(255,196,61,.16);
-  --seq-ambar-2: #C79200;
-  --seq-ambar-3: #E0B33C;
-  --seq-ambar-4: #F5D470;
+  --seq-vermelho-1: rgba(214,72,58,.20);
+  --seq-vermelho-2: #C0453A;
+  --seq-vermelho-3: #F0756A;
+  --seq-vermelho-4: #FFA79E;
+  --seq-ambar-1: var(--seq-vermelho-1);
+  --seq-ambar-2: var(--seq-vermelho-2);
+  --seq-ambar-3: var(--seq-vermelho-3);
+  --seq-ambar-4: var(--seq-vermelho-4);
   --sit-bom:     #3BD17F;
-  --sit-atencao: #E0B33C;
-  --sit-critico: #C79200;
+  --sit-atencao: #F0B23C;
+  --sit-fora:    #FF7A6E;
+  --sit-critico: var(--sit-fora);
 }
 
 /* Abas de segundo nível: mais discretas que as principais, para a
    hierarquia ficar clara (tela > aba > sub-aba). */
-.abas.abas-internas { margin: 2px 0 14px; gap: 4px; }
-.abas-internas .aba { font-size: 12px; padding: 6px 12px; }
+/* Sub-abas: a MESMA pastilha cheia da aba principal, so meio grau menor.
+   A tentativa anterior deu a elas um azul tenue "para nao competir com a
+   hierarquia" — e elas voltaram a desaparecer no fundo claro. Hierarquia
+   que custa a legibilidade nao e hierarquia, e decoracao. */
+.abas.abas-internas { margin: 4px 0 16px; gap: 8px; }
+.abas-internas .aba { font-size: 12.5px; padding: 8px 16px; }
 
 /* --- Cartão de turno: número herói + medidor + situação --- */
 .grade-turnos {
@@ -537,6 +562,12 @@ h2 { font-size: 17px; font-weight: 600; }
   background: var(--seq-verde-4); transition: width .5s cubic-bezier(.2,.8,.3,1);
 }
 .medidor.ambar > i { background: var(--seq-ambar-3); }
+/* O medidor tambem carrega a situacao: verde dentro da meta, ambar em
+   atencao, vermelho fora dela. Assim o numero, o selo e a barra dizem a
+   mesma coisa — e de longe basta a barra. */
+.medidor.sit-bom > i     { background: var(--sit-bom); }
+.medidor.sit-atencao > i { background: var(--sit-atencao); }
+.medidor.sit-critico > i { background: var(--sit-fora); }
 /* A marca da meta fica ACIMA do preenchimento: com o medidor cheio ela
    sumia por baixo, justamente no caso em que ela confirma o resultado. */
 .medidor-meta {
@@ -669,15 +700,18 @@ td.celula-medidor { min-width: 110px; }
 .legenda-faixas b { color: var(--tinta); font-variant-numeric: tabular-nums; }
 .legenda-faixas small { display: block; color: var(--tinta-fraca); margin-left: 15px; font-size: 10.5px; }
 
+/* Ausencia e vermelha. Era ambar, e na ficha isso empatava com o azul de
+   "outros dias" e com o amarelo de "aguardando" do resto do sistema: as
+   tres coisas pareciam o mesmo aviso. */
 :root {
   --faixa-trab:   #01973A;
   --faixa-outros: #5B7FD4;
-  --faixa-aus:    #B8860B;
+  --faixa-aus:    #C62828;
 }
 [data-tema="escuro"] {
   --faixa-trab:   #1FA061;
   --faixa-outros: #6485DC;
-  --faixa-aus:    #B08726;
+  --faixa-aus:    #E05A4E;
 }
 
 /* Tiles pequenos dentro da ficha */
@@ -887,6 +921,13 @@ td.celula-medidor { min-width: 110px; }
 .subtitulo { margin: 6px 0 0; color: var(--tinta-media); font-size: 13px; line-height: 1.4; overflow: visible; }
 .topo h1 { line-height: 1.15; }
 .acoes-topo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* O seletor de competencia e o comando mais usado da tela de
+   assiduidade e era um select cru, do tamanho da letra. Ganha corpo. */
+.acoes-topo select {
+  font-weight: 600; padding: 10px 14px; border-radius: 99px;
+  border: 1px solid var(--linha-forte); background: var(--vidro-alto); cursor: pointer;
+}
+.acoes-topo select:hover { border-color: var(--azul-vivo); color: var(--azul-vivo); }
 
 .faixa-aviso {
   background: linear-gradient(100deg, var(--amarelo) 0%, #FFD803 100%); color: #2E2A00;
@@ -1202,6 +1243,44 @@ input[type="file"] { border: 0; background: none; padding: 0; font-size: 12px; c
 .icone-botao.perigo:hover { border-color: var(--vermelho); color: var(--vermelho); background: var(--vermelho-tenue); }
 .acoes-linha { display: flex; gap: 6px; align-items: center; }
 
+/* --- Campo de busca ---
+   Era um input igual a todos os outros, encolhido num canto do titulo
+   do cartao: quem procurava uma pessoa nao achava onde digitar. Agora
+   tem lupa, largura de verdade e borda que responde ao foco. */
+.campo-busca { position: relative; display: inline-flex; align-items: center; flex: 0 1 330px; }
+.campo-busca::before {
+  content: '🔍'; position: absolute; left: 14px; font-size: 15px;
+  pointer-events: none; line-height: 1;
+}
+.campo-busca > input {
+  width: 100%; padding: 12px 14px 12px 40px; font-size: 13.5px; font-weight: 500;
+  border: 2px solid var(--azul-vivo); border-radius: 99px;
+  background: var(--vidro-alto); color: var(--tinta);
+  box-shadow: 0 2px 10px rgba(17, 23, 133, .12);
+}
+.campo-busca > input::placeholder { color: var(--tinta-media); font-weight: 500; }
+.campo-busca > input:focus {
+  border-color: var(--azul-vivo);
+  box-shadow: 0 0 0 4px var(--azul-tenue), 0 2px 10px rgba(17, 23, 133, .14);
+}
+
+/* --- Configuracao > Apresentacao: uma linha por turno ---
+   Era uma tabela em que o campo, com largura de 100%, transbordava a
+   celula e cobria o botao Salvar: o clique morria no campo. Aqui o
+   campo cresce ate onde sobra espaco e o botao tem lugar proprio. */
+.linha-apres {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--linha);
+}
+.linha-apres:last-of-type { border-bottom: 0; padding-bottom: 2px; }
+.linha-apres .apres-turno {
+  font-family: 'Archivo', sans-serif; font-size: 12px; font-weight: 800;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--tinta-fraca);
+  width: 74px; flex-shrink: 0;
+}
+.linha-apres .apres-link { flex: 1 1 260px; min-width: 0; }
+.linha-apres .botao { flex-shrink: 0; }
+
 /* =========================================================
    BARRAS, TABELAS, ETIQUETAS
    ========================================================= */
@@ -1318,6 +1397,37 @@ tr:last-child td { border-bottom: 0; }
   color: #fff; border-color: transparent;
   background: linear-gradient(135deg, var(--neon-roxo), var(--neon-ciano));
   box-shadow: 0 8px 24px -8px var(--neon-roxo);
+}
+
+/* Mes ENCERRADO: continua clicavel — e historico, nao lixo — mas em tom
+   apagado e tracejado, para nunca ser confundido com um mes em curso. */
+.chip-mes.encerrado {
+  color: var(--tinta-fraca); background: transparent;
+  border-style: dashed; border-color: var(--linha-forte); box-shadow: none;
+}
+.chip-mes.encerrado:hover { color: var(--tinta-media); border-color: var(--tinta-fraca); }
+.chip-mes.encerrado.ativo {
+  color: var(--tinta); background: var(--vidro-alto);
+  border-style: dashed; border-color: var(--tinta-media);
+  box-shadow: inset 0 0 0 1px var(--linha);
+}
+/* Traco que separa o que passou do que esta correndo. */
+.divisor-meses {
+  flex: 0 0 auto; width: 1px; align-self: stretch;
+  margin: 2px 6px; background: var(--linha-forte);
+}
+
+/* Aviso no topo de um mes encerrado. Nao e erro nem alerta: e um estado.
+   Por isso cinza, nao vermelho — vermelho aqui faria o mes que passou
+   parecer um problema a resolver. */
+.aviso-encerrado {
+  border-radius: 10px; padding: 11px 15px; margin-bottom: 14px;
+  font-size: 12.5px; line-height: 1.65; color: var(--tinta-media);
+  border-left: 4px solid var(--tinta-fraca);
+  background: color-mix(in srgb, var(--tinta-fraca) 10%, transparent);
+}
+.aviso-encerrado strong {
+  font-family: 'Archivo', sans-serif; letter-spacing: .03em; color: var(--tinta);
 }
 
 /* Faixa de andamento — a linha logo abaixo do titulo da aba do mes. */
@@ -1596,7 +1706,15 @@ tr:last-child td { border-bottom: 0; }
 
 
 /* --- Abas internas (submenus do RH) --- */
-.abas { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--linha); }
+/* ABAS — pastilhas.
+   Eram texto solto com um sublinhado de 2px: num fundo animado, com
+   cartoes grandes em volta, ninguem percebia que Painel / Colaboradores
+   / Periodo eram BOTOES. A regra do sistema e "olhou, viu": aba agora e
+   pastilha com fundo e borda, e a ativa e azul cheio com texto branco. */
+.abas {
+  display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap;
+  padding-bottom: 2px;
+}
 
 /* Aba Periodo: atalhos rapidos + formulario de datas. */
 .periodo-atalhos { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
@@ -1605,13 +1723,28 @@ tr:last-child td { border-bottom: 0; }
 .periodo-form .botao { flex-shrink: 0; height: 44px; }
 .datas-aus { font-size: 11px; color: var(--tinta-media); max-width: 320px; line-height: 1.6; }
 .aba {
-  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
-  font-family: 'Archivo', sans-serif; font-size: 13px; font-weight: 600; padding: 9px 15px;
-  color: var(--tinta-media); transition: color .18s ease, border-color .18s ease;
+  background: var(--vidro-alto); border: 2px solid var(--borda-aba); border-radius: 99px;
+  cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 13.5px; font-weight: 700;
+  letter-spacing: .01em; padding: 10px 20px; color: var(--tinta);
+  box-shadow: 0 2px 8px rgba(17, 23, 133, .10);
+  transition: color .18s ease, background .18s ease, border-color .18s ease,
+              box-shadow .18s ease, transform .18s ease;
 }
-.aba:hover { color: var(--tinta); }
-.aba.ativa { color: var(--azul-vivo); border-bottom-color: var(--azul-vivo); }
-[data-tema="escuro"] .aba.ativa { color: var(--amarelo); border-bottom-color: var(--amarelo); }
+.aba:hover {
+  color: var(--azul-vivo); border-color: var(--azul-vivo); transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(17, 23, 133, .18);
+}
+.aba.ativa {
+  background: linear-gradient(140deg, var(--azul) 0%, var(--azul-vivo) 100%);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 4px 14px rgba(17, 23, 133, .30);
+}
+.aba.ativa:hover { color: #fff; }
+[data-tema="escuro"] .aba.ativa {
+  background: linear-gradient(140deg, var(--azul-vivo) 0%, #A78BFA 100%);
+  color: #0B0B18; box-shadow: 0 4px 16px rgba(124, 139, 255, .35);
+}
+[data-tema="escuro"] .aba.ativa:hover { color: #0B0B18; }
 
 /* --- Serie temporal (ausencia dia a dia) --- */
 .serie { display: flex; align-items: flex-end; gap: 3px; height: 150px; padding-top: 8px; }

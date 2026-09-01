@@ -623,11 +623,24 @@ function acaoFichaColaborador(usuario, params) {
     };
   });
 
-  // Sem quebra por competencia: a ficha mostra o historico inteiro da
-  // pessoa, atravessando todas as planilhas ja importadas.
+  /*
+   * A ficha mostra o historico inteiro da pessoa, atravessando todas as
+   * planilhas ja importadas — isso e proposital.
+   *
+   * MAS: o mes do RH vai do dia 21 ao 20, entao a MESMA data cai em duas
+   * competencias (25/08 existe em 2026-08 e em 2026-09). Sem tratar, a
+   * mesma falta aparecia repetida na lista. Aqui cada DATA + CODIGO conta
+   * uma vez so, ficando com o registro da competencia mais recente.
+   */
+  const jaVistos = {};
   const ausenciasRaw = listar('FATO_ASSIDUIDADE').filter(function (f) {
-    return String(f.MATRICULA) === String(mat) && String(f.AUSENCIA) === 'Sim' &&
-           !ehNaoDefinido_(f.CATEGORIA);
+    if (String(f.MATRICULA) !== String(mat)) return false;
+    if (String(f.AUSENCIA) !== 'Sim') return false;
+    if (ehNaoDefinido_(f.CATEGORIA)) return false;
+    const chave = isoDaFato_(f.DATA) + '|' + String(f.CODIGO);
+    if (jaVistos[chave]) return false;
+    jaVistos[chave] = true;
+    return true;
   }).map(function (f) {
     const c = {}; Object.keys(f).forEach(function (k) { c[k] = f[k]; });
     c._iso = isoDaFato_(f.DATA);
@@ -641,6 +654,9 @@ function acaoFichaColaborador(usuario, params) {
     // como Date; brDoIso_ trata texto e Date pelo mesmo caminho.
     return {
       data: brDoIso_(a._iso), iso: a._iso,
+      // A competencia vai junto: sem ela a lista parecia contradizer o
+      // cabecalho (que resume um mes so).
+      competencia: normalizarCompetenciaRH_(a.COMPETENCIA),
       codigo: a.CODIGO, descricao: t.desc, categoria: String(a.CATEGORIA || '')
     };
   });

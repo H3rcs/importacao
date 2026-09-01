@@ -601,10 +601,23 @@ async function agir(acao, params, recado) {
      * de uma prebusca de todas as telas: aprovar uma atividade custava
      * oito idas ao servidor e ~15 s de fila. Agora custa duas.
      */
-    esquecerTela(paginaAtual);
-    envelhecerTelas();
+    // Acoes globais (parametros, perfis) mudam TODAS as telas: nesses
+    // casos o cache inteiro cai, senao outra tela mostra dado velho.
+    if (r && r.invalidarTudo) esquecerTelas();
+    else { esquecerTela(paginaAtual); envelhecerTelas(); }
     fecharJanela();
-    if (recado) avisar(recado);
+
+    /*
+     * Se o servidor devolveu um aviso (tipico: a operacao gravou mas o
+     * e-mail nao saiu), ele TEM que aparecer. Antes a falha de e-mail era
+     * engolida e a tela dizia so "Atividade criada" — por isso ninguem
+     * percebia que o coordenador nunca foi avisado.
+     */
+    if (r && r.avisoEmail) avisar(r.avisoEmail, true);
+    // O servidor pode devolver um recado mais preciso que o do botao
+    // (por exemplo: para QUAIS enderecos o aviso saiu). Ele tem prioridade.
+    else if (r && r.recado) avisar(r.recado);
+    else if (recado) avisar(recado);
     await abrir(paginaAtual, paramsAtual);
     return r;
   } catch (e) {
@@ -805,12 +818,34 @@ function pintarCalendario(r) {
 
   const meses = d.competenciasDisponiveis.length ? d.competenciasDisponiveis : [d.competencia];
 
+  /*
+   * A tira de meses agora carrega TAMBEM os meses ja encerrados. Eles
+   * ficam a esquerda, apagados e com um cadeado, separados por um traco
+   * do mes atual em diante — da para consultar agosto sem confundi-lo
+   * com um mes que ainda esta correndo.
+   */
+  const encerrados = d.competenciasEncerradas || [];
+  const chip = (c) => {
+    const fechado = encerrados.indexOf(c) !== -1;
+    return `<button class="chip-mes ${c === d.competencia ? 'ativo' : ''}${fechado ? ' encerrado' : ''}"
+              title="${fechado ? 'Mês encerrado — só consulta' : 'Abrir ' + esc(c)}"
+              onclick="abrir('calendario',{competencia:'${esc(c)}'})">${fechado ? '🔒 ' : ''}${esc(c)}</button>`;
+  };
+  const emCurso = meses.filter((c) => encerrados.indexOf(c) === -1);
+
   el('pagina').innerHTML = `
     <div class="tira-meses">
-      ${meses.map((c) => `
-        <button class="chip-mes ${c === d.competencia ? 'ativo' : ''}"
-                onclick="abrir('calendario',{competencia:'${esc(c)}'})">${esc(c)}</button>`).join('')}
+      ${encerrados.map(chip).join('')}
+      ${encerrados.length && emCurso.length ? '<span class="divisor-meses" aria-hidden="true"></span>' : ''}
+      ${emCurso.map(chip).join('')}
     </div>
+
+    ${d.encerrado ? `
+      <div class="aviso-encerrado">
+        <strong>🔒 ${esc(d.competencia)} é um mês encerrado.</strong>
+        Você está consultando o histórico: os números abaixo são o resultado final do mês
+        e nada mais é gerado nem cobrado aqui. Para trabalhar, volte ao mês em andamento.
+      </div>` : ''}
 
     <div class="grade grade-kpi" style="margin-bottom:16px">
       ${kpiFiltro(d.resumo.total, 'Programadas', 'azul', 'todas')}
@@ -852,10 +887,10 @@ function pintarCalendario(r) {
         <span>Gestao de atividades — ${d.atividades.length} no mes</span>
         <span style="display:flex;gap:8px">
           ${d.mesPassado && p.validar ? `<button class="botao secundario" onclick="encerrarMes('${esc(d.competencia)}')">Encerrar mês passado</button>` : ''}
-          ${p.programar ? `<button class="botao" onclick="formNovaAtividade('${esc(d.competencia)}')">+ Nova atividade</button>` : ''}
+          ${p.programar && !d.mesPassado ? `<button class="botao" onclick="formNovaAtividade('${esc(d.competencia)}')">+ Nova atividade</button>` : ''}
         </span>
       </div>
-      ${d.mesPassado ? '<p class="dica" style="margin:-4px 0 12px;color:var(--alerta)">Este mes ja passou. \"Encerrar mes passado\" cancela tudo que ficou pendente.</p>' : ''}
+      ${d.mesPassado ? '<p class="dica" style="margin:-4px 0 12px">Mês encerrado — esta é a foto final. Se ficou algo pendente e você quer tirá-lo das contagens, use <b>Encerrar mês passado</b>.</p>' : ''}
       <p class="dica" style="margin:-4px 0 12px">Clique em <b>Abrir</b> na atividade para anexar entrega, remarcar, dar feedback, aprovar, reprovar ou cancelar.</p>
       <div style="overflow-x:auto">
         <table class="tabela-gestao"><thead><tr>
@@ -1186,8 +1221,10 @@ async function enviarEntrega(id) {
     botao.textContent = 'Montando o PDF — aguarde…';
     await executarAcaoSrv('finalizarEntrega', { id: id, pasta: pasta });
 
-    esquecerTela(paginaAtual);
-    envelhecerTelas();
+    // Acoes globais (parametros, perfis) mudam TODAS as telas: nesses
+    // casos o cache inteiro cai, senao outra tela mostra dado velho.
+    if (r && r.invalidarTudo) esquecerTelas();
+    else { esquecerTela(paginaAtual); envelhecerTelas(); }
     fecharJanela();
     avisar('Entrega enviada em PDF — gestão avisada');
     await abrir(paginaAtual, paramsAtual);
@@ -1506,7 +1543,11 @@ function situacaoAssid(pct, meta) {
   const limite = 100 - (meta === undefined ? 5 : meta);   // meta de absenteísmo
   if (pct >= limite) return { classe: 'bom', icone: '●', texto: 'dentro da meta' };
   if (pct >= limite - 3) return { classe: 'atencao', icone: '▲', texto: 'atenção' };
-  return { classe: 'critico', icone: '■', texto: 'crítico' };
+  // "Critico" soava a diagnostico de UTI para uma pessoa que faltou. A
+  // palavra passa a ser a mesma medida do nivel bom, virada do avesso:
+  // dentro da meta -> atencao -> fora da meta. A classe segue chamada
+  // 'critico' porque e o nome do estilo, nao o que aparece na tela.
+  return { classe: 'critico', icone: '■', texto: 'fora da meta' };
 }
 const selo = (s) => `<span class="situacao ${s.classe}"><b>${s.icone}</b>${s.texto}</span>`;
 
@@ -1525,9 +1566,9 @@ function colabTurnos(r) {
     const destaque = t.turno === 'CD';
     return `<div class="cartao cartao-turno"${destaque ? ' style="border-color:var(--azul-vivo)"' : ''}>
       <div class="turno-sigla">${destaque ? 'CD inteiro' : 'Turno ' + esc(t.turno)}</div>
-      <div class="turno-valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'critico'})">${t.media}%</div>
+      <div class="turno-valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'fora'})">${t.media}%</div>
       <div class="turno-legenda">de assiduidade</div>
-      <div class="medidor" title="${t.media}% — a marca é a meta de ${100 - meta}%">
+      <div class="medidor sit-${s.classe}" title="${t.media}% — a marca é a meta de ${100 - meta}%">
         <i style="width:${Math.max(2, Math.min(100, t.media))}%"></i>
         <span class="medidor-meta" style="left:${100 - meta}%"></span>
       </div>
@@ -1625,8 +1666,8 @@ function colabLista(r) {
     <div class="cartao">
       <div class="cartao-titulo linha-titulo">
         <span>${lista.length} colaborador(es) — clique numa linha para abrir a ficha</span>
-        <input id="busca-colab" placeholder="Buscar nome ou matrícula" oninput="filtrarColab()"
-               style="max-width:260px">
+        <span class="campo-busca">
+          <input id="busca-colab" placeholder="Buscar nome ou matrícula" oninput="filtrarColab()"></span>
       </div>
       <p class="dica" style="margin:-4px 0 12px">Clique no título da coluna para ordenar.
          A barra usa uma matiz só, em quatro tons: mais escura, maior o valor.</p>
@@ -2004,12 +2045,12 @@ function montarFicha(f) {
 
     <div class="ficha-heroi">
       <div>
-        <div class="valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'critico'})">${h.assiduidade}%</div>
+        <div class="valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'fora'})">${h.assiduidade}%</div>
         <div style="font-size:11.5px;color:var(--tinta-media);margin-top:4px">de assiduidade</div>
       </div>
       <div class="lado">
         <div class="rotulo">${h.trabalhados} de ${h.registros} dias lançados</div>
-        <div class="medidor" style="margin:0 0 8px">
+        <div class="medidor sit-${s.classe}" style="margin:0 0 8px">
           <i style="width:${Math.max(2, Math.min(100, h.assiduidade))}%"></i>
           <span class="medidor-meta" style="left:${100 - meta}%"></span>
         </div>
@@ -2050,11 +2091,16 @@ function montarFicha(f) {
               </div>`).join(''); })()}
         </div>` : ''}
       ${(f.ausencias || []).length ? `
+        <p class="dica" style="margin:-2px 0 8px">
+          Historico completo da pessoa — inclui meses anteriores, por isso pode
+          trazer datas fora da competencia do topo.
+        </p>
         <div style="max-height:220px;overflow-y:auto">
           ${f.ausencias.map((a) => `
             <div class="ausencia-linha">
               <span class="ponto" style="background:${corCategoria(a.categoria)}"></span>
               <span class="ausencia-dia">${esc(a.data)}</span>
+              ${a.competencia ? `<span class="cod">${esc(a.competencia)}</span>` : ''}
               <span class="cod">${esc(a.codigo)}</span>
               <span>${esc(a.descricao || '—')}</span>
               <span class="cat">${esc(a.categoria)}</span>
@@ -2335,21 +2381,73 @@ function cfgCalendario(d) {
 }
 
 /* ---- Aba 3: os links da reuniao ---- */
+/*
+ * O botao de salvar vivia dentro de uma celula de tabela, encostado num
+ * campo com `width:100%`: o campo transbordava a celula e cobria o
+ * botao, entao o clique nunca chegava nele. Ninguem conseguia gravar
+ * link nenhum — e por isso a tela de Apresentacao continuava vazia,
+ * ainda que o texto tivesse sido digitado.
+ *
+ * Agora cada turno e uma linha flex: rotulo com largura fixa, campo
+ * elastico, botao com largura propria e nada por cima. E o salvamento
+ * tem tres portas: o botao, a tecla Enter e a saida do campo.
+ */
 function cfgApresentacao(d) {
+  const linha = (a) => `
+    <div class="linha-apres">
+      <div class="apres-turno">Turno ${esc(a.turno)}</div>
+      <input id="ap-${esc(a.turno)}" class="apres-link" value="${esc(a.link)}"
+             placeholder="https://docs.google.com/presentation/d/..."
+             onkeydown="if (event.key === 'Enter') { event.preventDefault(); salvarApresentacao('${esc(a.turno)}', '${esc(a.id)}'); }"
+             onblur="salvarApresentacaoSeMudou('${esc(a.turno)}', '${esc(a.id)}', this.defaultValue)">
+      <button class="botao" onclick="salvarApresentacao('${esc(a.turno)}', '${esc(a.id)}')">Salvar link</button>
+      ${a.link ? `<button class="icone-botao" title="Abrir a apresentação em outra aba"
+             onclick="window.open('${esc(a.link)}','_blank')">Abrir</button>` : ''}
+    </div>`;
   return `
     <div class="cartao">
       <div class="cartao-titulo">Apresentações da reunião — um link por turno</div>
-      <p class="dica" style="margin:-4px 0 12px">Cole o link do Google Apresentações de cada turno.
-         Os botões da tela de Apresentação abrem estes links.</p>
-      <table><thead><tr><th>Turno</th><th>Link</th><th></th></tr></thead>
-      <tbody>${(d.apresentacoes || []).map((a) => `<tr>
-        <td><strong>${esc(a.turno)}</strong></td>
-        <td><input id="ap-${esc(a.turno)}" value="${esc(a.link)}"
-                   placeholder="https://docs.google.com/presentation/..." style="width:100%"></td>
-        <td><button class="icone-botao"
-              onclick="agir('salvarParametro',{id:'${esc(a.id)}',chave:'APRESENTACAO_${esc(a.turno)}',valor:val('ap-${esc(a.turno)}')},'Link do turno ${esc(a.turno)} salvo')">Salvar</button></td>
-      </tr>`).join('')}</tbody></table>
+      <p class="dica" style="margin:-4px 0 16px">Abra a apresentação do turno no Google, copie o endereço da
+         barra do navegador, cole aqui e clique em <b>Salvar link</b> (ou aperte Enter).
+         Os cartões da tela de Apresentação passam a abrir este link.</p>
+      ${(d.apresentacoes || []).map(linha).join('') || '<div class="vazio">Nenhum turno cadastrado.</div>'}
     </div>`;
+}
+
+/* Grava o link de um turno. Recusa endereco que nao seja do Google
+   Apresentacoes — colar o link errado e o engano mais comum, e antes ele
+   era gravado do mesmo jeito e so aparecia na reuniao. */
+let _apresEmVoo = '';
+async function salvarApresentacao(turno, id) {
+  const campo = el('ap-' + turno);
+  if (!campo) return;
+  const valor = String(campo.value || '').trim();
+  /*
+   * Clicar no botao dispara DOIS eventos: o blur do campo (no mousedown)
+   * e o click (no mouseup). Sem esta trava o mesmo link ia duas vezes ao
+   * servidor e o app remontava a tela duas vezes seguidas.
+   */
+  if (_apresEmVoo === turno + '|' + valor) return;
+  _apresEmVoo = turno + '|' + valor;
+  setTimeout(function () { _apresEmVoo = ''; }, 4000);
+  if (valor && !/docs\.google\.com\/presentation/i.test(valor)) {
+    avisar('Este endereço não é de uma apresentação do Google. Abra a apresentação do turno ' +
+           turno + ' e copie o endereço da barra do navegador.', true);
+    campo.focus();
+    return;
+  }
+  campo.defaultValue = valor;
+  await agir('salvarParametro', { id: id, chave: 'APRESENTACAO_' + turno, valor: valor },
+             valor ? 'Link do turno ' + turno + ' salvo' : 'Link do turno ' + turno + ' apagado');
+}
+
+/* Sair do campo tambem grava — mas so se o texto mudou de verdade, senao
+   cada clique na tela viraria uma ida ao servidor. */
+function salvarApresentacaoSeMudou(turno, id, original) {
+  const campo = el('ap-' + turno);
+  if (!campo) return;
+  if (String(campo.value || '').trim() === String(original || '').trim()) return;
+  salvarApresentacao(turno, id);
 }
 
 /* ---- Aba 4: manutenção ---- */
@@ -2620,8 +2718,8 @@ function blocoPessoas(d) {
     <div class="cartao">
       <div class="cartao-titulo linha-titulo">
         <span>${(d.pessoas || []).length} pessoa(s) no cadastro</span>
-        <input id="busca-pessoa" placeholder="Buscar nome, e-mail ou turno" oninput="filtrarPessoas()"
-               style="max-width:280px">
+        <span class="campo-busca">
+          <input id="busca-pessoa" placeholder="Buscar nome, e-mail ou turno" oninput="filtrarPessoas()"></span>
       </div>
       <p class="dica" style="margin:-4px 0 12px">Este é o cadastro único: o mesmo registro define
          quem <b>entra</b> no sistema e quem <b>recebe</b> os avisos do turno.</p>

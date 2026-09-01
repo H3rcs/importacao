@@ -37,7 +37,7 @@ const TURNOS = ['A', 'B', 'C'];
  */
 function gerarCompetencia(competencia, quem) {
   const base = competenciaParaData(competencia);
-  if (!base) throw new Error('Competencia invalida: ' + competencia);
+  if (!base) throw new Error('Competência invalida: ' + competencia);
 
   const ano = base.getFullYear(), mes = base.getMonth();
   const sigla = SIGLAS[mes];
@@ -145,10 +145,25 @@ function turnoDaPessoa(p) {
   return '';
 }
 
+/*
+ * Turno -> coordenador. Passou a ler de ACESSOS, que virou o cadastro
+ * unico de pessoas: EQUIPE e ACESSOS eram as mesmas pessoas em duas
+ * tabelas que nao conversavam, e o coordenador do turno podia estar num
+ * cadastro e nao no outro.
+ *
+ * Prefere quem tem acesso ATIVO; entre dois do mesmo turno, quem for
+ * COORDENADOR vem primeiro.
+ */
 function coordenadoresPorTurno() {
   if (_equipeMemo) return _equipeMemo;
   const mapa = {};
-  listar('EQUIPE').filter(function (p) { return marcado(p.ATIVO); }).forEach(function (p) {
+  const candidatos = listar('ACESSOS').filter(function (p) {
+    return marcado(p.ATIVO) && String(p.EMAIL || '').trim();
+  });
+  const nota = function (p) {
+    return String(p.PERFIL || '').toUpperCase().trim() === 'COORDENADOR' ? 0 : 1;
+  };
+  candidatos.sort(function (a, b) { return nota(a) - nota(b); }).forEach(function (p) {
     const t = turnoDaPessoa(p);
     if (t && !mapa[t]) {
       mapa[t] = { nome: String(p.NOME || '').trim(), email: String(p.EMAIL || '').toLowerCase().trim() };
@@ -162,7 +177,7 @@ function coordenadoresPorTurno() {
 function acaoGerarMes(usuario, params) {
   exigirCapacidade(usuario, 'PROGRAMAR');
   const competencia = String(params.competencia || '').trim();
-  if (!competenciaParaData(competencia)) throw new Error('Competencia invalida.');
+  if (!competenciaParaData(competencia)) throw new Error('Competência invalida.');
   const jaTem = listar('ATIVIDADES', true).some(function (a) {
     return normalizarCompetencia(a.COMPETENCIA) === competencia;
   });
@@ -194,14 +209,26 @@ function gerarMesSeNecessario() {
 /* ------------------------------------------------------------------ */
 
 function dadosCalendario(usuario, params) {
-  let competencia = params.competencia || competenciaDe(hoje());
-  // Blindagem: se pedirem um mes que ja passou (link antigo, cache), joga
-  // para o mes atual — mes vencido nao deve mais ser aberto.
-  const dPed = competenciaParaData(competencia);
-  if (dPed && (dPed.getFullYear() * 12 + dPed.getMonth()) < (hoje().getFullYear() * 12 + hoje().getMonth())) {
-    competencia = competenciaDe(hoje());
-  }
+  const competencia = params.competencia || competenciaDe(hoje());
   const escopo = escopoDe(usuario);
+
+  /*
+   * MES ENCERRADO.
+   *
+   * Antes, pedir um mes vencido era redirecionado para o mes atual: "mes
+   * vencido nao deve mais ser aberto". A intencao era boa — ninguem cai
+   * num mes velho cheio de "atrasadas" por engano — mas o efeito era que
+   * agosto simplesmente DEIXAVA DE EXISTIR na virada do mes, e nao havia
+   * como consultar o que foi feito. Os dados nunca sairam do banco; era
+   * a navegacao que os escondia.
+   *
+   * Agora o mes vencido abre normalmente, marcado como ENCERRADO. A tela
+   * mostra o aviso, o mes fica claramente separado dos que estao
+   * correndo, e nada nele e gerado ou recalculado (ver abaixo).
+   */
+  const dPed = competenciaParaData(competencia);
+  const encerrado = !!dPed &&
+    (dPed.getFullYear() * 12 + dPed.getMonth()) < (hoje().getFullYear() * 12 + hoje().getMonth());
 
   /*
    * O mes nasce sozinho. Na planilha, abrir a aba do mes ja mostra as
@@ -222,35 +249,99 @@ function dadosCalendario(usuario, params) {
    * instantaneo — era o "Carregando..." demorado.
    */
   const cruas = listar('ATIVIDADES');
-  const existeMes = cruas.some(function (a) {
+
+  /*
+   * QUAL ATIVIDADE E DESTE MES: manda a DATA DO PRAZO, nao o rotulo.
+   *
+   * A COMPETENCIA e o rotulo com que a atividade nasceu. Remarcar uma
+   * atividade de 29/08 para 01/09 muda o prazo; o rotulo so acompanha se
+   * quem remarcou estava rodando uma versao que ja corrigia isso. Toda
+   * linha remarcada antes disso ficou com PRAZO em setembro e rotulo AGO,
+   * e o resultado era exatamente o que apareceu na tela: a atividade
+   * pintada no dia 1 de setembro DENTRO do calendario de agosto (a grade
+   * desenha pela data) e ausente do calendario de setembro (a lista
+   * filtrava pelo rotulo).
+   *
+   * Agora o mes de uma atividade e o mes em que ela vence. Rotulo errado
+   * deixa de esconder atividade — sem precisar consertar linha nenhuma.
+   * Sem prazo (treinamento ainda nao agendado) o rotulo continua valendo,
+   * que e a unica informacao que existe.
+   *
+   * ATENCAO ao ler o PRAZO: a celula NEM SEMPRE volta como texto
+   * 'aaaa-mm-dd'. Ela pode vir como objeto Date (planilha antiga, ou
+   * linha que o Sheets converteu antes de o formato de texto ser
+   * aplicado) ou como '01/09/2026'. A primeira versao desta correcao
+   * comparava `String(PRAZO).slice(0,7)` com '2026-09'; nesses dois
+   * casos a comparacao falhava, caia no rotulo, e a atividade continuava
+   * presa em agosto — so que agora sem aparecer na grade, porque o dia
+   * cinza tinha parado de desenhar. Some dos dois lados: foi o que
+   * aconteceu. `paraData` entende os tres formatos.
+   */
+  const alvo = competenciaParaData(competencia);
+  const mesAlvo = alvo ? (alvo.getFullYear() * 12 + alvo.getMonth()) : null;
+  const doMesPeloPrazo = function (a) {
+    const p = paraData(a.PRAZO);
+    if (p && mesAlvo !== null) return (p.getFullYear() * 12 + p.getMonth()) === mesAlvo;
     return normalizarCompetencia(a.COMPETENCIA) === competencia;
+  };
+
+  /*
+   * O MES JA NASCEU? Conta so atividade de ROTINA.
+   *
+   * Este teste decide se o mes precisa ser materializado a partir das
+   * ROTINAS. Ele perguntava "existe QUALQUER atividade neste mes?" — e
+   * uma unica avulsa respondia que sim. Foi o que aconteceu com outubro:
+   * havia uma AV marcada para 01/10, o mes se declarou pronto, a geracao
+   * nunca rodou e o calendario abriu com uma atividade so.
+   *
+   * Avulsa e o que o gerente acrescenta POR FORA das rotinas; ela nunca
+   * pode responder por elas. Treinamento sem data ('S00') tambem nao
+   * conta: ele e vaga, nao rotina cumprida.
+   */
+  const ehDeRotina = function (a) {
+    const t = String(a.TIPO || '').toUpperCase().trim();
+    return t && t !== 'AV';
+  };
+  const existeMes = cruas.some(function (a) {
+    return ehDeRotina(a) && doMesPeloPrazo(a);
   });
-  if (!existeMes) {
+
+  /*
+   * Mes ENCERRADO nunca gera. Sem esta guarda, abrir agosto em setembro
+   * criaria as rotinas de agosto do zero — atividades nascendo ja
+   * atrasadas, num mes que ninguem pode mais cumprir. Consulta e
+   * consulta.
+   */
+  if (!existeMes && !encerrado) {
     // So gera se ainda nao existe; quem nao programa apenas ve vazio.
-    if (competenciaParaData(competencia) && podeFazer(usuario, 'PROGRAMAR')) {
+    // gerarCompetencia pula ID que ja existe, entao rodar de novo nunca
+    // duplica nada — no pior caso nao faz coisa alguma.
+    if (dPed && podeFazer(usuario, 'PROGRAMAR')) {
       try { gerarCompetencia(competencia, usuario.email); } catch (e) { /* segue */ }
     }
   }
 
   const fonte = existeMes ? cruas : listar('ATIVIDADES');
-  const todas = fonte.filter(function (a) {
-    return normalizarCompetencia(a.COMPETENCIA) === competencia;
-  }).map(hidratar);
+  const todas = fonte.filter(doMesPeloPrazo).map(hidratar);
 
   // Cancelada some de TUDO — calendario, tabela de gestao e contagens —
   // exatamente como na planilha ("saiu do mostrador e das contagens").
-  const doMes = todas.filter(function (a) { return a.competencia === competencia; })
-                     .filter(function (a) { return a.status !== STATUS.CANCELADA; })
+  const doMes = todas.filter(function (a) { return a.status !== STATUS.CANCELADA; })
                      .filter(function (a) { return dentroDoEscopo(a, escopo); });
 
 
   doMes.sort(function (a, b) { return String(a.prazoISO).localeCompare(String(b.prazoISO)); });
 
   const base = competenciaParaData(competencia) || hoje();
+  const meses = competenciasExistentes(cruas);
 
   return {
     competencia: competencia,
-    competenciasDisponiveis: competenciasExistentes(cruas),
+    encerrado: encerrado,
+    competenciasDisponiveis: meses,
+    // Quais dos meses da tira ja se encerraram — a tira precisa saber
+    // para separar o que passou do que esta correndo.
+    competenciasEncerradas: mesesEncerrados(meses),
     grade: montarGrade(base, doMes),
     /*
      * Na planilha, treinamento nao mora na tabela GESTAO DE ATIVIDADES: ele
@@ -259,16 +350,22 @@ function dadosCalendario(usuario, params) {
      */
     atividades: doMes.filter(function (a) { return a.prazoISO && a.tipo !== 'TRE'; }),
     treinamentos: doMes.filter(function (a) { return a.tipo === 'TRE'; }),
-    canceladas: atividadesCanceladas(competencia, escopo),
-    mesPassado: (function () { const d = competenciaParaData(competencia); return d ? (d.getFullYear() * 12 + d.getMonth()) < (hoje().getFullYear() * 12 + hoje().getMonth()) : false; })(),
+    // Reaproveita a lista que ja foi hidratada acima. Antes chamava
+    // atividadesCanceladas(), que fazia listar('ATIVIDADES').map(hidratar)
+    // de novo — hidratava TODOS os meses so para pescar as canceladas de
+    // um. Era a tabela inteira processada duas vezes por abertura.
+    canceladas: atividadesCanceladas(competencia, escopo, todas),
+    // Mesmo calculo do `encerrado` la de cima — era repetido aqui em
+    // linha, e duas copias da mesma regra e uma delas esperando divergir.
+    mesPassado: encerrado,
     naoAgendadas: doMes.filter(function (a) { return !a.prazoISO && a.tipo !== 'TRE'; }),
     resumo: resumirStatus(doMes.filter(function (a) { return a.prazoISO && a.tipo !== 'TRE'; })),
     andamento: linhaAndamento(doMes.filter(function (a) { return a.prazoISO && a.tipo !== 'TRE'; })),
     porTurno: TURNOS.map(function (t) { return resumoTurno(doMes.filter(function (a) { return a.prazoISO && a.tipo !== 'TRE'; }), t); }),
     setores: listar('SETORES').filter(function (s) { return marcado(s.ATIVO); })
                               .map(function (s) { return s.SETOR; }),
-    equipe: listar('EQUIPE').filter(function (p) { return marcado(p.ATIVO) && String(p.TURNO || '').trim(); })
-                            .map(function (p) { return { turno: String(p.TURNO).toUpperCase().trim(), nome: String(p.NOME || '').trim() }; }),
+    equipe: listar('ACESSOS').filter(function (p) { return marcado(p.ATIVO) && String(p.TURNO || '').trim(); })
+                             .map(function (p) { return { turno: String(p.TURNO).toUpperCase().trim(), nome: String(p.NOME || '').trim() }; }),
     validacoes: VALIDACOES,
     permissoes: {
       entregar: podeFazer(usuario, 'ENTREGAR') || podeFazer(usuario, 'ANEXAR'),
@@ -295,6 +392,13 @@ function linhaAndamento(lista) {
 /**
  * Garante que a competencia exista. Se ja tem atividade, nao faz nada.
  * Se nao tem e a pessoa pode programar, gera das rotinas na hora.
+ *
+ * NAO E MAIS CHAMADA: dadosCalendario passou a fazer isso em linha, para
+ * aproveitar a leitura crua que ela ja tinha feito. Mantida porque e a
+ * unica forma de materializar um mes fora da tela (util no editor e para
+ * qualquer rotina futura), e removida ela seria funcionalidade a menos.
+ * Se um dia for chamada de novo, note que ela le a tabela com
+ * incluirExcluidos = true — leitura que nao passa pelo cache.
  */
 function garantirCompetencia(competencia, usuario) {
   const existe = listar('ATIVIDADES', true).some(function (a) {
@@ -319,22 +423,31 @@ function normalizarCompetencia(valor) {
   return competenciaParaData(s) ? s : s;
 }
 
+/*
+ * Os meses que a tira mostra.
+ *
+ * Esta funcao descartava tudo que ja tinha passado. O motivo declarado
+ * era nao deixar ninguem cair num mes velho cheio de "atrasadas" — mas o
+ * preco era alto demais: na virada do mes, agosto inteiro desaparecia da
+ * navegacao e nao havia mais como consultar o que a operacao entregou.
+ * Historico nao e o mesmo problema que "mes errado aberto por engano";
+ * o segundo se resolve com um aviso na tela, nao apagando o primeiro.
+ *
+ * Agora entram: os meses vencidos QUE TEM ATIVIDADE (nunca um mes vazio
+ * do passado, que so poluiria a tira), o mes atual e os seis a frente.
+ * A tela marca os vencidos como encerrados.
+ */
 function competenciasExistentes(jaLidas) {
   const vistas = {};
   const base = hoje();
-  const ordAtual = base.getFullYear() * 12 + base.getMonth();
 
-  // meses que ja tem atividade — mas SO do mes atual em diante. Meses que
-  // ja passaram nao aparecem no seletor: sem eles na navegacao, ninguem
-  // cai num mes velho cheio de "atrasadas", e os indicadores nunca mostram
-  // numero de mes vencido. E o comportamento que a gestao espera.
-  // Reaproveita a leitura que a tela ja fez — sem isso era mais uma
-  // varredura da tabela inteira a cada abertura.
+  // Meses que ja tem atividade — inclusive os que ja passaram. Reaproveita
+  // a leitura que a tela ja fez; sem isso era mais uma varredura da tabela
+  // inteira a cada abertura.
   (jaLidas || listar('ATIVIDADES', true)).forEach(function (a) {
-    const c = normalizarCompetencia(a.COMPETENCIA);
-    if (!c) return;
-    const d = competenciaParaData(c);
-    if (d && (d.getFullYear() * 12 + d.getMonth()) >= ordAtual) vistas[c] = true;
+    const prazo = paraData(a.PRAZO);
+    const c = prazo ? competenciaDe(prazo) : normalizarCompetencia(a.COMPETENCIA);
+    if (c && competenciaParaData(c)) vistas[c] = true;
   });
 
   // + janela navegavel para frente: do mes atual ate 6 meses a frente.
@@ -348,6 +461,16 @@ function competenciasExistentes(jaLidas) {
   });
 }
 
+/** Quais competencias da lista ja se encerraram (mes anterior ao atual). */
+function mesesEncerrados(lista) {
+  const base = hoje();
+  const ordAtual = base.getFullYear() * 12 + base.getMonth();
+  return (lista || []).filter(function (c) {
+    const d = competenciaParaData(c);
+    return !!d && (d.getFullYear() * 12 + d.getMonth()) < ordAtual;
+  });
+}
+
 /**
  * Cancela todas as atividades ainda pendentes de uma competencia passada.
  * Usado para "fechar" um mes que ja passou: elas somem do mostrador e das
@@ -357,14 +480,27 @@ function acaoCancelarCompetencia(usuario, params) {
   exigirCapacidade(usuario, 'VALIDAR');
   const competencia = String(params.competencia || '').trim();
   const motivo = String(params.motivo || '').trim() || 'Mes encerrado pela gestao.';
-  let n = 0;
-  listar('ATIVIDADES').map(hidratar).forEach(function (a) {
-    if (a.competencia !== competencia) return;
-    if (a.status === STATUS.CANCELADA || a.status === STATUS.APROVADA) return;
-    atualizar('ATIVIDADES', a.id, { VALIDACAO: 'Cancelada', MOTIVO: motivo, STATUS: STATUS.CANCELADA }, usuario.email);
-    n++;
+  /*
+   * DESEMPENHO: era um `atualizar()` por atividade. Cada um custa trava,
+   * leitura do cabecalho, varredura da coluna ID, escrita da linha, troca
+   * de geracao e log — umas seis idas ao Google. Com 30 atividades no mes
+   * eram ~180 chamadas, e o botao parecia travado. Agora e UMA leitura e
+   * UMA escrita, independentemente do tamanho do mes.
+   *
+   * Filtra CRU antes de hidratar: hidratar a tabela inteira so para
+   * descobrir o status de 30 linhas era trabalho jogado fora.
+   */
+  const alvos = listar('ATIVIDADES').filter(function (r) {
+    return normalizarCompetencia(r.COMPETENCIA) === competencia;
+  }).map(hidratar).filter(function (a) {
+    return a.status !== STATUS.CANCELADA && a.status !== STATUS.APROVADA;
   });
-  return { ok: true, canceladas: n };
+
+  const r = atualizarVarios('ATIVIDADES', alvos.map(function (a) {
+    return { id: a.id, campos: { VALIDACAO: 'Cancelada', MOTIVO: motivo, STATUS: STATUS.CANCELADA } };
+  }), usuario.email);
+
+  return { ok: true, canceladas: r.alterados };
 }
 
 /**
@@ -374,7 +510,7 @@ function acaoCancelarCompetencia(usuario, params) {
 function acaoReativarAtividade(usuario, params) {
   exigirCapacidade(usuario, 'VALIDAR');
   const a = obter('ATIVIDADES', params.id);
-  if (!a) throw new Error('Atividade nao encontrada.');
+  if (!a) throw new Error('Atividade não encontrada.');
   atualizar('ATIVIDADES', params.id, {
     VALIDACAO: '', MOTIVO: '',
     STATUS: statusDe(paraData(a.PRAZO), a.ENTREGUE_EM, '')
@@ -382,10 +518,50 @@ function acaoReativarAtividade(usuario, params) {
   return { ok: true };
 }
 
-/** Lista as canceladas de uma competencia — alimenta a tela de arquivo. */
-function atividadesCanceladas(competencia, escopo) {
-  return listar('ATIVIDADES').map(hidratar)
-    .filter(function (a) { return a.competencia === competencia && a.status === STATUS.CANCELADA; })
+/**
+ * Lista as canceladas de uma competencia — alimenta a tela de arquivo.
+ * `jaHidratadas` evita reprocessar a tabela quando quem chamou ja tem a
+ * lista pronta (e o caso de dadosCalendario).
+ */
+/*
+ * CONSERTO DE ROTULO.
+ *
+ * A tela ja passou a decidir o mes pela data do prazo, entao rotulo
+ * errado nao esconde mais nada. Mas a COMPETENCIA continua sendo o que o
+ * digesto, a Central e as contagens leem — deixa-la errada e guardar uma
+ * mentira no banco. Esta funcao alinha o rotulo e a semana ao prazo de
+ * cada atividade, numa gravacao em lote. Roda no botao "Atualizar dados"
+ * e na rotina diaria; nao toca em quem ja esta certo.
+ *
+ * O ID nao muda: ele nomeia a pasta dos anexos no Drive e e referencia em
+ * e-mail ja enviado. Um AGO-S35-AV-T vencendo em setembro fica com o ID
+ * de origem, como acontece na planilha.
+ */
+function corrigirCompetencias(quem) {
+  const mudancas = [];
+  listar('ATIVIDADES').forEach(function (a) {
+    const prazo = paraData(a.PRAZO);
+    if (!prazo) return;
+    const certa = competenciaDe(prazo);
+    const certaSemana = semanaISO(prazo);
+    const campos = {};
+    if (normalizarCompetencia(a.COMPETENCIA) !== certa) campos.COMPETENCIA = certa;
+    if (String(a.SEMANA || '').trim() !== certaSemana) campos.SEMANA = certaSemana;
+    if (Object.keys(campos).length) mudancas.push({ id: String(a.ID), campos: campos });
+  });
+  if (!mudancas.length) return { ok: true, corrigidas: 0 };
+  atualizarVarios('ATIVIDADES', mudancas, quem || 'sistema');
+  limparCache('ATIVIDADES');
+  return { ok: true, corrigidas: mudancas.length };
+}
+
+function atividadesCanceladas(competencia, escopo, jaHidratadas) {
+  // Quando a lista ja chega restrita ao mes (pelo prazo), refiltrar pelo
+  // rotulo so faria a cancelada mal rotulada sumir de novo.
+  const base = jaHidratadas || listar('ATIVIDADES').map(hidratar)
+    .filter(function (a) { return a.competencia === competencia; });
+  return base
+    .filter(function (a) { return a.status === STATUS.CANCELADA; })
     .filter(function (a) { return dentroDoEscopo(a, escopo); });
 }
 
@@ -407,48 +583,72 @@ function coordenadorDaLinha(r) {
   return p ? { nome: p.nome, email: p.email || emailGravado } : { nome: '', email: emailGravado };
 }
 
+/*
+ * DESEMPENHO desta funcao (ela roda uma vez por LINHA da tabela):
+ *   - coordenadorDaLinha(r) era chamado DUAS vezes (nome e e-mail),
+ *     e ele consulta o mapa da EQUIPE. Agora uma vez so.
+ *   - diaNum(hoje()) aparecia aqui e mais uma vez dentro de statusDe():
+ *     dois Utilities.formatDate por linha para descobrir sempre o mesmo
+ *     "hoje". Virou hojeNum(), calculado uma vez por execucao.
+ *   - o numero do dia do prazo passou a viajar junto (prazoNum), entao a
+ *     Central, os insights e o digesto param de recalcular a mesma coisa
+ *     em cada filtro que fazem sobre a lista.
+ */
 function hidratar(r) {
   const prazo = paraData(r.PRAZO);
+  const prazoISO = prazo ? paraISO(prazo) : '';
+  const prazoNum = prazoISO ? diaNumISO(prazoISO) : null;
   const validacao = String(r.VALIDACAO || '').trim();
   const entregue = String(r.ENTREGUE_EM || '').trim();
   // Metadado de anexo custa uma chamada ao Drive por arquivo. Na lista basta
   // a contagem; nome e tamanho so quando a atividade e aberta.
   const idsAnexos = idsDeAnexos(r.ANEXOS);
+  const coord = coordenadorDaLinha(r);
 
   return {
     id: String(r.ID || ''),
     competencia: normalizarCompetencia(r.COMPETENCIA),
     semana: String(r.SEMANA || ''),
     prazo: formatarData(prazo),
-    prazoISO: prazo ? paraISO(prazo) : '',
+    prazoISO: prazoISO,
+    prazoNum: prazoNum,
     diaSemana: prazo ? ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][prazo.getDay()] : '',
     atividade: String(r.ATIVIDADE || '').trim(),
     tipo: String(r.TIPO || '').toUpperCase().trim(),
     turno: String(r.TURNO || '').trim(),
-    coordenador: coordenadorDaLinha(r).nome,
-    coordenadorEmail: coordenadorDaLinha(r).email,
+    coordenador: coord.nome,
+    coordenadorEmail: coord.email,
     setor: String(r.SETOR || '').trim(),
     anexos: idsAnexos,
     qtdAnexos: idsAnexos.length,
-    anexoUrl: String(r.ANEXOS || '').trim(),   // link direto do PDF da entrega
+    // Link direto da entrega. A coluna pode trazer URL (entrega em PDF) ou
+    // IDs do Drive (anexo avulso); urlDeAnexo() resolve os dois.
+    anexoUrl: urlDeAnexo(r.ANEXOS),
     entregue: !!entregue,
     entregueEm: entregue,
     validacao: validacao,
     motivo: String(r.MOTIVO || '').trim(),
-    status: statusDe(prazo, entregue, validacao),
-    diasAtraso: (prazo && !entregue && !validacao) ? Math.max(0, diaNum(hoje()) - diaNum(prazo)) : 0,
+    status: statusDe(prazoISO, entregue, validacao),
+    diasAtraso: (prazoNum !== null && !entregue && !validacao)
+      ? Math.max(0, hojeNum() - prazoNum) : 0,
     criadoPor: String(r.CRIADO_POR || '').toLowerCase().trim()
   };
 }
 
-/** O status nunca e digitado: e consequencia dos fatos da linha. */
+/*
+ * O status nunca e digitado: e consequencia dos fatos da linha.
+ * Aceita o prazo como Date (chamadas antigas) ou como texto aaaa-mm-dd
+ * (caminho novo, sem nenhum Utilities.formatDate).
+ */
 function statusDe(prazo, entregueEm, validacao) {
   if (validacao === 'Aprovado') return STATUS.APROVADA;
   if (validacao === 'Reprovado') return STATUS.REPROVADA;
   if (validacao === 'Cancelada') return STATUS.CANCELADA;
   if (entregueEm) return STATUS.AGUARDANDO;
   if (!prazo) return STATUS.NAO_AGENDADO;
-  return (diaNum(prazo) < diaNum(hoje())) ? STATUS.ATRASADA : STATUS.PENDENTE;
+  const dia = (prazo instanceof Date) ? diaNumISO(paraISO(prazo)) : diaNumISO(prazo);
+  if (isNaN(dia)) return STATUS.NAO_AGENDADO;
+  return (dia < hojeNum()) ? STATUS.ATRASADA : STATUS.PENDENTE;
 }
 
 /** Grade do mes, domingo a sabado, como o calendario visual da planilha. */
@@ -470,14 +670,21 @@ function montarGrade(base, atividades) {
     for (let d = 0; d < 7; d++) {
       const data = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + s * 7 + d);
       const iso = paraISO(data);
-      const doDia = porDia[iso] || [];
+      const desteMes = data.getMonth() === mes;
+      /*
+       * Dia cinza (sobra da semana que atravessa o mes) nao carrega mais
+       * atividade. Ele mostrava o compromisso do mes vizinho como se
+       * fosse deste, e a mesma atividade parecia existir em agosto e nao
+       * existir em setembro.
+       */
+      const doDia = desteMes ? (porDia[iso] || []) : [];
       /*
        * As cores do calendario da planilha, na mesma ordem de precedencia:
        * amarelo = hoje · vermelho = dia com atraso · azul = dia com prazo ·
        * verde = reuniao com a gerencia (o marco da semana).
        */
       dias.push({
-        iso: iso, dia: data.getDate(), doMes: data.getMonth() === mes,
+        iso: iso, dia: data.getDate(), doMes: desteMes,
         hoje: iso === hojeIso,
         temPrazo: doDia.length > 0,
         temAtraso: doDia.some(function (a) { return a.status === STATUS.ATRASADA; }),
@@ -582,20 +789,58 @@ function dentroDoEscopo(a, escopo) {
 /* ACOES                                                               */
 /* ------------------------------------------------------------------ */
 
+/*
+ * DEPOIS DE GRAVAR, NAO RELEIA.
+ *
+ * Toda acao fazia `atualizar(...)` e logo em seguida
+ * `hidratar(obter('ATIVIDADES', id))` so para montar o e-mail. Mas
+ * `atualizar` chama `limparCache`, que chama `esquecerLeituras()`: aquele
+ * `obter` relia a aba ATIVIDADES INTEIRA — uma leitura completa da tabela
+ * por clique de botao. Como sabemos exatamente quais campos mudaram,
+ * basta aplica-los sobre o registro que ja tinhamos em maos.
+ */
+function comCampos_(registro, campos) {
+  const copia = {};
+  Object.keys(registro || {}).forEach(function (k) { copia[k] = registro[k]; });
+  Object.keys(campos || {}).forEach(function (k) { copia[k.toUpperCase()] = campos[k]; });
+  return copia;
+}
+
 /** Coordenador anexa a entrega. Carimba a hora e avisa a gestao. */
 function acaoEntregar(usuario, params) {
   garantirAlcance(usuario, params.id);
   const antes = obter('ATIVIDADES', params.id);
-  if (!antes) throw new Error('Atividade nao encontrada.');
+  if (!antes) throw new Error('Atividade não encontrada.');
 
   const resultado = anexarArquivo(usuario, 'ATIVIDADES', params.id, params.arquivo);
 
   const jaEntregue = String(antes.ENTREGUE_EM || '').trim();
   if (!jaEntregue) {
-    atualizar('ATIVIDADES', params.id, {
-      ENTREGUE_EM: agoraTexto(), STATUS: STATUS.AGUARDANDO
-    }, usuario.email);
-    avisarEntregaRecebida(hidratar(obter('ATIVIDADES', params.id)), usuario);
+    const campos = { ENTREGUE_EM: agoraTexto(), STATUS: STATUS.AGUARDANDO };
+    atualizar('ATIVIDADES', params.id, campos, usuario.email);
+
+    // Copia em memoria do registro ja atualizado, para montar o aviso sem
+    // reler a tabela. A coluna ANEXOS foi gravada pelo anexarArquivo acima,
+    // que devolve a lista nova — por isso ela entra aqui, e nao no
+    // `campos` (que ja foi gravado).
+    const depois = comCampos_(antes, campos);
+    if (resultado && resultado.anexosDoRegistro !== undefined) {
+      depois.ANEXOS = resultado.anexosDoRegistro;
+    }
+    /*
+     * O aviso NAO pode derrubar uma entrega ja gravada. enviar() passou a
+     * lancar excecao quando o e-mail falha (mudanca deliberada, para o
+     * erro nao morrer no log) — mas aqui a atividade ja esta carimbada
+     * como entregue. Sem este try, a pessoa via um erro e reenviava o
+     * arquivo. A rota de entrega em PDF ja se protegia assim; agora as
+     * duas se comportam igual, e a falha volta como aviso, nao como erro.
+     */
+    try {
+      avisarEntregaRecebida(hidratar(depois), usuario);
+    } catch (e) {
+      resultado.avisoEmail = 'A entrega foi gravada, mas o e-mail para a gestao nao saiu: ' +
+                             (e.message || e);
+    }
   }
   return resultado;
 }
@@ -603,37 +848,56 @@ function acaoEntregar(usuario, params) {
 /** Gerente aprova, reprova ou cancela. O e-mail sai com o motivo junto. */
 function acaoValidar(usuario, params) {
   const validacao = String(params.validacao || '').trim();
+
+  /*
+   * Antes esta funcao chamava obter() ate QUATRO vezes — duas delas na
+   * mesma expressao — e sem checar nulo: um ID inexistente estourava em
+   * "Cannot read properties of null". Agora le uma vez, valida, e monta o
+   * registro atualizado em memoria (sem a releitura completa da tabela
+   * que o obter() pos-gravacao provocava).
+   */
+  const antes = obter('ATIVIDADES', params.id);
+  if (!antes) throw new Error('Atividade não encontrada.');
+  const prazoAtual = paraData(antes.PRAZO);
+  const entregueAtual = antes.ENTREGUE_EM;
+
   // vazio = reabrir: limpa validacao e motivo, status volta a ser calculado
   if (validacao === '') {
     atualizar('ATIVIDADES', params.id, {
       VALIDACAO: '', MOTIVO: '',
-      STATUS: statusDe(paraData(obter('ATIVIDADES', params.id).PRAZO),
-                       obter('ATIVIDADES', params.id).ENTREGUE_EM, '')
+      STATUS: statusDe(prazoAtual, entregueAtual, '')
     }, usuario.email);
     return { ok: true, reaberta: true };
   }
-  if (VALIDACOES.indexOf(validacao) === -1) throw new Error('Validacao invalida.');
+  if (VALIDACOES.indexOf(validacao) === -1) throw new Error('Validação invalida.');
 
   const motivo = String(params.motivo || '').trim();
   if (validacao === 'Reprovado' && !motivo) {
-    throw new Error('Reprovacao exige motivo: e ele que o coordenador recebe no e-mail.');
+    throw new Error('Reprovação exige motivo: e ele que o coordenador recebe no e-mail.');
   }
 
-  atualizar('ATIVIDADES', params.id, {
+  const campos = {
     VALIDACAO: validacao, MOTIVO: motivo,
-    STATUS: statusDe(paraData(obter('ATIVIDADES', params.id).PRAZO),
-                     obter('ATIVIDADES', params.id).ENTREGUE_EM, validacao)
-  }, usuario.email);
+    STATUS: statusDe(prazoAtual, entregueAtual, validacao)
+  };
+  atualizar('ATIVIDADES', params.id, campos, usuario.email);
 
-  try { avisarValidacao(hidratar(obter('ATIVIDADES', params.id)), validacao, usuario); } catch (e) {}
-  return { ok: true };
+  let avisoEmail = '';
+  try { avisarValidacao(hidratar(comCampos_(antes, campos)), validacao, usuario); }
+  catch (e) { avisoEmail = 'Validacao gravada, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  return { ok: true, avisoEmail: avisoEmail };
 }
 
 /** Gerente define o setor da vistoria — o coordenador e avisado na hora. */
 function acaoDefinirSetor(usuario, params) {
-  atualizar('ATIVIDADES', params.id, { SETOR: String(params.setor || '').trim() }, usuario.email);
-  try { avisarSetorDefinido(hidratar(obter('ATIVIDADES', params.id))); } catch (e) {}
-  return { ok: true };
+  const antes = obter('ATIVIDADES', params.id);
+  if (!antes) throw new Error('Atividade não encontrada.');
+  const campos = { SETOR: String(params.setor || '').trim() };
+  atualizar('ATIVIDADES', params.id, campos, usuario.email);
+  let avisoEmail = '';
+  try { avisarSetorDefinido(hidratar(comCampos_(antes, campos))); }
+  catch (e) { avisoEmail = 'Setor gravado, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  return { ok: true, avisoEmail: avisoEmail };
 }
 
 /** Remarcacao com motivo — equivalente ao aplicarRemarcacao da planilha. */
@@ -641,18 +905,32 @@ function acaoRemarcar(usuario, params) {
   const nova = paraData(params.prazo);
   if (!nova) throw new Error('Informe a nova data.');
   const motivo = String(params.motivo || '').trim();
-  if (!motivo) throw new Error('Remarcacao exige motivo.');
+  if (!motivo) throw new Error('Remarcação exige motivo.');
 
   const antes = obter('ATIVIDADES', params.id);
+  if (!antes) throw new Error('Atividade não encontrada.');
   const prazoAntigo = formatarData(paraData(antes.PRAZO));
+  let avisoEmail = '';
 
-  atualizar('ATIVIDADES', params.id, {
-    PRAZO: paraISO(nova), SEMANA: semanaISO(nova),
+  const campos = {
+    /*
+     * A COMPETENCIA acompanha a data nova. Sem isso, remarcar de 28/08
+     * para 03/09 deixava a atividade com competencia AGO: sumia do
+     * calendario de setembro e nao encaixava em nenhum dia de agosto.
+     */
+    PRAZO: paraISO(nova), SEMANA: semanaISO(nova), COMPETENCIA: competenciaDe(nova),
+    // Remarcar reabre o prazo: o status tem que ser recalculado, senao a
+    // linha continua "Atrasada" mesmo com a data nova la na frente.
+    STATUS: statusDe(nova, antes.ENTREGUE_EM, String(antes.VALIDACAO || '').trim()),
     MOTIVO: ('Remarcada de ' + prazoAntigo + ' para ' + formatarData(nova) + ': ' + motivo)
-  }, usuario.email);
+  };
+  atualizar('ATIVIDADES', params.id, campos, usuario.email);
 
-  if (params.avisar !== false) { try { avisarRemarcacao(hidratar(obter('ATIVIDADES', params.id)), prazoAntigo, motivo); } catch (e) {} }
-  return { ok: true };
+  if (params.avisar !== false) {
+    try { avisarRemarcacao(hidratar(comCampos_(antes, campos)), prazoAntigo, motivo); }
+    catch (e) { avisoEmail = 'Prazo remarcado, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  }
+  return { ok: true, avisoEmail: avisoEmail };
 }
 
 /**
@@ -663,14 +941,15 @@ function acaoRemarcar(usuario, params) {
 function acaoCancelarAtividade(usuario, params) {
   const motivo = String(params.motivo || '').trim() || 'Cancelada pela gestao.';
   const a = obter('ATIVIDADES', params.id);
-  if (!a) throw new Error('Atividade nao encontrada.');
+  if (!a) throw new Error('Atividade não encontrada.');
 
-  atualizar('ATIVIDADES', params.id, {
-    VALIDACAO: 'Cancelada', MOTIVO: motivo, STATUS: STATUS.CANCELADA
-  }, usuario.email);
+  const campos = { VALIDACAO: 'Cancelada', MOTIVO: motivo, STATUS: STATUS.CANCELADA };
+  atualizar('ATIVIDADES', params.id, campos, usuario.email);
 
-  try { avisarValidacao(hidratar(obter('ATIVIDADES', params.id)), 'Cancelada', usuario); } catch (e) {}
-  return { ok: true };
+  let avisoEmail = '';
+  try { avisarValidacao(hidratar(comCampos_(a, campos)), 'Cancelada', usuario); }
+  catch (e) { avisoEmail = 'Cancelamento gravado, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  return { ok: true, avisoEmail: avisoEmail };
 }
 
 /**
@@ -701,16 +980,36 @@ function acaoCriarAtividade(usuario, params) {
     ? { nome: 'Gerencia + coordenadores', email: '' }
     : (equipe[turno] || { nome: '', email: '' });
 
-  inserir('ATIVIDADES', {
+  const nova = {
     ID: id, COMPETENCIA: competencia, SEMANA: semana, PRAZO: paraISO(data),
     ATIVIDADE: atividade, TIPO: 'AV', TURNO: turno,
     COORDENADOR: pessoa.nome, COORDENADOR_EMAIL: pessoa.email,
     SETOR: String(params.setor || '').trim(),
     ANEXOS: '', ENTREGUE_EM: '', VALIDACAO: '', MOTIVO: '', STATUS: STATUS.PENDENTE
-  }, usuario.email);
+  };
+  inserir('ATIVIDADES', nova, usuario.email);
 
-  try { avisarNovaAtividade(hidratar(obter('ATIVIDADES', id))); } catch (e) {}
-  return { ok: true, id: id };
+  // O registro acabou de ser montado aqui: nao ha por que reler a tabela
+  // inteira so para hidrata-lo.
+  /*
+   * O aviso nao pode derrubar a atividade ja criada — mas TAMBEM nao pode
+   * sumir em silencio. Antes o catch vazio escondia a falha: a atividade
+   * nascia, o e-mail nao saia, e ninguem ficava sabendo. Agora o motivo
+   * volta como aviso e a tela mostra.
+   */
+  let avisoEmail = '', avisados = [];
+  try { avisados = avisarNovaAtividade(hidratar(nova)) || []; }
+  catch (e) { avisoEmail = 'Atividade criada, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+
+  /*
+   * A tela dizia sempre "Atividade criada — coordenador avisado", tendo
+   * o e-mail saido ou nao. Agora ela repete os enderecos que receberam:
+   * da para conferir na hora se o aviso foi para quem devia.
+   */
+  const recado = avisados.length
+    ? 'Atividade criada — aviso enviado para ' + avisados.join(', ')
+    : 'Atividade criada.';
+  return { ok: true, id: id, avisoEmail: avisoEmail, recado: recado, avisados: avisados };
 }
 
 /** Gerente agenda um treinamento que estava como "Nao agendado". */
@@ -718,9 +1017,12 @@ function acaoAgendarTreinamento(usuario, params) {
   const data = paraData(params.prazo);
   if (!data) throw new Error('Informe a data do treinamento.');
 
+  const antes = obter('ATIVIDADES', params.id);
+  if (!antes) throw new Error('Atividade não encontrada.');
+
   const campos = {
     PRAZO: paraISO(data), SEMANA: semanaISO(data),
-    ATIVIDADE: String(params.atividade || '').trim() || obter('ATIVIDADES', params.id).ATIVIDADE,
+    ATIVIDADE: String(params.atividade || '').trim() || antes.ATIVIDADE,
     STATUS: STATUS.PENDENTE
   };
   // Na planilha o gerente escolhe de qual turno e o treinamento; "Todos"
@@ -728,8 +1030,11 @@ function acaoAgendarTreinamento(usuario, params) {
   if (params.turno) campos.TURNO = String(params.turno).trim();
   atualizar('ATIVIDADES', params.id, campos, usuario.email);
 
-  avisarTreinamento(hidratar(obter('ATIVIDADES', params.id)));
-  return { ok: true };
+  // O aviso nao pode desfazer um agendamento ja gravado.
+  const resposta = { ok: true };
+  try { avisarTreinamento(hidratar(comCampos_(antes, campos))); }
+  catch (e) { resposta.avisoEmail = 'Treinamento agendado, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  return resposta;
 }
 
 /*
@@ -743,7 +1048,7 @@ function acaoAgendarTreinamento(usuario, params) {
 function acaoDetalhesAtividade(usuario, params) {
   garantirAlcance(usuario, params.id);
   const r = obter('ATIVIDADES', params.id);
-  if (!r) throw new Error('Atividade nao encontrada.');
+  if (!r) throw new Error('Atividade não encontrada.');
   return { id: params.id, anexos: listarAnexos(r.ANEXOS) };
 }
 
@@ -756,7 +1061,7 @@ function garantirAlcance(usuario, id) {
   const escopo = escopoDe(usuario);
   if (escopo.tipo === 'TODOS') return;
   const registro = obter('ATIVIDADES', id);
-  if (!registro) throw new Error('Atividade nao encontrada.');
+  if (!registro) throw new Error('Atividade não encontrada.');
   if (dentroDoEscopo(hidratar(registro), escopo)) return;
-  throw new Error('Esta atividade nao esta no seu alcance.');
+  throw new Error('Esta atividade não esta no seu alcance.');
 }

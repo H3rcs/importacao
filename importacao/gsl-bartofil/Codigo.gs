@@ -71,8 +71,6 @@ const ACOES = {
   restaurarPerfis:     { capacidade: 'GERIR_ACESSOS', funcao: 'acaoRestaurarPerfis' },
 
   // configuracao
-  salvarPessoa:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarPessoa' },
-  excluirPessoa:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirPessoa' },
   salvarSetor:         { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarSetor' },
   excluirSetor:        { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirSetor' },
   salvarRotina:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarRotina' },
@@ -91,14 +89,22 @@ const ACOES = {
   excluirDePara:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirDePara' },
   reclassificar:       { capacidade: 'PROGRAMAR',     funcao: 'acaoReclassificar' },
   fichaColaborador:    { capacidade: 'VER_INDIVIDUAL', funcao: 'acaoFichaColaborador' },
-  ranking:             { capacidade: 'VER_INDIVIDUAL', funcao: 'acaoRanking' },
-  periodo:             { capacidade: 'VER_INDIVIDUAL', funcao: 'acaoPeriodo' },
-  analise:             { capacidade: 'VER_INDIVIDUAL', funcao: 'dadosAnalise' },
+  // A aba COLABORADORES le do AGR_COLAB sob demanda — a lista nao cabia
+  // no payload do painel (limite de 50 mil caracteres por celula) e era
+  // por isso que a aba nao carregava.
+  colaboradores:       { capacidade: null,            funcao: 'acaoColaboradores' },
+  periodo:             { capacidade: null,            funcao: 'acaoPeriodo' },
+  atualizarRH:         { capacidade: 'PROGRAMAR',     funcao: 'acaoAtualizarRH' },
+  diagnosticoRH:       { capacidade: null,            funcao: 'acaoDiagnosticoRH' },
+  restaurarDePara:     { capacidade: 'PROGRAMAR',     funcao: 'acaoRestaurarDePara' },
 
-  // acessos
+  // pessoas e acessos
   salvarUsuario:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoSalvarUsuario' },
   excluirUsuario:      { capacidade: 'GERIR_ACESSOS', funcao: 'acaoExcluirUsuario' },
   alterarPermissao:    { capacidade: 'GERIR_ACESSOS', funcao: 'acaoAlterarPermissao' },
+  aprovarAcesso:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoAprovarAcesso' },
+  recusarAcesso:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoRecusarAcesso' },
+  alternarAtivo:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoAlternarAtivo' },
 
   // gerais
   atualizarDados:      { capacidade: null,            funcao: 'acaoAtualizarDados' },
@@ -152,8 +158,9 @@ function montarBootstrapDoZero() {
       app: APP,
       aguardando: telas.length === 0,
       usuario: {
-        nome: u.nome, email: u.email, perfil: u.perfil, turno: u.turno,
-        cadastrado: u.cadastrado, escopo: descreverEscopo(u), podes: u.permissoes.podes
+        nome: u.nome, email: u.email, papel: u.papel || '', perfil: u.perfil, turno: u.turno,
+        situacao: u.situacao || '', cadastrado: u.cadastrado,
+        escopo: descreverEscopo(u), podes: u.permissoes.podes
       },
       telas: telas,
       modulos: modulosDe(u),
@@ -290,12 +297,12 @@ function executarAcao(emailUsuario, nomeAcao, params) {
   if (emailUsuario) definirEmailAtual(emailUsuario);
   const usuario = usuarioAtual();
   const acao = ACOES[nomeAcao];
-  if (!acao) throw new Error('Acao desconhecida: ' + nomeAcao);
+  if (!acao) throw new Error('Ação desconhecida: ' + nomeAcao);
   if (acao.capacidade) exigirCapacidade(usuario, acao.capacidade);
 
   const executor = globalThis[acao.funcao];
   if (typeof executor !== 'function') {
-    throw new Error('A acao "' + nomeAcao + '" aponta para ' + acao.funcao + ', que nao existe.');
+    throw new Error('A ação "' + nomeAcao + '" aponta para ' + acao.funcao + ', que nao existe.');
   }
   return JSON.stringify(executor(usuario, params || {}) || { ok: true });
 }
@@ -314,15 +321,25 @@ function identificar(email) {
   }
   definirEmailAtual(alvo);
   try {
+    /*
+     * E-mail que nao esta no cadastro NAO e mais registrado em silencio.
+     * A resposta pede o formulario de pedido, e quem decide pedir e a
+     * pessoa. Antes ela era cadastrada sozinha como PENDENTE e caia numa
+     * tela de espera sem ter pedido nada.
+     */
+    if (!buscarAcesso(alvo)) {
+      return JSON.stringify({ ok: false, semCadastro: true,
+        motivo: 'Este e-mail ainda não tem acesso. Peça a liberação abaixo.' });
+    }
     const b = montarBootstrapDoZero();
     if (!b.ok) return JSON.stringify(b);
     if (b.aguardando) {
       return JSON.stringify({ ok: false, aguardando: true,
-        motivo: 'Seu acesso ainda nao foi liberado pelo administrador.' });
+        motivo: 'Seu pedido está na fila do administrador. Você recebe um e-mail assim que ele liberar.' });
     }
     if (!b.telas || !b.telas.length) {
       return JSON.stringify({ ok: false,
-        motivo: 'Este e-mail nao tem acesso liberado. Fale com o administrador.' });
+        motivo: 'Este e-mail não tem nenhuma tela liberada. Fale com o administrador.' });
     }
     if (b.instalado && b.telas.length) {
       b.primeiraTela = JSON.parse(carregarTela(alvo, b.telas[0].id, {}));
@@ -349,8 +366,15 @@ function salvarTema(tema) {
 /* --- Acoes gerais --- */
 
 function acaoAtualizarDados() {
+  // Aproveita a varrida para alinhar rotulo de mes e semana ao prazo de
+  // cada atividade. Uma linha remarcada por uma versao antiga ficou com
+  // COMPETENCIA de agosto e prazo em setembro; e aqui que ela se acerta.
+  let corrigidas = 0;
+  try { corrigidas = (corrigirCompetencias('atualizar dados') || {}).corrigidas || 0; } catch (e) {}
   limparCache();
-  return { ok: true };
+  return { ok: true, recado: corrigidas
+    ? 'Dados atualizados — ' + corrigidas + ' atividade(s) tiveram o mês corrigido pela data do prazo.'
+    : '' };
 }
 
 function acaoLigarGatilhos(usuario) { return instalarGatilhos(); }
@@ -363,10 +387,25 @@ function acaoEnviarDigesto(usuario) {
 
 /* dadosInicio vive no Central.gs · dadosConfig no Config.gs */
 
-function dadosAcessos(usuario) {
+/*
+ * TELA "PESSOAS E ACESSOS" — uma so.
+ *
+ * Substituiu as duas que existiam: o cartao "Equipe" da Configuracao
+ * (com o botao "Nova pessoa") e a tela "Acessos" (com o botao "Novo
+ * usuario"). Eram as mesmas pessoas em dois cadastros que nao
+ * conversavam — dava para ter o Gerente cadastrado como COORDENADOR sem
+ * ninguem notar, e era exatamente o que estava acontecendo.
+ */
+function dadosPessoas(usuario) {
   exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const perfis = carregarPerfis();
+  const pessoas = listarPessoas();
+
   return {
+    // Os pedidos vem primeiro: sao o que exige decisao.
+    pedidos: pessoas.filter(function (p) { return p.situacao === 'PENDENTE'; }),
+    pessoas: pessoas.filter(function (p) { return p.situacao !== 'PENDENTE'; }),
+    niveis: Object.keys(perfis).filter(function (n) { return n !== PERFIL_PADRAO_NOVO_USUARIO; }).sort(),
     telas: TELAS.map(function (t) { return { id: t.id, nome: t.nome }; }),
     capacidades: CAPACIDADES,
     perfis: Object.keys(perfis).map(function (nome) {
@@ -375,12 +414,14 @@ function dadosAcessos(usuario) {
         descricao: perfis[nome].descricao, telas: perfis[nome].telas, podes: perfis[nome].podes
       };
     }),
-    usuarios: listarAcessos().filter(function (u) { return !u.pendente; }),
-    pendentes: listarAcessos().filter(function (u) { return u.pendente; }),
-    turnos: ['ADM', 'A', 'B', 'C'],
-    rh: estadoInstalacao()
+    turnos: ['ADM', 'A', 'B', 'C', 'J', 'BC'],
+    escopos: ESCOPOS,
+    eu: usuario.email
   };
 }
+
+/* Nome antigo — alguma chamada solta pode ainda existir. */
+function dadosAcessos(usuario) { return dadosPessoas(usuario); }
 
 /** Download de anexo: o front pede, o servidor devolve os bytes. */
 function obterAnexo(idArquivo) {
@@ -422,11 +463,14 @@ function diagnostico() {
   });
 
   const u = usuarioAtual();
+  // carregarTela virou (email, idTela, params). Aqui chamava (id, params):
+  // o id de tela entrava como e-mail e a funcao morria em "Tela
+  // desconhecida: [object Object]" — a propria medicao nao rodava.
   telasDe(u).forEach(function (t) {
     const chave = chaveDeTela(t.id, u, {});
     CacheService.getScriptCache().remove(chave);
-    relogio('montar tela ' + t.id, function () { return carregarTela(t.id, {}); });
-    relogio('tela ' + t.id + ' (do cache)', function () { return carregarTela(t.id, {}); });
+    relogio('montar tela ' + t.id, function () { return carregarTela(u.email, t.id, {}); });
+    relogio('tela ' + t.id + ' (do cache)', function () { return carregarTela(u.email, t.id, {}); });
   });
 
   Logger.log('=== fim ===');

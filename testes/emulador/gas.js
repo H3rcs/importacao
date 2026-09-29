@@ -173,7 +173,7 @@ class Mundo {
   novaPlanilha(nome, linhas, colunas) {
     const arq = this.novoArquivo(nome, 'application/vnd.google-apps.spreadsheet', Buffer.alloc(0));
     const p = new Planilha(this, arq.id, nome);
-    p.abas.push(new Aba(p, 'Página1', linhas || 1000, colunas || 26));
+    p.abas.push(new Aba(p, 'Página1', linhas || 1000, colunas || this.opcoes.colunasPadrao || 26));
     this.planilhas.set(arq.id, p);
     return p;
   }
@@ -390,7 +390,7 @@ function fazerPlanilha(p) {
       if (typeof nome === 'number') { indice = nome; n = null; }
       if (!n) { let k = p.abas.length + 1; while (p.abas.some((a) => a.nome === 'Página' + k)) k++; n = 'Página' + k; }
       if (p.abas.some((a) => a.nome === n)) throw erroGAS('A sheet with the name "' + n + '" already exists. Please enter another name.');
-      const a = new Aba(p, n, 1000, 26);
+      const a = new Aba(p, n, 1000, m.opcoes.colunasPadrao || 26);
       if (typeof indice === 'number') p.abas.splice(indice, 0, a); else p.abas.push(a);
       return fazerAba(a);
     },

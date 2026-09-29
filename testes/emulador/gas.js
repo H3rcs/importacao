@@ -323,14 +323,32 @@ function fazerAba(aba) {
     getLastColumn() { m.chamadasPlanilha++; return aba.ultimaColuna(); },
     getMaxRows() { return aba.maxL; },
     getMaxColumns() { return aba.maxC; },
-    insertRowsAfter(depois, n) { aba.dados.splice(depois, 0, ...Array.from({ length: n }, () => undefined)); aba.maxL += n; return self; },
+    insertRowsAfter(depois, n) {
+      aba.dados.splice(depois, 0, ...Array.from({ length: n }, () => undefined)); aba.maxL += n;
+      // formato das celulas: as linhas de baixo descem; as novas herdam o da linha de cima
+      const novo = new Map();
+      aba.formatos.forEach((f, k) => {
+        const [l, c] = k.split(',').map(Number);
+        novo.set((l >= depois ? l + n : l) + ',' + c, f);
+        if (l === depois - 1) for (let i = 0; i < n; i++) novo.set((depois + i) + ',' + c, f);
+      });
+      aba.formatos = novo;
+      return self;
+    },
     insertRowsBefore(antes, n) { return self.insertRowsAfter(antes - 1, n); },
     insertRows(antes, n) { return self.insertRowsAfter(antes - 1, n || 1); },
     insertColumnsAfter(depois, n) { aba.dados.forEach((r) => { if (r) r.splice(depois, 0, ...Array(n).fill('')); }); aba.maxC += n; return self; },
     deleteRows(ini, n) {
       if (ini < 1 || ini + n - 1 > aba.maxL) throw erroGAS('Those rows are out of bounds.');
       if (n >= aba.maxL - aba.congeladas && aba.maxL - n < 1) throw erroGAS('Sorry, it is not possible to delete all non-frozen rows.');
-      aba.dados.splice(ini - 1, n); aba.maxL -= n; return self;
+      aba.dados.splice(ini - 1, n); aba.maxL -= n;
+      const novo = new Map();
+      aba.formatos.forEach((f, k) => {
+        const [l, c] = k.split(',').map(Number);
+        if (l < ini - 1) novo.set(k, f); else if (l >= ini - 1 + n) novo.set((l - n) + ',' + c, f);
+      });
+      aba.formatos = novo;
+      return self;
     },
     deleteRow(l) { return self.deleteRows(l, 1); },
     deleteColumns(ini, n) { aba.dados.forEach((r) => { if (r) r.splice(ini - 1, n); }); aba.maxC -= n; return self; },

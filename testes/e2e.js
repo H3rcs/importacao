@@ -14,6 +14,7 @@ const path = require('path');
 let playwright;
 try { playwright = require('playwright'); } catch (e) { playwright = require('/opt/node22/lib/node_modules/playwright'); }
 const { criarServidor } = require('./emulador/servidor.js');
+const { folhaRH } = require('./emulador/folha-rh.js');
 
 const PASTA = path.resolve(process.argv[2] || path.join(__dirname, '..', 'GSL'));
 const FILTRO = process.argv[3] || '';
@@ -46,6 +47,34 @@ function instalarComPessoas(s) {
   ctx.acaoSalvarUsuario(admin, { email: COORD, nome: 'Maria Souza', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenadora' });
   ctx.acaoSalvarUsuario(admin, { email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
 }
+
+/*
+ * ASSIDUIDADE — duas competencias do RH com folhas que se SOBREPOEM
+ * (setembro comeca em 18/08: 18, 19 e 20/08 estao nas duas) e a mesma
+ * falta de 19/08 lancada nas duas. Agosto e importado duas vezes.
+ * Tudo pelas portas publicas (entrar -> executarAcao), como a tela faz.
+ */
+function prepararAssiduidade(s) {
+  const run = (fn, ...a) => { const r = s.chamar(DONO, fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.erro.message); return r.valor; };
+  const e = JSON.parse(run('entrar', DONO, '4321', '4321', ''));
+  afirmar(e.entrada === 'APP', 'dono entrou: ' + JSON.stringify(e).slice(0, 200));
+  const ctx = { t: e.token, f: e.filial.codigo };
+  const acao = (nome, p) => { const x = JSON.parse(run('executarAcao', ctx, nome, p || {})); if (x && x.ok === false) throw new Error(nome + ': ' + x.erro); return x.dados !== undefined ? x.dados : x; };
+  const pessoas = [
+    { mat: '100234', nome: 'ANA SOUZA', turno: 'A', dias: { '2025-08-05': '16', '2025-08-06': '1', '2025-08-19': '16' } },
+    { mat: '100555', nome: 'BRUNO LIMA', turno: 'B', dias: { '2025-08-12': '28', '2025-08-19': '1', '2025-08-25': '16' } }
+  ];
+  const agosto = folhaRH(s.mundo, 'Folha 2025-08', { inicio: [2025, 7, 21], dias: 31, pessoas });
+  const setembro = folhaRH(s.mundo, 'Folha 2025-09', { inicio: [2025, 8, 18], dias: 34, pessoas, matComoNumero: true });
+  const a = acao('salvarArquivoRH', { competencia: '2025-08', link: agosto, aba: 'FOLHA DE PONTO' });
+  const b = acao('salvarArquivoRH', { competencia: '09/2025', link: setembro, aba: 'FOLHA DE PONTO' });
+  acao('importarCompetencia', { id: a.id });
+  acao('importarCompetencia', { id: b.id });
+  acao('importarCompetencia', { id: a.id });              // reimportar nao pode duplicar
+  return { acao };
+}
+
+function repetidas(lista) { return lista.filter((d, i) => lista.indexOf(d) !== i); }
 
 /* Uma "aba" com uma conta Google. Devolve page e o frame do GSL. */
 async function abrirAba(s, conta, extras) {
@@ -268,6 +297,46 @@ async function rodar() {
     await aba.page.waitForTimeout(800);
     afirmar(await esperarTela(aba, ['entrar', 'sem-acesso', 'falha']) === 'entrar', 'voltou para a entrada');
     afirmar(!s.registro.some((r) => r.tipo === 'moldura-recarregada'), 'nao recarregou so a moldura');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('assiduidade > periodo: folhas sobrepostas e reimportacao nao repetem datas (servidor)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const { acao } = prepararAssiduidade(s);
+    const r = acao('periodo', { de: '2025-08-01', ate: '2025-08-31', tipo: 'TODAS', turno: '' });
+    afirmar(r.registros === 6, 'seis ausencias em agosto (3 de cada), veio ' + r.registros);
+    r.lista.forEach((p) => {
+      const d = p.datas.map((x) => x.data);
+      afirmar(!repetidas(d).length, p.nome + ' com data repetida: ' + d.join(', '));
+      afirmar(p.registros === d.length, p.nome + ': registros (' + p.registros + ') = datas (' + d.length + ')');
+    });
+    const ana = r.lista.find((p) => p.nome === 'ANA SOUZA');
+    afirmar(ana && ana.datas.map((x) => x.data).join(',') === '05/08/2025,06/08/2025,19/08/2025', 'datas da Ana: ' + (ana && ana.datas.map((x) => x.data).join(',')));
+    const dias = (r.linhaDoTempo || []).map((x) => x.data);
+    afirmar(dias.length === 31 && !repetidas(dias).length, 'linha do tempo com 31 dias sem repetir');
+    afirmar((r.linhaDoTempo.find((x) => x.data === '2025-08-19') || {}).total === 2, 'dia 19/08 conta 2 (uma de cada pessoa)');
+    await s.fechar();
+  });
+
+  await cenario('assiduidade > periodo: a tela mostra cada data uma vez so (Chromium)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    prepararAssiduidade(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => abrir('assiduidade'));
+    await f.waitForSelector('.abas .aba', { timeout: 15000 });
+    await f.click('.abas .aba:has-text("Período")');
+    await f.waitForSelector('#pd-de', { timeout: 10000 });
+    await f.fill('#pd-de', '2025-08-01');
+    await f.fill('#pd-ate', '2025-08-31');
+    await f.click('.periodo-form .botao');
+    await f.waitForSelector('td.datas-aus', { timeout: 15000 });
+    const linhas = await f.$$eval('td.datas-aus', (tds) => tds.map((t) => t.textContent.trim()));
+    afirmar(linhas.length === 2, 'duas pessoas na tabela, vieram ' + linhas.length);
+    linhas.forEach((t) => { const d = t.split(/,\s*/); afirmar(!repetidas(d).length, 'datas repetidas na tela: ' + t); });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });
 

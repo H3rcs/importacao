@@ -374,14 +374,27 @@ caso('ADMIN ve todas as telas e paineis mesmo com PERFIS e paineis da filial inc
   afirmar(!rg.telas.some((t) => t.id === 'estoque' || t.id === 'nobreaks'), 'gerente: ' + rg.telas.map((t) => t.id).join(','));
 });
 
-caso('estoque de TI: material do CD/Loja com estoque, minimo e ideal (e quanto falta para o ideal)', () => {
+caso('estoque de TI: estoque, minimo (alerta) e ideal; saida com data, setor e usuario', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
-  acao(m, s, 'salvarItemEstoque', { nome: 'Toner HP 85A', uso: 'LOJA', minimo: '2', ideal: '6', saldoInicial: '3' });
-  acao(m, s, 'importarItensEstoque', { texto: 'Mouse USB\tPeriféricos\tLogitech\tM90\tun\t5\tArmário TI\t12\t\tCD/LOJA\t15' });
-  const itens = tela(m, s, 'estoque').itens;
+  acao(m, s, 'salvarItemEstoque', { nome: 'Toner HP 85A', minimo: '2', ideal: '6', saldoInicial: '3' });
+  acao(m, s, 'importarItensEstoque', { texto: 'Mouse USB\tPeriféricos\tLogitech\tM90\tun\t5\tArmário TI\t12\t\t15' });
+  let itens = tela(m, s, 'estoque').itens;
   const toner = itens.find((i) => i.nome === 'Toner HP 85A'), mouse = itens.find((i) => i.nome === 'Mouse USB');
-  afirmar(toner.uso === 'LOJA' && toner.minimo === 2 && toner.ideal === 6 && toner.saldo === 3 && toner.faltaIdeal === 3, 'toner: ' + JSON.stringify(toner));
-  afirmar(mouse.uso === 'CD/LOJA' && mouse.ideal === 15 && mouse.faltaIdeal === 3, 'mouse: ' + JSON.stringify(mouse));
+  afirmar(toner.minimo === 2 && toner.ideal === 6 && toner.saldo === 3 && toner.faltaIdeal === 3 && toner.situacao === 'OK', 'toner: ' + JSON.stringify(toner));
+  afirmar(mouse.ideal === 15 && mouse.faltaIdeal === 3, 'mouse: ' + JSON.stringify(mouse));
+  // chegaram dois mouses: so a quantidade
+  acao(m, s, 'movimentarEstoque', { tipo: 'ENTRADA', item: mouse.codigo, quantidade: '2' });
+  // saida sem setor nem usuario e recusada; com o usuario so, passa
+  const e0 = erroDe(() => acao(m, s, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', data: '2026-09-28' }));
+  afirmar(/setor ou o usuário/.test(e0), 'saida sem destino: ' + e0);
+  acao(m, s, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', data: '2026-09-28', destino: 'Loja 3', solicitante: 'Carla' });
+  const d = tela(m, s, 'estoque');
+  itens = d.itens;
+  afirmar(itens.find((i) => i.nome === 'Mouse USB').saldo === 14, 'mouse depois da entrada');
+  const t2 = itens.find((i) => i.nome === 'Toner HP 85A');
+  afirmar(t2.saldo === 2 && t2.situacao === 'REPOR', 'toner no minimo vira alerta: ' + t2.saldo + ' ' + t2.situacao);
+  const mv = d.movimentos.find((x) => x.tipo === 'SAIDA');
+  afirmar(mv.data === '2026-09-28' && mv.destino === 'Loja 3' && mv.solicitante === 'Carla' && d.listas.solicitantes.indexOf('Carla') !== -1, 'saida: ' + JSON.stringify(mv));
   const e = erroDe(() => acao(m, s, 'salvarItemEstoque', { nome: 'Cabo', minimo: '10', ideal: '4' }));
   afirmar(/não pode ser menor que o mínimo/.test(e), 'ideal < minimo: ' + e);
 });

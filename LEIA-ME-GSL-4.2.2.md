@@ -20,7 +20,15 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
 
 - **O ADMIN vê tudo.** A tabela PERFIS e os painéis gravados na filial podiam vir incompletos de versões antigas, e o administrador não via Filiais e painéis, Nobreaks, Limpeza, Quadro do CD (onde se liga a planilha do BI) e Estoque de TI. Agora o ADMIN tem todas as telas e permissões, sem depender da tabela PERFIS. Ele também vê todos os painéis em qualquer filial. Um painel que não está ligado para os outros aparece para ele com o selo **oculto**; para ligar para todos, use **Filiais e painéis**.
 - **Cadastrar outro CD** (Campina Grande, Ponte Nova…): **Configuração › Filiais e painéis › Nova filial**. Informe nome, cidade, código (ex.: CPG, PNV) e os painéis. O sistema cria a planilha da filial sozinho.
-- **Estoque de TI:** cada item tem **CD/Loja** (onde o material é usado: CD, Loja ou os dois) e **Estoque ideal**. A lista de itens mostra Material de Informática, CD/Loja, Estoque, Estoque mínimo, Estoque ideal e quanto falta para o ideal, e tem filtro por CD/Loja. Em **Colar da planilha**, CD/Loja e Ideal são as duas últimas colunas. O esquema subiu para 8.4 e as colunas novas são criadas sozinhas.
+- **Estoque de TI** abre direto na aba **Estoque**:
+  - Busca grande no topo: digite "mouse" e a lista filtra na hora.
+  - Colunas: **Material de Informática CD/Loja** (o mesmo material serve para o CD e para a loja), **Estoque**, **Estoque mínimo** e **Estoque ideal**.
+  - **Alerta:** quando um material chega ao estoque mínimo (ou zera), aparece uma faixa vermelha no topo com os itens, e a linha fica marcada. Clicar na faixa mostra só os que precisam repor.
+  - **+ Entrada** em cada linha: chegou material, digite a quantidade e aperte Enter (a data já vem com hoje).
+  - **− Saída** em cada linha: quantidade, data da saída, **setor** e **usuário que recebeu** (pelo menos um dos dois). Os setores e usuários já usados aparecem como sugestão.
+  - As abas **Resumo**, **Movimentações** e **Inventário** continuam.
+  - Em **Colar da planilha**, a última coluna é o estoque ideal. O esquema subiu para 8.4 e a coluna nova é criada sozinha.
+- **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS. Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
 ## O que foi corrigido

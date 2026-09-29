@@ -33,15 +33,6 @@ const EST_HISTORICO_MAX = 1000;   // teto de linhas do historico de um item (o s
 
 function estNum_(v) { const n = num_(v); return n === null ? 0 : n; }
 
-/* Onde o material de informatica e usado: no CD, na loja ou nos dois. */
-const EST_USOS = ['CD', 'LOJA', 'CD/LOJA'];
-function usoEstoque_(v) {
-  const t = String(v || '').toUpperCase().replace(/\s+/g, '').replace(/[E+&]/g, '/').replace(/\/+/g, '/');
-  if (t === 'CD') return 'CD';
-  if (t === 'LOJA') return 'LOJA';
-  if (t.indexOf('CD') !== -1 && t.indexOf('LOJA') !== -1) return 'CD/LOJA';
-  return '';
-}
 /* Soma de decimais (0,3 - 0,1 - 0,2) deixa resto de ponto flutuante: arredonda. */
 function estArred_(n) { return Math.round(n * 1e6) / 1e6; }
 
@@ -75,7 +66,6 @@ function itensEstoque_() {
       unidade: String(i.UNIDADE || 'un').trim() || 'un',
       minimo: estNum_(i.ESTOQUE_MINIMO),
       ideal: estNum_(i.ESTOQUE_IDEAL),
-      uso: usoEstoque_(i.USO),
       local: String(i.LOCAL || '').trim(),
       observacao: String(i.OBSERVACAO || '').trim(),
       ativo: String(i.ATIVO || 'SIM').trim() === '' || marcado(i.ATIVO)
@@ -150,7 +140,11 @@ function dadosEstoque(usuario, params) {
   EST_CATEGORIAS.forEach(function (c) { categorias[c] = true; });
   itens.forEach(function (i) { categorias[i.categoria] = true; });
   const destinos = {};
-  movs.forEach(function (m) { if (m.destino) destinos[m.destino] = true; });
+  const solicitantes = {};
+  movs.forEach(function (m) {
+    if (m.destino) destinos[m.destino] = true;
+    if (m.tipo === 'SAIDA' && m.solicitante) solicitantes[m.solicitante] = true;
+  });
 
   return {
     hoje: hojeIso,
@@ -162,7 +156,7 @@ function dadosEstoque(usuario, params) {
       tipos: EST_TIPOS.map(function (t) { return { id: t, nome: EST_NOMES_TIPO[t] }; }),
       categorias: Object.keys(categorias).sort(),
       unidades: EST_UNIDADES,
-      usos: EST_USOS,
+      solicitantes: Object.keys(solicitantes).sort(),
       destinos: Object.keys(destinos).sort()
     },
     permissoes: {
@@ -186,7 +180,6 @@ function camposItem_(p) {
     UNIDADE: String(p.unidade || 'un').trim() || 'un',
     ESTOQUE_MINIMO: num_(p.minimo) === null ? '' : num_(p.minimo),
     ESTOQUE_IDEAL: num_(p.ideal) === null ? '' : num_(p.ideal),
-    USO: usoEstoque_(p.uso),
     LOCAL: String(p.local || '').trim(),
     OBSERVACAO: String(p.observacao || '').trim(),
     ATIVO: p.ativo === false ? 'NAO' : 'SIM'
@@ -264,7 +257,7 @@ function acaoExcluirItemEstoque(usuario, params) {
  * CADASTRO EM LOTE — colar da planilha.
  * Uma linha por item, colunas separadas por TAB (o que o Excel/Planilhas
  * copia) ou ponto e virgula, nesta ordem:
- *   nome | categoria | marca | modelo | unidade | minimo | local | saldo inicial | codigo | uso (CD/LOJA) | ideal
+ *   nome | categoria | marca | modelo | unidade | minimo | local | saldo inicial | codigo | ideal
  * So o nome e obrigatorio. Linha de cabecalho e ignorada.
  */
 function acaoImportarItensEstoque(usuario, params) {
@@ -289,7 +282,7 @@ function acaoImportarItensEstoque(usuario, params) {
       if (!codigo) { codigo = 'TI-' + String(proximo).padStart(4, '0'); proximo++; }
       if (porCodigo[codigo]) { ignoradas.push(nome + ' (código ' + codigo + ' já existe)'); return; }
       const campos = camposItem_({ codigo: codigo, nome: nome, categoria: c[1], marca: c[2], modelo: c[3],
-        unidade: c[4], minimo: c[5], local: c[6], uso: c[9], ideal: c[10] });
+        unidade: c[4], minimo: c[5], local: c[6], ideal: c[9] });
       novos.push(campos);
       porCodigo[codigo] = true; porNome[nome.toLowerCase()] = true;
       const saldo = num_(c[7]);
@@ -317,8 +310,8 @@ function acaoMovimentarEstoque(usuario, params) {
   let qtd = num_(params.quantidade);
   if (qtd === null || qtd === 0) throw new Error('Informe a quantidade.');
   if (tipo !== 'AJUSTE' && qtd < 0) throw new Error('A quantidade é sempre positiva — o tipo diz se entra ou sai.');
-  if ((tipo === 'SAIDA') && !String(params.destino || '').trim()) {
-    throw new Error('Informe para onde foi (setor ou pessoa) — é o que permite saber onde cada item está.');
+  if ((tipo === 'SAIDA') && !String(params.destino || '').trim() && !String(params.solicitante || '').trim()) {
+    throw new Error('Informe para onde foi: o setor ou o usuário que recebeu — é o que permite saber onde cada item está.');
   }
 
   /*

@@ -125,6 +125,13 @@ tr.lp-atrasada td:first-child { padding-left: 10px; }
 .nb-folha tr.hoje td.nb-dia { color: var(--azul-vivo); }
 
 /* ---- limpeza ---- */
+/* Estoque de TI: alerta de estoque minimo, busca grande e botoes de entrada/saida. */
+.est-alerta { background: rgba(214, 69, 65, .10); border: 1.5px solid var(--alerta, #d64541); color: var(--tinta, inherit);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; line-height: 1.6; cursor: pointer; }
+.est-busca-grande { display: block; margin-bottom: 12px; }
+.est-busca-grande input { width: 100%; font-size: 16px; padding: 12px 14px; }
+.est-linha-alerta td:first-child { box-shadow: inset 4px 0 0 var(--alerta, #d64541); }
+.botao.est-mais, .botao.est-menos { padding: 6px 12px; font-size: 13px; min-height: 0; }
 .lp-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
 .lp-filtro { border: 1.5px solid var(--linha-forte); background: var(--vidro-alto); color: var(--tinta-media);
   border-radius: 999px; padding: 7px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }

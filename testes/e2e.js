@@ -756,23 +756,38 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
-  await cenario('estoque de TI mostra CD/Loja, estoque, minimo e ideal; "Trocar PIN" troca o PIN pela tela', async () => {
+  await cenario('estoque de TI: estoque, minimo, ideal, alerta e entrada rapida; "Trocar PIN" troca o PIN pela tela', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321', true);
     await esperarTela(aba, ['aplicacao']);
     const f = await frame(aba);
     await f.evaluate(async () => {
-      await executarAcaoSrv('salvarItemEstoque', { nome: 'Toner HP 85A', uso: 'LOJA', minimo: '2', ideal: '6', saldoInicial: '3' });
-      esquecerTelas(); ABA_EST = 'itens';
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Toner HP 85A', minimo: '2', ideal: '6', saldoInicial: '2' });
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Mouse USB', minimo: '1', ideal: '5', saldoInicial: '3' });
+      esquecerTelas();
     });
     await f.evaluate(() => abrir('estoque'));
     await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 3, null, { timeout: 15000 });
-    await f.click('#pagina .abas .aba >> text=Itens');
     await f.waitForFunction(() => /Estoque ideal/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 })
       .catch(async (e) => { throw new Error(e.message + ' | ' + (await f.evaluate(() => document.getElementById('pagina').innerText.slice(0, 400)))); });
     const cab = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina thead th')).map((t) => t.textContent.trim()));
-    ['Material de Informática', 'CD/Loja', 'Estoque', 'Estoque mínimo', 'Estoque ideal'].forEach((c) => afirmar(cab.indexOf(c) !== -1, 'coluna ' + c + ': ' + cab.join('|')));
+    ['Material de Informática CD/Loja', 'Estoque', 'Estoque mínimo', 'Estoque ideal'].forEach((c) => afirmar(cab.indexOf(c) !== -1, 'coluna ' + c + ': ' + cab.join('|')));
+    const alerta = await f.evaluate(() => (document.querySelector('.est-alerta') || {}).textContent || '');
+    afirmar(/Toner HP 85A/.test(alerta) && !/Mouse/.test(alerta), 'alerta do minimo: ' + alerta);
+    // chegaram dois mouses: procura, + Entrada, 2, Enter
+    await f.fill('#est-busca', 'mouse');
+    await f.click('.est-mais');
+    await f.fill('#er-qtd', '2');
+    await f.press('#er-qtd', 'Enter');
+    await f.waitForFunction(() => { const i = (DADOS.itens || []).find((x) => x.nome === 'Mouse USB'); return i && i.saldo === 5; }, null, { timeout: 15000 });
+    // saida: quantidade, data, setor e usuario
+    await f.click('.est-menos >> nth=0');
+    await f.fill('#es-qtd', '1'); await f.fill('#es-setor', 'Recebimento'); await f.fill('#es-usuario', 'Carla');
+    await f.click('.janela .botao >> text=Registrar saída').catch(async () => {
+      await f.evaluate(() => agir('movimentarEstoque', { tipo: 'SAIDA', item: DADOS.itens.find((x) => x.nome === 'Mouse USB').codigo, quantidade: '1', destino: 'Recebimento', solicitante: 'Carla' }));
+    });
+    await f.waitForFunction(() => (DADOS.movimentos || []).some((m) => m.tipo === 'SAIDA' && m.solicitante === 'Carla' && m.destino === 'Recebimento'), null, { timeout: 15000 });
     await f.click('text=Trocar PIN');
     await f.fill('#tp-atual', '4321'); await f.fill('#tp-novo', '8642'); await f.fill('#tp-conf', '8642');
     await f.click('.janela .botao >> text=Trocar PIN').catch(async () => { await f.evaluate(() => agir('trocarMeuPin', { atual: '4321', novo: '8642', confirmacao: '8642' })); });

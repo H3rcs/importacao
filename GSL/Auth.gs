@@ -439,6 +439,9 @@ const SESSAO_SEGUNDOS = 6 * 3600;      // o CacheService guarda no maximo 6 h
 const SESSAO_RENOVAR_MS = 20 * 60 * 1000;
 const PIN_TENTATIVAS = 5;
 const PIN_BLOQUEIO_SEG = 10 * 60;
+const CODIGO_EMAIL_SEG = 15 * 60;      // codigo de primeiro acesso mandado por e-mail
+const CODIGO_ADMIN_SEG = 6 * 3600;     // codigo entregue pelo administrador (limite do cache)
+const CODIGO_REENVIO_MS = 60 * 1000;   // no maximo um e-mail de codigo por minuto
 
 /*
  * Toda porta publica chama isto primeiro. `ctx` e { t: sessao, f: filial }
@@ -545,21 +548,99 @@ function zerarErrosPin_(email) {
 }
 
 /*
+ * CODIGO DE PRIMEIRO ACESSO (4.2.2).
+ *
+ * Antes, quem ainda nao tinha PIN criava um so digitando o e-mail. Como o
+ * cadastro e feito pelo administrador e ninguem tem PIN no comeco, qualquer
+ * pessoa que soubesse o e-mail de um colega (ou de um administrador) criava
+ * o PIN dele, entrava como ele e ainda trancava o dono de verdade do lado de
+ * fora. Agora o primeiro PIN so nasce com uma prova de que a pessoa e dona
+ * do e-mail:
+ *   - o navegador esta na conta Google dela (o Google ja provou); ou
+ *   - um codigo de 6 numeros que o sistema manda para o e-mail dela; ou
+ *   - um codigo que o administrador gerou em Pessoas e acessos (para quem
+ *     nao consegue abrir o e-mail naquele momento).
+ * O cache guarda so o resumo do codigo, nunca o codigo.
+ */
+function chaveCodigo_(email, origem) { return 'pincod_' + origem + '_' + email.replace(/[^a-z0-9]/g, '_'); }
+
+function gerarCodigo_() {
+  const b = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid(), Utilities.Charset.UTF_8);
+  let n = 0;
+  for (let i = 0; i < 6; i++) n = (n * 256 + (b[i] & 255)) % 1000000;
+  return ('00000' + n).slice(-6);
+}
+
+function guardarCodigo_(email, codigo, origem, segundos) {
+  CacheService.getScriptCache().put(chaveCodigo_(email, origem),
+    JSON.stringify({ h: resumoPin_(email, 'codigo:' + codigo), em: Date.now() }), segundos);
+}
+
+function lerCodigo_(email, origem) {
+  const bruto = CacheService.getScriptCache().get(chaveCodigo_(email, origem));
+  if (!bruto) return null;
+  try { return JSON.parse(bruto); } catch (e) { return null; }
+}
+
+function codigoConfere_(email, codigo) {
+  const c = String(codigo || '').replace(/\D/g, '');
+  if (!/^\d{6}$/.test(c)) return false;
+  const resumo = resumoPin_(email, 'codigo:' + c);
+  return ['email', 'admin'].some(function (o) {
+    const g = lerCodigo_(email, o);
+    return !!(g && g.h === resumo);
+  });
+}
+
+function apagarCodigos_(email) {
+  try { CacheService.getScriptCache().removeAll([chaveCodigo_(email, 'email'), chaveCodigo_(email, 'admin')]); } catch (e) {}
+}
+
+/*
+ * Manda o codigo para o e-mail da propria pessoa — direto pelo MailApp e SEM
+ * a copia (EMAIL_COPIA) que os avisos levam: o codigo e so dela.
+ */
+function mandarCodigoPorEmail_(email, nome) {
+  const atual = lerCodigo_(email, 'email');
+  if (atual && Date.now() - Number(atual.em || 0) < CODIGO_REENVIO_MS) return { jaEnviado: true };
+  const codigo = gerarCodigo_();
+  try {
+    MailApp.sendEmail({
+      to: email,
+      subject: 'GSL Bartofil — código de primeiro acesso: ' + codigo,
+      htmlBody: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#14152B;max-width:560px">' +
+        '<p>Olá' + (nome ? ', <b>' + htmlSeguro(nome) + '</b>' : '') + '.</p>' +
+        '<p>Alguém está criando o PIN do GSL para o e-mail <b>' + htmlSeguro(email) + '</b>. ' +
+        'Se foi você, digite este código na tela de entrada:</p>' +
+        '<p style="font-size:28px;font-weight:bold;letter-spacing:6px;color:#111785">' + codigo + '</p>' +
+        '<p style="color:#666;font-size:12px">O código vale 15 minutos. Se não foi você, ignore este e-mail — ' +
+        'sem o código ninguém cria o seu PIN.</p></div>'
+    });
+  } catch (e) {
+    return { erro: 'Não consegui mandar o código para o seu e-mail (' + (e.message || e) + '). ' +
+      'Peça ao administrador um código de primeiro acesso (Pessoas e acessos).' };
+  }
+  guardarCodigo_(email, codigo, 'email', CODIGO_EMAIL_SEG);
+  try { registrarLog('sistema', 'EMAIL', 'CODIGO_PIN', email, 'Código de primeiro acesso enviado'); } catch (e) {}
+  return { enviado: true };
+}
+
+/*
  * PORTA DE ENTRADA — e-mail + PIN.
  *   PIN certo           -> sessao nova + tudo que a tela precisa (como no doGet)
  *   primeiro acesso     -> { criarPin: true } ate a pessoa repetir o PIN
  *   errado 5 vezes      -> 10 minutos de espera para aquele e-mail
  */
-function entrar(email, pin, confirmacao, filial) {
+function entrar(email, pin, confirmacao, filial, codigo) {
   _porta = true;
   try {
-    return JSON.stringify(entrar_(email, pin, confirmacao, filial));
+    return JSON.stringify(entrar_(email, pin, confirmacao, filial, codigo));
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
   }
 }
 
-function entrar_(emailBruto, pinBruto, confBruto, filial) {
+function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
   _porta = true;
   if (!bancoInstalado()) return { ok: false, erro: 'O sistema ainda não foi instalado.' };
   try { garantirEsquema(); } catch (erro) {
@@ -596,20 +677,38 @@ function entrar_(emailBruto, pinBruto, confBruto, filial) {
 
   const resumo = String(registro.PIN_HASH || '').trim();
   if (!resumo) {
-    // PRIMEIRO ACESSO: a propria pessoa cria o PIN, digitando duas vezes.
-    // O PIN do dono so nasce na conta Google dele — senao qualquer um
-    // chegaria antes e criaria o PIN do administrador.
-    if (ehDono && !googleConfirma) {
-      return { ok: false, erro: 'Para criar o PIN do administrador, abra o GSL no navegador logado na conta ' + email + '.' };
-    }
+    // PRIMEIRO ACESSO: a propria pessoa cria o PIN, digitando duas vezes —
+    // e prova que o e-mail e dela (ver CODIGO DE PRIMEIRO ACESSO).
+    const primeiroNome = String(registro.NOME || '').split(' ')[0];
     const conf = String(confBruto || '').trim();
+    const codigo = String(codBruto || '').replace(/\D/g, '');
+    if (!googleConfirma) {
+      if (!codigo) {
+        const envio = mandarCodigoPorEmail_(email, primeiroNome);
+        if (envio.erro) return { ok: false, criarPin: true, pedirCodigo: true, erro: envio.erro };
+        return { ok: false, criarPin: true, pedirCodigo: true, nome: primeiroNome,
+                 recado: 'Primeiro acesso: mandamos um código de 6 números para ' + email +
+                         '. Digite o código e repita o PIN.' };
+      }
+      if (!codigoConfere_(email, codigo)) {
+        const n = contarErroPin_(email);
+        const restam = PIN_TENTATIVAS - n;
+        return { ok: false, criarPin: true, pedirCodigo: true, erro: restam > 0
+          ? 'Código incorreto ou vencido. Confira o e-mail mais recente do GSL. ' +
+            (restam === 1 ? 'Resta 1 tentativa.' : 'Restam ' + restam + ' tentativas.')
+          : 'Tentativas demais. Espere 10 minutos ou peça ao administrador um código de primeiro acesso.' };
+      }
+    }
     if (!conf) {
-      return { ok: false, criarPin: true, nome: String(registro.NOME || '').split(' ')[0],
+      return { ok: false, criarPin: true, pedirCodigo: !googleConfirma, nome: primeiroNome,
                recado: 'Primeiro acesso: repita o PIN para confirmar. Guarde bem — é ele que você vai usar sempre.' };
     }
-    if (conf !== pin) return { ok: false, criarPin: true, erro: 'Os dois PINs não são iguais. Digite de novo.' };
+    if (conf !== pin) {
+      return { ok: false, criarPin: true, pedirCodigo: !googleConfirma, erro: 'Os dois PINs não são iguais. Digite de novo.' };
+    }
     atualizar('ACESSOS', registro.ID, { PIN_HASH: resumoPin_(email, pin), PIN_EM: agoraTexto() }, email);
     limparCache('ACESSOS');
+    apagarCodigos_(email);
   } else if (resumoPin_(email, pin) !== resumo) {
     const n = contarErroPin_(email);
     const restam = PIN_TENTATIVAS - n;
@@ -652,7 +751,11 @@ function sairDoSistema(ctx) {
   return JSON.stringify({ ok: true });
 }
 
-/* Esqueceu o PIN: o administrador zera e a pessoa cria outro na proxima entrada. */
+/*
+ * Esqueceu o PIN (ou ainda nao criou): o administrador zera e recebe um
+ * CODIGO DE PRIMEIRO ACESSO para entregar a pessoa. Ela entra com o e-mail,
+ * um PIN novo e esse codigo — ou pede o codigo por e-mail na propria tela.
+ */
 function acaoZerarPin(usuario, params) {
   exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const alvo = obter('ACESSOS', params.id);
@@ -661,9 +764,15 @@ function acaoZerarPin(usuario, params) {
   if (perfilAlvo === 'ADMIN' && String(usuario.perfil).toUpperCase() !== 'ADMIN') {
     throw new Error('Só um administrador zera o PIN de outro administrador.');
   }
+  const email = String(alvo.EMAIL || '').toLowerCase().trim();
+  if (email === usuario.email) throw new Error('Para trocar o seu próprio PIN, peça a outro administrador.');
   atualizar('ACESSOS', params.id, { PIN_HASH: '', PIN_EM: '' }, usuario.email);
   limparCache('ACESSOS');
-  zerarErrosPin_(String(alvo.EMAIL || '').toLowerCase().trim());
-  return { ok: true, recado: 'PIN zerado. Na próxima entrada, ' + (String(alvo.NOME || '').split(' ')[0] || 'a pessoa') +
-    ' cria um PIN novo.' };
+  zerarErrosPin_(email);
+  const codigo = gerarCodigo_();
+  guardarCodigo_(email, codigo, 'admin', CODIGO_ADMIN_SEG);
+  registrarLog(usuario.email, 'CODIGO_PIN', 'ACESSOS', email, 'Código de primeiro acesso gerado pelo administrador');
+  const nome = String(alvo.NOME || '').split(' ')[0] || 'a pessoa';
+  return { ok: true, codigo: codigo, nome: nome, email: email,
+    recado: 'Código de primeiro acesso de ' + nome + ': ' + codigo + ' (vale 6 horas).' };
 }

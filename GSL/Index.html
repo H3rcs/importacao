@@ -63,6 +63,11 @@
       <input id="entrar-pin" name="pin" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
              autocomplete="off" placeholder="4 a 6 números">
       <div id="entrar-confirma" class="entrar-confirma oculto">
+        <div id="entrar-codigo-caixa" class="oculto">
+          <label class="entrar-rotulo" for="entrar-codigo">Código que chegou no seu e-mail</label>
+          <input id="entrar-codigo" type="text" inputmode="numeric" maxlength="6"
+                 autocomplete="one-time-code" placeholder="6 números">
+        </div>
         <label class="entrar-rotulo" for="entrar-pin2">Repita o PIN (primeiro acesso)</label>
         <input id="entrar-pin2" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
                autocomplete="off" placeholder="o mesmo PIN">
@@ -70,8 +75,8 @@
       <input type="hidden" name="filial" id="entrar-filial">
       <p id="entrar-msg" class="entrar-msg" role="status" aria-live="polite"></p>
       <button id="entrar-botao" class="botao" type="submit">Entrar</button>
-      <p class="dica entrar-dica">Primeiro acesso: digite um PIN novo — o sistema pede para repetir e ele passa
-        a ser o seu. Esqueceu? Peça ao administrador para zerar o seu PIN.</p>
+      <p class="dica entrar-dica">Primeiro acesso: digite um PIN novo — o sistema manda um código para o seu
+        e-mail e pede para repetir o PIN, que passa a ser o seu. Esqueceu? Peça ao administrador para zerar o seu PIN.</p>
     </form>
   </div>
 

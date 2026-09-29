@@ -226,7 +226,9 @@ function mostrarEntrada(info) {
   if (info.emailDigitado) el('entrar-email').value = info.emailDigitado;
   el('entrar-pin').value = '';
   el('entrar-pin2').value = '';
+  el('entrar-codigo').value = '';
   el('entrar-confirma').classList.toggle('oculto', !info.criarPin);
+  el('entrar-codigo-caixa').classList.toggle('oculto', !info.pedirCodigo);
   const msg = el('entrar-msg');
   msg.textContent = info.erroEntrada || info.recado || '';
   msg.className = 'entrar-msg' + (info.erroEntrada ? ' erro' : (info.recado ? ' ok' : ''));
@@ -239,22 +241,27 @@ async function entrarNoSistema(ev) {
   const pin = val('entrar-pin').trim();
   const criando = !el('entrar-confirma').classList.contains('oculto');
   const conf = criando ? val('entrar-pin2').trim() : '';
+  const pedindoCodigo = criando && !el('entrar-codigo-caixa').classList.contains('oculto');
+  const codigo = pedindoCodigo ? val('entrar-codigo').replace(/\D/g, '') : '';
   const msg = el('entrar-msg');
   const falar = (t, tipo) => { msg.textContent = t; msg.className = 'entrar-msg ' + (tipo || 'erro'); };
   if (!email || email.indexOf('@') === -1) { falar('Digite o seu e-mail.'); return false; }
   if (!/^\d{4,6}$/.test(pin)) { falar('O PIN tem de 4 a 6 números.'); return false; }
+  if (pedindoCodigo && !/^\d{6}$/.test(codigo)) { falar('Digite o código de 6 números que chegou no seu e-mail.'); return false; }
   if (criando && !conf) { falar('Repita o PIN no segundo campo.'); return false; }
   el('entrar-pin2').name = criando ? 'confirmacao' : '';
+  el('entrar-codigo').name = pedindoCodigo ? 'codigo' : '';
   el('entrar-filial').value = lerLocal(CHAVE_FILIAL) || '';
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
   try {
-    const r = await chamarJSON('entrar', email, pin, conf, lerLocal(CHAVE_FILIAL) || '');
+    const r = await chamarJSON('entrar', email, pin, conf, lerLocal(CHAVE_FILIAL) || '', codigo);
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
+      el('entrar-codigo-caixa').classList.toggle('oculto', !r.pedirCodigo);
       falar(r.erro || r.recado || 'Primeiro acesso: repita o PIN para confirmar.', r.erro ? 'erro' : 'ok');
       el('entrar-pin2').value = '';
-      el('entrar-pin2').focus();
+      (r.pedirCodigo && !val('entrar-codigo') ? el('entrar-codigo') : el('entrar-pin2')).focus();
       return false;
     }
     if (r && r.ok === false) {
@@ -285,6 +292,25 @@ function sessaoTerminou() {
 
 function confirmarZerarPin(nome) {
   return window.confirm('Zerar o PIN de ' + nome + '? Na próxima entrada a pessoa cria um PIN novo.');
+}
+
+/*
+ * Codigo de primeiro acesso gerado pelo administrador (Zerar PIN ou, para
+ * quem ainda nao tem PIN, Codigo de acesso). Aparece numa janela — num
+ * aviso que some em 7 s ninguem conseguiria anotar.
+ */
+async function gerarCodigoAcesso(id, nome, temPin) {
+  if (temPin && !confirmarZerarPin(nome)) return;
+  try {
+    const r = await executarAcaoSrv('zerarPin', { id: id });
+    esquecerTela(paginaAtual);
+    abrirJanela('Código de primeiro acesso', `
+      <p style="margin-top:0;line-height:1.7">Entregue este código para <b>${esc(r.nome)}</b> (${esc(r.email)}):</p>
+      <p style="font-size:30px;font-weight:800;letter-spacing:8px;margin:6px 0 14px">${esc(r.codigo)}</p>
+      <p class="dica">Vale 6 horas. Na entrada, a pessoa digita o e-mail e um PIN novo; o sistema pede este
+        código e a repetição do PIN. Ela também pode receber um código no próprio e-mail, direto pela tela.</p>`,
+      `<button class="botao" onclick="fecharJanela(); abrir(paginaAtual, paramsAtual)">Fechar</button>`);
+  } catch (e) { avisar(e.message || e, true); }
 }
 
 /* Esconde todas as telas de entrada de uma vez. */
@@ -3097,8 +3123,10 @@ function blocoPessoas(d) {
           <td>${situacao(p)}</td>
           <td>${p.temPin ? '<span class="selo-entrega">criado</span>' : '<span class="pendente-entrega">cria no 1º acesso</span>'}</td>
           <td><button class="icone-botao" onclick="formUsuario(${jsArg(p.id)})">Editar</button>
-              ${p.temPin && p.email !== d.eu ? `<button class="icone-botao" title="A pessoa cria um PIN novo na próxima entrada"
-                onclick="if(confirmarZerarPin(${jsArg(p.nome || p.email)})) agir('zerarPin',{id:${jsArg(p.id)}})">Zerar PIN</button>` : ''}
+              ${p.email !== d.eu ? `<button class="icone-botao" title="${p.temPin
+                  ? 'Apaga o PIN e gera um código para a pessoa criar outro'
+                  : 'Gera um código para a pessoa criar o PIN sem precisar do e-mail'}"
+                onclick="gerarCodigoAcesso(${jsArg(p.id)}, ${jsArg(p.nome || p.email)}, ${p.temPin ? 'true' : 'false'})">${p.temPin ? 'Zerar PIN' : 'Código de acesso'}</button>` : ''}
               ${p.email === d.eu ? '' :
                 `<button class="icone-botao" onclick="agir('alternarAtivo',{id:${jsArg(p.id)}},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}</td>
         </tr>`).join('') || '<tr><td colspan="9" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>

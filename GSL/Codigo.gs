@@ -60,10 +60,12 @@ function doPost(e) {
   }
   let carga;
   try {
-    const r = entrar_(p.email, p.pin, p.confirmacao, p.filial);
+    const r = entrar_(p.email, p.pin, p.confirmacao, p.filial, p.codigo);
     carga = (r && r.ok) ? r : { ok: true, instalado: true, entrada: 'ENTRAR',
-      erroEntrada: (r && (r.erro || r.recado)) || 'Não consegui entrar.', criarPin: !!(r && r.criarPin),
+      erroEntrada: (r && r.erro) || '', recado: (r && !r.erro && r.recado) || '',
+      criarPin: !!(r && r.criarPin), pedirCodigo: !!(r && r.pedirCodigo),
       emailDigitado: String(p.email || '') };
+    if (!(r && r.ok) && !carga.erroEntrada && !carga.recado) carga.erroEntrada = 'Não consegui entrar.';
   } catch (erro) {
     carga = { ok: true, instalado: true, entrada: 'ENTRAR', erroEntrada: String(erro.message || erro),
               emailDigitado: String(p.email || '') };

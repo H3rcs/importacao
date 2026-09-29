@@ -452,8 +452,9 @@ function avisarAcessoLiberado(pessoa) {
     '<p>Olá' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') + '!</p>' +
     '<p>O seu acesso ao sistema foi liberado com o nível <b>' +
     (pessoa.perfil || '—') + '</b>.</p>' +
-    '<p>Para entrar, basta abrir o link abaixo estando logado com a sua conta <b>' + pessoa.email +
-    '</b>. Não há senha nem cadastro para fazer — o sistema reconhece você pela conta Google da empresa.</p>' +
+    '<p>Para entrar, abra o link abaixo e digite o seu e-mail (<b>' + pessoa.email + '</b>) e um PIN ' +
+    'de 4 a 6 números à sua escolha. No primeiro acesso o sistema manda um código para este e-mail e ' +
+    'pede para repetir o PIN — depois disso, é só e-mail e PIN.</p>' +
     rodapeLink());
 }
 

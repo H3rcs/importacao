@@ -124,13 +124,31 @@ async function esperarTela(aba, quais, ms) {
 }
 async function texto(aba, id) { const f = await frame(aba); return f.evaluate((i) => (document.getElementById(i) || {}).textContent || '', id); }
 
-async function entrar(aba, email, pin, confirmar) {
+/* O codigo de primeiro acesso que o "Google" mandou para o e-mail (o emulador guarda os e-mails). */
+function codigoDoEmail(s, email) {
+  const m = s.mundo.emails.filter((x) => x.to === email && /código de primeiro acesso/i.test(x.subject)).pop();
+  return m ? (m.subject.match(/(\d{6})\s*$/) || [])[1] : '';
+}
+
+/* Cria o PIN pelo servidor, com o codigo do e-mail, como a pessoa faria. */
+function criarPin(s, conta, email, pin) {
+  let r = JSON.parse(s.chamar(conta, 'entrar', email, pin, '', '', '').valor);
+  if (r.pedirCodigo) r = JSON.parse(s.chamar(conta, 'entrar', email, pin, pin, '', codigoDoEmail(s, email)).valor);
+  else if (r.criarPin) r = JSON.parse(s.chamar(conta, 'entrar', email, pin, pin, '', '').valor);
+  afirmar(r.token, 'PIN criado para ' + email + ': ' + JSON.stringify(r).slice(0, 200));
+  return r;
+}
+
+async function entrar(aba, email, pin, confirmar, codigo) {
   const f = await frame(aba);
   await f.fill('#entrar-email', email);
   await f.fill('#entrar-pin', pin);
   await f.click('#entrar-botao');
   if (confirmar) {
     await f.waitForSelector('#entrar-confirma:not(.oculto)', { timeout: 10000 });
+    if (await f.isVisible('#entrar-codigo')) {
+      await f.fill('#entrar-codigo', codigo || codigoDoEmail(aba.s, email));
+    }
     await f.fill('#entrar-pin2', pin);
     await f.click('#entrar-botao');
   }
@@ -199,6 +217,53 @@ async function rodar() {
     afirmar((await texto(aba, 'usuario-conta')).includes(COORD), 'entrou como ela, nao como a conta do computador');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('primeiro acesso: sem o codigo do e-mail ninguem cria o PIN de outra pessoa', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, GERAL);
+    const f = await frame(aba);
+    await f.fill('#entrar-email', GERENTE);
+    await f.fill('#entrar-pin', '5555');
+    await f.click('#entrar-botao');
+    await f.waitForSelector('#entrar-codigo', { state: 'visible', timeout: 10000 });
+    afirmar(/mandamos um código/i.test(await texto(aba, 'entrar-msg')), 'avisa que mandou o codigo: ' + await texto(aba, 'entrar-msg'));
+    const email = s.mundo.emails.find((x) => x.to === GERENTE);
+    afirmar(email && !email.cc, 'codigo foi so para o e-mail da pessoa, sem copia');
+    await f.fill('#entrar-codigo', '000000' === codigoDoEmail(s, GERENTE) ? '111111' : '000000');
+    await f.fill('#entrar-pin2', '5555');
+    await f.click('#entrar-botao');
+    await f.waitForFunction(() => /incorreto/i.test(document.getElementById('entrar-msg').textContent), null, { timeout: 10000 });
+    afirmar((await telaVisivel(aba)).includes('entrar'), 'nao entrou');
+    const ctx = s.contexto(DONO); ctx._porta = true;
+    const reg = ctx.registroDeAcesso_(GERENTE);
+    afirmar(!String(reg.PIN_HASH || ''), 'PIN do gerente continua sem dono');
+    // o dono do e-mail, com o codigo certo, cria o PIN
+    await f.fill('#entrar-codigo', codigoDoEmail(s, GERENTE));
+    await f.fill('#entrar-pin', '5555');
+    await f.fill('#entrar-pin2', '5555');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'com o codigo certo entrou');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('administrador gera codigo de acesso; a pessoa entra com ele', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const adm = await abrirAba(s, DONO);
+    await entrar(adm, DONO, '4321', true);
+    await esperarTela(adm, ['aplicacao']);
+    const fa = await frame(adm);
+    await fa.evaluate(() => abrir('acessos'));
+    await fa.waitForSelector('#tabela-pessoas', { timeout: 15000 });
+    await fa.click('#tabela-pessoas tr:has-text("Maria Souza") button:has-text("Código de acesso")');
+    await fa.waitForSelector('#janela:not(.oculto)', { timeout: 10000 });
+    const codigo = ((await fa.evaluate(() => document.getElementById('janela-corpo').innerText)).match(/\b(\d{6})\b/) || [])[1];
+    afirmar(codigo, 'janela mostrou o codigo');
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '2468', true, codigo);
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou com o codigo do administrador');
+    afirmar(!aba.erros.length && !adm.erros.length, 'erros: ' + aba.erros.concat(adm.erros).join(' | '));
+    await adm.contexto.close(); await aba.contexto.close(); await s.fechar();
   });
 
   await cenario('PIN errado: avisa, conta tentativas e bloqueia na quinta', async () => {
@@ -280,7 +345,7 @@ async function rodar() {
 
   await cenario('Google bloqueando o google.script.run (HTTP 403): entra pelo formulario', async () => {
     const s = await subir(); instalarComPessoas(s);
-    s.chamar(GERAL, 'entrar', COORD, '1234', '1234', '');            // PIN ja criado
+    criarPin(s, GERAL, COORD, '1234');                               // PIN ja criado
     const aba = await abrirAba(s, GERAL, { bloqueio403: true });
     await entrar(aba, COORD, '1234');
     afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'sem-acesso'], 20000) === 'aplicacao', 'entrou pela reserva');
@@ -288,9 +353,30 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('Google bloqueando (HTTP 403) no primeiro acesso: codigo do e-mail pelo formulario', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true });
+    let f = await frame(aba);
+    await f.fill('#entrar-email', COORD);
+    await f.fill('#entrar-pin', '1357');
+    await f.click('#entrar-botao');
+    await aba.page.waitForTimeout(1500);
+    await esperarTela(aba, ['entrar']);
+    f = await frame(aba);
+    await f.waitForSelector('#entrar-codigo', { state: 'visible', timeout: 15000 });
+    afirmar(await f.inputValue('#entrar-email') === COORD, 'e-mail continua preenchido');
+    await f.fill('#entrar-pin', '1357');
+    await f.fill('#entrar-codigo', codigoDoEmail(s, COORD));
+    await f.fill('#entrar-pin2', '1357');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva com o codigo');
+    afirmar(s.registro.filter((r) => r.tipo === 'doPost').length >= 2, 'dois POSTs de entrada');
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('Google bloqueando (HTTP 403): abrir tela vai por POST e o codigo da sessao nao aparece na URL', async () => {
     const s = await subir(); instalarComPessoas(s);
-    s.chamar(GERAL, 'entrar', COORD, '1234', '1234', '');
+    criarPin(s, GERAL, COORD, '1234');
     const aba = await abrirAba(s, GERAL, { bloqueio403: true });
     await entrar(aba, COORD, '1234');
     afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
@@ -311,8 +397,7 @@ async function rodar() {
 
   await cenario('codigo de sessao na URL (?t=) nao abre o sistema', async () => {
     const s = await subir(); instalarComPessoas(s);
-    const r = JSON.parse(s.chamar(GERAL, 'entrar', COORD, '1234', '1234', '').valor);
-    afirmar(r.token, 'sessao criada');
+    const r = criarPin(s, GERAL, COORD, '1234');
     const aba = await abrirAba(s, GERAL, { query: '?t=' + r.token });
     afirmar(await esperarTela(aba, ['entrar', 'aplicacao']) === 'entrar', 'pede e-mail e PIN mesmo com o codigo na URL');
     await aba.contexto.close(); await s.fechar();

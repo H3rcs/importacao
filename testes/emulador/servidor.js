@@ -120,6 +120,14 @@ function criarServidor(opcoes) {
       if (url.pathname === '/exec' && (req.method === 'GET' || req.method === 'POST')) {
         const ctx = novaExecucao(mundo, opcoes.pasta, execucao, execOpcoes);
         let saida;
+        // A moldura do GSL se recarregando sozinha (location.reload dentro
+        // do iframe): no Google ela volta EM BRANCO. Aqui tambem.
+        if (req.method === 'GET' && req.headers['sec-fetch-dest'] === 'iframe') {
+          registro.push({ tipo: 'moldura-recarregada', q: url.search });
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<!DOCTYPE html><html><body></body></html>');
+          return;
+        }
         if (req.method === 'GET') {
           registro.push({ tipo: 'doGet', q: url.search });
           saida = ctx.doGet(eventoDe(url.searchParams));

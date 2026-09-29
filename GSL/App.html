@@ -325,7 +325,7 @@ function trocarContaGoogle() {
       <li>Volte para esta aba e clique em <b>Já troquei</b>.</li>
     </ol>`, `
     <button class="botao secundario" onclick="window.open('https:\/\/accounts.google.com/Logout','_blank')">Abrir contas do Google</button>
-    <button class="botao" onclick="location.reload()">Já troquei</button>`);
+    <button class="botao" onclick="recarregarApp()">Já troquei</button>`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -454,7 +454,9 @@ function abrirPorNavegacao(idTela, params) {
 }
 
 async function pararSimulacao() {
-  try { await chamar('encerrarSimulacao', ctx()); location.reload(); }
+  // Sem recarregar a pagina (na moldura do Google ela voltaria em branco):
+  // pede a sessao de novo, ja com o perfil verdadeiro.
+  try { await chamar('encerrarSimulacao', ctx()); tratarEntrada(await chamarJSON('retomarSessao', ctx())); }
   catch (e) { avisar(e.message || e, true); }
 }
 
@@ -485,7 +487,10 @@ async function instalarSistema() {
   b.disabled = true; b.textContent = 'Criando…';
   try {
     await chamar('instalar', email);
-    location.reload();
+    // Instalado: o proximo passo e entrar com e-mail e PIN. Sem recarregar
+    // (na moldura do Google a pagina recarregada volta em branco).
+    mostrarEntrada({ emailDigitado: email,
+      recado: 'Sistema instalado. Digite um PIN de 4 a 6 números — ele passa a ser o seu.' });
   } catch (e) { b.disabled = false; b.textContent = 'Criar banco de dados'; avisar(e.message || e, true); }
 }
 

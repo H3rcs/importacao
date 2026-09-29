@@ -51,6 +51,7 @@ function esquecerFuso() { _fusoMemo = ''; _hojeMemo = null; _hojeISOMemo = ''; _
 
 /** Fixa o fuso do banco e do projeto no padrao da Bartofil. */
 function corrigirFuso() {
+  exigirPorta_();           // grava propriedade e mexe no banco: so pela tela ou pelo dono
   const relato = { antes: '', agora: FUSO_PADRAO, projeto: '', divergente: false };
   try { relato.antes = abrirBanco().getSpreadsheetTimeZone(); } catch (e) {}
   try { abrirBanco().setSpreadsheetTimeZone(FUSO_PADRAO); } catch (e) {}

@@ -468,12 +468,18 @@ function contextoDaChamada_(ctx) {
  * aqui: so anda se a execucao entrou por uma porta (que confere a sessao)
  * ou se e o dono rodando pelo editor/gatilho.
  */
+var _portaConferida = false;
 function exigirPorta_() {
-  if (_porta) return;
+  if (_porta || _portaConferida) return;
   const ativo = emailDeQuemAbriu();
-  if (!ativo) return;                                   // gatilho: ninguem do outro lado
-  if (ativo === donoDoScript()) return;                 // editor, pelo dono
-  if (ativo === String(prop('EMAIL_ADMIN', '')).toLowerCase().trim()) return;
+  // EMAIL_ADMIN lido direto: o prop() passa por aqui (seria recursao).
+  const admin = String(PropertiesService.getScriptProperties().getProperty('EMAIL_ADMIN') || '').toLowerCase().trim();
+  if (!ativo ||                                         // gatilho: ninguem do outro lado
+      ativo === donoDoScript() ||                       // editor, pelo dono
+      (admin && ativo === admin)) {
+    _portaConferida = true;
+    return;
+  }
   throw new Error('Acesso negado: use o sistema pela tela.');
 }
 

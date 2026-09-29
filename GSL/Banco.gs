@@ -20,6 +20,10 @@
 var _props = null;
 
 function prop(chave, padrao) {
+  // 4.2.2: as propriedades guardam o SEGREDO_PIN e os IDs do banco. Sem esta
+  // trava, qualquer conta da empresa lia tudo pelo console com
+  // google.script.run.prop('SEGREDO_PIN') — ver exigirPorta_.
+  exigirPorta_();
   if (!_props) _props = PropertiesService.getScriptProperties().getProperties();
   const v = _props[chave];
   return (v === null || v === undefined || v === '') ? padrao : v;
@@ -58,6 +62,7 @@ function gravarTextoCache(chave, texto, segundos) {
 }
 
 function lerTextoCache(chave) {
+  exigirPorta_();           // o cache de telas guarda dados de todo mundo
   try {
     const cache = CacheService.getScriptCache();
     const quantos = Number(cache.get(chave) || 0);
@@ -101,6 +106,7 @@ function geracaoDados() {
 }
 
 function avancarGeracao() {
+  exigirPorta_();
   const g = String(Number(geracaoDados() || 1) + 1);
   PropertiesService.getScriptProperties().setProperty('GERACAO_DADOS', g);
   CacheService.getScriptCache().put('geracao', g, 21600);
@@ -643,6 +649,10 @@ const CACHE_POR_TABELA = {
 };
 
 function comCache(chaveBase, funcao) {
+  // A leitura do cache tem a mesma trava da leitura da planilha: antes um
+  // cache quente devolvia acessos, perfis e filiais a quem chamasse pelo
+  // console (e qualquer chave do cache, inclusive a do codigo de acesso).
+  exigirPorta_();
   const chave = chaveNoEspaco(chaveBase);
   const cache = CacheService.getScriptCache();
   const guardado = cache.get(chave);
@@ -671,6 +681,7 @@ function comCache(chaveBase, funcao) {
  * telas do zero — era isso que travava os botoes do calendario.
  */
 function limparCache(tabela) {
+  exigirPorta_();
   esquecerLeituras();
   const props = PropertiesService.getScriptProperties();
   const cache = CacheService.getScriptCache();

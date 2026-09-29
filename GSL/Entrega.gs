@@ -122,9 +122,11 @@ function acaoFinalizarEntrega(usuario, params) {
     else imgs.push(f);
   });
 
+  // A hora entra no nome: duas entregas do mesmo dia (a reprovada e a
+  // corrigida) tinham o mesmo nome, e ninguem sabia qual era a nova.
   var nomeBase = _limpaNomeEntrega(
     info.id + ' - ' + String(info.atividade).substring(0, 45) + ' - ' +
-    Utilities.formatDate(new Date(), fuso(), 'dd-MM-yyyy'));
+    Utilities.formatDate(new Date(), fuso(), "dd-MM-yyyy HH'h'mm"));
 
   // O Apps Script nao faz merge de PDF pronto com outros arquivos.
   if (pdfs.length && (docs.length || imgs.length || pdfs.length > 1)) {
@@ -176,12 +178,19 @@ function acaoFinalizarEntrega(usuario, params) {
   });
 
   // Os campos que mudaram ja estao em maos: montar o e-mail sem reler a tabela.
+  // O e-mail nao derruba a entrega ja gravada — mas a falha vai para a tela
+  // (antes ela dizia "gestao avisada" mesmo sem e-mail nenhum).
+  var avisoEmail = '';
   try {
     avisarEntregaEmPdf(hidratar(gravado.depois), arquivos.length, url, usuario, gravado.reentrega);
-  } catch (eMail) { /* o e-mail nao pode derrubar a entrega ja gravada */ }
+  } catch (eMail) {
+    avisoEmail = 'Entrega gravada, mas o e-mail para a gestão não saiu: ' + (eMail.message || eMail);
+  }
 
   try { tmp.setTrashed(true); } catch (e3) {}
-  return { ok: true, url: url, arquivos: arquivos.length, reentrega: gravado.reentrega };
+  var r = { ok: true, url: url, arquivos: arquivos.length, reentrega: gravado.reentrega };
+  if (avisoEmail) r.avisoEmail = avisoEmail;
+  return r;
 }
 
 /*

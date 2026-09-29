@@ -931,6 +931,8 @@ function pintar(idTela, r, silencioso) {
   const pagina = el('pagina');
   pagina.classList.toggle('sem-entrada', !!silencioso);
 
+  // O "modo filtrando" e so do calendario: nao pode vazar para outra tela.
+  if (idTela !== 'calendario') pagina.classList.remove('filtrando');
   const pintor = window[TELAS_PINTA[idTela]];
   if (typeof pintor !== 'function') {
     pagina.innerHTML = `<div class="erro-caixa">A tela "${esc(idTela)}" ainda nao tem visual montado.</div>`;
@@ -1257,7 +1259,7 @@ function pintarCalendario(r) {
                 dia.itens.some((i) => i.entregue) ? ' tem-entrega' : ''}">
             <div class="dia-numero">${dia.dia}</div>
             ${dia.itens.map((i) => `
-              <button class="pilula ${classeStatus(i.status)}${i.entregue ? ' tem-anexo' : ''}" title="${esc(i.atividade)}${i.entregue ? ' — ENTREGUE (' + (i.qtdAnexos || 1) + ' arquivo)' : ''}"
+              <button class="pilula ${classeStatus(i.status)}${i.entregue ? ' tem-anexo' : ''}" title="${esc(i.atividade)}${i.entregue ? ' — ENTREGUE (' + (i.qtdAnexos || 0) + ' arquivo)' : ''}"
                       data-turno="${esc(i.turno)}"
                       onclick="abrirAtividade(${jsArg(i.id)})">${esc(i.tipo)}${i.turno !== 'Todos' ? ' ' + esc(i.turno) : ''}</button>`).join('')}
           </div>`).join('')).join('')}
@@ -1298,7 +1300,7 @@ function pintarCalendario(r) {
               <td>${esc(a.coordenador || '—')}</td>
               <td>${esc(a.setor || '—')}</td>
               <td>${a.entregue
-                    ? `<span class="selo-entrega">\u{1F4CE} ${a.qtdAnexos || 1} arquivo(s)</span>`
+                    ? `<span class="selo-entrega">\u{1F4CE} ${a.qtdAnexos || 0} arquivo(s)</span>`
                     : '<span class="pendente-entrega">aguardando</span>'}</td>
               <td>${esc(a.entregueEm || '—')}</td>
               <td>${esc(a.validacao || '—')}</td>
@@ -1309,13 +1311,13 @@ function pintarCalendario(r) {
       </div>
     </div>
 
-    ${(d.treinamentos || []).length ? `
+    ${vagasDoMes(d).length ? `
     <div class="cartao bloco-treinamento">
-      <div class="cartao-titulo">Treinamentos programados pelo gerente</div>
+      <div class="cartao-titulo">Treinamentos e vagas programados pelo gerente</div>
       <div class="dica" style="margin-bottom:10px">
         Vaga que o gerente marca — preencha o tema, o turno e a data. O coordenador e avisado por e-mail na hora.
       </div>
-      ${d.treinamentos.map((a) => `
+      ${vagasDoMes(d).map((a) => `
         <div class="linha-atividade">
           <div class="data-atividade">
             <div class="data-dia">${a.prazo ? esc(a.prazo.slice(0, 5)) : '--'}</div>
@@ -1344,6 +1346,9 @@ function pintarCalendario(r) {
           ${p.validar ? `<button class="icone-botao" onclick="agir('reativarAtividade',{id:${jsArg(a.id)}},'Atividade reativada')">Reativar</button>` : ''}
         </div>`).join('')}
     </div>` : ''}`;
+  // Filtro de status/turno sobrevive a repintura (acao ou revalidacao de
+  // fundo): antes a pilula continuava acesa, mas nada mais era filtrado.
+  aplicarFiltro();
 }
 
 function encerrarMes(competencia) {
@@ -1580,6 +1585,13 @@ function formRemarcar(id) {
     <button class="botao" onclick="agir('remarcar',{id:${jsArg(id)},prazo:val('r-data'),motivo:val('r-motivo'),avisar:marcado('r-avisar')},'Prazo remarcado')">Remarcar</button>`);
 }
 
+/*
+ * Vagas do mes: os treinamentos (TRE) e tambem as vagas de outras rotinas
+ * AVULSAS ainda sem data. Estas eram geradas, contavam como pendentes e
+ * nunca apareciam — nao havia onde agenda-las.
+ */
+function vagasDoMes(d) { return [].concat(d.treinamentos || [], d.naoAgendadas || []); }
+
 function formTreinamento(id) {
   const a = todasAtividades().find((x) => x.id === id);
   abrirJanela('Agendar treinamento', `
@@ -1660,7 +1672,8 @@ async function enviarEntrega(id) {
     if (feito && feito.invalidarTudo) esquecerTelas();
     else { esquecerTela(paginaAtual); envelhecerTelas(); }
     fecharJanela();
-    avisar(feito && feito.arquivos
+    if (feito && feito.avisoEmail) avisar(feito.avisoEmail, true);
+    else avisar(feito && feito.arquivos
       ? `Entrega enviada (${feito.arquivos} arquivo(s)) — gestão avisada`
       : 'Entrega enviada em PDF — gestão avisada');
     await abrir(paginaAtual, paramsAtual);
@@ -3596,9 +3609,9 @@ function pintarAcoes(r) {
         </div>
         <div class="tira-turnos" style="margin:0">
           <span class="tira-rotulo">Turno</span>
-          ${['TODOS'].concat(d.turnos).map((t) => `
-            <button class="pastilha-turno ${String(f.turno).toUpperCase() === String(t).toUpperCase() ? 'ativa' : ''}"
-                    onclick="filtrarAcoes({turno:${jsArg(t)}})">${t === 'TODOS' ? 'Todos' : esc(t)}</button>`).join('')}
+          ${[''].concat(d.turnos).map((t) => `
+            <button class="pastilha-turno ${String(f.turno || '').toUpperCase() === String(t).toUpperCase() ? 'ativa' : ''}"
+                    onclick="filtrarAcoes({turno:${jsArg(t)}})">${t === '' ? 'Todos' : t === 'Todos' ? 'Geral (CD)' : esc(t)}</button>`).join('')}
         </div>
         <div class="busca-caixa">
           <span class="busca-lupa" aria-hidden="true">&#128269;</span>

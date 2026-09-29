@@ -140,6 +140,13 @@ function acaoSalvarRotina(usuario, params) {
   };
   if (!campos.TIPO) throw new Error('Informe a sigla do tipo (3 letras) — ela entra no ID da atividade.');
   if (!campos.ATIVIDADE) throw new Error('Descreva a atividade.');
+  if (campos.FREQUENCIA === 'MENSAL') {
+    const regra = String(campos.DIA || '').toUpperCase().trim();
+    const n = Number(regra);
+    if (['PRIMEIRA_SEGUNDA', 'ULTIMA_SEXTA'].indexOf(regra) === -1 && !(n >= 1 && n <= 31 && n === Math.floor(n))) {
+      throw new Error('Rotina mensal: o "Quando" é um dia de 1 a 31 (dia que o mês não tem vira o último dia do mês).');
+    }
+  }
   return params.id ? atualizar('ROTINAS', params.id, campos, usuario.email)
                    : { ok: true, id: inserir('ROTINAS', campos, usuario.email) };
 }

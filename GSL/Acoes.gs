@@ -139,7 +139,9 @@ function dadosAcoes(usuario, params) {
   const minhas = acoesNoAlcance(usuario, listarAcoes());
 
   let lista = minhas.slice();
-  if (filtroTurno && filtroTurno !== 'TODOS') {
+  // Sem filtro e '' (4.2.2). Antes 'Todos' era ao mesmo tempo "sem filtro" e
+  // o turno das acoes do CD inteiro: essas nunca podiam ser separadas.
+  if (filtroTurno) {
     lista = lista.filter(function (a) { return String(a.turno).toUpperCase() === filtroTurno; });
   }
   if (filtroSituacao === 'ABERTAS') {
@@ -180,7 +182,7 @@ function dadosAcoes(usuario, params) {
     ranking: rankingAcoesPorTurno(minhas),
     turnos: ACOES_TURNOS,
     pessoas: pessoasParaAcao(),
-    filtro: { turno: filtroTurno || 'TODOS', situacao: filtroSituacao, busca: busca },
+    filtro: { turno: filtroTurno, situacao: filtroSituacao, busca: busca },
     permissoes: {
       gerir: podeFazer(usuario, 'GERIR_ACOES'),
       email: email

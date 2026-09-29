@@ -240,18 +240,22 @@ function idsDeAnexos(valor) {
   return lerAnexos_(valor).map(function (a) { return a.id; });
 }
 
-/** Link para abrir a entrega, seja ela URL gravada, ID do Drive ou lista JSON. */
+/*
+ * Link para abrir a entrega, seja ela URL gravada, ID do Drive ou lista JSON.
+ * E a ULTIMA entrega (4.2.2): depois de uma reprovacao, o botao "Entrega
+ * recebida" abria o PDF reprovado, e o gerente validava o arquivo errado.
+ */
 function urlDeAnexo(valor) {
   const bruto = String(valor || '').trim();
   if (!bruto) return '';
   if (bruto.charAt(0) === '[') {
-    const primeiro = lerAnexos_(bruto)[0];
-    if (!primeiro) return '';
-    return primeiro.url || ('https://drive.google.com/file/d/' + primeiro.id + '/view');
+    const ultimo = lerAnexos_(bruto).slice(-1)[0];
+    if (!ultimo) return '';
+    return ultimo.url || ('https://drive.google.com/file/d/' + ultimo.id + '/view');
   }
-  if (bruto.indexOf('http') === 0) return bruto.split(',')[0].trim();
+  if (bruto.indexOf('http') === 0) { const partes = bruto.split(','); return partes[partes.length - 1].trim(); }
   const ids = idsDeAnexos(bruto);
-  return ids.length ? ('https://drive.google.com/file/d/' + ids[0] + '/view') : '';
+  return ids.length ? ('https://drive.google.com/file/d/' + ids[ids.length - 1] + '/view') : '';
 }
 
 function higienizarNome(nome) {

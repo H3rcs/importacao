@@ -300,10 +300,23 @@ function linhaDoId(aba, id) {
   const colId = colunas.indexOf('ID');
   if (colId === -1) throw new Error('A tabela não tem coluna ID.');
 
-  const ids = aba.getRange(2, colId + 1, Math.max(1, aba.getLastRow() - 1), 1).getValues();
+  /*
+   * A PRIMEIRA linha VIVA com o ID (4.2.2). Versoes antigas chegaram a gravar
+   * a mesma atividade duas vezes: a escrita de uma em uma ia para a primeira
+   * copia e a de lote (atualizarVarios) para a ultima — cada uma mexia numa.
+   * Agora as duas acertam a mesma. Copia excluida so vale se for a unica.
+   */
+  const n = Math.max(1, aba.getLastRow() - 1);
+  const ids = aba.getRange(2, colId + 1, n, 1).getValues();
+  const colExc = colunas.indexOf('EXCLUIDO');
+  const exc = colExc === -1 ? null : aba.getRange(2, colExc + 1, n, 1).getValues();
+  let excluida = -1;
   for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === String(id)) return { linha: i + 2, colunas: colunas };
+    if (String(ids[i][0]) !== String(id)) continue;
+    if (!exc || !marcado(exc[i][0])) return { linha: i + 2, colunas: colunas };
+    if (excluida === -1) excluida = i;
   }
+  if (excluida !== -1) return { linha: excluida + 2, colunas: colunas };
   throw new Error('Registro ' + id + ' nao encontrado em ' + aba.getName() + '.');
 }
 
@@ -402,8 +415,13 @@ function atualizarVarios(tabela, mudancas, quem) {
 
     // Indice ID -> linha, montado uma vez. Antes cada atualizar() varria a
     // coluna ID inteira de novo, uma vez por registro.
+    // A primeira linha VIVA de cada ID — a mesma que o linhaDoId acha.
+    const colExc = colunas.indexOf('EXCLUIDO');
     const linhaDe = {};
-    for (let i = 1; i < valores.length; i++) linhaDe[String(valores[i][colId])] = i;
+    for (let i = 1; i < valores.length; i++) {
+      const k = String(valores[i][colId]);
+      if (linhaDe[k] === undefined && !(colExc !== -1 && marcado(valores[i][colExc]))) linhaDe[k] = i;
+    }
 
     const posQuando = colunas.indexOf('ATUALIZADO_EM');
     const posQuem = colunas.indexOf('ATUALIZADO_POR');

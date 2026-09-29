@@ -15,6 +15,25 @@
  */
 const JANELA_INSIGHTS_DIAS = 84;
 
+/*
+ * O MES DA TELA (4.2.2). Os numeros do topo — geral e por turno — agora
+ * contam o mesmo conjunto do Calendario: atividades COM data, deste mes, sem
+ * as vagas de treinamento ainda nao agendadas. Antes entravam as vagas TRE
+ * (5 "pendentes" num mes 100% aprovado) e todo mes futuro ja gerado (no dia
+ * 20 a geracao automatica derrubava a "Conclusao" de 88% para 43%).
+ */
+function doMesAtual_(lista) {
+  const atual = competenciaDe(hoje());
+  return lista.filter(function (a) {
+    return a.prazoISO && a.tipo !== 'TRE' && competenciaDe(paraData(a.prazoISO)) === atual;
+  });
+}
+
+/* Por mes: cada linha bate com o Calendario daquele mes (sem as vagas TRE sem data). */
+function paraOsMeses_(lista) {
+  return lista.filter(function (a) { return a.prazoISO || a.tipo !== 'TRE'; });
+}
+
 function atividadesDaCentral_() {
   const agora = hoje();
   const ordAtual = agora.getFullYear() * 12 + agora.getMonth();
@@ -56,8 +75,11 @@ function dadosInicio(usuario) {
     return a.status !== STATUS.CANCELADA && a.status !== STATUS.APROVADA && a.prazoISO;
   });
 
-  const daSemana = minhas.filter(function (a) {
-    if (!a.prazoISO) return false;
+  // A semana vem da lista larga (inclui prazos recentes de meses anteriores):
+  // no comeco do mes, os dias da semana que ainda sao do mes passado sumiam
+  // do cartao que dizia mostra-los.
+  const daSemana = lidas.janela.filter(function (a) {
+    if (!a.prazoISO || a.status === STATUS.CANCELADA || !dentroDoEscopo(a, escopo)) return false;
     const d = paraData(a.prazoISO);
     return d >= semana.inicio && d <= semana.fim;
   }).sort(function (a, b) { return a.prazoISO.localeCompare(b.prazoISO); });
@@ -67,7 +89,7 @@ function dadosInicio(usuario) {
     perfil: usuario.perfil,
     escopo: descreverEscopo(usuario),
     hoje: formatarData(hoje()),
-    geral: resumirStatus(minhas),
+    geral: resumirStatus(doMesAtual_(minhas)),
     urgencias: {
       atrasadas: ativas.filter(function (a) { return a.prazoNum < hojeN; }).length,
       hoje: ativas.filter(function (a) { return a.prazoNum === hojeN; }).length,
@@ -78,8 +100,8 @@ function dadosInicio(usuario) {
       inicio: formatarData(semana.inicio), fim: formatarData(semana.fim),
       itens: daSemana
     },
-    porMes: andamentoPorMes(todas),
-    porTurno: TURNOS.map(function (t) { return resumoTurno(todas, t); }),
+    porMes: andamentoPorMes(paraOsMeses_(todas)),
+    porTurno: TURNOS.map(function (t) { return resumoTurno(doMesAtual_(todas), t); }),
     insights: podeFazer(usuario, 'VER_INDIVIDUAL') ? gerarInsights(todas, lidas.janela, aguardandoTodas) : [],
     atalhos: telasDe(usuario).filter(function (t) { return t.id !== 'inicio'; })
   };
@@ -352,9 +374,9 @@ function dadosApresentacao(usuario) {
   return {
     hoje: formatarData(hoje()),
     semana: { inicio: formatarData(semana.inicio), fim: formatarData(semana.fim) },
-    geral: resumirStatus(vivas),
-    porTurno: TURNOS.map(function (t) { return resumoTurno(todas, t); }),
-    porMes: andamentoPorMes(todas),
+    geral: resumirStatus(doMesAtual_(vivas)),
+    porTurno: TURNOS.map(function (t) { return resumoTurno(doMesAtual_(todas), t); }),
+    porMes: andamentoPorMes(paraOsMeses_(todas)),
     atrasadas: atrasadas.slice(0, 15),
     maisAtrasadas: Math.max(0, atrasadas.length - 15),
     aguardando: aguardando.slice(0, 15),

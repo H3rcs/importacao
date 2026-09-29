@@ -106,6 +106,9 @@ function digestoMatinal() {
 
   const equipe = coordenadoresPorTurno();
 
+  // Um endereco recusado nao pode deixar os outros turnos sem digesto: cada
+  // envio tem o seu try, e as falhas sobem juntas no fim.
+  const falhas = [];
   TURNOS.forEach(function (turno) {
     const pessoa = equipe[turno];
     if (!pessoa || !pessoa.email) return;
@@ -126,7 +129,7 @@ function digestoMatinal() {
 
     if (!atrasadas.length && !reprovadas.length && !hojeVence.length && !amanha.length && !proximos.length) return;
 
-    const corpo = '<p>Bom dia' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') +
+    const corpo = '<p>Bom dia' + (pessoa.nome ? ', <b>' + htmlSeguro(pessoa.nome) + '</b>' : '') +
       '! Este e o seu resumo unico do dia — tudo que o Turno ' + turno + ' deve ou precisa enviar:</p>' +
       secao('ATRASADAS — regularizar hoje', COR_ALERTA, atrasadas, hojeN) +
       secao('REPROVADAS — corrigir e reanexar', COR_ALERTA, reprovadas, hojeN) +
@@ -147,8 +150,10 @@ function digestoMatinal() {
                   : amanha.length    ? 'Turno ' + turno + ' — vence amanha'
                   :                    'Turno ' + turno + ' — proximos prazos';
 
-    enviar([pessoa.email], assunto, corpo, ccGestao);
+    try { enviar([pessoa.email], assunto, corpo, ccGestao); }
+    catch (e) { falhas.push('turno ' + turno + ': ' + (e.message || e)); }
   });
+  if (falhas.length) throw new Error('Digesto não saiu para ' + falhas.join(' | '));
 }
 
 function secao(titulo, cor, itens, hojeN) {
@@ -162,7 +167,7 @@ function secao(titulo, cor, itens, hojeN) {
       const reprovada = a.status === STATUS.REPROVADA
         ? ' · <b style="color:' + COR_ALERTA + '">REPROVADA — corrigir e reanexar</b>' +
           (porque ? ' <span style="color:#6b7280">(' + htmlSeguro(porque) + ')</span>' : '') : '';
-      return '<li style="margin:4px 0">' + a.atividade +
+      return '<li style="margin:4px 0">' + htmlSeguro(a.atividade) +
              ' <span style="color:#6b7280">(' + a.competencia + ' · ' + a.semana + ')</span>' +
              ' — prazo <b>' + a.prazo + '</b>' + atraso + reprovada + '</li>';
     }).join('') + '</ul>';
@@ -193,7 +198,7 @@ function briefingGerente() {
 
   const corpo = '<p>Entregas anexadas aguardando sua validacao:</p><ul>' +
     aguardando.map(function (a) {
-      return '<li>' + a.atividade + ' — ' + a.competencia + ' · Turno ' + a.turno + ' · ' + a.coordenador +
+      return '<li>' + htmlSeguro(a.atividade) + ' — ' + a.competencia + ' · Turno ' + a.turno + ' · ' + htmlSeguro(a.coordenador) +
              ' · entregue em ' + a.entregueEm + '</li>';
     }).join('') + '</ul>' + rodapeLink();
 
@@ -206,7 +211,7 @@ function briefingGerente() {
 
 function avisarEntregaRecebida(a, usuario) {
   enviar(emailsDaGestao(), 'Entrega recebida — ' + a.atividade + ' (' + a.semana + ' · Turno ' + a.turno + ')',
-    '<p>O coordenador <b>' + (a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega:</p>' +
+    '<p>O coordenador <b>' + htmlSeguro(a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega:</p>' +
     bloco(a) + '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink());
 }
 
@@ -233,7 +238,7 @@ function avisarSetorDefinido(a) {
   if (!a.setor) return;
   enviar(emailsDoTurno(a), 'Setor definido para a vistoria da ' + a.semana + ': ' + a.setor,
     '<p>O gerente definiu o setor da sua vistoria semanal:</p>' + bloco(a) +
-    '<p>Imprima o checklist, faca a inspecao no setor <b>' + a.setor +
+    '<p>Imprima o checklist, faca a inspecao no setor <b>' + htmlSeguro(a.setor) +
     '</b>, escaneie o checklist preenchido e anexe pelo sistema.</p>' + rodapeLink());
 }
 
@@ -250,7 +255,7 @@ function avisarEntregaEmPdf(a, qtdArquivos, url, usuario, reentrega) {
   // senao ela parece so mais um arquivo numa atividade ja decidida.
   enviar(destino, (reentrega ? 'Entrega corrigida (era reprovada) — ' : 'Entrega recebida — ') +
     a.atividade + ' (' + a.semana + ' · Turno ' + a.turno + ')',
-    '<p>O coordenador <b>' + (a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega (' +
+    '<p>O coordenador <b>' + htmlSeguro(a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega (' +
     qtdArquivos + ' arquivo(s) em um PDF unico):</p>' + bloco(a) +
     '<p><a href="' + url + '" style="color:' + COR_AZUL + '">Abrir o PDF da entrega</a></p>' +
     '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink());
@@ -376,14 +381,19 @@ function bloco(a) {
     linha('Status', a.status) + '</table>';
 }
 
+/*
+ * O valor e o texto vem de quem usa o sistema (nome da atividade, motivo da
+ * reprovacao): vao escapados. Um motivo com "<A3>" sumia do e-mail, e um
+ * "<2m" engolia o resto da linha.
+ */
 function linha(rotulo, valor) {
   return '<tr><td style="padding:3px 12px 3px 0;color:#6b7280">' + rotulo +
-         '</td><td style="padding:3px 0"><b>' + valor + '</b></td></tr>';
+         '</td><td style="padding:3px 0"><b>' + htmlSeguro(valor) + '</b></td></tr>';
 }
 
 function caixa(titulo, texto, corBarra, fundo) {
   return '<div style="border-left:4px solid ' + corBarra + ';background:' + fundo +
-    ';padding:10px 14px;margin:12px 0"><b>' + titulo + '</b><br>' + texto + '</div>';
+    ';padding:10px 14px;margin:12px 0"><b>' + titulo + '</b><br>' + htmlSeguro(texto) + '</div>';
 }
 
 function rodapeLink() {
@@ -449,7 +459,7 @@ function avisarPedidoDeAcesso(pedido) {
 function avisarAcessoLiberado(pessoa) {
   if (!pessoa || !pessoa.email) return;
   enviar([pessoa.email], 'Seu acesso ao GSL Bartofil foi liberado',
-    '<p>Olá' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') + '!</p>' +
+    '<p>Olá' + (pessoa.nome ? ', <b>' + htmlSeguro(pessoa.nome) + '</b>' : '') + '!</p>' +
     '<p>O seu acesso ao sistema foi liberado com o nível <b>' +
     (pessoa.perfil || '—') + '</b>.</p>' +
     '<p>Para entrar, abra o link abaixo e digite o seu e-mail (<b>' + pessoa.email + '</b>) e um PIN ' +
@@ -462,7 +472,7 @@ function avisarAcessoLiberado(pessoa) {
 function avisarAcessoRecusado(pessoa, motivo) {
   if (!pessoa || !pessoa.email) return;
   enviar([pessoa.email], 'Sobre o seu pedido de acesso ao GSL Bartofil',
-    '<p>Olá' + (pessoa.nome ? ', <b>' + pessoa.nome + '</b>' : '') + '.</p>' +
+    '<p>Olá' + (pessoa.nome ? ', <b>' + htmlSeguro(pessoa.nome) + '</b>' : '') + '.</p>' +
     '<p>O seu pedido de acesso ao sistema não foi aprovado neste momento.</p>' +
     (motivo ? caixa('Motivo:', motivo, COR_AZUL, '#EEF0FF') : '') +
     '<p>Se achar que houve engano, procure a gerência do CD.</p>' + rodapeLink());

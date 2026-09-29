@@ -610,6 +610,9 @@ function servicos(m, execucao) {
   const enviar = (a, b, c, d) => {
     const msg = typeof a === 'object' ? Object.assign({}, a) : Object.assign({ to: a, subject: b, body: c }, d || {});
     if (!msg.to) throw erroGAS('Invalid argument: recipient');
+    // endereco com "invalido" e recusado, como o Gmail recusa um e-mail com erro de digitacao
+    const ruim = String(msg.to).split(',').filter((x) => /invalido/i.test(x))[0];
+    if (ruim) throw erroGAS('Invalid email: ' + ruim.trim());
     m.emails.push(msg);
   };
   const MailApp = estrito('MailApp', { sendEmail: enviar, getRemainingDailyQuota: () => 100 });

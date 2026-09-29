@@ -227,8 +227,13 @@ function datasDaRotina(rotina, ano, mes) {
     const regra = String(rotina.DIA || '').toUpperCase().trim();
     if (regra === 'PRIMEIRA_SEGUNDA') return [primeiraSegunda(ano, mes)].filter(Boolean);
     if (regra === 'ULTIMA_SEXTA') return [ultimaSexta(ano, mes)].filter(Boolean);
+    // Dia que o mes nao tem (31 em setembro, 29-31 em fevereiro) cai no
+    // ULTIMO dia do mes. Antes o Date virava o dia 1 do mes seguinte: o mes
+    // curto ficava sem a atividade e o seguinte com duas.
     const dia = Number(regra);
-    return dia ? [new Date(ano, mes, dia)] : [];
+    if (!(dia >= 1)) return [];
+    const ultimo = new Date(ano, mes + 1, 0).getDate();
+    return [new Date(ano, mes, Math.min(Math.floor(dia), ultimo))];
   }
 
   if (freq === 'AVULSA') {
@@ -1294,14 +1299,30 @@ function acaoDetalhesAtividade(usuario, params) {
  * Conferir e remover na mesma trava: a linha conferida e a gravada.
  */
 function acaoRemoverAnexoAtividade(usuario, params) {
+  // Mesma regra de quem entrega (ENTREGAR ou ANEXAR) — a tela ja oferecia o
+  // Remover por essa regra, e a porta exigia so ANEXAR.
+  exigirPodeEntregar_(usuario);
   return comTrava(function () {
     const registro = obter('ATIVIDADES', params.id);
     if (!registro) throw new Error('Atividade não encontrada.');
     garantirAlcanceEscrita_(usuario, registro);
-    if (String(registro.VALIDACAO || '').trim() === 'Aprovado' && !podeFazer(usuario, 'VALIDAR')) {
+    const validacao = String(registro.VALIDACAO || '').trim();
+    if (validacao === 'Aprovado' && !podeFazer(usuario, 'VALIDAR')) {
       throw new Error('Esta atividade ja foi aprovada: so a gerencia pode remover anexo dela.');
     }
-    return removerAnexo(usuario, 'ATIVIDADES', params.id, params.idArquivo);
+    const r = removerAnexo(usuario, 'ATIVIDADES', params.id, params.idArquivo);
+    /*
+     * Saiu o ULTIMO arquivo: a atividade nao pode continuar "Aguardando
+     * validacao" sem nada para validar (e com a hora de entrega do arquivo
+     * removido). Volta a ser pendente pelo prazo.
+     */
+    const atual = obter('ATIVIDADES', params.id);
+    if (atual && !idsDeAnexos(atual.ANEXOS).length && validacao !== 'Aprovado') {
+      atualizar('ATIVIDADES', params.id, {
+        ENTREGUE_EM: '', STATUS: statusDe(paraData(atual.PRAZO), '', validacao)
+      }, usuario.email);
+    }
+    return r;
   });
 }
 
@@ -1312,4 +1333,72 @@ function garantirAlcance(usuario, id) {
   if (!registro) throw new Error('Atividade não encontrada.');
   if (dentroDoEscopo(hidratar(registro), escopo)) return;
   throw new Error('Esta atividade não esta no seu alcance.');
+}
+
+
+/* ------------------------------------------------------------------ */
+/* MANUTENCAO — atividades gravadas em dobro por versoes antigas       */
+/*                                                                     */
+/* Rodar pelo EDITOR, como dono:                                       */
+/*   conferirAtividadesDuplicadas()  -> so mostra (Registro de execucao) */
+/*   limparAtividadesDuplicadas()    -> aplica                         */
+/* Fica a copia com evidencia (validacao, entrega ou anexo); os anexos */
+/* das outras copias sao juntados nela; as outras sao marcadas como    */
+/* EXCLUIDO — nada e apagado da planilha.                              */
+/* ------------------------------------------------------------------ */
+
+function conferirAtividadesDuplicadas() { return duplicadasDeAtividades_(false); }
+function limparAtividadesDuplicadas() { return duplicadasDeAtividades_(true); }
+
+function duplicadasDeAtividades_(aplicar) {
+  exigirDono_();
+  return comTrava(function () {
+    const aba = abaDe('ATIVIDADES');
+    const ultima = aba.getLastRow(), nCol = aba.getLastColumn();
+    if (ultima < 2) return { grupos: 0, marcadas: 0, detalhes: [] };
+    const valores = aba.getRange(1, 1, ultima, nCol).getValues();
+    const col = {};
+    valores[0].forEach(function (c, j) { col[String(c).trim().toUpperCase()] = j; });
+    const porId = {};
+    for (let i = 1; i < valores.length; i++) {
+      const id = String(valores[i][col.ID] || '').trim();
+      if (!id || marcado(valores[i][col.EXCLUIDO])) continue;
+      (porId[id] = porId[id] || []).push(i);
+    }
+    const temEvidencia = function (i) {
+      return !!(String(valores[i][col.VALIDACAO] || '').trim() || String(valores[i][col.ENTREGUE_EM] || '').trim() ||
+                String(valores[i][col.ANEXOS] || '').trim());
+    };
+    const detalhes = [];
+    let marcadas = 0;
+    Object.keys(porId).forEach(function (id) {
+      const linhas = porId[id];
+      if (linhas.length < 2) return;
+      const fica = linhas.filter(function (i) { return String(valores[i][col.VALIDACAO] || '').trim(); })[0] ||
+                   linhas.filter(temEvidencia)[0] || linhas[0];
+      const saem = linhas.filter(function (i) { return i !== fica; });
+      const anexos = [];
+      [fica].concat(saem).forEach(function (i) {
+        String(valores[i][col.ANEXOS] || '').split(',').map(function (x) { return x.trim(); })
+          .forEach(function (x) { if (x && anexos.indexOf(x) === -1) anexos.push(x); });
+      });
+      detalhes.push(id + ': fica a linha ' + (fica + 1) + ', saem ' + saem.map(function (i) { return i + 1; }).join(', ') +
+        (anexos.length ? ' (' + anexos.length + ' anexo(s) juntados)' : ''));
+      if (!aplicar) return;
+      if (col.ANEXOS !== undefined && anexos.length) aba.getRange(fica + 1, col.ANEXOS + 1).setValue(anexos.join(','));
+      saem.forEach(function (i) {
+        aba.getRange(i + 1, col.EXCLUIDO + 1).setValue('SIM');
+        if (col.ATUALIZADO_EM !== undefined) aba.getRange(i + 1, col.ATUALIZADO_EM + 1).setValue(agoraTexto());
+        if (col.ATUALIZADO_POR !== undefined) aba.getRange(i + 1, col.ATUALIZADO_POR + 1).setValue('manutencao');
+        marcadas++;
+      });
+    });
+    if (aplicar && marcadas) {
+      limparCache('ATIVIDADES');
+      registrarLog(donoDoScript() || 'sistema', 'MANUTENCAO', 'ATIVIDADES', marcadas + ' copia(s)', detalhes.join(' | ').slice(0, 45000));
+    }
+    const r = { grupos: detalhes.length, marcadas: marcadas, aplicado: !!aplicar, detalhes: detalhes };
+    Logger.log(JSON.stringify(r, null, 2));
+    return r;
+  });
 }

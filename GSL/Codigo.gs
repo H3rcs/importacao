@@ -355,7 +355,7 @@ const ACOES = {
   definirSetor:        { capacidade: 'PROGRAMAR',     funcao: 'acaoDefinirSetor', modulo: 'calendario' },
   remarcar:            { capacidade: 'PROGRAMAR',     funcao: 'acaoRemarcar', modulo: 'calendario' },
   agendarTreinamento:  { capacidade: 'PROGRAMAR',     funcao: 'acaoAgendarTreinamento', modulo: 'calendario' },
-  removerAnexo:        { capacidade: 'ANEXAR',        funcao: 'acaoRemoverAnexoAtividade', modulo: 'calendario' },
+  removerAnexo:        { capacidade: null,            funcao: 'acaoRemoverAnexoAtividade', modulo: 'calendario' },
   detalhesAtividade:   { capacidade: null,            funcao: 'acaoDetalhesAtividade', modulo: 'calendario' },
   iniciarEntrega:      { capacidade: null,            funcao: 'acaoIniciarEntrega', modulo: 'calendario' },
   receberParte:        { capacidade: null,            funcao: 'acaoReceberParte', modulo: 'calendario' },
@@ -487,9 +487,17 @@ const VALIDADE_TELA = 180;
  * dividem o mesmo payload, e o primeiro que abrir paga por todos.
  * A excecao e o escopo PROPRIAS, onde o conteudo e pessoal mesmo.
  */
+/*
+ * Telas cujo conteudo depende de QUEM olha — o "voce" e o Concluir do Plano
+ * de Acao, o "eu" de Pessoas e acessos. Sem o e-mail na chave, duas pessoas
+ * do mesmo nivel e turno dividiam o mesmo payload (e cada ADMIN recebia o
+ * que o aquecimento do cache montou para o dono).
+ */
+const TELAS_PESSOAIS = { acoes: true, acessos: true };
+
 function chaveDeTela(idTela, usuario, params) {
   const e = escopoDe(usuario);
-  const dono = (e.tipo === 'PROPRIAS') ? usuario.email : '';
+  const dono = (e.tipo === 'PROPRIAS' || TELAS_PESSOAIS[idTela]) ? usuario.email : '';
   /*
    * O DIA entra na chave. Os indicadores dependem de "hoje" (atrasada,
    * vence hoje, mes vigente); sem o dia, uma tela montada ontem continuava

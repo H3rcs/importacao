@@ -55,12 +55,39 @@ function doGet(e) {
 function doPost(e) {
   _porta = true;
   const p = (e && e.parameter) || {};
+
+  // SAIR pela reserva: apaga a sessao no servidor (o sairDoSistema pelo
+  // google.script.run tambem seria barrado). Reenviado, nao faz mal.
+  if (p.sair) {
+    if (/^[a-f0-9]{32,80}$/.test(String(p.sair))) {
+      try { CacheService.getScriptCache().remove('sess_' + p.sair); } catch (x) {}
+    }
+    return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', recado: 'Você saiu do GSL.', viaPost: true });
+  }
+
+  /*
+   * BILHETE DE USO UNICO (4.2.2). O navegador guarda o POST no historico:
+   * F5 ou Voltar depois de "Sair" reenviava o e-mail e o PIN (ou a sessao)
+   * da pessoa anterior e o proximo entrava como ela. Cada pagina leva um
+   * bilhete; o POST so vale com um bilhete novo (ou usado ha menos de 90 s,
+   * para um clique repetido).
+   */
+  if (!usarBilhete_(p.bilhete)) {
+    return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', viaPost: true,
+      erroEntrada: 'Por segurança, esta página não pode ser reenviada. Digite o e-mail e o PIN de novo.' });
+  }
+
   if (!String(p.email || '').trim() && p.t) {
-    return paginaComCarga_(cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p }));
+    const nav = cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p });
+    nav.viaPost = true;
+    return paginaComCarga_(nav);
   }
   let carga;
   try {
     const r = entrar_(p.email, p.pin, p.confirmacao, p.filial, p.codigo);
+    // Entrou: o bilhete queima de vez (sem a folga de 90 s) — reenviar este
+    // POST pelo historico nao pode abrir a sessao de novo.
+    if (r && r.ok) queimarBilhete_(p.bilhete);
     carga = (r && r.ok) ? r : { ok: true, instalado: true, entrada: 'ENTRAR',
       erroEntrada: (r && r.erro) || '', recado: (r && !r.erro && r.recado) || '',
       criarPin: !!(r && r.criarPin), pedirCodigo: !!(r && r.pedirCodigo),
@@ -70,7 +97,34 @@ function doPost(e) {
     carga = { ok: true, instalado: true, entrada: 'ENTRAR', erroEntrada: String(erro.message || erro),
               emailDigitado: String(p.email || '') };
   }
+  carga.viaPost = true;
   return paginaComCarga_(carga);
+}
+
+const BILHETE_SEG = 6 * 3600;
+const BILHETE_FOLGA_MS = 90 * 1000;
+
+function novoBilhete_() {
+  const b = Utilities.getUuid();
+  try { CacheService.getScriptCache().put('bilhete_' + b, 'novo', BILHETE_SEG); } catch (e) {}
+  return b;
+}
+
+function queimarBilhete_(bilhete) {
+  try { CacheService.getScriptCache().put('bilhete_' + String(bilhete || ''), 'queimado', BILHETE_SEG); } catch (e) {}
+}
+
+function usarBilhete_(bilhete) {
+  const b = String(bilhete || '');
+  if (!/^[0-9a-f-]{36}$/i.test(b)) return false;
+  const cache = CacheService.getScriptCache();
+  const v = cache.get('bilhete_' + b);
+  if (!v || v === 'queimado') return false;
+  if (v === 'novo') {
+    cache.put('bilhete_' + b, String(Date.now()), BILHETE_SEG);
+    return true;
+  }
+  return Date.now() - Number(v) <= BILHETE_FOLGA_MS;
 }
 
 /*
@@ -111,6 +165,7 @@ function cargaDaPagina_(pedido) {
 
 function paginaComCarga_(carga) {
   carga.urlApp = urlDoApp_();
+  carga.bilhete = novoBilhete_();
   const t = HtmlService.createTemplateFromFile('Index');
   t.app = APP;
   // "<" escapado: um texto com </script> dentro de um nome nao pode
@@ -125,7 +180,16 @@ function paginaComCarga_(carga) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/*
+ * Endereco do app. Em alguns projetos o getUrl() devolve o endereco de
+ * teste (/dev), que so abre para quem edita o script: a reserva por POST e
+ * o "Tentar de novo" levariam as pessoas a uma tela de erro. A propriedade
+ * URL_APP (o /exec da implantacao, colado pelo administrador) tem
+ * prioridade — ver /exec?diagnostico=1.
+ */
 function urlDoApp_() {
+  const fixo = String(prop('URL_APP', '')).trim();
+  if (/^https:\/\/script\.google\.com\/.+\/exec$/.test(fixo)) return fixo;
   try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; }
 }
 
@@ -263,6 +327,8 @@ function paginaDiagnostico_() {
     linha('Quem o Google diz que abriu', d.usuarioAtivo || '(vazio)') +
     linha('Conta que executa o script', d.donoDoScript || '(vazio)') +
     linha('Cadastrada no GSL?', d.cadastrado ? 'SIM — ' + (d.perfil || '') : 'NÃO') +
+    linha('Endereço usado pelo sistema', htmlSeguro(urlDoApp_() || '(vazio)') +
+      (/\/dev$/.test(urlDoApp_()) ? ' — é o de TESTE: grave o /exec na propriedade URL_APP' : '')) +
     '</table>' +
     '<p style="line-height:1.7;background:#FFF8D6;padding:14px 18px;border-left:4px solid #EA6D0B">' +
     d.veredito + '</p></div>';

@@ -387,7 +387,7 @@ function caixa(titulo, texto, corBarra, fundo) {
 }
 
 function rodapeLink() {
-  let url = ScriptApp.getService().getUrl();
+  let url = urlDoApp_();       // respeita a propriedade URL_APP (ver Codigo.gs)
   // O e-mail de uma filial leva direto para ela.
   try { if (!ehFilialPrincipal()) url += '?filial=' + encodeURIComponent(filialAtual().codigo); } catch (e) {}
   return '<p style="margin-top:18px"><a href="' + url +

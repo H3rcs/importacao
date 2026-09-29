@@ -436,7 +436,10 @@ function simulacaoAtiva(email) {
 /* ------------------------------------------------------------------ */
 
 const SESSAO_SEGUNDOS = 6 * 3600;      // o CacheService guarda no maximo 6 h
-const SESSAO_RENOVAR_MS = 20 * 60 * 1000;
+const SESSAO_RENOVAR_MS = 5 * 60 * 1000;
+// Uma hora sem usar o sistema e a sessao acaba (4.2.2): no computador
+// compartilhado, a aba esquecida aberta nao fica valida por 6 horas.
+const SESSAO_OCIOSA_MS = 60 * 60 * 1000;
 const PIN_TENTATIVAS = 5;
 const PIN_BLOQUEIO_SEG = 10 * 60;
 const CODIGO_EMAIL_SEG = 15 * 60;      // codigo de primeiro acesso mandado por e-mail
@@ -524,7 +527,12 @@ function emailDaSessao_(token) {
   if (!bruto) return '';
   let s;
   try { s = JSON.parse(bruto); } catch (e) { return ''; }
-  if (Date.now() - Number(s.t || 0) > SESSAO_RENOVAR_MS) {
+  const parada = Date.now() - Number(s.t || 0);
+  if (parada > SESSAO_OCIOSA_MS) {
+    try { cache.remove('sess_' + t); } catch (e) {}
+    return '';
+  }
+  if (parada > SESSAO_RENOVAR_MS) {
     s.t = Date.now();
     try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {}
   }

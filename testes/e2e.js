@@ -80,7 +80,8 @@ function repetidas(lista) { return lista.filter((d, i) => lista.indexOf(d) !== i
 async function abrirAba(s, conta, extras) {
   const contexto = extras && extras.contexto ? extras.contexto : await navegador.newContext();
   const cookies = [{ name: 'gas_conta', value: conta, url: s.url }];
-  if (extras && extras.bloqueio403) cookies.push({ name: 'gas_403', value: '1', url: s.url });
+  if (extras && extras.bloqueio403) cookies.push({ name: 'gas_403', value: extras.bloqueio403 === 'perm' ? 'perm' : '1', url: s.url });
+  if (extras && extras.atraso) cookies.push({ name: 'gas_atraso', value: String(extras.atraso), url: s.url });
   await contexto.addCookies(cookies);
   const page = await contexto.newPage();
   const erros = [];
@@ -88,7 +89,7 @@ async function abrirAba(s, conta, extras) {
   page.on('console', (m) => {
     if (m.type() === 'error' && !/ERR_CERT|fonts\.googleapis|Failed to load resource/.test(m.text())) erros.push('console: ' + m.text());
   });
-  await page.goto(s.url + ((extras && extras.query) || ''));
+  await page.goto(s.url + ((extras && extras.query) || ''), { waitUntil: 'domcontentloaded' });
   const aba = { page, contexto, erros, s };
   await esperarTela(aba);
   return aba;
@@ -351,6 +352,95 @@ async function rodar() {
     afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'sem-acesso'], 20000) === 'aplicacao', 'entrou pela reserva');
     afirmar(s.registro.some((r) => r.tipo === 'doPost'), 'usou o POST de reserva');
     await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('varias contas Google (PERMISSION_DENIED): entra pelo formulario', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: 'perm' });
+    await entrar(aba, COORD, '1234');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
+    afirmar(s.registro.some((r) => r.tipo === 'doPost'), 'usou o POST de reserva');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('falha lenta do Google (clique ja vencido): avisa e o segundo clique entra', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true, atraso: 6500 });
+    await entrar(aba, COORD, '1234');
+    const f = await frame(aba);
+    await f.waitForFunction(() => /Clique em Entrar de novo/i.test(document.getElementById('entrar-msg').textContent), null, { timeout: 15000 });
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'o segundo clique entrou');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('reenviar o POST de entrada (F5/Voltar depois de Sair) nao entra de novo', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true });
+    await entrar(aba, COORD, '1234');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    const post = s.registro.filter((r) => r.tipo === 'doPost').pop();
+    afirmar(post && /email=/.test(post.corpo) && /bilhete=/.test(post.corpo), 'o POST de entrada levou o bilhete');
+    let f = await frame(aba);
+    const token = await f.evaluate(() => TOKEN);
+    await f.evaluate(() => sair());
+    await aba.page.waitForTimeout(1500);
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao'], 15000) === 'entrar', 'saiu');
+    afirmar(s.registro.some((r) => r.tipo === 'doPost' && r.campos.includes('sair')), 'a saida foi por POST');
+    const r = s.chamar(GERAL, 'retomarSessao', { t: token, f: '' });
+    afirmar(JSON.parse(r.valor).entrada === 'ENTRAR', 'a sessao antiga acabou no servidor');
+    // o "proximo" reenvia o POST de entrada guardado no historico
+    const resp = await aba.contexto.request.post(s.url, { headers: { 'content-type': 'application/x-www-form-urlencoded' }, data: post.corpo });
+    const html = await resp.text();
+    afirmar(/n\\u00e3o pode ser reenviada|não pode ser reenviada|nao pode ser reenviada/.test(html) || /reenviada/.test(html), 'POST reenviado recusado');
+    afirmar(!/"entrada":"APP"/.test(html), 'POST reenviado nao abre o sistema');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('aba restaurada depois de fechada nao reaproveita a sessao; F5 imediato sim', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '1234', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const r = await f.evaluate(() => {
+      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(Date.now() - 20000));
+      const velha = lerSessao();
+      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(Date.now() - 1000));
+      const f5 = lerSessao();
+      return { velha, f5 };
+    });
+    afirmar(r.velha === '' && r.f5 === 'abc123', 'restaurada depois de 20 s: nada; F5: sessao — ' + JSON.stringify(r));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('sem filial liberada: tela explica e "Entrar com outro e-mail" volta para a entrada', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const ctx = s.contexto(DONO); ctx._porta = true;
+    const admin = { email: DONO, perfil: 'ADMIN', permissoes: ctx.permissoesDe('ADMIN') };
+    ctx.acaoSalvarUsuario(admin, { email: 'semfilial@bartofil.com.br', nome: 'Sem Filial', perfil: 'COORDENADOR', turno: 'A', filiais: 'XYZ' });
+    criarPin(s, GERAL, 'semfilial@bartofil.com.br', '1234');
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, 'semfilial@bartofil.com.br', '1234');
+    afirmar(await esperarTela(aba, ['sem-acesso', 'aplicacao', 'falha']) === 'sem-acesso', 'mostra a tela de sem acesso');
+    const f = await frame(aba);
+    afirmar(!(await f.evaluate(() => TOKEN)), 'a sessao nao ficou guardada');
+    await f.click('#sem-acesso .botao-texto');
+    afirmar(await esperarTela(aba, ['entrar']) === 'entrar', 'voltou para digitar outro e-mail');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('Google Fonts travado nao prende a abertura', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const contexto = await navegador.newContext();
+    await contexto.route(/fonts\.(googleapis|gstatic)\.com/, () => { /* nunca responde */ });
+    const aba = await abrirAba(s, GERAL, { contexto });
+    afirmar((await telaVisivel(aba)).includes('entrar'), 'tela de entrada abriu com a fonte travada');
+    await contexto.close(); await s.fechar();
   });
 
   await cenario('Google bloqueando (HTTP 403) no primeiro acesso: codigo do e-mail pelo formulario', async () => {

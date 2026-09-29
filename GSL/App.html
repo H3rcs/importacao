@@ -39,14 +39,42 @@ function gravarLocal(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
  */
 let TOKEN = '';
 const CHAVE_SESSAO = 'gsl_sessao';
-function lerSessao() { try { return sessionStorage.getItem(CHAVE_SESSAO) || ''; } catch (e) { return ''; } }
+/*
+ * 4.2.2 — o navegador DEVOLVE o sessionStorage quando a aba fechada e
+ * reaberta (Ctrl+Shift+T, "continuar de onde parou"): o proximo a usar o
+ * computador entrava como a pessoa anterior, sem PIN. Agora a aba anota a
+ * hora em que a pagina saiu, e o codigo so vale se ela voltou em ate 15 s
+ * — um F5. Aba restaurada depois disso pede e-mail e PIN.
+ */
+const CHAVE_SAIDA = 'gsl_saida';
+function lerSessao() {
+  try {
+    const t = sessionStorage.getItem(CHAVE_SESSAO) || '';
+    const saiu = Number(sessionStorage.getItem(CHAVE_SAIDA) || 0);
+    sessionStorage.removeItem(CHAVE_SAIDA);
+    if (!t || Date.now() - saiu > 15000) { sessionStorage.removeItem(CHAVE_SESSAO); return ''; }
+    return t;
+  } catch (e) { return ''; }
+}
 function gravarSessao(t) { try { if (t) sessionStorage.setItem(CHAVE_SESSAO, t); else sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) {} }
+window.addEventListener('pagehide', function () {
+  try { if (TOKEN) sessionStorage.setItem(CHAVE_SAIDA, String(Date.now())); } catch (e) {}
+});
+
+/*
+ * CANAL BARRADO. Em computador com varias contas Google (ou cookie de
+ * terceiros bloqueado) o google.script.run falha — HTTP 403 ou o
+ * PERMISSION_DENIED "reading from storage". Detectado uma vez, a entrada e
+ * a saida passam a ir direto por POST (ver navegarPelaPagina).
+ */
+let CANAL_BARRADO = false;
 const ctx = () => ({ t: TOKEN, f: FILIAL });
 
 const chamar = (f, ...a) => new Promise((ok, erro) => {
   google.script.run.withSuccessHandler(ok).withFailureHandler((e) => {
-    // Sessao vencida (6 h sem uso) ou apagada: volta para a entrada.
+    // Sessao vencida (sem uso) ou apagada: volta para a entrada.
     if (/\[SESSAO\]/.test(String((e && e.message) || e || ''))) sessaoTerminou();
+    if (canalBloqueado(e)) CANAL_BARRADO = true;
     erro(e);
   })[f](...a);
 });
@@ -153,7 +181,14 @@ function alternarTema() {
   gravarLocal(CHAVE_TEMA, TEMA);
 }
 
-window.addEventListener('load', iniciar);
+/*
+ * Comeca no DOMContentLoaded, nao no load (4.2.2): o load espera TODOS os
+ * recursos da pagina — inclusive a folha das fontes do Google. Com
+ * fonts.googleapis.com lento ou bloqueado, a entrada so aparecia quando a
+ * fonte desistia.
+ */
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+else setTimeout(iniciar, 0);
 
 /*
  * ABERTURA — tudo o que a primeira tela precisa ja veio dentro do HTML
@@ -166,6 +201,7 @@ async function iniciar() {
     vigiarVisibilidade();
     const inicio = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true };
     URL_APP = inicio.urlApp || '';
+    if (inicio.viaPost) CANAL_BARRADO = true;       // esta pagina ja veio pela reserva
     if (!inicio.ok) return mostrarFalha(inicio.erro);
 
     if (inicio.entrada === 'INSTALAR' || inicio.instalado === false) {
@@ -189,10 +225,18 @@ async function iniciar() {
 function tratarEntrada(r) {
   if (!r) return mostrarEntrada({ erroEntrada: 'O servidor não respondeu. Tente de novo.' });
   if (r.ok === false && !r.entrada) return mostrarEntrada({ erroEntrada: r.erro });
-  if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
-  if (r.entrada === 'APP') return montarSessao(r);
-  if (r.entrada === 'ESCOLHER_FILIAL') return mostrarEscolhaFilial(r.filiais, r.usuario);
-  if (r.entrada === 'ENTRAR') { TOKEN = ''; gravarSessao(''); return mostrarEntrada(r); }
+  if (r.entrada === 'SEM_SESSAO') return sessaoTerminou();
+  if (r.entrada === 'APP' || r.entrada === 'ESCOLHER_FILIAL') {
+    if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
+    if (r.entrada === 'APP') return montarSessao(r);
+    return mostrarEscolhaFilial(r.filiais, r.usuario);
+  }
+  // Entrou, mas nao tem para onde ir (sem filial, desativado, sem nivel):
+  // a sessao nao fica guardada — senao F5 e "tentar de novo" voltavam para
+  // esta mesma tela, sem caminho para digitar outro e-mail.
+  if (r.token) { try { google.script.run.withFailureHandler(function () {}).sairDoSistema({ t: r.token }); } catch (e) {} }
+  TOKEN = ''; gravarSessao('');
+  if (r.entrada === 'ENTRAR') return mostrarEntrada(r);
   return mostrarSemAcesso(r);
 }
 
@@ -223,6 +267,7 @@ function mostrarEntrada(info) {
   soMostrar('entrar');
   const form = el('form-entrar');
   if (form && URL_APP) form.action = URL_APP;
+  el('entrar-bilhete').value = bilheteDaPagina();
   if (info.emailDigitado) el('entrar-email').value = info.emailDigitado;
   el('entrar-pin').value = '';
   el('entrar-pin2').value = '';
@@ -251,11 +296,17 @@ async function entrarNoSistema(ev) {
   if (criando && !conf) { falar('Repita o PIN no segundo campo.'); return false; }
   el('entrar-pin2').name = criando ? 'confirmacao' : '';
   el('entrar-codigo').name = pedindoCodigo ? 'codigo' : '';
-  el('entrar-filial').value = lerLocal(CHAVE_FILIAL) || '';
+  // A filial da ultima pessoa neste computador NAO vai junto: quem tem mais
+  // de uma escolhe (antes caia direto na filial de quem usou antes).
+  el('entrar-filial').value = '';
+  el('entrar-bilhete').value = bilheteDaPagina();
+  // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
+  if (CANAL_BARRADO && URL_APP) { el('form-entrar').submit(); return false; }
+  const clique = Date.now();
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
   try {
-    const r = await chamarJSON('entrar', email, pin, conf, lerLocal(CHAVE_FILIAL) || '', codigo);
+    const r = await chamarJSON('entrar', email, pin, conf, '', codigo);
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
       el('entrar-codigo-caixa').classList.toggle('oculto', !r.pedirCodigo);
@@ -272,9 +323,19 @@ async function entrarNoSistema(ev) {
     }
     tratarEntrada(r);
   } catch (e) {
-    // Computador onde o google.script.run e barrado: envia o formulario
-    // como pagina (POST no /exec), que passa onde a chamada nao passa.
-    if (canalBloqueado(e) && URL_APP) { el('form-entrar').submit(); return false; }
+    /*
+     * O entrar() do servidor nunca falha (devolve JSON ate no erro): cair
+     * aqui e o CANAL que falhou — 403, PERMISSION_DENIED de varias contas
+     * Google, rede. O formulario vai como pagina (POST no /exec), que passa
+     * onde a chamada nao passa. Mas a janela de cima so navega ate ~5 s
+     * depois do clique: se a falha demorou mais, o proximo clique envia.
+     */
+    if (URL_APP) {
+      CANAL_BARRADO = true;
+      if (Date.now() - clique < 4500) { el('form-entrar').submit(); return false; }
+      falar('A conexão com o Google falhou. Clique em Entrar de novo para continuar.', 'ok');
+      return false;
+    }
     falar(explicarErro(e));
   } finally {
     b.disabled = false; b.textContent = 'Entrar';
@@ -404,6 +465,7 @@ function escolherFilial(codigo) {
   }, 12000);
   chamarJSON('abrirFilial', { t: TOKEN, f: codigo }).then((r) => {
     respondeu = true; clearTimeout(reserva);
+    if (r && (r.entrada === 'SEM_SESSAO' || /\[SESSAO\]/.test(r.erro || ''))) return sessaoTerminou();
     if (r && r.ok && r.entrada === 'APP') return montarSessao(r);
     if (r && r.entrada && r.entrada !== 'APP') return mostrarSemAcesso(r);
     mostrarFalha((r && r.erro) || 'Não consegui abrir a filial.');
@@ -475,7 +537,16 @@ function montarSessao(r) {
  * o canal — a tela avisa quando for o caso.
  */
 function canalBloqueado(e) {
-  return /\b403\b|NetworkError|Falha na conex/i.test(String((e && e.message) || e || ''));
+  // "reading from storage ... PERMISSION_DENIED" e o erro do google.script.run
+  // quando ha mais de uma conta Google aberta no navegador — o caso do
+  // computador compartilhado. Antes so o 403 ativava a reserva.
+  return /\b40[13]\b|NetworkError|Falha na conex|PERMISSION_DENIED|reading from storage|armazenamento/i
+    .test(String((e && e.message) || e || ''));
+}
+
+/* Bilhete de uso unico que o servidor pos nesta pagina (ver doPost). */
+function bilheteDaPagina() {
+  return (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL && CARGA_INICIAL.bilhete) || '';
 }
 function abrirPorNavegacao(idTela, params) {
   if (!URL_APP || !FILIAL) return false;
@@ -496,8 +567,11 @@ function abrirPorNavegacao(idTela, params) {
  * logo depois de um clique (abrir tela, escolher filial).
  */
 let NAVEGACAO_PENDENTE = null;
+let SAINDO_DA_PAGINA = false;        // a janela de cima ja comecou a navegar
+window.addEventListener('beforeunload', function () { SAINDO_DA_PAGINA = true; });
 function navegarPelaPagina(campos) {
   if (!URL_APP) return false;
+  campos = Object.assign({ bilhete: bilheteDaPagina() }, campos);
   NAVEGACAO_PENDENTE = campos;
   const f = document.createElement('form');
   f.method = 'post'; f.action = URL_APP; f.target = '_top'; f.style.display = 'none';
@@ -512,12 +586,13 @@ function navegarPelaPagina(campos) {
   // Ainda aqui depois de 4 s: o navegador barrou a navegacao (o clique ja
   // tinha "vencido"). Um botao da ao navegador o clique que ele exige.
   setTimeout(() => {
-    if (NAVEGACAO_PENDENTE !== campos) return;
+    // Navegacao em andamento (servidor lento) nao e bloqueio: nada a fazer.
+    if (NAVEGACAO_PENDENTE !== campos || SAINDO_DA_PAGINA) return;
     abrirJanela('Continuar', `
       <p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google,
         então o sistema continua recarregando a página. Clique em <b>Continuar</b>.</p>`, `
       <button class="botao" onclick="fecharJanela(); navegarPelaPagina(NAVEGACAO_PENDENTE)">Continuar</button>`);
-  }, 4000);
+  }, 6000);
   return true;
 }
 
@@ -535,6 +610,10 @@ async function pararSimulacao() {
 function sair() {
   const t = TOKEN;
   TOKEN = ''; gravarSessao(''); SESSAO = null; esquecerTelas();
+  // Canal barrado: o sairDoSistema pelo google.script.run tambem seria
+  // barrado e a sessao continuaria valida no servidor. Sair e um clique,
+  // entao a pagina pode navegar: a saida vai por POST.
+  if (t && CANAL_BARRADO && navegarPelaPagina({ sair: t })) return;
   if (t) { try { google.script.run.withFailureHandler(function () {}).sairDoSistema({ t: t }); } catch (e) {} }
   if (el('entrar')) { el('entrar-email').value = ''; return mostrarEntrada({ recado: 'Você saiu do GSL.' }); }
   abrirJanela('Sair do sistema', `
@@ -568,6 +647,11 @@ async function instalarSistema() {
  */
 function explicarErro(t) {
   const m = String((t && t.message) || t || '');
+  if (/PERMISSION_DENIED|reading from storage|armazenamento/i.test(m)) {
+    return 'O Google recusou a conversa com o servidor porque há mais de uma conta Google aberta neste ' +
+           'navegador. Use uma janela só com a conta @bartofil.com.br (ou uma janela anônima). ' +
+           'Detalhe técnico: ' + m;
+  }
   if (/\b403\b|NetworkError|Falha na conex/i.test(m)) {
     return 'Este computador abriu o sistema, mas o Google bloqueou (HTTP 403) a conversa '
          + 'com o servidor. Verifique: 1) a conta @bartofil.com.br é a PRIMEIRA conta logada no '

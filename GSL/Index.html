@@ -4,6 +4,13 @@
   <base target="_top">
   <meta charset="utf-8">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23111785%22/%3E%3Crect%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%2301973A%22/%3E%3Crect%20x%3D%2232%22%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%23FFEE03%22/%3E%3Ctext%20x%3D%2232%22%20y%3D%2242%22%20font-family%3D%22Archivo%2CArial%2Csans-serif%22%20font-size%3D%2240%22%20font-weight%3D%22800%22%20fill%3D%22%23fff%22%20text-anchor%3D%22middle%22%3EB%3C/text%3E%3C/svg%3E">
+  <!-- Fontes SEM bloquear a pagina (4.2.2). Antes vinham por @import dentro
+       do Estilo: se fonts.googleapis.com demorasse ou estivesse bloqueado
+       (proxy do servidor em nuvem), nenhum script rodava e a pagina ficava
+       parada em "Abrindo o sistema". Sem as fontes, vale a do sistema. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap">
   <?!= include('Estilo'); ?>
   <?!= include('PaineisEstilo'); ?>
   <?!= include('Marca'); ?>
@@ -73,6 +80,7 @@
                autocomplete="off" placeholder="o mesmo PIN">
       </div>
       <input type="hidden" name="filial" id="entrar-filial">
+      <input type="hidden" name="bilhete" id="entrar-bilhete">
       <p id="entrar-msg" class="entrar-msg" role="status" aria-live="polite"></p>
       <button id="entrar-botao" class="botao" type="submit">Entrar</button>
       <p class="dica entrar-dica">Primeiro acesso: digite um PIN novo — o sistema manda um código para o seu
@@ -90,11 +98,11 @@
     <div id="sem-acesso-cartao" class="cartao-conta oculto">
       <span class="conta-rotulo">Conectado como</span>
       <strong id="sem-acesso-conta"></strong>
-      <span class="selo-verificado">&#128274; conta informada pelo Google</span>
+      <span class="selo-verificado">&#128274; conta usada na entrada</span>
     </div>
     <div class="login-caixa">
       <button class="botao" onclick="recarregarApp()">Já fui liberado — tentar de novo</button>
-      <button class="botao-texto" onclick="trocarContaGoogle()">Estou com a conta errada</button>
+      <button class="botao-texto" onclick="sair()">Entrar com outro e-mail</button>
     </div>
   </div>
 
@@ -218,7 +226,7 @@
           (ev && ev.lineno ? ' (linha ' + ev.lineno + ')' : '');
         mostrar(primeiroErro);
       });
-      window.addEventListener('load', function () {
+      document.addEventListener('DOMContentLoaded', function () {
         mostrar(primeiroErro || 'o código da página não foi executado');
       });
 

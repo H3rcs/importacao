@@ -10,8 +10,9 @@
  * que o erro da foto aparece como "Failed to execute 'write' on 'Document'".
  *
  * Quem o Google diz que abriu (Session.getActiveUser) vem do cookie
- * gas_conta. O cookie gas_403=1 simula o bloqueio do google.script.run
- * (varias contas Google no mesmo navegador).
+ * gas_conta. O cookie gas_403=1 simula o bloqueio do google.script.run por
+ * HTTP 403; gas_403=perm, o PERMISSION_DENIED de varias contas Google no
+ * mesmo navegador; gas_atraso=ms atrasa as respostas.
  */
 'use strict';
 const http = require('http');
@@ -134,7 +135,7 @@ function criarServidor(opcoes) {
         } else {
           const corpo = await lerCorpo(req);
           const params = new URLSearchParams(corpo);
-          registro.push({ tipo: 'doPost', campos: [...params.keys()] });
+          registro.push({ tipo: 'doPost', campos: [...params.keys()], corpo: corpo });
           const e = eventoDe(params);
           e.postData = { contents: corpo, type: 'application/x-www-form-urlencoded', length: corpo.length };
           saida = ctx.doPost(e);
@@ -146,7 +147,16 @@ function criarServidor(opcoes) {
       if (url.pathname === '/__gsr' && req.method === 'POST') {
         const { fn, args } = JSON.parse(await lerCorpo(req));
         registro.push({ tipo: 'run', fn });
+        // gas_atraso=ms: a resposta (ou a falha) demora — o clique "vence"
+        if (cookies.gas_atraso) await new Promise((ok) => setTimeout(ok, Number(cookies.gas_atraso)));
         if (cookies.gas_403 === '1') { res.writeHead(403); res.end('Forbidden'); return; }
+        // gas_403=perm: o erro que o Google da com varias contas no navegador
+        if (cookies.gas_403 === 'perm') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, erro: { name: 'ScriptError',
+            message: "We're sorry, a server error occurred while reading from storage. Error code PERMISSION_DENIED." } }));
+          return;
+        }
         const r = chamarPeloNavegador(mundo, opcoes.pasta, execucao, fn, args, execOpcoes);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(r));

@@ -288,6 +288,36 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('Google bloqueando (HTTP 403): abrir tela vai por POST e o codigo da sessao nao aparece na URL', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    s.chamar(GERAL, 'entrar', COORD, '1234', '1234', '');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true });
+    await entrar(aba, COORD, '1234');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
+    let f = await frame(aba);
+    await f.click('.holocard >> nth=0');                    // clique de verdade: a navegacao precisa dele
+    await aba.page.waitForTimeout(2500);
+    f = await frame(aba);
+    await f.waitForSelector('#aplicacao:not(.oculto)', { timeout: 15000 });
+    const titulo = await f.evaluate(() => document.getElementById('titulo-pagina').textContent);
+    const conteudo = await f.evaluate(() => document.getElementById('pagina').innerText);
+    afirmar(!/Abrindo pela navega/.test(conteudo), 'a tela abriu (nao ficou em "Abrindo pela navegacao")');
+    afirmar(s.registro.some((r) => r.tipo === 'doPost' && r.campos.includes('t') && r.campos.includes('tela')), 'usou o POST com a tela');
+    afirmar(!/[?&]t=/.test(aba.page.url()), 'URL sem codigo: ' + aba.page.url());
+    afirmar(!s.registro.some((r) => r.tipo === 'doGet' && /[?&]t=/.test(r.q || '')), 'nenhum GET com ?t=');
+    afirmar(titulo && titulo !== 'modulos', 'titulo da tela: ' + titulo);
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('codigo de sessao na URL (?t=) nao abre o sistema', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const r = JSON.parse(s.chamar(GERAL, 'entrar', COORD, '1234', '1234', '').valor);
+    afirmar(r.token, 'sessao criada');
+    const aba = await abrirAba(s, GERAL, { query: '?t=' + r.token });
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao']) === 'entrar', 'pede e-mail e PIN mesmo com o codigo na URL');
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('botao "Ja fui liberado — tentar de novo" recarrega o app (sem moldura em branco)', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, GERAL);

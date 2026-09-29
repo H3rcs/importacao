@@ -17,67 +17,47 @@ const APP = {
 };
 
 /*
- * ENTRADA DO SISTEMA — sem login.
+ * ENTRADA DO SISTEMA — e-mail e PIN (4.2).
  *
  * A implantacao e "Executar como: eu" + "Qualquer pessoa da Bartofil":
- * o Google Workspace so deixa chegar aqui quem esta logado com a conta
- * da empresa. O doGet apenas descobre QUEM chegou (Auth.gs), em QUAIS
- * filiais ela pode entrar (Filiais.gs) e manda tudo dentro do HTML — a
- * primeira tela abre sem nenhuma chamada ao servidor.
+ * o Google Workspace so deixa chegar aqui quem esta logado com uma conta
+ * da empresa — mas essa conta pode ser a geral do computador. Quem esta
+ * usando e dito pela propria pessoa, a cada abertura: e-mail e PIN
+ * (Auth.gs). O doGet devolve a pagina ja com a tela de entrada; depois
+ * de entrar, a sessao vive so naquela aba.
  *
- *   /exec                 entrada normal
- *   /exec?filial=SSA      entra direto numa filial
+ *   /exec                 entrada normal (pede e-mail e PIN)
+ *   /exec?filial=SSA      filial preferida depois de entrar
  *   /exec?diagnostico=1   diz se o Google esta informando quem abriu
  */
 function doGet(e) {
   _porta = true;
   const pedido = (e && e.parameter) || {};
   if (pedido.diagnostico) return paginaDiagnostico_();
-
-  let carga;
-  try {
-    /*
-     * 4.2: sem sessao, a pagina abre na tela de ENTRADA (e-mail + PIN).
-     * Com ?t=<sessao> (a navegacao de reserva leva o codigo), abre direto.
-     */
-    if (!modoGoogle_() && bancoInstalado()) {
-      _tokenDaVez = String(pedido.t || '');
-      if (!emailDaSessao_(_tokenDaVez)) {
-        _tokenDaVez = '';
-        return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', sessaoInvalida: !!pedido.t });
-      }
-    }
-    carga = montarEntrada_(pedido.filial);
-    if (_tokenDaVez) carga.token = _tokenDaVez;
-    /*
-     * ?tela=assiduidade — a tela ja vem montada dentro do HTML.
-     * E o caminho de reserva do cliente: se o google.script.run for
-     * barrado numa maquina (HTTP 403), abrir uma tela vira navegacao de
-     * pagina, que passa onde a chamada nao passa.
-     */
-    if (carga.ok && carga.entrada === 'APP' && pedido.tela) {
-      // Parametros da tela vem em ?p= (JSON) — antes a reserva perdia os filtros.
-      let params = {};
-      try { params = pedido.p ? (JSON.parse(String(pedido.p)) || {}) : {}; } catch (x) { params = {}; }
-      try {
-        carga.telaEmbutida = { id: String(pedido.tela), params: params,
-          resposta: JSON.parse(carregarTela({ t: _tokenDaVez, f: carga.filial.codigo }, String(pedido.tela), params)) };
-      } catch (erroTela) { carga.avisoTela = String(erroTela.message || erroTela); }
-    }
-  } catch (erro) {
-    carga = { ok: false, erro: String(erro.message || erro) };
-  }
-  return paginaComCarga_(carga);
+  /*
+   * 4.2.2: o codigo de sessao NAO e aceito na URL. O ?t= da navegacao de
+   * reserva ficava na barra de endereco e no historico do navegador: no
+   * computador compartilhado, o proximo a usar voltava pelo historico e
+   * entrava como a pessoa anterior, sem digitar PIN. A reserva agora e
+   * um POST (ver doPost), que nao deixa o codigo em lugar nenhum.
+   */
+  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p }));
 }
 
 /*
- * RESERVA DA ENTRADA. Onde o google.script.run e barrado (HTTP 403), o
- * formulario de e-mail e PIN e enviado como POST para o proprio /exec —
- * navegacao de pagina, que passa onde a chamada nao passa.
+ * RESERVA — onde o google.script.run e barrado (HTTP 403), a pagina
+ * conversa com o servidor por POST no proprio /exec, que e navegacao de
+ * pagina e passa onde a chamada nao passa. Dois formularios chegam aqui:
+ *   - o de ENTRADA (email, pin, confirmacao, filial);
+ *   - o de NAVEGACAO (t, filial, tela, p): trocar de filial ou abrir uma
+ *     tela com a sessao que ja existe.
  */
 function doPost(e) {
   _porta = true;
   const p = (e && e.parameter) || {};
+  if (!String(p.email || '').trim() && p.t) {
+    return paginaComCarga_(cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p }));
+  }
   let carga;
   try {
     const r = entrar_(p.email, p.pin, p.confirmacao, p.filial);
@@ -89,6 +69,42 @@ function doPost(e) {
               emailDigitado: String(p.email || '') };
   }
   return paginaComCarga_(carga);
+}
+
+/*
+ * O que a pagina leva dentro (CARGA_INICIAL). pedido = { t, filial, tela, p }.
+ * Sem sessao valida, a pagina abre na ENTRADA (e-mail + PIN).
+ */
+function cargaDaPagina_(pedido) {
+  let carga;
+  try {
+    if (!modoGoogle_() && bancoInstalado()) {
+      _tokenDaVez = String(pedido.t || '');
+      if (!emailDaSessao_(_tokenDaVez)) {
+        _tokenDaVez = '';
+        return { ok: true, instalado: true, entrada: 'ENTRAR', sessaoInvalida: !!pedido.t };
+      }
+    }
+    carga = montarEntrada_(pedido.filial);
+    if (_tokenDaVez) carga.token = _tokenDaVez;
+    /*
+     * tela=assiduidade — a tela ja vem montada dentro do HTML. E o caminho
+     * de reserva do cliente: se o google.script.run for barrado numa
+     * maquina (HTTP 403), abrir uma tela vira navegacao de pagina.
+     */
+    if (carga.ok && carga.entrada === 'APP' && pedido.tela) {
+      // Parametros da tela vem em p (JSON) — antes a reserva perdia os filtros.
+      let params = {};
+      try { params = pedido.p ? (JSON.parse(String(pedido.p)) || {}) : {}; } catch (x) { params = {}; }
+      try {
+        carga.telaEmbutida = { id: String(pedido.tela), params: params,
+          resposta: JSON.parse(carregarTela({ t: _tokenDaVez, f: carga.filial.codigo }, String(pedido.tela), params)) };
+      } catch (erroTela) { carga.avisoTela = String(erroTela.message || erroTela); }
+    }
+  } catch (erro) {
+    carga = { ok: false, erro: String(erro.message || erro) };
+  }
+  return carga;
 }
 
 function paginaComCarga_(carga) {

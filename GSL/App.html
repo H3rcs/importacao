@@ -206,11 +206,13 @@ async function retomarOuPedirEntrada(inicio) {
   try {
     tratarEntrada(await chamarJSON('retomarSessao', { t: TOKEN, f: lerLocal(CHAVE_FILIAL) || '' }));
   } catch (e) {
-    // Canal barrado (403): a propria pagina volta ja com a sessao aberta.
-    if (canalBloqueado(e) && URL_APP) {
-      const url = URL_APP + '?t=' + encodeURIComponent(TOKEN);
-      try { window.top.location.href = url; } catch (x) { window.location.href = url; }
-      return;
+    // Canal barrado (403): sem um clique o navegador nao deixa a moldura
+    // navegar a pagina, entao a pessoa entra de novo — o formulario de
+    // entrada tem a sua propria reserva (POST no /exec).
+    TOKEN = ''; gravarSessao('');
+    if (canalBloqueado(e)) {
+      return mostrarEntrada({ erroEntrada: 'Este computador bloqueia a conversa direta com o Google. ' +
+        'Entre de novo com o seu e-mail e PIN.' });
     }
     mostrarEntrada({ erroEntrada: explicarErro(e) });
   }
@@ -342,8 +344,7 @@ function mostrarEscolhaFilial(filiais, usuario) {
   el('escolher-filial-ola').textContent = quem.nome ? 'Olá, ' + quem.nome.split(' ')[0] + '.' : '';
   el('grade-filiais').innerHTML = FILIAIS_DISPONIVEIS.map((f) => `
     <a class="holocard azul cartao-filial ${f.codigo === ultima ? 'ultima' : ''}"
-       href="${esc(URL_APP ? URL_APP + '?t=' + encodeURIComponent(TOKEN) + '&filial=' + encodeURIComponent(f.codigo) : '#')}" target="_top"
-       onclick="return escolherFilial(${jsArg(f.codigo)})">
+       href="#" onclick="return escolherFilial(${jsArg(f.codigo)})">
       <div class="holo-icone">\u{1F3E2}</div>
       <div class="holo-titulo">${esc(f.nome)}</div>
       <div class="holo-frase">${esc(f.cidade || '')}${f.cidade ? ' · ' : ''}${(f.paineis || []).length} painel(is)</div>
@@ -358,16 +359,23 @@ function mostrarEscolhaFilial(filiais, usuario) {
 
 /*
  * Entrar numa filial: primeiro pelo canal normal (rapido, sem recarregar).
- * Se ele falhar — o HTTP 403 de maquina com cookie bloqueado —, o link
- * do proprio cartao segue: e navegacao de pagina, que passa onde a
+ * Se ele falhar — o HTTP 403 de maquina com cookie bloqueado —, vai por
+ * navegacao de pagina (POST, ver navegarPelaPagina), que passa onde a
  * chamada nao passa, e o servidor ja devolve a filial montada no HTML.
  */
 function escolherFilial(codigo) {
   gravarLocal(CHAVE_FILIAL, codigo);
-  if (typeof google === 'undefined' || !google.script) return true;   // segue o link
+  if (typeof google === 'undefined' || !google.script) { irParaFilial(codigo); return false; }
   soMostrar('carregando');
   let respondeu = false;
-  const reserva = setTimeout(() => { if (!respondeu) irParaFilial(codigo); }, 12000);
+  // Sem resposta em 12 s: volta aos cartoes. A navegacao de reserva precisa
+  // de um clique recente, e o clique desta escolha ja "venceu".
+  const reserva = setTimeout(() => {
+    if (respondeu) return;
+    respondeu = true;
+    mostrarEscolhaFilial(FILIAIS_DISPONIVEIS);
+    avisar('O servidor demorou para responder. Clique na filial de novo.', true);
+  }, 12000);
   chamarJSON('abrirFilial', { t: TOKEN, f: codigo }).then((r) => {
     respondeu = true; clearTimeout(reserva);
     if (r && r.ok && r.entrada === 'APP') return montarSessao(r);
@@ -378,9 +386,9 @@ function escolherFilial(codigo) {
 }
 
 function irParaFilial(codigo) {
-  if (!URL_APP) return mostrarFalha('Não consegui abrir a filial e não sei o endereço do sistema para recarregar.');
-  const url = URL_APP + '?t=' + encodeURIComponent(TOKEN) + '&filial=' + encodeURIComponent(codigo);
-  try { window.top.location.href = url; } catch (e) { window.location.href = url; }
+  if (!navegarPelaPagina({ t: TOKEN, filial: codigo })) {
+    mostrarFalha('Não consegui abrir a filial e não sei o endereço do sistema para recarregar.');
+  }
 }
 
 function trocarFilial() {
@@ -447,9 +455,43 @@ function abrirPorNavegacao(idTela, params) {
   if (!URL_APP || !FILIAL) return false;
   el('pagina').innerHTML = '<div class="vazio">Abrindo pela navegação…</div>';
   const temParams = params && Object.keys(params).length;
-  const url = URL_APP + '?t=' + encodeURIComponent(TOKEN) + '&filial=' + encodeURIComponent(FILIAL) +
-    '&tela=' + encodeURIComponent(idTela) + (temParams ? '&p=' + encodeURIComponent(JSON.stringify(params)) : '');
-  try { window.top.location.href = url; } catch (x) { window.location.href = url; }
+  return navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: idTela,
+    p: temParams ? JSON.stringify(params) : '' });
+}
+
+/*
+ * NAVEGACAO DE RESERVA (4.2.2) — sempre por POST no /exec.
+ *
+ * Antes ia como link /exec?t=<sessao>: o codigo ficava na barra de endereco
+ * e no historico, e no computador compartilhado o proximo a usar voltava
+ * pelo historico e entrava como a pessoa anterior, sem PIN. No POST o
+ * codigo vai no corpo do pedido e nao fica em lugar nenhum. A janela de
+ * cima so navega em resposta a um clique — por isso isto so e chamado
+ * logo depois de um clique (abrir tela, escolher filial).
+ */
+let NAVEGACAO_PENDENTE = null;
+function navegarPelaPagina(campos) {
+  if (!URL_APP) return false;
+  NAVEGACAO_PENDENTE = campos;
+  const f = document.createElement('form');
+  f.method = 'post'; f.action = URL_APP; f.target = '_top'; f.style.display = 'none';
+  Object.keys(campos).forEach((k) => {
+    if (campos[k] === undefined || campos[k] === null || campos[k] === '') return;
+    const i = document.createElement('input');
+    i.type = 'hidden'; i.name = k; i.value = String(campos[k]);
+    f.appendChild(i);
+  });
+  document.body.appendChild(f);
+  f.submit();
+  // Ainda aqui depois de 4 s: o navegador barrou a navegacao (o clique ja
+  // tinha "vencido"). Um botao da ao navegador o clique que ele exige.
+  setTimeout(() => {
+    if (NAVEGACAO_PENDENTE !== campos) return;
+    abrirJanela('Continuar', `
+      <p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google,
+        então o sistema continua recarregando a página. Clique em <b>Continuar</b>.</p>`, `
+      <button class="botao" onclick="fecharJanela(); navegarPelaPagina(NAVEGACAO_PENDENTE)">Continuar</button>`);
+  }, 4000);
   return true;
 }
 

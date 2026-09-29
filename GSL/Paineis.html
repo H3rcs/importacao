@@ -659,7 +659,7 @@ function nbFormImportar() {
     <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">Cole o link da planilha
       <b>Monitoramento de Nobreaks</b> (a que tem as abas Cadastro e Lancamentos). O GSL traz os nobreaks
       e todas as leituras. Leitura repetida não entra duas vezes, e a linha de exemplo é ignorada.</p>
-    <div class="campo"><label>Link da planilha</label><input id="nb-link" placeholder="https://docs.google.com/spreadsheets/d/..."></div>
+    <div class="campo"><label>Link da planilha</label><input id="nb-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..."></div>
     <p class="dica">Se a planilha estiver em .xlsx no Drive, abra no Google Planilhas e use Arquivo › Salvar como Planilhas Google antes.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('importarNobreaks',{link:val('nb-link')}).catch(()=>{})">Importar</button>`);
@@ -1030,7 +1030,7 @@ function lpFormImportar() {
       <b>Gestão da Limpeza</b> (a versão online). O GSL traz as <b>não conformidades</b> (viram ações), os
       <b>produtos</b>, as <b>compras</b>, o <b>rendimento</b> das embalagens e as <b>zonas</b>. O que já foi
       importado não entra de novo. Registros e resumo dos turnos ficam de fora — saíram do painel.</p>
-    <div class="campo"><label>Link da planilha</label><input id="lp-link" placeholder="https://docs.google.com/spreadsheets/d/..."></div>`, `
+    <div class="campo"><label>Link da planilha</label><input id="lp-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..."></div>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('importarLimpeza',{link:val('lp-link')}).catch(()=>{})">Importar</button>`);
 }
@@ -1049,7 +1049,7 @@ function pintarQuadro(r) {
       <strong>Falta ligar o Quadro à planilha de apoio desta filial.</strong>
       É a mesma planilha do BI de funções: abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS.
       ${d.podeConfigurar ? `<div class="pn-linha" style="justify-content:center;margin-top:16px">
-        <input id="bq-link" placeholder="https://docs.google.com/spreadsheets/d/..." style="max-width:460px">
+        <input id="bq-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..." style="max-width:460px">
         <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link')}).catch(()=>{})">Ligar planilha</button></div>`
         : '<br><br>Peça para quem configura o sistema ligar a planilha.'}</div>`;
     return;

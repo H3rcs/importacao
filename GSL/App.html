@@ -2,6 +2,17 @@
 /* Cliente do GSL Bartofil.
    Leitura: carregarTela(filial, id, params) · Escrita: executarAcao(filial, nome, params) */
 
+/*
+ * REGRA DO HTMLSERVICE (4.2.2) — NUNCA escreva barra-barra nem barra-asterisco
+ * dentro de texto, template (crase) ou regex neste arquivo e no Paineis.
+ * Ao servir a pagina, o Google apaga o que PARECE comentario sem entender
+ * crase: um accept="image/(asterisco)" num template engolia o codigo ate
+ * o proximo fim de comentario e a tela travava na entrada com
+ * "SyntaxError: Unexpected token 'class'". Escreva https:\/\/... e image/\*
+ * (a barra invertida some no navegador). O teste testes/checar-htmlservice.js
+ * confere isso antes de publicar.
+ */
+
 let SESSAO = null, paginaAtual = 'inicio', paramsAtual = {}, DADOS = null, TEMA = 'claro';
 let paginaAnterior = null;   // qual tela ja estava desenhada — ver pintar()
 
@@ -313,7 +324,7 @@ function trocarContaGoogle() {
       <li>Saia da conta atual ou escolha a sua conta <b>@bartofil.com.br</b>.</li>
       <li>Volte para esta aba e clique em <b>Já troquei</b>.</li>
     </ol>`, `
-    <button class="botao secundario" onclick="window.open('https://accounts.google.com/Logout','_blank')">Abrir contas do Google</button>
+    <button class="botao secundario" onclick="window.open('https:\/\/accounts.google.com/Logout','_blank')">Abrir contas do Google</button>
     <button class="botao" onclick="location.reload()">Já troquei</button>`);
 }
 
@@ -464,7 +475,7 @@ function sair() {
     <p style="line-height:1.7">Se este é o seu computador, basta fechar a aba. Se for um computador
       compartilhado, saia também da conta Google para ninguém entrar como você.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    <button class="botao" onclick="window.open('https://accounts.google.com/Logout','_blank')">Sair da conta Google</button>`);
+    <button class="botao" onclick="window.open('https:\/\/accounts.google.com/Logout','_blank')">Sair da conta Google</button>`);
 }
 
 async function instalarSistema() {
@@ -859,6 +870,8 @@ function gerarProximoMes() {
     const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
     opcoes.push(meses[d.getMonth()] + ' ' + d.getFullYear());
   }
+  // O recado vem do servidor ("N criadas" ou "nada a gerar"): antes a
+  // tela dizia "Mes gerado" mesmo quando nada tinha sido gerado.
   abrirJanela('Gerar um mês', `
     <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
       Cria as atividades do mês escolhido a partir das rotinas, sem esperar a geração automática do dia 20.
@@ -867,8 +880,6 @@ function gerarProximoMes() {
     <div class="campo"><label>Mes</label>
       <select id="gm-comp">${opcoes.map((c) => `<option>${c}</option>`).join('')}</select></div>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-    <!-- O recado vem do servidor ("N criadas" ou "nada a gerar"): antes a
-         tela dizia "Mes gerado" mesmo quando nada tinha sido gerado. -->
     <button class="botao" onclick="agir('gerarMes',{competencia:val('gm-comp')},'Pronto')">Gerar mês</button>`);
 }
 
@@ -931,7 +942,7 @@ function janelaAutorizarEmail(msg) {
     </ol>
     <p class="dica">Isso vale só para você, o dono do sistema. Os coordenadores e o gerente não precisam autorizar nada — eles só recebem os e-mails.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    <button class="botao" onclick="window.open('https://myaccount.google.com/permissions','_blank')">Abrir página de autorização</button>`);
+    <button class="botao" onclick="window.open('https:\/\/myaccount.google.com/permissions','_blank')">Abrir página de autorização</button>`);
 }
 
 function avisar(texto, erro) {
@@ -1235,6 +1246,9 @@ function abrirAtividade(id) {
   // botoes de decidir de novo. So oferece "Reabrir" para desfazer.
   const jaDecidida = a.validacao === 'Aprovado' || a.validacao === 'Reprovado' || a.validacao === 'Cancelada';
 
+  // A caixa de feedback comeca VAZIA. Vinha preenchida com o MOTIVO da linha
+  // — a nota de remarcacao ou o motivo da reprovacao anterior — e aprovar
+  // mandava esse texto como "feedback" no e-mail. O historico fica acima dela.
   const validacao = p.validar ? (jaDecidida ? `
     <div class="campo" style="border-top:1px solid var(--linha);padding-top:16px">
       <label>Validação do gerente</label>
@@ -1247,9 +1261,6 @@ function abrirAtividade(id) {
     <div class="campo" style="border-top:1px solid var(--linha);padding-top:16px">
       <label>Validação do gerente</label>
       ${a.motivo ? `<p class="dica" style="margin:0 0 8px">Histórico: ${esc(a.motivo)}</p>` : ''}
-      <!-- Comeca VAZIO. Vinha preenchido com o MOTIVO da linha — a nota de
-           remarcacao ou o motivo da reprovacao anterior — e aprovar mandava
-           esse texto como "feedback" no e-mail. O historico fica acima. -->
       <textarea id="a-motivo" placeholder="Feedback ou motivo (obrigatório para reprovar)"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="botao" style="background:var(--verde)" onclick="validar(${jsArg(a.id)},'Aprovado')">Aprovar</button>
@@ -1283,7 +1294,7 @@ function abrirAtividade(id) {
       ${podeEntregarNa_(a, p) ? `
         <div class="area-envio" style="margin-top:10px">
           <input type="file" id="a-arquivos" multiple
-                 accept="image/*,.heic,.heif,.hif,.tif,.tiff,.avif,.dng,.pdf,.docx,.doc,.odt,.rtf,.txt"
+                 accept="image/\*,.heic,.heif,.hif,.tif,.tiff,.avif,.dng,.pdf,.docx,.doc,.odt,.rtf,.txt"
                  onchange="listarEscolhidos()" style="display:none">
           <button class="botao secundario" type="button" onclick="el('a-arquivos').click()">Escolher fotos ou arquivos</button>
           <div id="a-lista" class="lista-envio"></div>
@@ -2652,7 +2663,7 @@ function cfgApresentacao(d) {
     <div class="linha-apres">
       <div class="apres-turno">Turno ${esc(a.turno)}</div>
       <input id="ap-${esc(a.turno)}" class="apres-link" value="${esc(a.link)}"
-             placeholder="https://docs.google.com/presentation/d/..."
+             placeholder="https:\/\/docs.google.com/presentation/d/..."
              onkeydown="if (event.key === 'Enter') { event.preventDefault(); salvarApresentacao(${jsArg(a.turno)}, ${jsArg(a.id)}); }"
              onblur="salvarApresentacaoSeMudou(${jsArg(a.turno)}, ${jsArg(a.id)}, this.defaultValue)">
       <button class="botao" onclick="salvarApresentacao(${jsArg(a.turno)}, ${jsArg(a.id)})">Salvar link</button>
@@ -2770,7 +2781,7 @@ function formArquivoRH(id) {
         </select></div>
     </div>
     <div class="campo"><label>Link da planilha do RH</label>
-      <input id="rh-link" value="${esc(a ? a.link : '')}" placeholder="https://docs.google.com/spreadsheets/..."></div>
+      <input id="rh-link" value="${esc(a ? a.link : '')}" placeholder="https:\/\/docs.google.com/spreadsheets/..."></div>
     <div class="campo"><label>Aba da folha</label>
       <input id="rh-aba" value="${esc(a ? a.aba : 'FOLHA DE PONTO')}"></div>
     <div class="campo"><label>Observação</label>

@@ -97,7 +97,10 @@ function paginaComCarga_(carga) {
   t.app = APP;
   // "<" escapado: um texto com </script> dentro de um nome nao pode
   // fechar a tag do script que carrega os dados.
-  t.inicial = JSON.stringify(carga).replace(/</g, '\\u003c');
+  // "/" escapado (4.2.2): o HtmlService apaga o que parece comentario de
+  // JavaScript, e o https: da urlApp tem duas barras seguidas. \u002f e o
+  // mesmo "/" para o JSON e para o navegador — e nao sobra barra nenhuma.
+  t.inicial = JSON.stringify(carga).replace(/</g, '\\u003c').replace(/\//g, '\\u002f');
   return t.evaluate()
     .setTitle(APP.nome)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')

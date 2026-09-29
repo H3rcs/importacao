@@ -43,6 +43,8 @@ A 4.0/4.1 e a 4.2 tinham esse mesmo trecho. A 4.2.1 também.
    - Quem pode acessar: **Qualquer pessoa em Bartofil**
 5. Abra o endereço do sistema. A tela deve pedir e-mail e PIN. Se aparecer "O sistema não carregou: …", mande a mensagem.
 6. O código de primeiro acesso vai por e-mail. Se o e-mail nunca foi autorizado, rode `testarEmail` pelo editor (Executar) e aceite as permissões.
+7. Entre como administrador e clique **uma vez** em **Reclassificar a base** (Configuração, parte do RH). Assim os painéis e a aba Colaboradores dos meses já fechados são refeitos com as contas novas (sem "Ignorar", um lançamento por pessoa e dia). Os meses abertos se refazem sozinhos.
+8. Abra `…/exec?diagnostico=1`. Se a linha "Endereço usado pelo sistema" terminar em `/dev`, copie o endereço `/exec` da implantação. Cole em **Configurações do projeto › Propriedades do script** com o nome `URL_APP`.
 
 ## Testes (para quem mexer no código)
 

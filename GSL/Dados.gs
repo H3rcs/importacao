@@ -214,8 +214,10 @@ function competenciaMaisRecenteComPainel_(arquivos, exceto, usuario) {
  *
  * 4: agregado por (matrícula, turno) e licença que já é ausência contada
  *    uma vez só.
+ * 5: (4.2.2) 'Ignorar' fora das contas também depois do Reclassificar e um
+ *    lançamento por pessoa e dia.
  */
-const VERSAO_PAINEL = 4;
+const VERSAO_PAINEL = 5;
 
 function painelAtual_(payload) {
   // Painel sem carimbo e de uma versao anterior a esta: refaz. Refazer
@@ -1258,6 +1260,13 @@ function importarArquivoRH_(arq, quem, espera) {
 
   const ext = extrair_(folha.m, det, cfg, compArq);
   if (!ext.regs.length) {
+    // Tem gente com lancamento, mas todas as linhas foram recusadas (turno
+    // fora de RH_TURNOS, matricula curta): isso e erro de verdade, com o
+    // motivo — nao "folha ainda vazia".
+    if ((ext.rejeitadas || []).some(function (r) { return r.celulas > 0; })) {
+      throw new Error('Nenhum lançamento aproveitado da planilha do RH. ' +
+        avisosDeRejeitadas_(ext.rejeitadas).join(' '));
+    }
     // Folha ainda vazia (o mes do RH vira no dia 21): nao e falha de
     // importacao — ver marcarFolhaVazia_ e acaoAtualizarRH.
     marcarFolhaVazia_(compArq, true);
@@ -2333,8 +2342,11 @@ function matExibida_(v) {
  * ausencia > categoria definida > Outros > fora da legenda.
  */
 function pesoDoDia_(f) {
-  if (String(f.AUSENCIA) === 'Sim') return 3;
   const c = catN_(f.CATEGORIA);
+  // Ignorar perde ate para o que esta fora da legenda: ele nem entra nas
+  // contas, entao se vencesse o dia o dia de verdade sumia (Reclassificar).
+  if (c === 'IGNORAR') return -1;
+  if (String(f.AUSENCIA) === 'Sim') return 3;
   if (ehNaoDefinido_(c)) return 0;
   return c === 'OUTROS' ? 1 : 2;
 }
@@ -2610,8 +2622,7 @@ function arquivosRH() {
 /* A competencia do RH e "aaaa-mm". Se a celula virou Date, formata de volta. */
 function normalizarCompetenciaRH_(valor) {
   if (valor instanceof Date) return Utilities.formatDate(valor, fuso(), 'yyyy-MM');
-  const t = String(valor || '').trim();
-  return competenciaDigitada_(t) || t;
+  return String(valor || '').trim();
 }
 
 /*
@@ -2652,7 +2663,11 @@ function acaoSalvarArquivoRH(usuario, params) {
   return comTrava(function () {
     const id = String(params.id || '');
     const repetida = listar('ARQUIVOS_RH').filter(function (a) {
-      return String(a.ID) !== id && compDe_(a) === comp;
+      // Compara no formato aaaa-mm: um cadastro antigo '08/2025' e o mesmo
+      // mes que '2025-08' (antes passava, e o mes aparecia duas vezes). So
+      // aqui — normalizar em toda leitura "ressuscitava" sobras de meses
+      // renomeados por versao antiga (ver acaoLimparOrfasRH).
+      return String(a.ID) !== id && (competenciaDigitada_(compDe_(a)) || compDe_(a)) === comp;
     })[0];
     if (repetida) {
       throw new Error('A competência ' + comp + ' já está cadastrada. Edite a existente em vez de cadastrar outra.');

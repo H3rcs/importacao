@@ -218,6 +218,35 @@ caso('Atualizar dados com o mes novo ainda vazio: atualiza o outro e nao da erro
   afirmar(d.semDados && (d.competencias || []).length === 2, 'mes vazio mostra "sem dados" com o seletor dos dois meses');
 });
 
+caso('sobra de competencia renomeada por versao antiga ("2025-8") continua fora das contas', () => {
+  const m = novoMundo();
+  const url = folhaRH(m, 'F08', { inicio: [2025, 7, 21], dias: 31, pessoas: [{ mat: '100234', nome: 'ANA SOUZA', turno: 'A', dias: { '2025-08-05': '16' } }] });
+  const a = acao(m, 'acaoSalvarArquivoRH', { competencia: '2025-08', link: url, aba: 'FOLHA DE PONTO' });
+  acao(m, 'acaoImportarCompetencia', { id: a.id });
+  // copia das linhas com o rotulo antigo, como uma versao antiga deixava ao renomear
+  for (const t of ['FATO_ASSIDUIDADE', 'AGR_COLAB']) {
+    const ab = aba(m, t); const j = ab.dados[0].indexOf('COMPETENCIA'); const n = ab.dados.length;
+    for (let l = 1; l < n; l++) if (ab.dados[l] && ab.dados[l][j] === '2025-08') { const c = ab.dados[l].slice(); c[j] = '2025-8'; ab.dados.push(c); }
+    ab.maxL = Math.max(ab.maxL, ab.dados.length + 5);
+  }
+  m.cache.clear();
+  const r = acao(m, 'acaoPeriodo', { de: '2025-08-01', ate: '2025-08-31', tipo: 'TODAS' });
+  afirmar(r.registros === 1, 'uma falta so, veio ' + r.registros);
+  const c = acao(m, 'acaoColaboradores', { competencia: '2025-08' }).lista[0];
+  afirmar(c.faltasInjustificadas === 1, 'Colaboradores com 1 falta, veio ' + c.faltasInjustificadas);
+  const d = acao(m, 'acaoDiagnosticoRH', {});
+  afirmar((d.orfas || []).some((o) => o.competencia === '2025-8'), 'diagnostico lista a sobra para limpar');
+});
+
+caso('folha com linhas mas todas recusadas (turno desconhecido) e erro, nao "folha vazia"', () => {
+  const m = novoMundo();
+  const url = folhaRH(m, 'F09', { inicio: [2025, 8, 21], dias: 31, pessoas: [{ mat: '100234', nome: 'ANA SOUZA', turno: 'D', dias: {} }] });
+  const a = acao(m, 'acaoSalvarArquivoRH', { competencia: '2025-09', link: url, aba: 'FOLHA DE PONTO' });
+  let erro = '';
+  try { acao(m, 'acaoImportarCompetencia', { id: a.id }); } catch (e) { erro = e.message; }
+  afirmar(/aproveitado/.test(erro) && /D/.test(erro), 'erro com o motivo: ' + erro);
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

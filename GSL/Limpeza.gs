@@ -237,14 +237,18 @@ function acaoSalvarAcaoLimpeza(usuario, params) {
     PRAZO: isoDe_(params.prazo),
     STATUS: statusLimpeza_(params.status),
     EVIDENCIA: String(params.evidencia || '').trim(),
-    CUSTO: num_(params.custo) === null ? '' : num_(params.custo)
+    CUSTO: milOuVazio_(params.custo)
   };
   if (!campos.PROBLEMA) throw new Error('Descreva o que foi encontrado.');
   if (!campos.ACAO) throw new Error('Defina a ação que resolve o problema.');
   if (campos.STATUS !== 'Concluída' && campos.STATUS !== 'Cancelada') campos.FECHAMENTO = '';
+  conferirFechamento_(campos.DATA, isoDe_(params.fechamento));
 
   if (!params.id) {
-    if (campos.STATUS === 'Concluída') campos.FECHAMENTO = isoDe_(params.fechamento) || paraISO(hoje());
+    // Acao registrada ja resolvida: sem data de conclusao informada, vale a
+    // data da propria acao (antes virava "hoje" — 45 dias "em aberto" para
+    // algo resolvido na hora, e contado como concluido no mes errado).
+    if (campos.STATUS === 'Concluída') campos.FECHAMENTO = isoDe_(params.fechamento) || campos.DATA;
     return { ok: true, id: inserir('LP_ACOES', campos, usuario.email) };
   }
   return comTrava(function () {
@@ -269,11 +273,12 @@ function acaoSalvarAcaoLimpeza(usuario, params) {
 function acaoConcluirAcaoLimpeza(usuario, params) {
   const campos = { STATUS: 'Concluída', FECHAMENTO: isoDe_(params.fechamento) || paraISO(hoje()) };
   if (params.evidencia) campos.EVIDENCIA = String(params.evidencia).trim();
-  if (num_(params.custo) !== null) campos.CUSTO = num_(params.custo);
+  if (numMilhar_(params.custo) !== null) campos.CUSTO = numMilhar_(params.custo);
   // A situacao e conferida na hora de gravar: a tela pode estar velha.
   return comTrava(function () {
     const a = obter('LP_ACOES', params.id);
     if (!a) throw new Error('Ação não encontrada.');
+    conferirFechamento_(isoDe_(a.DATA), campos.FECHAMENTO);
     const status = statusLimpeza_(a.STATUS);
     if (status === 'Cancelada') throw new Error('Esta ação foi cancelada. Para concluir, edite e reabra antes.');
     if (status === 'Concluída') throw new Error('Esta ação já foi concluída' +
@@ -284,26 +289,58 @@ function acaoConcluirAcaoLimpeza(usuario, params) {
 
 function acaoExcluirAcaoLimpeza(usuario, params) { return excluir('LP_ACOES', params.id, usuario.email); }
 
+/* Conclusao antes da data da acao dava "dias em aberto" negativo. */
+function conferirFechamento_(dataIso, fechamentoIso) {
+  if (dataIso && fechamentoIso && fechamentoIso < dataIso) {
+    throw new Error('A data de conclusão (' + formatarData(paraData(fechamentoIso)) +
+      ') é anterior à data da ação (' + formatarData(paraData(dataIso)) + ').');
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* CUSTOS                                                              */
 /* ------------------------------------------------------------------ */
 
 function nOuVazio_(v) { const n = num_(v); return n === null ? '' : n; }
+function milOuVazio_(v) { const n = numMilhar_(v); return n === null ? '' : n; }
 
 function acaoSalvarProduto(usuario, params) {
   const campos = {
     PRODUTO: String(params.produto || '').trim(),
     TIPO: normalizarTexto_(params.tipo).indexOf('PRONTO') === 0 ? 'Pronto uso' : 'Concentrado',
-    EMBALAGEM_ML: nOuVazio_(params.embalagemMl), PRECO: nOuVazio_(params.preco),
+    EMBALAGEM_ML: milOuVazio_(params.embalagemMl), PRECO: milOuVazio_(params.preco),
     DILUICAO_ML_L: nOuVazio_(params.diluicao), SOLUCAO_L: nOuVazio_(params.solucaoL),
     APLICACOES_DIA: nOuVazio_(params.aplicacoesDia), ONDE: String(params.onde || '').trim(),
     ATIVO: params.ativo === false ? 'NAO' : 'SIM'
   };
   if (!campos.PRODUTO) throw new Error('Informe o nome do produto.');
-  if (params.id) return atualizar('LP_PRODUTOS', params.id, campos, usuario.email);
-  const repetido = produtosLimpeza_().some(function (p) { return p.produto.toLowerCase() === campos.PRODUTO.toLowerCase(); });
-  if (repetido) throw new Error('Esse produto já está cadastrado.');
-  return { ok: true, id: inserir('LP_PRODUTOS', campos, usuario.email) };
+  return comTrava(function () {
+    // Editar tambem confere o nome (antes so o cadastro novo conferia, e dava
+    // para ter dois "Detergente Neutro 5L").
+    const repetido = produtosLimpeza_().some(function (p) {
+      return p.id !== params.id && p.produto.toLowerCase() === campos.PRODUTO.toLowerCase();
+    });
+    if (repetido) throw new Error('Esse produto já está cadastrado.');
+    if (!params.id) return { ok: true, id: inserir('LP_PRODUTOS', campos, usuario.email) };
+    const antes = obter('LP_PRODUTOS', params.id);
+    if (!antes) throw new Error('Produto não encontrado.');
+    const nomeAntes = String(antes.PRODUTO || '').trim();
+    const r = atualizar('LP_PRODUTOS', params.id, campos, usuario.email);
+    /*
+     * Renomeou: embalagens e compras vao junto (como o codigo do nobreak vai
+     * para as leituras). Antes elas ficavam orfas — sem "deve render ate" e
+     * fora da conta de embalagens atrasadas.
+     */
+    if (nomeAntes && nomeAntes !== campos.PRODUTO) {
+      ['LP_EMBALAGENS', 'LP_COMPRAS'].forEach(function (tb) {
+        const muda = listar(tb).filter(function (x) {
+          return String(x.PRODUTO || '').trim().toLowerCase() === nomeAntes.toLowerCase();
+        }).map(function (x) { return { id: x.ID, campos: { PRODUTO: campos.PRODUTO } }; });
+        if (muda.length) atualizarVarios(tb, muda, usuario.email);
+      });
+    }
+    return r;
+  });
 }
 
 function acaoExcluirProduto(usuario, params) { return excluir('LP_PRODUTOS', params.id, usuario.email); }
@@ -317,7 +354,7 @@ function acaoSalvarCompra(usuario, params) {
   const campos = {
     DATA: isoDe_(params.data) || paraISO(hoje()),
     PRODUTO: String(params.produto || '').trim(),
-    QUANTIDADE: nOuVazio_(params.quantidade), PRECO_UNIT: nOuVazio_(params.precoUnit),
+    QUANTIDADE: milOuVazio_(params.quantidade), PRECO_UNIT: milOuVazio_(params.precoUnit),
     FORNECEDOR: String(params.fornecedor || '').trim(), NF: String(params.nf || '').trim(),
     OBSERVACAO: String(params.observacao || '').trim()
   };
@@ -342,7 +379,7 @@ function acaoSalvarEmbalagem(usuario, params) {
   const campos = {
     PRODUTO: String(params.produto || '').trim(),
     DATA_COMPRA: isoDe_(params.dataCompra), NF: String(params.nf || '').trim(),
-    PRECO: nOuVazio_(params.preco), ABERTURA: isoDe_(params.abertura),
+    PRECO: milOuVazio_(params.preco), ABERTURA: isoDe_(params.abertura),
     TERMINO: isoDe_(params.termino), OBSERVACAO: String(params.observacao || '').trim()
   };
   if (!campos.PRODUTO) throw new Error('Escolha o produto.');
@@ -430,18 +467,29 @@ exigirPorta_();
   if (novasZonas.length) { inserirVarios('LP_ZONAS', novasZonas, usuario.email); relato.zonas = novasZonas.length; }
 
   // Acoes (NAO CONFORMIDADES)
+  /*
+   * Conta por chave (nao "ja vi / nao vi"): duas nao conformidades iguais no
+   * mesmo dia e local (turno A resolveu, turno C ainda aberta) eram UMA — a
+   * aberta sumia. Reimportar continua sem duplicar: pula enquanto a planilha
+   * nao tiver mais linhas daquela chave do que o GSL ja tem.
+   */
+  const chaveAcao = function (data, turno, local, problema) {
+    return [data, String(turno || '').toUpperCase().trim(), local, problema].join('|').toLowerCase();
+  };
   const acoesTem = {};
   listar('LP_ACOES').forEach(function (a) {
-    acoesTem[(isoDe_(a.DATA) + '|' + t(a.LOCAL) + '|' + t(a.PROBLEMA)).toLowerCase()] = true;
+    const k = chaveAcao(isoDe_(a.DATA), a.TURNO, t(a.LOCAL), t(a.PROBLEMA));
+    acoesTem[k] = (acoesTem[k] || 0) + 1;
   });
+  const acoesVistas = {};
   const novasAcoes = [];
   ler(aba('NAO CONFORMIDADES'), 'DATA').forEach(function (o) {
     const problema = t(p(o, 'O QUE FOI'));
     if (!problema) return;
     const data = isoDe_(p(o, 'DATA'));
-    const k = (data + '|' + t(p(o, 'LOCAL')) + '|' + problema).toLowerCase();
-    if (acoesTem[k]) return;
-    acoesTem[k] = true;
+    const k = chaveAcao(data, t(p(o, 'TURNO')), t(p(o, 'LOCAL')), problema);
+    acoesVistas[k] = (acoesVistas[k] || 0) + 1;
+    if (acoesVistas[k] <= (acoesTem[k] || 0)) return;
     const status = statusLimpeza_(p(o, 'STATUS'));
     novasAcoes.push({
       DATA: data, TURNO: t(p(o, 'TURNO')).toUpperCase(), ORIGEM: t(p(o, 'ORIGEM')) || 'Vistoria setorial',
@@ -474,15 +522,17 @@ exigirPorta_();
 
   // Compras
   const compTem = {};
-  comprasLimpeza_().forEach(function (c) { compTem[(c.data + '|' + c.produto + '|' + c.nf).toLowerCase()] = true; });
+  const chaveComp = function (d, pr, nf, q, u) { return [d, pr, nf, q === '' || q === null ? '' : Number(q), u === '' || u === null ? '' : Number(u)].join('|').toLowerCase(); };
+  comprasLimpeza_().forEach(function (c) { const k = chaveComp(c.data, c.produto, c.nf, c.quantidade, c.precoUnit); compTem[k] = (compTem[k] || 0) + 1; });
+  const compVistas = {};
   const novasComp = [];
   ler(aba('COMPRAS'), 'DATA').forEach(function (o) {
     const prod = t(p(o, 'PRODUTO'));
     const data = isoDe_(p(o, 'DATA'));
     if (!prod || !data) return;
-    const k = (data + '|' + prod + '|' + t(p(o, 'NF'))).toLowerCase();
-    if (compTem[k]) return;
-    compTem[k] = true;
+    const k = chaveComp(data, prod, t(p(o, 'NF')), nOuVazio_(p(o, 'QUANTIDADE')), nOuVazio_(p(o, 'PRECO UNIT')));
+    compVistas[k] = (compVistas[k] || 0) + 1;
+    if (compVistas[k] <= (compTem[k] || 0)) return;
     novasComp.push({ DATA: data, PRODUTO: prod, QUANTIDADE: nOuVazio_(p(o, 'QUANTIDADE')),
       PRECO_UNIT: nOuVazio_(p(o, 'PRECO UNIT')), FORNECEDOR: t(p(o, 'FORNECEDOR')), NF: t(p(o, 'NF')),
       OBSERVACAO: t(p(o, 'OBSERVACAO')) });
@@ -491,15 +541,16 @@ exigirPorta_();
 
   // Embalagens (RENDIMENTO)
   const embTem = {};
-  listar('LP_EMBALAGENS').forEach(function (e) { embTem[(t(e.PRODUTO) + '|' + isoDe_(e.ABERTURA)).toLowerCase()] = true; });
+  listar('LP_EMBALAGENS').forEach(function (e) { const k = (t(e.PRODUTO) + '|' + isoDe_(e.ABERTURA)).toLowerCase(); embTem[k] = (embTem[k] || 0) + 1; });
+  const embVistas = {};
   const novasEmb = [];
   ler(aba('RENDIMENTO'), 'PRODUTO').forEach(function (o) {
     const prod = t(p(o, 'PRODUTO'));
     const abertura = isoDe_(p(o, 'DATA DE ABERTURA'));
     if (!prod || !abertura) return;
     const k = (prod + '|' + abertura).toLowerCase();
-    if (embTem[k]) return;
-    embTem[k] = true;
+    embVistas[k] = (embVistas[k] || 0) + 1;
+    if (embVistas[k] <= (embTem[k] || 0)) return;
     novasEmb.push({ PRODUTO: prod, DATA_COMPRA: isoDe_(p(o, 'DATA DA COMPRA')), NF: t(p(o, 'NF')),
       PRECO: nOuVazio_(p(o, 'PRECO PAGO')), ABERTURA: abertura, TERMINO: isoDe_(p(o, 'DATA REAL')),
       OBSERVACAO: t(p(o, 'CAUSA')) });

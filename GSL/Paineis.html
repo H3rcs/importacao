@@ -50,7 +50,7 @@ const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) 
 
 /* Abas internas de um painel. */
 function pnAbas(lista, atual, funcao) {
-  return `<div class="abas">${lista.map(([id, nome]) => `<button class="aba ${atual === id ? 'ativa' : ''}"
+  return `<div class="abas">${lista.map(([id, nome]) => `<button class="aba ${atual === id ? 'ativa' : ''}" data-aba="${esc(id)}"
     onclick="${funcao}(${jsArg(id)})">${nome}</button>`).join('')}</div>`;
 }
 
@@ -281,7 +281,7 @@ function pintarNobreaks(r) {
 
 function trocarAbaNB(aba) {
   ABA_NB = aba;
-  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
   pintarAbaNB(DADOS);
 }
 
@@ -685,7 +685,7 @@ function pintarLimpeza(r) {
 
 function trocarAbaLP(aba) {
   ABA_LP = aba;
-  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
   pintarAbaLP(DADOS);
 }
 
@@ -828,7 +828,10 @@ function lpAcoes(d) {
   </div>`;
 }
 
-function lpOpcoes(lista, atual) { return lista.map((x) => `<option ${x === atual ? 'selected' : ''}>${esc(x)}</option>`).join(''); }
+function lpOpcoes(lista, atual) {
+  const l = (atual && lista.indexOf(atual) === -1) ? [atual].concat(lista) : lista;
+  return l.map((x) => `<option ${x === atual ? 'selected' : ''}>${esc(x)}</option>`).join('');
+}
 
 function lpFormAcao(id) {
   const d = DADOS;
@@ -841,6 +844,7 @@ function lpFormAcao(id) {
     </div>
     <div class="campo-duplo">
       <div class="campo"><label>Zona</label><select id="la-zona"><option value="">—</option>
+        ${a && a.zona && !d.zonas.some((z) => z.zona === a.zona) ? `<option value="${esc(a.zona)}" selected>${esc(a.zona)}</option>` : ''}
         ${d.zonas.filter((z) => z.ativo || (a && a.zona === z.zona)).map((z) => `<option value="${esc(z.zona)}" ${a && a.zona === z.zona ? 'selected' : ''}>${esc(z.zona)} — ${esc(z.descricao)}</option>`).join('')}</select></div>
       <div class="campo"><label>Local exato</label><input id="la-local" value="${esc(a ? a.local : '')}" placeholder="Ex.: Banheiro da central"></div>
     </div>
@@ -856,15 +860,20 @@ function lpFormAcao(id) {
       <div class="campo"><label>Prazo</label><input type="date" id="la-prazo" value="${esc(a ? a.prazo : '')}"></div>
     </div>
     <div class="campo-duplo">
-      <div class="campo"><label>Situação</label><select id="la-status">${lpOpcoes(d.listas.status, a ? a.status : 'Aberta')}</select></div>
+      <div class="campo"><label>Situação</label><select id="la-status"
+        onchange="el('la-fech-caixa').classList.toggle('oculto', this.value !== 'Concluída')">${lpOpcoes(d.listas.status, a ? a.status : 'Aberta')}</select></div>
       <div class="campo"><label>Custo da ação (R$, opcional)</label><input id="la-custo" inputmode="decimal" value="${a && a.custo !== null ? String(a.custo).replace('.', ',') : ''}"></div>
     </div>
+    <div class="campo ${a && a.status === 'Concluída' ? '' : 'oculto'}" id="la-fech-caixa"><label>Concluída em</label>
+      <input type="date" id="la-fech" value="${esc(a && a.fechamento ? a.fechamento : '')}">
+      <p class="dica">Em branco: a data da ação, se ela já foi registrada resolvida; hoje, se ela está sendo concluída agora.</p></div>
     <div class="campo"><label>Evidência / nº do chamado</label><input id="la-evid" value="${esc(a ? a.evidencia : '')}" placeholder="foto no Drive, CH-0151…"></div>`, `
     ${a ? `<button class="botao perigo" onclick="agir('excluirAcaoLimpeza',{id:${jsArg(a.id)}},'Ação excluída').catch(()=>{})">Excluir</button>` : ''}
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('salvarAcaoLimpeza',{id:${jsArg(a ? a.id : '')},data:val('la-data'),origem:val('la-origem'),zona:val('la-zona'),local:val('la-local'),
       problema:val('la-problema'),acao:val('la-acao'),criticidade:val('la-crit'),turno:val('la-turno'),responsavel:val('la-resp'),
-      prazo:val('la-prazo'),status:val('la-status'),custo:val('la-custo'),evidencia:val('la-evid')},'Ação salva').catch(()=>{})">Salvar</button>`);
+      prazo:val('la-prazo'),status:val('la-status'),custo:val('la-custo'),evidencia:val('la-evid'),
+      fechamento:val('la-status') === 'Concluída' ? val('la-fech') : ''},'Ação salva').catch(()=>{})">Salvar</button>`);
 }
 
 function lpFormConcluir(id) {
@@ -1006,7 +1015,8 @@ function lpFormEmbalagem(id, terminar) {
   const e = id ? d.embalagens.find((x) => x.id === id) : null;
   abrirJanela(terminar ? 'Embalagem terminou' : (e ? 'Editar embalagem' : 'Abrir embalagem'), `
     <div class="campo-duplo">
-      <div class="campo"><label>Produto</label><select id="le-prod">${d.produtos.map((p) => `<option ${e && e.produto === p.produto ? 'selected' : ''}>${esc(p.produto)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Produto</label><select id="le-prod">${lpOpcoes(d.produtos.map((p) => p.produto),
+        e ? (d.produtos.find((p) => p.produto.toLowerCase() === String(e.produto || '').toLowerCase()) || { produto: e.produto }).produto : '')}</select></div>
       <div class="campo"><label>Data de abertura</label><input type="date" id="le-abertura" value="${esc(e ? e.abertura : d.hoje)}"></div>
     </div>
     <div class="campo-duplo">
@@ -1311,7 +1321,7 @@ function pintarEstoque(r) {
 
 function trocarAbaEst(aba) {
   ABA_EST = aba;
-  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
   pintarAbaEst(DADOS);
 }
 
@@ -1342,7 +1352,7 @@ function estPainel(d) {
   const repor = ativos.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO')
     .sort((a, b) => (a.saldo - a.minimo) - (b.saldo - b.minimo));
   const mes = d.hoje.slice(0, 7);
-  const doMes = d.movimentos.filter((m) => (m.data || '').slice(0, 7) === mes);
+  const doMes = d.movimentos.filter((m) => (m.data || '').slice(0, 7) === mes && !m.estornado);
   const unidades = ativos.reduce((s, i) => s + Math.max(0, i.saldo), 0);
   const saidasMes = doMes.filter((m) => m.tipo === 'SAIDA');
   const porDestino = {};
@@ -1486,7 +1496,7 @@ function estMovimentos(d) {
           <td>${esc(m.destino || '—')}${m.solicitante ? `<div class="lp-sub">${esc(m.solicitante)}</div>` : ''}</td>
           <td>${esc(m.documento || '—')}${m.serie ? `<div class="lp-sub">${esc(m.serie)}</div>` : ''}</td>
           <td style="max-width:260px">${esc(m.observacao)}<div class="lp-sub">${esc((m.por || '').split('@')[0])}</div></td>
-          <td>${d.permissoes.cadastrar && !/^ESTORNO/.test(m.observacao) ? `<button class="icone-botao" onclick="estFormEstorno(${jsArg(m.id)})">Estornar</button>` : ''}</td></tr>`;
+          <td>${d.permissoes.cadastrar && !/^ESTORNO/.test(m.observacao) && !m.estornado ? `<button class="icone-botao" onclick="estFormEstorno(${jsArg(m.id)})">Estornar</button>` : (m.estornado ? '<span class="pn-mini">estornado</span>' : '')}</td></tr>`;
       }).join('') || '<tr><td colspan="8" class="vazio">Nenhuma movimentação com esses filtros.</td></tr>'}
     </tbody></table></div>
     ${lista.length > 300 ? '<p class="dica">Mostrando as 300 mais recentes. Use os filtros para achar as demais.</p>' : ''}

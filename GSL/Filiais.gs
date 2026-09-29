@@ -193,6 +193,7 @@ function codigosDaPessoa_(texto) {
   const t = String(texto || '').toUpperCase().replace(/\s+/g, '');
   if (!t) return null;                       // principal
   if (t === '*' || t === 'TODAS') return ['*'];
+  if (t === 'NENHUMA') return [];            // tirada da ultima filial em "Quem entra"
   return t.split(/[,;]/).filter(Boolean);
 }
 
@@ -520,6 +521,7 @@ function acaoSalvarPessoasDaFilial(usuario, params) {
     const email = String(p.EMAIL || '').toLowerCase().trim();
     if (!email) return;
     if (String(p.PERFIL || '').toUpperCase().trim() === 'ADMIN') return;
+    if (!marcado(p.ATIVO)) return;             // fora da lista da tela: nao mexe
     const atual = codigosDaPessoa_(p.FILIAIS);
     if (atual && atual[0] === '*') return;
     const lista = atual ? atual.slice() : [principal.codigo];
@@ -527,7 +529,8 @@ function acaoSalvarPessoasDaFilial(usuario, params) {
     const quer = !!marcados[email];
     if (tem === quer) return;
     const nova = quer ? lista.concat([f.codigo]) : lista.filter(function (c) { return c !== f.codigo; });
-    mudancas.push({ id: p.ID, campos: { FILIAIS: nova.join(',') } });
+    // Vazio quer dizer "so a principal": sem filial nenhuma grava um marcador.
+    mudancas.push({ id: p.ID, campos: { FILIAIS: nova.length ? nova.join(',') : 'NENHUMA' } });
   });
   if (mudancas.length) atualizarVarios('ACESSOS', mudancas, usuario.email);
   limparCache('ACESSOS');

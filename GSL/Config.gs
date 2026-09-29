@@ -140,6 +140,15 @@ function acaoSalvarRotina(usuario, params) {
   };
   if (!campos.TIPO) throw new Error('Informe a sigla do tipo (3 letras) — ela entra no ID da atividade.');
   if (!campos.ATIVIDADE) throw new Error('Descreva a atividade.');
+  // A sigla forma o ID da atividade (mes-semana-SIGLA-turno): duas rotinas
+  // com a mesma sigla na mesma semana viram UM ID e a segunda nunca nasce.
+  const mesmaSigla = listar('ROTINAS').filter(function (r) {
+    return String(r.TIPO || '').toUpperCase().trim() === campos.TIPO && String(r.ID) !== String(params.id || '');
+  })[0];
+  if (mesmaSigla) throw new Error('A sigla ' + campos.TIPO + ' já é da rotina "' + mesmaSigla.ATIVIDADE + '". Use outra sigla.');
+  if (campos.FREQUENCIA === 'SEMANAL' && ['1', '2', '3', '4', '5', '6', '7'].indexOf(String(campos.DIA || '').trim()) === -1) {
+    throw new Error('Rotina semanal: o "Quando" é o dia da semana em número — 1 (segunda) a 5 (sexta); 6 e 7 são sábado e domingo.');
+  }
   if (campos.FREQUENCIA === 'MENSAL') {
     const regra = String(campos.DIA || '').toUpperCase().trim();
     const n = Number(regra);

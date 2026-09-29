@@ -180,6 +180,7 @@ function esquecerLeituras() {
   // relida, ele tambem tem que cair, senao continuava valendo o mapa
   // montado antes da gravacao dentro da mesma requisicao.
   if (typeof _equipeMemo !== 'undefined') _equipeMemo = null;
+  if (typeof _digitosMat !== 'undefined') _digitosMat = null;   // RH_DIGITOS_MATRICULA e da filial
 }
 
 function abaDe(tabela) {
@@ -538,6 +539,10 @@ function comTrava(funcao, espera) {
     return funcao();
   } finally {
     _travaAberta = 0;
+    // Grava o que ficou pendente ANTES de soltar a trava (recomendacao da
+    // documentacao do LockService): sem isso, quem pega a trava em seguida
+    // pode ler a planilha sem a linha que acabou de ser gravada.
+    try { SpreadsheetApp.flush(); } catch (e) {}
     trava.releaseLock();
   }
 }

@@ -717,6 +717,45 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('paineis: aba clicada fica acesa; formularios da Limpeza nao trocam o produto nem escondem a conclusao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    // produto cadastrado com maiuscula; embalagem aberta com o nome digitado em minuscula
+    await f.evaluate(async () => {
+      await executarAcaoSrv('salvarProduto', { produto: 'Alcool 70', tipo: 'Pronto uso', embalagemMl: '1000', preco: '9,90' });
+      await executarAcaoSrv('salvarProduto', { produto: 'Detergente Neutro', tipo: 'Concentrado', embalagemMl: '5000', preco: '45,90', diluicao: '10', solucaoL: '5', aplicacoesDia: '2' });
+      await executarAcaoSrv('salvarEmbalagem', { produto: 'detergente neutro', abertura: '2026-09-20' });
+      esquecerTelas();
+    });
+    await f.evaluate(() => abrir('limpeza'));
+    await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 3, null, { timeout: 15000 });
+    await f.click('#pagina .abas .aba >> text=Custos');
+    const acesa = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina .abas .aba.ativa')).map((b) => b.textContent.trim()));
+    afirmar(acesa.length === 1 && acesa[0] === 'Custos', 'aba acesa: ' + acesa.join(','));
+    // "Terminou" numa embalagem de nome em minuscula: o produto certo continua escolhido
+    const escolhido = await f.evaluate(() => {
+      const e = DADOS.embalagens.find((x) => /detergente/i.test(x.produto));
+      lpFormEmbalagem(e.id, true);
+      return document.getElementById('le-prod').value;
+    });
+    afirmar(escolhido === 'Detergente Neutro', 'produto no formulario: ' + escolhido);
+    await f.evaluate(() => fecharJanela());
+    // Nova acao: "Concluida em" aparece quando a situacao e Concluida
+    const visivel = await f.evaluate(() => {
+      lpFormAcao('');
+      const antes = !document.getElementById('la-fech-caixa').classList.contains('oculto');
+      const sel = document.getElementById('la-status');
+      sel.value = 'Concluída'; sel.dispatchEvent(new Event('change'));
+      return [antes, !document.getElementById('la-fech-caixa').classList.contains('oculto')];
+    });
+    afirmar(!visivel[0] && visivel[1], 'campo Concluida em (antes, depois): ' + visivel);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

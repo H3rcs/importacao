@@ -307,7 +307,10 @@ function garantirEsquema() {
   if (principal && garantirFilialPrincipalGravada_()) mexeu = true;
   // Painel que nasceu nesta versao entra ligado na filial principal (uma vez so:
   // se voce tirar depois, esta migracao nao roda de novo).
-  if (principal && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
+  // So na atualizacao que CHEGA a 8.1 (quando o painel nasceu): nas seguintes,
+  // "Nao usar nesta filial" escolhido pelo administrador fica como esta.
+  const versaoAntes = Number(prop(chaveVersao, '') || 0);
+  if (principal && versaoAntes < 8.1 && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.

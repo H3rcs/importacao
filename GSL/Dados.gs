@@ -2747,9 +2747,20 @@ function acaoSalvarDePara(usuario, params) {
     CONTA_COMO_AUSENCIA: params.ausencia ? 'SIM' : 'NAO'
   };
   if (!campos.CODIGO) throw new Error('Informe o código.');
-  return params.id
-    ? atualizar('DE_PARA', params.id, campos, usuario.email)
-    : { ok: true, id: inserir('DE_PARA', campos, usuario.email) };
+  return comTrava(function () {
+    // Codigo repetido: a linha mais nova valia em silencio, e corrigir a
+    // que aparece na tela nao mudava nada na importacao nem no Reclassificar.
+    const outro = listar('DE_PARA').filter(function (l) {
+      return codigo_(l.CODIGO) === campos.CODIGO && String(l.ID) !== String(params.id || '');
+    })[0];
+    if (outro) {
+      throw new Error('O código ' + campos.CODIGO + ' já está no DE-PARA (' + String(outro.CATEGORIA || '—') +
+        '). Edite a linha que já existe.');
+    }
+    return params.id
+      ? atualizar('DE_PARA', params.id, campos, usuario.email)
+      : { ok: true, id: inserir('DE_PARA', campos, usuario.email) };
+  });
 }
 
 function acaoExcluirDePara(usuario, params) {

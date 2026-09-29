@@ -32,6 +32,8 @@ const EST_DIAS_HISTORICO = 90;
 const EST_HISTORICO_MAX = 1000;   // teto de linhas do historico de um item (o saldo-base cobre o resto)
 
 function estNum_(v) { const n = num_(v); return n === null ? 0 : n; }
+/* Soma de decimais (0,3 - 0,1 - 0,2) deixa resto de ponto flutuante: arredonda. */
+function estArred_(n) { return Math.round(n * 1e6) / 1e6; }
 
 /* CRIADO_EM ('dd/MM/yyyy HH:mm:ss') em ordem que se compara como texto. */
 function criadoOrdenavel_(t) {
@@ -41,7 +43,8 @@ function criadoOrdenavel_(t) {
 
 /* Mais recente primeiro: data do movimento e, no mesmo dia, a ordem de gravacao. */
 function ordemMovimentoDesc_(a, b) {
-  return (b.data + ' ' + criadoOrdenavel_(b.criado)).localeCompare(a.data + ' ' + criadoOrdenavel_(a.criado));
+  return (b.data + ' ' + criadoOrdenavel_(b.criado)).localeCompare(a.data + ' ' + criadoOrdenavel_(a.criado)) ||
+    String(b.id).localeCompare(String(a.id));   // mesmo segundo: o ID carrega o milissegundo da gravacao
 }
 
 /* ID do lancamento que um estorno desfaz ('ESTORNO de EST-... (Saida de ...)'), comparado inteiro. */
@@ -94,6 +97,7 @@ function movimentosEstoque_() {
 function saldosEstoque_(movs) {
   const s = {};
   (movs || movimentosEstoque_()).forEach(function (m) { s[m.item] = (s[m.item] || 0) + m.efeito; });
+  Object.keys(s).forEach(function (k) { s[k] = estArred_(s[k]); });
   return s;
 }
 
@@ -123,6 +127,10 @@ function dadosEstoque(usuario, params) {
   const h = hoje();
   const desde = paraISO(new Date(h.getFullYear(), h.getMonth(), h.getDate() - EST_DIAS_HISTORICO));
   const recentes = movs.filter(function (m) { return !m.data || m.data >= desde; }).sort(ordemMovimentoDesc_);
+  // Lancamento ja estornado: fora das contas do mes na tela e sem o botao Estornar.
+  const estornados = {};
+  movs.forEach(function (m) { const x = idEstornado_(m.observacao); if (x) estornados[x] = true; });
+  recentes.forEach(function (m) { m.estornado = !!estornados[m.id]; });
 
   const categorias = {};
   EST_CATEGORIAS.forEach(function (c) { categorias[c] = true; });
@@ -175,7 +183,7 @@ function proximoCodigoEstoque_(itens) {
     const m = String(i.codigo).match(/^TI-(\d+)$/);
     if (m) maior = Math.max(maior, Number(m[1]));
   });
-  return 'TI-' + ('000' + (maior + 1)).slice(-4);
+  return 'TI-' + String(maior + 1).padStart(4, '0');
 }
 
 function acaoSalvarItemEstoque(usuario, params) {
@@ -258,7 +266,7 @@ function acaoImportarItensEstoque(usuario, params) {
       if (porNome[nome.toLowerCase()]) { ignoradas.push(nome + ' (já existe)'); return; }
       let codigo = codigoLimpo_(c[8]);
       if (c[8] && !codigo) { ignoradas.push(nome + ' (código inválido)'); return; }
-      if (!codigo) { codigo = 'TI-' + ('000' + proximo).slice(-4); proximo++; }
+      if (!codigo) { codigo = 'TI-' + String(proximo).padStart(4, '0'); proximo++; }
       if (porCodigo[codigo]) { ignoradas.push(nome + ' (código ' + codigo + ' já existe)'); return; }
       const campos = camposItem_({ codigo: codigo, nome: nome, categoria: c[1], marca: c[2], modelo: c[3],
         unidade: c[4], minimo: c[5], local: c[6] });
@@ -305,7 +313,7 @@ function acaoMovimentarEstoque(usuario, params) {
 
     const saldo = saldosEstoque_()[item.codigo] || 0;
     const efeito = (EST_SINAL[tipo] || 0) * qtd;
-    if (saldo + efeito < 0) {
+    if (estArred_(saldo + efeito) < 0) {
       throw new Error('Saldo insuficiente: ' + item.nome + ' tem ' + saldo + ' ' + item.unidade +
         ' e a movimentação tira ' + Math.abs(efeito) + '. Registre a entrada antes ou faça um ajuste de inventário.');
     }
@@ -317,7 +325,7 @@ function acaoMovimentarEstoque(usuario, params) {
       OBSERVACAO: String(params.observacao || '').trim(), REGISTRADO_POR: usuario.email
     };
     const id = inserir('EST_MOVIMENTOS', campos, usuario.email);
-    return { ok: true, id: id, recado: EST_NOMES_TIPO[tipo] + ' registrada: ' + item.nome + ' — saldo agora ' + (saldo + efeito) + ' ' + item.unidade + '.' };
+    return { ok: true, id: id, recado: EST_NOMES_TIPO[tipo] + ' registrada: ' + item.nome + ' — saldo agora ' + estArred_(saldo + efeito) + ' ' + item.unidade + '.' };
   });
 }
 
@@ -337,7 +345,7 @@ function acaoEstornarMovimento(usuario, params) {
     const jaEstornado = movs.some(function (x) { return idEstornado_(x.observacao) === m.id; });
     if (jaEstornado) throw new Error('Este lançamento já foi estornado.');
     const saldo = saldosEstoque_(movs)[m.item] || 0;
-    if (saldo - m.efeito < 0) throw new Error('O estorno deixaria o saldo negativo. Confira as movimentações posteriores.');
+    if (estArred_(saldo - m.efeito) < 0) throw new Error('O estorno deixaria o saldo negativo. Confira as movimentações posteriores.');
     inserir('EST_MOVIMENTOS', {
       DATA: paraISO(hoje()), TIPO: 'AJUSTE', ITEM: m.item, QUANTIDADE: -m.efeito,
       DESTINO: m.destino, SOLICITANTE: '', DOCUMENTO: m.documento, SERIE: m.serie,
@@ -405,6 +413,6 @@ function acaoHistoricoItemEstoque(usuario, params) {
   const naLista = lista.reduce(function (s, m) { return s + m.efeito; }, 0);
   return {
     ok: true, codigo: codigo, nome: item ? item.nome : codigo, unidade: item ? item.unidade : '',
-    saldo: saldo, saldoBase: saldo - naLista, total: movs.length, movimentos: lista
+    saldo: estArred_(saldo), saldoBase: estArred_(saldo - naLista), total: movs.length, movimentos: lista
   };
 }

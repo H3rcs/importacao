@@ -3127,13 +3127,17 @@ async function verCodigosPendentes() {
   abrirJanela('Códigos fora da legenda', '<div class="vazio">Procurando…</div>', '');
   try {
     const lista = await executarAcaoSrv('codigosPendentes', {});
+    const faltaReclassificar = lista.some((c) => c.jaNaLegenda);
     abrirJanela('Códigos fora da legenda', lista.length ? `
-      <p class="dica" style="margin:0 0 12px">Estes códigos apareceram na folha importada e não
-         estão no DE-PARA. Eles ficam <b>fora dos gráficos e das contagens</b> — entrar como
+      <p class="dica" style="margin:0 0 12px">Estes códigos apareceram na folha importada fora do
+         DE-PARA. Eles ficam <b>fora dos gráficos e das contagens</b> — entrar como
          categoria inventada seria pior que não entrar.</p>
-      <table><thead><tr><th>Código</th><th class="numero">Vezes</th></tr></thead>
+      ${faltaReclassificar ? `<p class="dica" style="margin:0 0 12px">Os marcados como <b>já cadastrado</b>
+         estão no DE-PARA: falta só rodar o <b>Reclassificar</b>. Não cadastre de novo.</p>` : ''}
+      <table><thead><tr><th>Código</th><th class="numero">Vezes</th><th></th></tr></thead>
       <tbody>${lista.map((c) => `<tr><td class="mono"><strong>${esc(c.codigo)}</strong></td>
-        <td class="numero">${c.vezes}</td></tr>`).join('')}</tbody></table>`
+        <td class="numero">${c.vezes}</td>
+        <td>${c.jaNaLegenda ? '<span class="etiqueta aguardando">já cadastrado — falta Reclassificar</span>' : ''}</td></tr>`).join('')}</tbody></table>`
       : '<div class="cartao">Nenhum código pendente — a folha inteira está traduzida.</div>',
       '<button class="botao" onclick="fecharJanela()">Fechar</button>');
   } catch (e) { avisar(e.message || e, true); }
@@ -3283,6 +3287,7 @@ function filiaisDaPessoa(p, d) {
     return pr ? pr.codigo : '—';
   }
   if (t === '*' || t === 'TODAS') return 'Todas';
+  if (t === 'NENHUMA') return 'Nenhuma';
   return t.split(',').join(' · ');
 }
 

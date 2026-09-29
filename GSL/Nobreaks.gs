@@ -27,6 +27,12 @@ function num_(v) {
   return isNaN(n) ? null : n;
 }
 
+/* Inteiro com ponto de milhar ("7.500", "5.000", "1.500") e milhar, nao decimal. */
+function numMilhar_(v) {
+  if (typeof v === 'string' && /^\s*\d{1,3}(\.\d{3})+\s*$/.test(v)) v = v.replace(/\./g, '');
+  return num_(v);
+}
+
 function isoDe_(v) {
   if (!v) return '';
   const d = paraData(v);
@@ -48,6 +54,8 @@ function horaDe_(v) {
   const t = String(v || '').trim();
   const m = t.match(/^(\d{1,2})\s*[:hH.]\s*(\d{2})/);
   if (m) return dd_(Number(m[1])) + ':' + m[2];
+  const hh = t.match(/^(\d{1,2})\s*[hH]$/);
+  if (hh) return dd_(Number(hh[1])) + ':00';
   const so = t.match(/^(\d{1,2})$/);
   if (so) return dd_(Number(so[1])) + ':00';
   return t;
@@ -91,7 +99,7 @@ function leiturasNobreak_(desdeISO, ateISO) {
     if (ateISO && l.data > ateISO) return false;
     return true;
   }).sort(function (a, b) {
-    return (a.data + a.hora + a.leitura).localeCompare(b.data + b.hora + b.leitura);
+    return a.data.localeCompare(b.data) || (a.leitura - b.leitura) || a.hora.localeCompare(b.hora);
   });
 }
 
@@ -114,7 +122,7 @@ function dadosNobreaks(usuario) {
     },
     permissoes: {
       lancar: podeFazer(usuario, 'LANCAR_NOBREAK'),
-      cadastrar: podeFazer(usuario, 'PROGRAMAR')
+      cadastrar: podeFazer(usuario, 'PROGRAMAR') && podeFazer(usuario, 'LANCAR_NOBREAK')
     }
   };
 }
@@ -276,11 +284,12 @@ function acaoExcluirLeitura(usuario, params) {
 /* --- Cadastro dos equipamentos --- */
 
 function acaoSalvarNobreak(usuario, params) {
+  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const campos = {
     CODIGO: codigoLimpo_(params.codigo),
     MODELO: String(params.modelo || '').trim(),
     LOCAL: String(params.local || '').trim(),
-    POTENCIA_VA: num_(params.potencia) === null ? '' : num_(params.potencia),
+    POTENCIA_VA: numMilhar_(params.potencia) === null ? '' : numMilhar_(params.potencia),
     TENSAO_ENTRADA: num_(params.tensaoEntrada) === null ? '' : num_(params.tensaoEntrada),
     TENSAO_SAIDA: num_(params.tensaoSaida) === null ? '' : num_(params.tensaoSaida),
     ATIVO: params.ativo === false ? 'NAO' : 'SIM',
@@ -312,6 +321,7 @@ function acaoSalvarNobreak(usuario, params) {
 }
 
 function acaoExcluirNobreak(usuario, params) {
+  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const e = obter('NB_EQUIPAMENTOS', params.id);
   if (!e) throw new Error('Nobreak não encontrado.');
   const temLeitura = listar('NB_LEITURAS').some(function (l) { return String(l.NOBREAK || '').trim() === String(e.CODIGO).trim(); });
@@ -330,6 +340,7 @@ function acaoExcluirNobreak(usuario, params) {
  * nao e duplicada. A linha de EXEMPLO da planilha e ignorada.
  */
 function acaoImportarNobreaks(usuario, params) {
+  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const link = String(params.link || '').trim();
   if (!link) throw new Error('Cole o link da planilha antiga.');
   let arq;
@@ -384,20 +395,29 @@ exigirPorta_();
         const e = jaTem[codigo], campos = {};
         const modelo = String(pega(o, ['MODELO']) || '').trim();
         const local = String(pega(o, ['LOCAL']) || '').trim();
-        const pot = num_(pega(o, ['POTENCIA']));
+        const pot = numMilhar_(pega(o, ['POTENCIA']));
         if (!e.modelo && modelo && modelo.indexOf('modelo do') !== 0) campos.MODELO = modelo;
         if (!e.local && local && local.indexOf('onde ele') !== 0) campos.LOCAL = local;
         if (!e.potencia && pot) campos.POTENCIA_VA = pot;
-        if (Object.keys(campos).length) atualizar('NB_EQUIPAMENTOS', e.id, campos, usuario.email);
+        if (e.id && Object.keys(campos).length) {
+          atualizar('NB_EQUIPAMENTOS', e.id, campos, usuario.email);
+          if (campos.MODELO) e.modelo = campos.MODELO;
+          if (campos.LOCAL) e.local = campos.LOCAL;
+          if (campos.POTENCIA_VA) e.potencia = campos.POTENCIA_VA;
+        }
       }
       return;
     }
-    inserir('NB_EQUIPAMENTOS', {
+    const novo = {
       CODIGO: codigo, MODELO: String(pega(o, ['MODELO']) || ''), LOCAL: String(pega(o, ['LOCAL']) || ''),
-      POTENCIA_VA: num_(pega(o, ['POTENCIA'])) || '', TENSAO_ENTRADA: num_(pega(o, ['TENSAO NOMINAL ENTRADA'])) || '',
+      POTENCIA_VA: numMilhar_(pega(o, ['POTENCIA'])) || '', TENSAO_ENTRADA: num_(pega(o, ['TENSAO NOMINAL ENTRADA'])) || '',
       TENSAO_SAIDA: num_(pega(o, ['TENSAO NOMINAL SAIDA'])) || '', ATIVO: 'SIM', OBSERVACAO: ''
-    }, usuario.email);
-    jaTem[codigo] = { codigo: codigo };
+    };
+    // O cadastro antigo pode repetir o codigo ("NB 04" e "NB-04"): a segunda
+    // linha completa a primeira. Sem o id aqui, o atualizar() recebia
+    // undefined e a importacao parava no meio, sem os lancamentos.
+    const idNovo = inserir('NB_EQUIPAMENTOS', novo, usuario.email);
+    jaTem[codigo] = { id: idNovo, codigo: codigo, modelo: novo.MODELO, local: novo.LOCAL, potencia: novo.POTENCIA_VA };
     novosEq++;
   });
 

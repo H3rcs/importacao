@@ -13,7 +13,7 @@
 
 const APP = {
   nome: 'GSL Bartofil',
-  versao: '4.2.1'
+  versao: '4.2.2'
 };
 
 /*

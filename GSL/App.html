@@ -649,6 +649,18 @@ async function filaLivre(limite) {
 }
 
 async function abrir(idTela, params) {
+  /*
+   * 'modulos' e a tela inicial DO NAVEGADOR (os cartoes), nao uma tela do
+   * servidor. Depois de uma acao feita ali (Reportar erro, Atualizar dados)
+   * o agir() reabria a pagina atual e pedia ao servidor a tela "modulos":
+   * caia num erro com a lateral vazia e sem botao de voltar.
+   */
+  if (!SESSAO) return;
+  if (idTela === 'modulos') return abrirModulos();
+  if (!(SESSAO.telas || []).some((t) => t.id === idTela)) {
+    abrirModulos();
+    return avisar('O seu nível de acesso não abre esta tela.', true);
+  }
   paginaAtual = idTela; paramsAtual = params || {};
 
   // Entrar por atalho (um botao da Central, por exemplo) tem que acender o
@@ -1321,9 +1333,10 @@ function abrirAtividade(id) {
    * `detalhesAtividade`, `removerAnexo` e a funcao `baixar()` ficaram
    * inalcancaveis: quem anexou arquivo avulso nao conseguia mais ver nem
    * remover. A chamada e feita depois de a janela existir, e so quando ha
-   * anexo — nenhuma ida ao Drive a mais nos outros casos.
+   * anexo — nenhuma ida ao Drive a mais nos outros casos. (Na 4.2 ela
+   * passou a ir sempre, porque trazia a conversa; o chat saiu, a regra volta.)
    */
-  carregarDetalhes(a.id, podeRemoverAnexo_(a, p));
+  if (a.qtdAnexos) carregarDetalhes(a.id, podeRemoverAnexo_(a, p));
 }
 
 /* Nome e tamanho de arquivo custam uma chamada ao Drive cada. Buscar isso

@@ -261,7 +261,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.2';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN
+const VERSAO_ESQUEMA = '8.3';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a

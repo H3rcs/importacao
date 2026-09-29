@@ -340,6 +340,44 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('reportar erro na tela de modulos: grava o relato e volta para os modulos', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '1234', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.click('.botao-feedback');
+    await f.fill('#fb-texto', 'Teste: a tela travou.');
+    await f.click('#janela-rodape .botao:not(.secundario)');
+    await aba.page.waitForTimeout(1500);
+    const r = await f.evaluate(() => ({ titulo: document.getElementById('titulo-pagina').textContent,
+      erro: Array.from(document.querySelectorAll('#pagina .erro-caixa')).map((e) => e.innerText).join(' | '),
+      cartoes: document.querySelectorAll('#pagina .tela-modulos').length }));
+    afirmar(!r.erro && r.cartoes === 1, 'voltou aos modulos sem erro: ' + JSON.stringify(r));
+    const banco = [...s.mundo.planilhas.values()].find((p) => p.nome === 'GSL_BANCO');
+    afirmar(banco.abas.find((a) => a.nome === 'FEEDBACK').ultimaLinha() === 2, 'relato gravado na FEEDBACK');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('projeto com o Conversas.gs antigo esquecido: o sistema ainda carrega', async () => {
+    const fs = require('fs'), os = require('os');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-sobra-'));
+    fs.readdirSync(PASTA).forEach((f) => fs.copyFileSync(path.join(PASTA, f), path.join(tmp, f)));
+    // o comeco do Conversas.gs da 4.1/4.2 (as declaracoes de topo)
+    fs.writeFileSync(path.join(tmp, 'Conversas.gs'), "const CONVERSA_ATIVIDADE = 'ATIVIDADE';\n" +
+      "const CONVERSA_DIRETA = 'DIRETO';\nconst CONVERSA_LIMITE = 200;\nconst FEEDBACK_TIPOS = ['ERRO', 'SUGESTAO', 'DUVIDA'];\n" +
+      "function listarFeedback() { return []; }\n");
+    for (const ordem of ['alfabetica', 'reversa']) {
+      const s = await criarServidor({ pasta: tmp, apagarComentarios: 'simples', dono: DONO, ordem });
+      instalarComPessoas(s);
+      const aba = await abrirAba(s, GERAL);
+      afirmar((await telaVisivel(aba)).includes('entrar'), 'abre na entrada (ordem ' + ordem + ')');
+      await aba.contexto.close(); await s.fechar();
+    }
+    fs.rmSync(tmp, { recursive: true });
+  });
+
   await cenario('administrador: todas as telas do menu abrem sem erro', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);

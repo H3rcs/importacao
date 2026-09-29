@@ -709,7 +709,7 @@ function diagnostico() {
 /* ganhou tela propria: Configuracao › Relatos de erro.                */
 /* ------------------------------------------------------------------ */
 
-const FEEDBACK_TIPOS = ['ERRO', 'SUGESTAO', 'DUVIDA'];
+const TIPOS_DE_RELATO = ['ERRO', 'SUGESTAO', 'DUVIDA'];
 
 /* Instante real do registro: o ID carrega o milissegundo da criacao. */
 function instanteDoRegistro_(r) {
@@ -732,7 +732,7 @@ function acaoEnviarFeedback(usuario, params) {
 
   const tipo = String(params.tipo || 'ERRO').toUpperCase().trim();
   const id = inserir('FEEDBACK', {
-    TIPO: FEEDBACK_TIPOS.indexOf(tipo) !== -1 ? tipo : 'ERRO',
+    TIPO: TIPOS_DE_RELATO.indexOf(tipo) !== -1 ? tipo : 'ERRO',
     TELA: String(params.tela || '').trim(),
     TEXTO: texto,
     AUTOR: String(usuario.email || '').toLowerCase().trim(),

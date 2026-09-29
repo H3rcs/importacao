@@ -215,6 +215,9 @@ function podeAbrir(usuario, idTela) {
   if (usuario.permissoes.telas.indexOf(idTela) === -1) return false;
   const tela = TELAS.filter(function (t) { return t.id === idTela; })[0];
   if (!tela) return false;
+  // Tela que exige capacidade (Configuracao, Pessoas, Filiais, Relatos): sem
+  // ela o menu mostrava o cartao e a tela abria direto num erro.
+  if (tela.exige && !podeFazer(usuario, tela.exige)) return false;
   return painelVisivel(usuario, tela.modulo);
 }
 

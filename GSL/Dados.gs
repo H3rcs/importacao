@@ -137,6 +137,12 @@ function garantirPainel_(arq, usuario) {
   const gravado = painelDaCompetencia_(comp);
   if (gravado && painelAtual_(lerPayload_(gravado))) return { painel: gravado, erro: '' };
 
+  // Mes novo com a folha ainda vazia: cada montagem da tela tomava a trava
+  // do sistema e reabria a planilha do RH so para ouvir "nenhum lancamento".
+  if (!gravado && folhaVaziaRecente_(comp)) {
+    return { painel: null, erro: 'A folha do RH desta competência ainda não tem lançamentos.' };
+  }
+
   try {
     if (recalcularDaFato_(comp, usuario.email, ESPERA_TRAVA_TELA)) {
       const p = painelDaCompetencia_(comp);
@@ -144,7 +150,9 @@ function garantirPainel_(arq, usuario) {
     }
   } catch (e) {
     // Falhou refazer o que existe (trava ocupada, por exemplo): reimportar
-    // por cima so pioraria. A pessoa ve o motivo e tenta de novo.
+    // por cima so pioraria. Havendo painel de versao anterior, ele serve —
+    // melhor que a tela de "importacao pendente" com o mes cheio de dados.
+    if (gravado) return { painel: gravado, erro: '' };
     return { painel: null, erro: String(e.message || e) };
   }
 
@@ -155,6 +163,23 @@ function garantirPainel_(arq, usuario) {
   } catch (e2) {
     return { painel: null, erro: String(e2.message || e2) };
   }
+}
+
+/*
+ * FOLHA VAZIA — o mes novo do RH (dia 21 em diante) nasce sem lancamento.
+ * A marca vive 30 minutos no cache (por filial) e cai na primeira
+ * importacao que achar lancamento.
+ */
+function marcarFolhaVazia_(comp, vazia) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const chave = chaveNoEspaco('rh_vazia_' + comp);
+    if (vazia) cache.put(chave, '1', 1800); else cache.remove(chave);
+  } catch (e) { /* a marca e so para poupar trabalho */ }
+}
+function folhaVaziaRecente_(comp) {
+  try { return !!CacheService.getScriptCache().get(chaveNoEspaco('rh_vazia_' + comp)); }
+  catch (e) { return false; }
 }
 
 /* A competencia mais recente (fora `exceto`) que tem painel — atual ou refeito da FATO. */
@@ -171,7 +196,9 @@ function competenciaMaisRecenteComPainel_(arquivos, exceto, usuario) {
         const novo = painelDaCompetencia_(comp);
         if (novo) return { arq: a, painel: novo };
       }
-    } catch (e) { /* segue para a proxima */ }
+    } catch (e) {
+      return { arq: a, painel: p };           // trava ocupada: o painel anterior serve
+    }
   }
   return null;
 }
@@ -1230,7 +1257,15 @@ function importarArquivoRH_(arq, quem, espera) {
   }
 
   const ext = extrair_(folha.m, det, cfg, compArq);
-  if (!ext.regs.length) throw new Error('Nenhum lançamento encontrado na planilha do RH.');
+  if (!ext.regs.length) {
+    // Folha ainda vazia (o mes do RH vira no dia 21): nao e falha de
+    // importacao — ver marcarFolhaVazia_ e acaoAtualizarRH.
+    marcarFolhaVazia_(compArq, true);
+    const vazia = new Error('Nenhum lançamento encontrado na planilha do RH.');
+    vazia.folhaVazia = true;
+    throw vazia;
+  }
+  marcarFolhaVazia_(compArq, false);
 
   const mapa = lerDePara_();
   const linhasFato = [];
@@ -1481,6 +1516,10 @@ function calcularAgregado_(comp, linhasFato, nomes) {
     const data = l[0], mat = String(l[3]), turno = String(l[4] || ''), cod = l[5], cat = l[6];
     const ausencia = (l[7] === 'Sim');
     const catN = catN_(cat);
+    // 'Ignorar' nao e lancamento. A importacao ja tirava essas linhas, mas o
+    // Reclassificar so troca a categoria na FATO: sem esta linha, o codigo
+    // recem-marcado como Ignorar continuava inflando registros e baixando a taxa.
+    if (catN === 'IGNORAR') return;
     lanc++;
 
     porCat[cat] = (porCat[cat] || 0) + 1;
@@ -2324,11 +2363,12 @@ function agoraTextoDados_() { return Utilities.formatDate(new Date(), fuso(), 'y
 function atualizarCompetenciaAberta() {
   const r = emCadaFilial_('assiduidade', atualizarCompetenciaAbertaDaFilial_);
   if (r.length === 1) return r[0];
-  const junto = { ok: true, feitas: [], erros: [] };
+  const junto = { ok: true, feitas: [], erros: [], vazias: [] };
   r.forEach(function (x) {
     if (!x) return;
     junto.feitas = junto.feitas.concat(x.feitas || []);
     junto.erros = junto.erros.concat(x.erros || []);
+    junto.vazias = junto.vazias.concat(x.vazias || []);
     if (x.ok === false) junto.ok = false;
   });
   return junto;
@@ -2341,7 +2381,7 @@ function atualizarCompetenciaAbertaDaFilial_() {
   }
 
   const quem = String(prop('EMAIL_ADMIN', 'sistema'));
-  const feitas = [], erros = [];
+  const feitas = [], erros = [], vazias = [];
   /*
    * LIMITE DE 6 MINUTOS. Cada competencia aberta e uma importacao inteira.
    * Esquecer meses antigos como "Aberta" (o cadastro nasce assim) fazia o
@@ -2361,6 +2401,9 @@ function atualizarCompetenciaAbertaDaFilial_() {
       feitas.push({ competencia: comp, registros: r.registros,
                     colaboradores: r.colaboradores, aviso: r.aviso || '' });
     } catch (e) {
+      // Mes novo com a folha ainda sem lancamento: nao e erro (todo mes, do
+      // dia 21 ate o RH lancar o primeiro dia, o botao e o gatilho falhavam).
+      if (e && e.folhaVazia) { vazias.push(comp); return; }
       /*
        * O erro NÃO é mais engolido.
        *
@@ -2376,7 +2419,7 @@ function atualizarCompetenciaAbertaDaFilial_() {
     }
   });
   limparCache();
-  return { ok: erros.length === 0, feitas: feitas, erros: erros };
+  return { ok: erros.length === 0, feitas: feitas, erros: erros, vazias: vazias };
 }
 
 /** Botao "Atualizar agora": mesma rotina do gatilho, disparada por gente. */
@@ -2386,19 +2429,22 @@ function acaoAtualizarRH(usuario) {
 
   if (r.pulou) throw new Error(r.pulou + ' Marque uma em Configuração › Fontes do RH.');
 
-  if (r.erros.length) {
-    // O erro vai para a tela, com o nome da competência e o motivo.
-    throw new Error('Não consegui atualizar ' +
-      r.erros.map(function (e) { return e.competencia + ': ' + e.erro; }).join(' · '));
-  }
+  const erros = r.erros.map(function (e) { return e.competencia + ': ' + e.erro; }).join(' · ');
+  // Nada foi atualizado: o erro vai para a tela, com a competência e o motivo.
+  // Se alguma foi, ela aparece — antes um mes com erro escondia os que deram
+  // certo e a tela nem recarregava.
+  if (r.erros.length && !r.feitas.length) throw new Error('Não consegui atualizar ' + erros);
 
   const total = r.feitas.reduce(function (n, f) { return n + f.registros; }, 0);
+  const partes = r.feitas.map(function (f) {
+    return f.competencia + ' — ' + f.registros + ' lançamentos, ' +
+           f.colaboradores + ' pessoas' + (f.aviso ? ' · ' + f.aviso : '');
+  });
+  if ((r.vazias || []).length) partes.push('ainda sem lançamentos na folha: ' + r.vazias.join(', '));
+  if (r.erros.length) partes.push('NÃO atualizadas: ' + erros);
   return {
-    ok: true, feitas: r.feitas,
-    aviso: r.feitas.map(function (f) {
-      return f.competencia + ' — ' + f.registros + ' lançamentos, ' +
-             f.colaboradores + ' pessoas' + (f.aviso ? ' · ' + f.aviso : '');
-    }).join(' | ') || 'Nada a atualizar.',
+    ok: true, feitas: r.feitas, vazias: r.vazias || [], invalidarTudo: true,
+    aviso: partes.join(' | ') || 'Nada a atualizar.',
     registros: total
   };
 }

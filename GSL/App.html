@@ -1619,7 +1619,13 @@ function pintarAssiduidade(r) {
   if (d.semRH || d.semDados) {
     el('subtitulo-pagina').textContent = d.semRH ? 'Nenhuma competência cadastrada'
                                                  : 'Competência sem dados importados';
-    el('acoes-topo').innerHTML = '';
+    // O seletor fica: escolher o mes novo (ainda vazio) nao pode prender a
+    // pessoa nesta tela sem caminho de volta para o mes anterior.
+    el('acoes-topo').innerHTML = (d.competencias || []).length > 1 ? `
+      <select onchange="abrir('assiduidade',{competencia:this.value})" title="Competência do painel">
+        ${d.competencias.map((c) => `<option value="${esc(c.competencia)}" ${c.competencia === d.competencia ? 'selected' : ''}>
+          ${esc(c.competencia)} — ${esc(c.situacao)}</option>`).join('')}
+      </select>` : '';
     el('pagina').innerHTML = `
       <div class="cartao">
         <div class="cartao-titulo">${d.semRH ? 'Sem fonte de dados' : 'Importação pendente'}</div>
@@ -1848,8 +1854,12 @@ async function rhColaboradoresTela(d) {
      * caracteres, e uma célula do Google Sheets aceita 50 mil. Era essa
      * a razão de a aba não carregar.
      */
-    COLAB_CACHE = COLAB_CACHE ||
-      await executarAcaoSrv('colaboradores', { competencia: d.competencia, minimo: 10 });
+    // A resposta pode chegar depois de a pessoa trocar de competencia (ou
+    // de aba): so desenha se a tela ainda for a mesma que pediu.
+    const comp = d.competencia;
+    const r = COLAB_CACHE || await executarAcaoSrv('colaboradores', { competencia: comp, minimo: 10 });
+    if (!DADOS || DADOS.competencia !== comp || ABA_RH !== 'colaboradores') return;
+    COLAB_CACHE = r;
     desenharColaboradores(d);
   } catch (e) {
     alvo.innerHTML = rhKpis(d) + `<div class="erro-caixa">${esc(e.message || e)}</div>`;
@@ -2284,10 +2294,18 @@ async function verDiagnosticoRH() {
       <div class="cartao-titulo">Por competência</div>
       <table><thead><tr><th>Competência</th><th class="numero">Lançamentos</th>
         <th class="numero">Ausências</th><th>De</th><th>Até</th></tr></thead>
-      <tbody>${d.competencias.map((c) => `<tr><td><strong>${esc(c.competencia)}</strong></td>
+      <tbody>${d.competencias.map((c) => `<tr><td><strong>${esc(c.competencia)}</strong>${c.semCadastro
+          ? ' <span class="pendente-entrega">sem cadastro</span>' : ''}</td>
         <td class="numero">${c.linhas}</td><td class="numero">${c.ausencias}</td>
         <td>${esc(c.de)}</td><td>${esc(c.ate)}</td></tr>`).join('')
         || '<tr><td colspan="5" class="vazio">Nada importado.</td></tr>'}</tbody></table>
+
+      ${(d.orfas || []).length ? `<div class="erro-caixa" style="margin-top:12px">
+        Sobras sem cadastro (ficam fora de todas as contas):
+        ${d.orfas.map((o) => esc(o.competencia) + ' (' + o.linhas + ' linha(s))').join(', ')}.
+        ${d.podeLimpar ? `<div style="margin-top:8px"><button class="botao"
+          onclick="fecharJanela(); agir('limparOrfasRH', {}, '')">Limpar sobras</button></div>` : ''}
+      </div>` : ''}
 
       <div class="cartao-titulo" style="margin-top:14px">Competências cadastradas</div>
       <table><thead><tr><th>Competência</th><th>Situação</th><th class="numero">Declarado</th>

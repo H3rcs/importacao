@@ -184,6 +184,40 @@ caso('rotulo antigo de competencia ("08/2025") e o mesmo mes que "2025-08"', () 
   afirmar(d.competencias.length === 1, 'seletor com um mes so: ' + d.competencias.map((c) => c.competencia).join(', '));
 });
 
+caso('codigo marcado como Ignorar + Reclassificar: mesma conta de uma importacao nova', () => {
+  const m = novoMundo();
+  const dias = {};
+  for (let i = 0; i < 31; i++) { const d = new Date(2025, 6, 21 + i); if (d.getDay() === 3) dias[iso(d)] = 'X'; }   // anotacao do RH as quartas
+  dias['2025-08-05'] = '16';
+  const url = folhaRH(m, 'F08', { inicio: [2025, 7, 21], dias: 31, pessoas: [
+    { mat: '100234', nome: 'ANA SOUZA', turno: 'A', dias }, { mat: '100555', nome: 'BRUNO LIMA', turno: 'B', dias }] });
+  const a = acao(m, 'acaoSalvarArquivoRH', { competencia: '2025-08', link: url, aba: 'FOLHA DE PONTO' });
+  acao(m, 'acaoImportarCompetencia', { id: a.id });
+  acao(m, 'acaoSalvarDePara', { codigo: 'X', descricao: 'Anotacao do RH', categoria: 'Ignorar' });
+  acao(m, 'acaoReclassificar', {});
+  const depois = acao(m, 'dadosAssiduidade', { competencia: '2025-08' }).kpis;
+  acao(m, 'acaoImportarCompetencia', { id: a.id });
+  const novo = acao(m, 'dadosAssiduidade', { competencia: '2025-08' }).kpis;
+  afirmar(depois.registros === novo.registros && depois.taxa === novo.taxa,
+    'Reclassificar ' + depois.registros + ' / ' + depois.taxa + '% x importacao nova ' + novo.registros + ' / ' + novo.taxa + '%');
+});
+
+caso('Atualizar dados com o mes novo ainda vazio: atualiza o outro e nao da erro', () => {
+  const m = novoMundo();
+  const pessoas = [{ mat: '100234', nome: 'ANA SOUZA', turno: 'A', dias: { '2025-08-05': '16' } }];
+  const ago = folhaRH(m, 'F08', { inicio: [2025, 7, 21], dias: 31, pessoas });
+  const set = folhaRH(m, 'F09', { inicio: [2025, 8, 21], dias: 31, pessoas: [] });          // mes novo: folha sem ninguem ainda
+  const a = acao(m, 'acaoSalvarArquivoRH', { competencia: '2025-08', link: ago, aba: 'FOLHA DE PONTO' });
+  acao(m, 'acaoSalvarArquivoRH', { competencia: '2025-09', link: set, aba: 'FOLHA DE PONTO' });
+  acao(m, 'acaoImportarCompetencia', { id: a.id });
+  const r = acao(m, 'acaoAtualizarRH', {});
+  afirmar(r.ok && r.feitas.length === 1 && r.feitas[0].competencia === '2025-08', 'agosto atualizado: ' + JSON.stringify(r).slice(0, 200));
+  afirmar(/sem lançamentos/.test(r.aviso) && (r.vazias || []).indexOf('2025-09') >= 0, 'avisa que setembro ainda esta vazio: ' + r.aviso);
+  afirmar(!linhas(m, 'LOG').some((l) => l.ACAO === 'ERRO' && /IMPORTACAO/.test(String(l.TABELA))), 'nenhum ERRO de importacao no LOG');
+  const d = acao(m, 'dadosAssiduidade', { competencia: '2025-09' });
+  afirmar(d.semDados && (d.competencias || []).length === 2, 'mes vazio mostra "sem dados" com o seletor dos dois meses');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

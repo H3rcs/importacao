@@ -192,6 +192,33 @@
   <div id="recado" class="recado oculto"></div>
 
   <script>
+    /* GUARDA DA ABERTURA (4.2.2). Se o App nao chegar a rodar (erro de
+       sintaxe, arquivo faltando no projeto), a pagina diz o motivo em vez
+       de ficar parada para sempre em "Abrindo o sistema". */
+    (function () {
+      function mostrar(msg) {
+        if (typeof window.iniciar === 'function') return;
+        var c = document.getElementById('carregando');
+        var f = document.getElementById('falha');
+        var t = document.getElementById('falha-texto');
+        if (!f || !t) return;
+        if (c) c.classList.add('oculto');
+        f.classList.remove('oculto');
+        t.textContent = 'O sistema não carregou: ' + msg +
+          '. Avise o administrador e mande esta mensagem para ele.';
+      }
+      var primeiroErro = '';
+      window.addEventListener('error', function (ev) {
+        if (!primeiroErro) primeiroErro = ((ev && ev.message) || 'erro desconhecido') +
+          (ev && ev.lineno ? ' (linha ' + ev.lineno + ')' : '');
+        mostrar(primeiroErro);
+      });
+      window.addEventListener('load', function () {
+        mostrar(primeiroErro || 'o código da página não foi executado');
+      });
+    })();
+  </script>
+  <script>
     /* Resposta do servidor entregue junto com a pagina — zero ida e volta. */
     var CARGA_INICIAL = <?!= inicial ?>;
   </script>

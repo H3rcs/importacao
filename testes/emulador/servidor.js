@@ -12,7 +12,9 @@
  * Quem o Google diz que abriu (Session.getActiveUser) vem do cookie
  * gas_conta. O cookie gas_403=1 simula o bloqueio do google.script.run por
  * HTTP 403; gas_403=perm, o PERMISSION_DENIED de varias contas Google no
- * mesmo navegador; gas_atraso=ms atrasa as respostas.
+ * mesmo navegador; gas_atraso=ms atrasa as respostas; gas_atraso_post=ms
+ * atrasa a resposta do POST DEPOIS de o doPost rodar (o Google ja entrou,
+ * a pagina nova ainda nao chegou).
  */
 'use strict';
 const http = require('http');
@@ -139,6 +141,7 @@ function criarServidor(opcoes) {
           const e = eventoDe(params);
           e.postData = { contents: corpo, type: 'application/x-www-form-urlencoded', length: corpo.length };
           saida = ctx.doPost(e);
+          if (cookies.gas_atraso_post) await new Promise((ok) => setTimeout(ok, Number(cookies.gas_atraso_post)));
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(embrulhar(saida, base));

@@ -82,6 +82,7 @@ async function abrirAba(s, conta, extras) {
   const cookies = [{ name: 'gas_conta', value: conta, url: s.url }];
   if (extras && extras.bloqueio403) cookies.push({ name: 'gas_403', value: extras.bloqueio403 === 'perm' ? 'perm' : '1', url: s.url });
   if (extras && extras.atraso) cookies.push({ name: 'gas_atraso', value: String(extras.atraso), url: s.url });
+  if (extras && extras.atrasoPost) cookies.push({ name: 'gas_atraso_post', value: String(extras.atrasoPost), url: s.url });
   await contexto.addCookies(cookies);
   const page = await contexto.newPage();
   const erros = [];
@@ -399,6 +400,113 @@ async function rodar() {
     afirmar(/n\\u00e3o pode ser reenviada|não pode ser reenviada|nao pode ser reenviada/.test(html) || /reenviada/.test(html), 'POST reenviado recusado');
     afirmar(!/"entrada":"APP"/.test(html), 'POST reenviado nao abre o sistema');
     await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('reserva por POST: clique repetido em Entrar manda um POST so, e entra', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    // O Google ja processou a entrada, mas a pagina nova demora 3 s para
+    // chegar: da tempo de a pessoa clicar de novo.
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true, atrasoPost: 3000 });
+    const f = await frame(aba);
+    await f.evaluate(() => { CANAL_BARRADO = true; });              // canal ja sabidamente barrado
+    await f.fill('#entrar-email', COORD);
+    await f.fill('#entrar-pin', '1234');
+    // Mouse de verdade pelo CDP, sem esperar a resposta: o click() do
+    // Playwright (e o proprio CDP) so voltam quando a pagina nova chega.
+    const caixa = await (await f.$('#entrar-botao')).boundingBox();
+    const cdp = await aba.contexto.newCDPSession(aba.page);
+    const x = caixa.x + caixa.width / 2, y = caixa.y + caixa.height / 2;
+    const clicar = () => {
+      cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }).catch(() => {});
+      cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }).catch(() => {});
+    };
+    // (Com a navegacao pendente o Playwright nao consegue avaliar nada no
+    // frame: a prova e o que chega no servidor e a tela final.)
+    clicar();
+    await aba.page.waitForTimeout(1500);
+    clicar();                                                       // a pessoa clica de novo
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou');
+    const posts = s.registro.filter((r) => r.tipo === 'doPost' && /(^|&)email=/.test(r.corpo || ''));
+    afirmar(posts.length === 1, 'um POST de entrada so: ' + posts.length);
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('primeiro acesso: trocar o e-mail desfaz o pedido de codigo (quem ja tem PIN entra)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL);
+    const f = await frame(aba);
+    await f.fill('#entrar-email', GERENTE);                         // e-mail errado, de quem nao tem PIN
+    await f.fill('#entrar-pin', '5678');
+    await f.click('#entrar-botao');
+    await f.waitForSelector('#entrar-codigo', { state: 'visible', timeout: 10000 });
+    await f.fill('#entrar-email', COORD);                           // corrige o e-mail
+    afirmar(!(await f.isVisible('#entrar-codigo')) && !(await f.isVisible('#entrar-pin2')), 'caixas do primeiro acesso somem');
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'sem-acesso'], 15000) === 'aplicacao', 'entrou com o PIN dela');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('reserva por POST com a pagina aberta a noite toda (bilhete vencido): explica, guarda o e-mail e entra', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true });
+    for (const k of [...s.mundo.cache.keys()]) if (/^bilhete_/.test(k)) s.mundo.cache.delete(k);   // 6 h depois
+    await entrar(aba, COORD, '1234');
+    await aba.page.waitForTimeout(1500);
+    await esperarTela(aba, ['entrar']);
+    let f = await frame(aba);
+    await f.waitForFunction(() => /aberta muito tempo/.test(document.getElementById('entrar-msg').textContent), null, { timeout: 15000 });
+    afirmar(await f.inputValue('#entrar-email') === COORD, 'o e-mail continua preenchido');
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'o segundo Entrar entrou');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('reserva por POST com a sessao vencida: a tela diz que a sessao terminou', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { bloqueio403: true });
+    await entrar(aba, COORD, '1234');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
+    for (const k of [...s.mundo.cache.keys()]) if (/^sess_/.test(k)) s.mundo.cache.delete(k);      // 1 h parada
+    const f = await frame(aba);
+    await f.click('.holocard >> nth=0');
+    await aba.page.waitForTimeout(2500);
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao'], 15000) === 'entrar', 'voltou para a entrada');
+    const msg = await texto(aba, 'entrar-msg');
+    afirmar(/sessão terminou/.test(msg), 'explica: "' + msg + '"');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('codigo de primeiro acesso: no maximo 3 e-mails em 15 min, e os anteriores continuam valendo', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const pedir = (email) => JSON.parse(s.chamar(GERAL, 'entrar', email, '5678', '', '', '').valor);
+    const chave = 'pincod_email_' + GERENTE.replace(/[^a-z0-9]/g, '_');
+    const passarUmMinuto = () => { const e = s.mundo.cache.get(chave); const v = JSON.parse(e.v); v.em -= 61000; e.v = JSON.stringify(v); };
+    const codigos = [];
+    for (let i = 0; i < 3; i++) {
+      const r = pedir(GERENTE);
+      afirmar(r.pedirCodigo && !r.erro, 'pedido ' + (i + 1) + ': ' + JSON.stringify(r).slice(0, 160));
+      codigos.push(codigoDoEmail(s, GERENTE)); passarUmMinuto();
+    }
+    afirmar(new Set(codigos).size === 3, 'tres codigos diferentes: ' + codigos.join(','));
+    const quarto = pedir(GERENTE);
+    afirmar(/Já mandamos 3/.test(quarto.erro || ''), 'quarto pedido recusado: ' + JSON.stringify(quarto).slice(0, 200));
+    afirmar(s.mundo.emails.filter((x) => x.to === GERENTE && /primeiro acesso/.test(x.subject)).length === 3, 'so 3 e-mails de codigo saíram');
+    // o primeiro codigo (o que ja estava na caixa de entrada) continua valendo
+    const r = JSON.parse(s.chamar(GERAL, 'entrar', GERENTE, '5678', '5678', '', codigos[0]).valor);
+    afirmar(r.token, 'entrou com o primeiro codigo: ' + JSON.stringify(r).slice(0, 200));
+    // teto do sistema inteiro por hora
+    const hora = new Date().toISOString().slice(0, 13).replace(/\D/g, '');
+    s.mundo.cache.set('pincod_hora_' + hora, { v: '60', expira: Date.now() + 3600000 });
+    const outro = pedir(COORD);
+    afirmar(/no limite/.test(outro.erro || '') && !s.mundo.emails.some((x) => x.to === COORD && /primeiro acesso/.test(x.subject)),
+      'teto por hora: ' + JSON.stringify(outro).slice(0, 200));
+    await s.fechar();
   });
 
   await cenario('aba restaurada depois de fechada nao reaproveita a sessao; F5 imediato sim', async () => {

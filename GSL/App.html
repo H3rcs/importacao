@@ -280,8 +280,47 @@ function mostrarEntrada(info) {
   setTimeout(() => { const alvo = el('entrar-email').value ? el(info.criarPin ? 'entrar-pin' : 'entrar-pin') : el('entrar-email'); if (alvo) alvo.focus(); }, 60);
 }
 
+/*
+ * O formulario de entrada ja foi como POST: nenhum segundo envio. O servidor
+ * queima o bilhete quando a entrada da certo, e um segundo POST com ele
+ * (clique repetido enquanto a pagina nova nao chega) caia em "Por seguranca".
+ */
+let ENTRADA_ENVIADA = false;
+function enviarFormEntrada() {
+  if (ENTRADA_ENVIADA) return;
+  ENTRADA_ENVIADA = true;
+  const b = el('entrar-botao');
+  b.disabled = true; b.textContent = 'Entrando…';
+  el('form-entrar').submit();
+  // Navegacao barrada (clique vencido): libera o botao para o proximo clique.
+  setTimeout(() => {
+    if (SAINDO_DA_PAGINA) return;
+    liberarBotaoEntrar();
+  }, 6000);
+}
+function liberarBotaoEntrar() {
+  ENTRADA_ENVIADA = false;
+  const b = el('entrar-botao');
+  if (b) { b.disabled = false; b.textContent = 'Entrar'; }
+}
+// Voltar do navegador com a pagina guardada (bfcache): o botao nao fica preso em "Entrando…".
+window.addEventListener('pageshow', function (ev) {
+  if (ev.persisted) { SAINDO_DA_PAGINA = false; liberarBotaoEntrar(); }
+});
+
+/* Trocou o e-mail: o codigo e a repeticao do PIN eram do primeiro acesso de OUTRO e-mail. */
+function esquecerPrimeiroAcesso() {
+  if (el('entrar-confirma').classList.contains('oculto') &&
+      el('entrar-codigo-caixa').classList.contains('oculto')) return;
+  el('entrar-confirma').classList.add('oculto');
+  el('entrar-codigo-caixa').classList.add('oculto');
+  el('entrar-codigo').value = ''; el('entrar-pin2').value = '';
+  const msg = el('entrar-msg'); msg.textContent = ''; msg.className = 'entrar-msg';
+}
+
 async function entrarNoSistema(ev) {
   if (ev) ev.preventDefault();
+  if (ENTRADA_ENVIADA) return false;
   const email = val('entrar-email').trim().toLowerCase();
   const pin = val('entrar-pin').trim();
   const criando = !el('entrar-confirma').classList.contains('oculto');
@@ -301,7 +340,7 @@ async function entrarNoSistema(ev) {
   el('entrar-filial').value = '';
   el('entrar-bilhete').value = bilheteDaPagina();
   // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
-  if (CANAL_BARRADO && URL_APP) { el('form-entrar').submit(); return false; }
+  if (CANAL_BARRADO && URL_APP) { enviarFormEntrada(); return false; }
   const clique = Date.now();
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
@@ -332,13 +371,13 @@ async function entrarNoSistema(ev) {
      */
     if (URL_APP) {
       CANAL_BARRADO = true;
-      if (Date.now() - clique < 4500) { el('form-entrar').submit(); return false; }
+      if (Date.now() - clique < 4500) { enviarFormEntrada(); return false; }
       falar('A conexão com o Google falhou. Clique em Entrar de novo para continuar.', 'ok');
       return false;
     }
     falar(explicarErro(e));
   } finally {
-    b.disabled = false; b.textContent = 'Entrar';
+    if (!ENTRADA_ENVIADA) { b.disabled = false; b.textContent = 'Entrar'; }
   }
   return false;
 }
@@ -463,13 +502,16 @@ function escolherFilial(codigo) {
     mostrarEscolhaFilial(FILIAIS_DISPONIVEIS);
     avisar('O servidor demorou para responder. Clique na filial de novo.', true);
   }, 12000);
+  // Resposta (ou falha) que chega depois dos 12 s e de outra escolha: ignora
+  // — senao abriria a filial que a pessoa ja abandonou.
   chamarJSON('abrirFilial', { t: TOKEN, f: codigo }).then((r) => {
+    if (respondeu) return;
     respondeu = true; clearTimeout(reserva);
     if (r && (r.entrada === 'SEM_SESSAO' || /\[SESSAO\]/.test(r.erro || ''))) return sessaoTerminou();
     if (r && r.ok && r.entrada === 'APP') return montarSessao(r);
     if (r && r.entrada && r.entrada !== 'APP') return mostrarSemAcesso(r);
     mostrarFalha((r && r.erro) || 'Não consegui abrir a filial.');
-  }).catch(() => { respondeu = true; clearTimeout(reserva); irParaFilial(codigo); });
+  }).catch(() => { if (respondeu) return; respondeu = true; clearTimeout(reserva); irParaFilial(codigo); });
   return false;
 }
 
@@ -500,6 +542,7 @@ function montarSessao(r) {
   if (FILIAL) gravarLocal(CHAVE_FILIAL, FILIAL);
   esquecerTelas();
   moduloAtual = null;
+  filtroAtivo = null; filtroTurno = null;   // filtro do calendario era da filial/pessoa anterior
   montarMenu(r.telas);
 
   const u = r.usuario;
@@ -545,9 +588,30 @@ function canalBloqueado(e) {
 }
 
 /* Bilhete de uso unico que o servidor pos nesta pagina (ver doPost). */
+let BILHETE_RENOVADO = '', BILHETE_DESDE = Date.now();
 function bilheteDaPagina() {
-  return (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL && CARGA_INICIAL.bilhete) || '';
+  return BILHETE_RENOVADO ||
+    (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL && CARGA_INICIAL.bilhete) || '';
 }
+/*
+ * O bilhete vive 6 h no servidor. Pagina aberta o dia inteiro: enquanto o
+ * canal funciona, pede um novo a cada 4 h — para a reserva por POST (se o
+ * canal cair no meio do turno) nao sair com um bilhete vencido.
+ */
+function renovarBilheteSeVelho() {
+  if (CANAL_BARRADO || Date.now() - BILHETE_DESDE < 4 * 3600 * 1000) return;
+  if (typeof google === 'undefined' || !google.script) return;
+  BILHETE_DESDE = Date.now();
+  chamar('renovarBilhete', ctx()).then((b) => {
+    if (typeof b !== 'string' || !/^[0-9a-f-]{36}$/i.test(b)) return;
+    BILHETE_RENOVADO = b;
+    const campo = el('entrar-bilhete'); if (campo) campo.value = b;
+  }).catch(() => {});
+}
+setInterval(renovarBilheteSeVelho, 15 * 60 * 1000);
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') renovarBilheteSeVelho();
+});
 function abrirPorNavegacao(idTela, params) {
   if (!URL_APP || !FILIAL) return false;
   el('pagina').innerHTML = '<div class="vazio">Abrindo pela navegação…</div>';
@@ -1009,7 +1073,12 @@ async function agir(acao, params, recado) {
     const msg = e.message || String(e);
     // Erro de permissao de e-mail nao vira um aviso que some em 7s: vira uma
     // janela com o passo a passo e o botao que leva direto para autorizar.
-    if (/MailApp|send_mail|permiss|autoriz/i.test(msg)) janelaAutorizarEmail(msg);
+    // O canal barrado (varias contas Google: "PERMISSION_DENIED") vem antes:
+    // ele tambem diz "permission", mas nao tem nada a ver com o e-mail.
+    // ("permiss" saiu da lista pelo mesmo motivo — e pegava ate o nosso
+    // "Sem permissao para ..." das telas.)
+    if (canalBloqueado(e)) avisar(explicarErro(e), true);
+    else if (/MailApp|send_mail|autoriz/i.test(msg)) janelaAutorizarEmail(msg);
     else avisar(msg, true);
     throw e;
   } finally {
@@ -1348,6 +1417,14 @@ function pintarCalendario(r) {
     </div>` : ''}`;
   // Filtro de status/turno sobrevive a repintura (acao ou revalidacao de
   // fundo): antes a pilula continuava acesa, mas nada mais era filtrado.
+  // Mas o turno so vale se a pastilha dele ainda existe (outro mes pode nao
+  // ter aquele turno, ou nem ter a tira): senao o mes inteiro ficava apagado
+  // sem nenhum botao para desfazer.
+  const pastilhas = Array.from(el('pagina').querySelectorAll('.pastilha-turno'));
+  if (filtroTurno && !pastilhas.some((b) => b.dataset.turnoFiltro === filtroTurno)) {
+    filtroTurno = null;
+    pastilhas.forEach((b) => b.classList.toggle('ativa', !b.dataset.turnoFiltro));
+  }
   aplicarFiltro();
 }
 
@@ -1594,8 +1671,10 @@ function vagasDoMes(d) { return [].concat(d.treinamentos || [], d.naoAgendadas |
 
 function formTreinamento(id) {
   const a = todasAtividades().find((x) => x.id === id);
-  abrirJanela('Agendar treinamento', `
-    <div class="campo"><label>Tema</label>
+  // A lista "Treinamentos e vagas" tem tambem vagas avulsas de outros tipos.
+  const tre = String(a.tipo || '').toUpperCase() === 'TRE';
+  abrirJanela(tre ? 'Agendar treinamento' : 'Agendar atividade', `
+    <div class="campo"><label>${tre ? 'Tema' : 'Atividade'}</label>
       <input id="t-atividade" value="${esc(a.atividade)}"></div>
     <div class="campo"><label>Data</label>
       <input type="date" id="t-data" value="${esc(a.prazoISO || '')}"></div>
@@ -1603,9 +1682,9 @@ function formTreinamento(id) {
       <select id="t-turno">
         ${['Todos', 'A', 'B', 'C'].map((x) => `<option ${x === (a.turno || 'Todos') ? 'selected' : ''}>${x}</option>`).join('')}
       </select></div>
-    <p class="dica">Ao salvar, os três coordenadores e a gestão recebem o aviso.</p>`, `
+    <p class="dica">Ao salvar, ${tre ? 'os três coordenadores' : 'o coordenador do turno'} e a gestão recebem o aviso.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-    <button class="botao" onclick="agir('agendarTreinamento',{id:${jsArg(id)},prazo:val('t-data'),atividade:val('t-atividade'),turno:val('t-turno')},'Treinamento agendado')">Agendar</button>`);
+    <button class="botao" onclick="agir('agendarTreinamento',{id:${jsArg(id)},prazo:val('t-data'),atividade:val('t-atividade'),turno:val('t-turno')},${jsArg(tre ? 'Treinamento agendado' : 'Atividade agendada')})">Agendar</button>`);
 }
 
 /*
@@ -1953,9 +2032,10 @@ async function rhColaboradoresTela(d) {
      */
     // A resposta pode chegar depois de a pessoa trocar de competencia (ou
     // de aba): so desenha se a tela ainda for a mesma que pediu.
-    const comp = d.competencia;
+    const comp = d.competencia, filial = FILIAL;
     const r = COLAB_CACHE || await executarAcaoSrv('colaboradores', { competencia: comp, minimo: 10 });
-    if (!DADOS || DADOS.competencia !== comp || ABA_RH !== 'colaboradores') return;
+    if (!DADOS || DADOS.competencia !== comp || FILIAL !== filial ||
+        paginaAtual !== 'assiduidade' || ABA_RH !== 'colaboradores') return;
     COLAB_CACHE = r;
     desenharColaboradores(d);
   } catch (e) {

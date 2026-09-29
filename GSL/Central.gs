@@ -29,9 +29,9 @@ function doMesAtual_(lista) {
   });
 }
 
-/* Por mes: cada linha bate com o Calendario daquele mes (sem as vagas TRE sem data). */
+/* Por mes: cada linha conta o mesmo que o Calendario daquele mes (com data, sem TRE). */
 function paraOsMeses_(lista) {
-  return lista.filter(function (a) { return a.prazoISO || a.tipo !== 'TRE'; });
+  return lista.filter(function (a) { return a.prazoISO && a.tipo !== 'TRE'; });
 }
 
 function atividadesDaCentral_() {

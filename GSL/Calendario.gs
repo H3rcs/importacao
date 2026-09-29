@@ -1266,10 +1266,17 @@ function acaoAgendarTreinamento(usuario, params) {
   if (params.turno) campos.TURNO = String(params.turno).trim();
   atualizar('ATIVIDADES', params.id, campos, usuario.email);
 
-  // O aviso nao pode desfazer um agendamento ja gravado.
+  // O aviso nao pode desfazer um agendamento ja gravado. Vaga que nao e
+  // de treinamento (rotina avulsa de outro tipo) tem aviso de atividade.
   const resposta = { ok: true };
-  try { avisarTreinamento(hidratar(comCampos_(antes, campos))); }
-  catch (e) { resposta.avisoEmail = 'Treinamento agendado, mas o aviso por e-mail nao saiu: ' + (e.message || e); }
+  const treinamento = String(antes.TIPO || '').toUpperCase().trim() === 'TRE';
+  try {
+    const a = hidratar(comCampos_(antes, campos));
+    if (treinamento) avisarTreinamento(a); else avisarAgendamento(a);
+  } catch (e) {
+    resposta.avisoEmail = (treinamento ? 'Treinamento' : 'Atividade') +
+      ' agendada, mas o aviso por e-mail nao saiu: ' + (e.message || e);
+  }
   return resposta;
 }
 
@@ -1317,7 +1324,9 @@ function acaoRemoverAnexoAtividade(usuario, params) {
      * removido). Volta a ser pendente pelo prazo.
      */
     const atual = obter('ATIVIDADES', params.id);
-    if (atual && !idsDeAnexos(atual.ANEXOS).length && validacao !== 'Aprovado') {
+    // (Reprovada continua Reprovada e com a data da 1a entrega — e ela que
+    // decide a pontualidade; so a que aguardava validacao volta a pendente.)
+    if (atual && !idsDeAnexos(atual.ANEXOS).length && validacao === '') {
       atualizar('ATIVIDADES', params.id, {
         ENTREGUE_EM: '', STATUS: statusDe(paraData(atual.PRAZO), '', validacao)
       }, usuario.email);

@@ -148,6 +148,47 @@ caso('atividade gravada em dobro por versao antiga: conferir, limpar, e as escri
   afirmar(String(c.obter('ATIVIDADES', id).MOTIVO) === 'teste', 'a escrita foi para a copia viva');
 });
 
+caso('vaga avulsa que nao e treinamento: o aviso e de atividade agendada, nao "Treinamento marcado"', () => {
+  const m = novoMundo();
+  let c = ctx(m);
+  c.acaoSalvarUsuario(admin(c), { email: 'coord.a@bartofil.com.br', nome: 'Coord A', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenador' });
+  c = ctx(m); c.acaoSalvarRotina(admin(c), { tipo: 'AUD', atividade: 'Auditoria surpresa', frequencia: 'AVULSA', quantidade: 1, porTurno: false, ativo: true });
+  c = ctx(m); c.gerarCompetencia('SET 2026', DONO);
+  c = ctx(m);
+  const vaga = (tipo) => c.listar('ATIVIDADES').filter((a) => String(a.TIPO) === tipo && !a.PRAZO)[0];
+  const aud = vaga('AUD'), tre = vaga('TRE');
+  afirmar(aud && tre, 'vagas AUD e TRE geradas');
+  m.emails.length = 0;
+  c.acaoAgendarTreinamento(admin(c), { id: aud.ID, prazo: '2026-09-15', atividade: 'Auditoria surpresa', turno: 'Todos' });
+  const assuntosAud = m.emails.map((e) => e.subject);
+  afirmar(assuntosAud.length && assuntosAud.every((x) => /Atividade agendada/.test(x) && !/Treinamento/.test(x)), 'AUD: ' + assuntosAud.join(' | '));
+  m.emails.length = 0;
+  c = ctx(m); c.acaoAgendarTreinamento(admin(c), { id: tre.ID, prazo: '2026-09-16', atividade: 'Empilhadeira segura', turno: 'Todos' });
+  afirmar(m.emails.some((e) => /Treinamento marcado/.test(e.subject)), 'TRE continua com o aviso de treinamento');
+});
+
+caso('remover o arquivo de uma entrega reprovada: continua Reprovada e com a data da entrega', () => {
+  const m = novoMundo();
+  let c = ctx(m); c.gerarCompetencia('SET 2026', DONO);
+  c = ctx(m);
+  const a = c.listar('ATIVIDADES').filter((x) => x.PRAZO)[0];
+  const arq = m.novoArquivo('entrega.pdf', 'application/pdf', Buffer.from('%PDF'));
+  const entregue = c.agoraTexto();
+  c.atualizar('ATIVIDADES', a.ID, { ANEXOS: arq.id, ENTREGUE_EM: entregue, VALIDACAO: 'Reprovado', STATUS: 'Reprovada' }, DONO);
+  c = ctx(m);
+  c.acaoRemoverAnexoAtividade(admin(c), { id: a.ID, idArquivo: arq.id });
+  c = ctx(m);
+  const depois = c.obter('ATIVIDADES', a.ID);
+  afirmar(String(depois.VALIDACAO) === 'Reprovado' && String(depois.ENTREGUE_EM) !== '', 'validacao ' + depois.VALIDACAO + ' / entregue ' + depois.ENTREGUE_EM);
+});
+
+caso('Central por mes: atividade sem data (vaga avulsa) nao entra na conta do mes', () => {
+  const m = novoMundo(); const c = ctx(m);
+  const lista = [{ prazoISO: '', tipo: 'AUD' }, { prazoISO: '2026-09-10', tipo: 'INV' }, { prazoISO: '2026-09-11', tipo: 'TRE' }];
+  const r = c.paraOsMeses_(lista);
+  afirmar(r.length === 1 && r[0].tipo === 'INV', 'ficou: ' + JSON.stringify(r));
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

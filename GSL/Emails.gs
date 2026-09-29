@@ -309,6 +309,12 @@ function unicos_(lista) {
   return saida;
 }
 
+/* Vaga de rotina avulsa (que nao e treinamento) agendada pelo gerente. */
+function avisarAgendamento(a) {
+  enviar(emailsDoTurno(a).concat(emailsDaGestao()), 'Atividade agendada para ' + a.prazo + ' — ' + a.atividade,
+    '<p>O gerente agendou esta atividade:</p>' + bloco(a) + rodapeLink());
+}
+
 function avisarTreinamento(a) {
   enviar(emailsDoTurno(a).concat(emailsDaGestao()), 'Treinamento marcado para ' + a.prazo,
     '<p>O gerente programou um <b>treinamento com colaboradores</b>:</p>' + bloco(a) +

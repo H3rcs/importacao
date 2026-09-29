@@ -55,6 +55,12 @@ function doGet(e) {
 function doPost(e) {
   _porta = true;
   const p = (e && e.parameter) || {};
+  const pagina = doPost_(p);
+  terminarBilhete_(p.bilhete);          // a folga de reenvio conta a partir daqui
+  return pagina;
+}
+
+function doPost_(p) {
 
   // SAIR pela reserva: apaga a sessao no servidor (o sairDoSistema pelo
   // google.script.run tambem seria barrado). Reenviado, nao faz mal.
@@ -69,12 +75,18 @@ function doPost(e) {
    * BILHETE DE USO UNICO (4.2.2). O navegador guarda o POST no historico:
    * F5 ou Voltar depois de "Sair" reenviava o e-mail e o PIN (ou a sessao)
    * da pessoa anterior e o proximo entrava como ela. Cada pagina leva um
-   * bilhete; o POST so vale com um bilhete novo (ou usado ha menos de 90 s,
-   * para um clique repetido).
+   * bilhete; o POST so vale com um bilhete novo — ou enquanto o primeiro
+   * pedido com ele ainda roda, ou ate 15 s depois de ele terminar (clique
+   * repetido). Bilhete que sumiu do cache (pagina aberta mais de 6 h) nao
+   * vale, mas a tela diz o motivo e guarda o e-mail.
    */
-  if (!usarBilhete_(p.bilhete)) {
+  const bilhete = estadoDoBilhete_(p.bilhete);
+  if (bilhete !== 'ok') {
     return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', viaPost: true,
-      erroEntrada: 'Por segurança, esta página não pode ser reenviada. Digite o e-mail e o PIN de novo.' });
+      emailDigitado: bilhete === 'vencido' ? String(p.email || '') : '',
+      erroEntrada: bilhete === 'vencido'
+        ? 'Esta página ficou aberta muito tempo. Digite o PIN de novo para entrar.'
+        : 'Por segurança, esta página não pode ser reenviada. Digite o e-mail e o PIN de novo.' });
   }
 
   if (!String(p.email || '').trim() && p.t) {
@@ -85,7 +97,7 @@ function doPost(e) {
   let carga;
   try {
     const r = entrar_(p.email, p.pin, p.confirmacao, p.filial, p.codigo);
-    // Entrou: o bilhete queima de vez (sem a folga de 90 s) — reenviar este
+    // Entrou: o bilhete queima de vez (sem a folga de 15 s) — reenviar este
     // POST pelo historico nao pode abrir a sessao de novo.
     if (r && r.ok) queimarBilhete_(p.bilhete);
     carga = (r && r.ok) ? r : { ok: true, instalado: true, entrada: 'ENTRAR',
@@ -102,7 +114,8 @@ function doPost(e) {
 }
 
 const BILHETE_SEG = 6 * 3600;
-const BILHETE_FOLGA_MS = 90 * 1000;
+const BILHETE_FOLGA_MS = 15 * 1000;      // o mesmo prazo do F5 no navegador (gsl_saida)
+const BILHETE_EM_USO_MS = 2 * 60 * 1000; // pedido que morreu no meio nao segura o bilhete para sempre
 
 function novoBilhete_() {
   const b = Utilities.getUuid();
@@ -114,17 +127,42 @@ function queimarBilhete_(bilhete) {
   try { CacheService.getScriptCache().put('bilhete_' + String(bilhete || ''), 'queimado', BILHETE_SEG); } catch (e) {}
 }
 
-function usarBilhete_(bilhete) {
+/* 'ok' · 'vencido' (sumiu do cache: 6 h ou despejo) · 'recusado' (queimado, reenvio tardio, formato). */
+function estadoDoBilhete_(bilhete) {
   const b = String(bilhete || '');
-  if (!/^[0-9a-f-]{36}$/i.test(b)) return false;
+  if (!/^[0-9a-f-]{36}$/i.test(b)) return 'recusado';
   const cache = CacheService.getScriptCache();
-  const v = cache.get('bilhete_' + b);
-  if (!v || v === 'queimado') return false;
+  const v = cache.get('bilhete_' + b) || '';
+  if (!v) return 'vencido';
   if (v === 'novo') {
-    cache.put('bilhete_' + b, String(Date.now()), BILHETE_SEG);
-    return true;
+    cache.put('bilhete_' + b, 'uso:' + Date.now(), BILHETE_SEG);
+    return 'ok';
   }
-  return Date.now() - Number(v) <= BILHETE_FOLGA_MS;
+  const m = /^(uso|fim):(\d+)$/.exec(v);
+  if (!m) return 'recusado';                                 // queimado
+  const idade = Date.now() - Number(m[2]);
+  return (m[1] === 'uso' ? idade <= BILHETE_EM_USO_MS : idade <= BILHETE_FOLGA_MS) ? 'ok' : 'recusado';
+}
+
+/* O pedido terminou: a folga de 15 s comeca agora (bilhete queimado continua queimado). */
+function terminarBilhete_(bilhete) {
+  try {
+    const b = String(bilhete || '');
+    if (!/^[0-9a-f-]{36}$/i.test(b)) return;
+    const cache = CacheService.getScriptCache();
+    if (/^uso:/.test(cache.get('bilhete_' + b) || '')) cache.put('bilhete_' + b, 'fim:' + Date.now(), BILHETE_SEG);
+  } catch (e) { /* so encurta a folga */ }
+}
+
+/*
+ * Bilhete novo para a pagina que continua aberta. O cliente pede quando a
+ * pagina passa de 4 h (enquanto o canal funciona), para a reserva por POST
+ * nunca ficar com um bilhete vencido na mao. Nao exige sessao: qualquer
+ * abertura da pagina (GET) ja da um bilhete novo — isto nao abre nada a mais.
+ */
+function renovarBilhete(ctx) {
+  contextoDaChamada_(ctx);
+  return novoBilhete_();
 }
 
 /*
@@ -138,7 +176,10 @@ function cargaDaPagina_(pedido) {
       _tokenDaVez = String(pedido.t || '');
       if (!emailDaSessao_(_tokenDaVez)) {
         _tokenDaVez = '';
-        return { ok: true, instalado: true, entrada: 'ENTRAR', sessaoInvalida: !!pedido.t };
+        const carga = { ok: true, instalado: true, entrada: 'ENTRAR', sessaoInvalida: !!pedido.t };
+        // Veio com sessao e ela acabou (1 h parada, ou saiu): a tela diz por que.
+        if (pedido.t) carga.erroEntrada = 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.';
+        return carga;
       }
     }
     carga = montarEntrada_(pedido.filial);

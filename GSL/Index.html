@@ -65,7 +65,8 @@
           autocomplete="off" onsubmit="return entrarNoSistema(event)">
       <label class="entrar-rotulo" for="entrar-email">E-mail</label>
       <input id="entrar-email" name="email" type="email" inputmode="email" autocomplete="off"
-             autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome@bartofil.com.br">
+             autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome@bartofil.com.br"
+             oninput="esquecerPrimeiroAcesso()">
       <label class="entrar-rotulo" for="entrar-pin">PIN</label>
       <input id="entrar-pin" name="pin" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
              autocomplete="off" placeholder="4 a 6 números">

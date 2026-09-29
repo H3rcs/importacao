@@ -445,6 +445,9 @@ const PIN_BLOQUEIO_SEG = 10 * 60;
 const CODIGO_EMAIL_SEG = 15 * 60;      // codigo de primeiro acesso mandado por e-mail
 const CODIGO_ADMIN_SEG = 6 * 3600;     // codigo entregue pelo administrador (limite do cache)
 const CODIGO_REENVIO_MS = 60 * 1000;   // no maximo um e-mail de codigo por minuto
+const CODIGO_POR_JANELA = 3;           // e-mails de codigo por pessoa a cada 15 min
+const CODIGO_GLOBAL_HORA = 60;         // e-mails de codigo do sistema inteiro por hora
+const CODIGO_RESERVA_COTA = 50;        // cota diaria de e-mail que o codigo nunca consome
 
 /*
  * Toda porta publica chama isto primeiro. `ctx` e { t: sessao, f: filial }
@@ -585,9 +588,18 @@ function gerarCodigo_() {
   return ('00000' + n).slice(-6);
 }
 
+/*
+ * Guarda o resumo do codigo. Para o e-mail, os 3 ultimos continuam valendo:
+ * um pedido novo (de outra pessoa, inclusive) nao invalida o codigo que ja
+ * esta na caixa de entrada de quem vai digitar.
+ */
 function guardarCodigo_(email, codigo, origem, segundos) {
+  const h = resumoPin_(email, 'codigo:' + codigo);
+  const antes = origem === 'email' ? lerCodigo_(email, origem) : null;
+  const hs = [h].concat(antes ? (antes.hs || [antes.h]).filter(Boolean) : []).slice(0, CODIGO_POR_JANELA);
   CacheService.getScriptCache().put(chaveCodigo_(email, origem),
-    JSON.stringify({ h: resumoPin_(email, 'codigo:' + codigo), em: Date.now() }), segundos);
+    JSON.stringify({ h: h, hs: hs, em: Date.now(), n: antes ? Number(antes.n || 1) + 1 : 1,
+                     desde: antes ? Number(antes.desde || antes.em || Date.now()) : Date.now() }), segundos);
 }
 
 function lerCodigo_(email, origem) {
@@ -602,7 +614,7 @@ function codigoConfere_(email, codigo) {
   const resumo = resumoPin_(email, 'codigo:' + c);
   return ['email', 'admin'].some(function (o) {
     const g = lerCodigo_(email, o);
-    return !!(g && g.h === resumo);
+    return !!(g && (g.hs || [g.h]).indexOf(resumo) !== -1);
   });
 }
 
@@ -617,6 +629,25 @@ function apagarCodigos_(email) {
 function mandarCodigoPorEmail_(email, nome) {
   const atual = lerCodigo_(email, 'email');
   if (atual && Date.now() - Number(atual.em || 0) < CODIGO_REENVIO_MS) return { jaEnviado: true };
+  /*
+   * LIMITES (4.2.2). O entrar() e publico: qualquer conta da empresa podia
+   * pedir codigo em nome de quem ainda nao tem PIN, sem fim — gastando a
+   * cota diaria de e-mail do dono (a mesma do digesto e dos avisos).
+   */
+  const pedeAdmin = 'Peça ao administrador um código de primeiro acesso (Pessoas e acessos).';
+  if (atual && Number(atual.n || 0) >= CODIGO_POR_JANELA) {
+    return { erro: 'Já mandamos ' + CODIGO_POR_JANELA + ' códigos para este e-mail. Use o mais recente, ' +
+      'espere 15 minutos ou ' + pedeAdmin.charAt(0).toLowerCase() + pedeAdmin.slice(1) };
+  }
+  const cache = CacheService.getScriptCache();
+  const kHora = 'pincod_hora_' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMddHH');
+  const naHora = Number(cache.get(kHora) || 0);
+  let cota = CODIGO_RESERVA_COTA + 1;
+  try { cota = MailApp.getRemainingDailyQuota(); } catch (e) { /* sem leitura da cota: segue */ }
+  if (naHora >= CODIGO_GLOBAL_HORA || cota <= CODIGO_RESERVA_COTA) {
+    return { erro: 'O envio de códigos está no limite agora. ' + pedeAdmin };
+  }
+  cache.put(kHora, String(naHora + 1), 3600);
   const codigo = gerarCodigo_();
   try {
     MailApp.sendEmail({
@@ -635,7 +666,10 @@ function mandarCodigoPorEmail_(email, nome) {
       'Peça ao administrador um código de primeiro acesso (Pessoas e acessos).' };
   }
   guardarCodigo_(email, codigo, 'email', CODIGO_EMAIL_SEG);
-  try { registrarLog('sistema', 'EMAIL', 'CODIGO_PIN', email, 'Código de primeiro acesso enviado'); } catch (e) {}
+  try {
+    registrarLog(emailDeQuemAbriu() || 'sistema', 'EMAIL', 'CODIGO_PIN', email,
+      'Código de primeiro acesso enviado (pedido pela conta ' + (emailDeQuemAbriu() || '—') + ')');
+  } catch (e) {}
   return { enviado: true };
 }
 

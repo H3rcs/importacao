@@ -33,7 +33,7 @@ const resultados = [];
 function afirmar(cond, msg) { if (!cond) throw new Error('FALHOU: ' + msg); }
 
 async function subir(opcoes) {
-  const s = await criarServidor(Object.assign({ pasta: PASTA, apagarComentarios: 'simples', dono: DONO }, opcoes || {}));
+  const s = await criarServidor(Object.assign({ pasta: PASTA, apagarComentarios: process.env.GSL_APAGADOR || 'simples', dono: DONO }, opcoes || {}));
   return s;
 }
 

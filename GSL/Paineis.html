@@ -1,0 +1,1680 @@
+<script>
+/* =====================================================================
+   PAINEIS NOVOS DO GSL
+     Filiais e painéis · Nobreaks · Limpeza CD · Quadro do CD
+   Usam as mesmas pecas do App (abrir, agir, abrirJanela, avisar, kpi,
+   barra, esc, el, val) e guardam o estado da tela em variaveis globais,
+   porque toda acao redesenha a tela com os dados novos.
+   ===================================================================== */
+
+/* ---------------- utilidades ---------------- */
+const pnNum = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '—'
+  : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas || 0, maximumFractionDigits: casas || 0 });
+const pnMoeda = (v) => (v === null || v === undefined || isNaN(Number(v))) ? '—'
+  : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const pnPct = (v, casas) => (v === null || v === undefined || isNaN(Number(v))) ? '—' : pnNum(v, casas === undefined ? 0 : casas) + '%';
+const pnData = (iso) => iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) : '—';
+const pnDataLonga = (iso) => iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) + '/' + String(iso).slice(0, 4) : '—';
+const PN_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const PN_SEMANA_LONGA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const PN_MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const pnDiaSemana = (iso) => { const d = pnParaData(iso); return d ? PN_SEMANA[d.getDay()] : ''; };
+function pnParaData(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+function pnISO(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function pnSomarDias(iso, n) { const d = pnParaData(iso); d.setDate(d.getDate() + n); return pnISO(d); }
+function pnSegunda(iso) { const d = pnParaData(iso); const dia = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dia); return pnISO(d); }
+const pnRotuloMes = (k) => { const p = String(k).split('-'); return p.length >= 2 ? PN_MESES[+p[1] - 1] + '/' + p[0].slice(2) : k; };
+/*
+ * Le o numero como a pessoa digitou: 221,5 ou 221.5. Em potencia (VA),
+ * "6.900" e seis mil e novecentos — ponto de milhar, como se escreve no
+ * Brasil. Em tensao e corrente o ponto e decimal.
+ */
+function pnLerNumero(t, milhar) {
+  let s = String(t == null ? '' : t).trim().replace(/\s/g, '');
+  if (!s) return null;
+  if (milhar && /^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  const n = Number(s.indexOf(',') !== -1 ? s.replace(/\./g, '').replace(',', '.') : s);
+  return isNaN(n) ? null : n;
+}
+
+/* KPI com linha de apoio; `compacto` para valores longos (dinheiro). */
+const pnKpi = (valor, rotulo, cor, sub, compacto) => `<div class="cartao kpi ${cor}${compacto ? ' compacto' : ''}">
+  <div class="kpi-valor">${esc(valor)}</div><div class="kpi-rotulo">${esc(rotulo)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`;
+const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) ? '—'
+  : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+
+/* Abas internas de um painel. */
+function pnAbas(lista, atual, funcao) {
+  return `<div class="abas">${lista.map(([id, nome]) => `<button class="aba ${atual === id ? 'ativa' : ''}"
+    onclick="${funcao}(${jsArg(id)})">${nome}</button>`).join('')}</div>`;
+}
+
+/*
+ * Grafico de linhas com varias series. Cada serie: { nome, cor, pontos:[numero|null] }.
+ * Buraco (null) quebra a linha — leitura que nao foi lancada aparece como falha.
+ * `referencias`: linhas tracejadas (tensao nominal, limite de carga).
+ */
+function pnGraficoLinhas(rotulos, series, opcoes) {
+  const o = opcoes || {};
+  const todos = [];
+  series.forEach((s) => s.pontos.forEach((v) => { if (v !== null && v !== undefined) todos.push(v); }));
+  (o.referencias || []).forEach((r) => todos.push(r.valor));
+  if (!todos.length || !rotulos.length) return '<div class="vazio">Sem leituras neste período.</div>';
+  const L = 720, A = o.altura || 200, mL = 46, mB = 28, mT = 14, mR = 10;
+  let min = o.min !== undefined ? o.min : Math.min(...todos), max = o.max !== undefined ? o.max : Math.max(...todos);
+  if (min === max) { min -= 1; max += 1; }
+  const folga = (max - min) * 0.08; if (o.min === undefined) min -= folga; max += folga;
+  const px = (i) => mL + (rotulos.length === 1 ? (L - mL - mR) / 2 : i * (L - mL - mR) / (rotulos.length - 1));
+  const py = (v) => mT + (A - mT - mB) * (1 - (v - min) / (max - min));
+  const passo = Math.max(1, Math.ceil(rotulos.length / 10));
+  const grades = [0, .25, .5, .75, 1].map((f) => min + (max - min) * f);
+  const trechos = (pts) => {
+    const saida = []; let atual = [];
+    pts.forEach((v, i) => {
+      if (v === null || v === undefined) { if (atual.length) saida.push(atual); atual = []; }
+      else atual.push(px(i).toFixed(1) + ',' + py(v).toFixed(1));
+    });
+    if (atual.length) saida.push(atual);
+    return saida;
+  };
+  return `<svg viewBox="0 0 ${L} ${A}" style="width:100%;height:auto;display:block" role="img" aria-label="${esc(o.titulo || 'gráfico')}">
+    ${grades.map((g) => `<line x1="${mL}" x2="${L - mR}" y1="${py(g)}" y2="${py(g)}" stroke="var(--linha)" stroke-width="1"/>
+      <text x="${mL - 6}" y="${py(g) + 3}" text-anchor="end" font-size="10" fill="var(--tinta-fraca)">${pnNum(g, (max - min) < 10 ? 1 : 0)}</text>`).join('')}
+    ${(o.referencias || []).map((r) => `<line x1="${mL}" x2="${L - mR}" y1="${py(r.valor)}" y2="${py(r.valor)}"
+      stroke="${r.cor}" stroke-dasharray="5 4" stroke-width="1.4" opacity=".8"/>
+      <text x="${L - mR - 2}" y="${py(r.valor) - 4}" text-anchor="end" font-size="10" fill="${r.cor}">${esc(r.nome)}</text>`).join('')}
+    ${series.map((s) => trechos(s.pontos).map((t) => t.length === 1
+      ? `<circle cx="${t[0].split(',')[0]}" cy="${t[0].split(',')[1]}" r="3" fill="${s.cor}"/>`
+      : `<polyline points="${t.join(' ')}" fill="none" stroke="${s.cor}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`).join('')).join('')}
+    ${series.map((s) => s.pontos.map((v, i) => (v === null || v === undefined) ? '' :
+      `<circle cx="${px(i)}" cy="${py(v)}" r="6" fill="transparent"><title>${esc(rotulos[i])} · ${esc(s.nome)}: ${pnNum(v, 1)}</title></circle>`).join('')).join('')}
+    ${rotulos.map((r, i) => (i % passo === 0 || i === rotulos.length - 1)
+      ? `<text x="${px(i)}" y="${A - 8}" text-anchor="middle" font-size="9.5" fill="var(--tinta-fraca)">${esc(String(r).slice(0, 5))}</text>` : '').join('')}
+  </svg>`;
+}
+
+/* Barras horizontais a partir de [[rotulo, valor]] — usa a peca `barra` do App. */
+function pnBarras(pares, cor, formatar) {
+  if (!pares.length) return '<div class="vazio">Nada por aqui.</div>';
+  const max = Math.max(...pares.map((p) => p[1]), 1);
+  return pares.map((p) => barra(p[0], formatar ? formatar(p[1]) : String(p[1]), max, p[1], cor)).join('');
+}
+
+/* =====================================================================
+   FILIAIS E PAINEIS
+   ===================================================================== */
+const PN_ESTADOS = { ATIVO: 'Ativo', OCULTO: 'Oculto', DESATIVADO: 'Desativado' };
+
+function pintarFiliais(r) {
+  const d = r.dados;
+  el('subtitulo-pagina').textContent = d.filiais.length + ' filial(is) · cada uma com banco e painéis próprios';
+  el('acoes-topo').innerHTML = `<button class="botao" onclick="formFilial()">Nova filial</button>`;
+  el('pagina').innerHTML = `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Como funciona</div>
+      <div class="pn-grade tres">
+        <div><span class="pn-chip ok">Ativo</span><p class="dica">Aparece para todo mundo que tem o nível de acesso liberado para ele.</p></div>
+        <div><span class="pn-chip atencao">Oculto</span><p class="dica">Só o administrador vê. Bom para montar e testar antes de mostrar para a equipe.</p></div>
+        <div><span class="pn-chip neutro">Desativado</span><p class="dica">Ninguém vê. Os dados continuam guardados — é só voltar para Ativo.</p></div>
+      </div>
+    </div>
+    <div class="pn-grade duas">
+      ${d.filiais.map((f) => cartaoFilial(f, d)).join('')}
+    </div>`;
+}
+
+function cartaoFilial(f, d) {
+  return `<div class="cartao" style="${f.ativa ? '' : 'opacity:.7'}">
+    <div class="linha-titulo" style="margin-bottom:10px">
+      <div>
+        <div class="nb-codigo">${esc(f.nome)}</div>
+        <div class="pn-mini"><span class="mono">${esc(f.codigo)}</span>${f.cidade ? ' · ' + esc(f.cidade) : ''} ·
+          ${f.pessoas} pessoa(s) com acesso</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${f.principal ? '<span class="pn-chip ok">principal</span>' : ''}
+        ${f.ativa ? '' : '<span class="pn-chip neutro">desligada</span>'}
+      </div>
+    </div>
+    <table><thead><tr><th>Painel</th><th>Estado nesta filial</th></tr></thead><tbody>
+      ${d.catalogo.map((p) => {
+        const e = f.paineis[p.id] || '';
+        return `<tr><td><strong>${esc(p.nome)}</strong><div class="pn-mini">${esc(p.frase)}</div></td>
+          <td><select onchange="agir('alterarPainel',{codigo:${jsArg(f.codigo)},painel:${jsArg(p.id)},estado:this.value},'Painel atualizado')">
+            <option value="REMOVER" ${e ? '' : 'selected'}>Não usar nesta filial</option>
+            ${Object.keys(PN_ESTADOS).map((k) => `<option value="${k}" ${e === k ? 'selected' : ''}>${PN_ESTADOS[k]}</option>`).join('')}
+          </select></td></tr>`;
+      }).join('')}
+    </tbody></table>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="icone-botao" onclick="formPessoasFilial(${jsArg(f.codigo)})">Quem entra (${f.pessoas})</button>
+      <button class="icone-botao" onclick="formFilial(${jsArg(f.codigo)})">Editar nome</button>
+      ${f.banco ? `<button class="icone-botao" onclick="window.open(${jsArg(f.banco)},'_blank')">Abrir banco de dados</button>` : ''}
+      ${f.principal ? '' : `<button class="icone-botao" onclick="agir('alternarFilial',{codigo:${jsArg(f.codigo)}},'Filial atualizada')">${f.ativa ? 'Desligar filial' : 'Religar filial'}</button>`}
+    </div>
+  </div>`;
+}
+
+/* Quem entra nesta filial — marca e desmarca de uma vez. */
+function formPessoasFilial(codigo) {
+  const d = DADOS;
+  const f = d.filiais.find((x) => x.codigo === codigo);
+  const pessoas = d.pessoas || [];
+  abrirJanela('Quem entra em ' + f.nome, `
+    <p class="dica" style="margin:0 0 10px">Marque quem pode escolher esta filial ao entrar no GSL. Quem tem nível ADMIN
+      ou está em “todas as filiais” entra sempre (para mudar isso, edite a pessoa em Pessoas e acessos).</p>
+    <div class="campo-busca" style="margin-bottom:10px"><input placeholder="Buscar pessoa" oninput="document.querySelectorAll('#pf-lista label').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(this.value.toLowerCase())!==-1?'':'none'})"></div>
+    <div class="lista-marcadores" id="pf-lista" style="max-height:50vh;overflow:auto">
+      ${pessoas.map((p) => `<label class="marcador"><input type="checkbox" class="pf-pessoa" value="${esc(p.email)}"
+        ${p.todas || p.filiais.indexOf(codigo) !== -1 ? 'checked' : ''} ${p.todas ? 'disabled' : ''}>
+        ${esc(p.nome || p.email)} <span class="pn-mini">${esc(p.perfil)}${p.todas ? ' · todas as filiais' : ''}</span></label>`).join('')
+        || '<div class="vazio">Ninguém cadastrado.</div>'}
+    </div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarPessoasFilial',{codigo:${jsArg(codigo)},emails:[...document.querySelectorAll('.pf-pessoa')].filter((c)=>c.checked&&!c.disabled).map((c)=>c.value)},'Acessos da filial salvos').catch(()=>{})">Salvar</button>`);
+}
+
+function formFilial(codigo) {
+  const d = DADOS;
+  const f = codigo ? d.filiais.find((x) => x.codigo === codigo) : null;
+  if (f) {
+    return abrirJanela('Editar ' + f.nome, `
+      <div class="campo-duplo">
+        <div class="campo"><label>Nome</label><input id="fl-nome" value="${esc(f.nome)}"></div>
+        <div class="campo"><label>Cidade</label><input id="fl-cidade" value="${esc(f.cidade)}"></div>
+      </div>
+      <p class="dica">O código (${esc(f.codigo)}) não muda. Os painéis se ajustam direto no cartão da filial.</p>`, `
+      <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade'),paineis:${esc(JSON.stringify(f.paineis))}},'Filial salva').catch(()=>{})">Salvar</button>`);
+  }
+  abrirJanela('Nova filial', `
+    <p class="dica" style="margin:0 0 14px">O GSL cria uma planilha de banco só para esta filial, na mesma pasta
+      do sistema. Os dados de uma filial nunca aparecem na outra.</p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Código (2 a 6 letras)</label><input id="fl-codigo" maxlength="6" placeholder="SSA" style="text-transform:uppercase"></div>
+      <div class="campo"><label>Nome</label><input id="fl-nome" placeholder="CD Salvador"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Cidade</label><input id="fl-cidade" placeholder="Salvador - BA"></div>
+      <div class="campo"><label>Copiar a configuração de</label>
+        <select id="fl-copiar"><option value="">Não copiar — começar com o padrão</option>
+          ${d.filiais.map((x) => `<option value="${esc(x.codigo)}" ${x.principal ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}
+        </select></div>
+    </div>
+    <p class="dica" style="margin:-8px 0 14px">Copia rotinas do calendário, setores, parâmetros, tabela do RH (DE-PARA),
+      zonas e produtos da limpeza. <b>Não</b> copia atividades, leituras, ações nem pessoas.</p>
+    <div class="campo"><label>Painéis desta filial</label>
+      <div class="lista-marcadores">
+        ${d.catalogo.map((p) => `<div class="pn-linha" style="justify-content:space-between;align-items:center">
+          <label class="marcador"><input type="checkbox" class="fl-painel" value="${p.id}"> <b>${esc(p.nome)}</b></label>
+          <select id="fl-estado-${p.id}" style="width:auto"><option value="ATIVO">Ativo</option><option value="OCULTO">Oculto (só eu vejo)</option></select>
+        </div>`).join('')}
+      </div>
+    </div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="criarFilial()">Criar filial</button>`);
+}
+
+function criarFilial() {
+  const paineis = {};
+  document.querySelectorAll('.fl-painel').forEach((c) => { if (c.checked) paineis[c.value] = val('fl-estado-' + c.value); });
+  if (!Object.keys(paineis).length) return avisar('Marque pelo menos um painel.', true);
+  avisar('Criando o banco da filial — pode levar alguns segundos…');
+  agir('salvarFilial', { codigo: val('fl-codigo'), nome: val('fl-nome'), cidade: val('fl-cidade'),
+    copiarDe: val('fl-copiar'), paineis: paineis }, 'Filial criada').then(atualizarFiliaisDaSessao).catch(() => {});
+}
+
+/* A lista de filiais da barra lateral e da troca vem da sessao; depois de
+   criar ou mudar uma filial ela precisa ser relida. */
+async function atualizarFiliaisDaSessao() {
+  try {
+    const s = await chamarJSON('abrirFilial', ctx());
+    if (s && s.ok && s.entrada === 'APP') {
+      SESSAO.filiais = s.filiais; SESSAO.modulos = s.modulos; SESSAO.telas = s.telas;
+      const caixa = el('filial-atual');
+      if (caixa && s.filiais.length > 1 && caixa.innerHTML.indexOf('Trocar') === -1) {
+        caixa.insertAdjacentHTML('beforeend', '<button class="botao-texto" onclick="trocarFilial()">Trocar filial</button>');
+      }
+    }
+  } catch (e) { /* a proxima abertura corrige */ }
+}
+
+/* =====================================================================
+   NOBREAKS
+   ===================================================================== */
+let ABA_NB = 'painel';          // painel | lancar | historico | equipamentos
+let NB_GRAFICO = { nobreak: '', dias: 30 };
+let NB_SEMANA = { nobreak: '', inicio: '' };
+let NB_HIST = { nobreak: '', mes: '' };
+
+function nbEquip(d, codigo) { return d.equipamentos.find((e) => e.codigo === codigo) || null; }
+
+/* Uma leitura, com as contas e os alertas. */
+function nbAvaliar(l, e, p) {
+  const r = { carga: null, poPi: null, motivos: [], vi: false, vo: false };
+  if (e && e.potencia && l.po !== null) r.carga = l.po / e.potencia * 100;
+  if (l.pi && l.po !== null) r.poPi = l.po / l.pi * 100;
+  const fora = (v, nominal) => nominal && v !== null && Math.abs(v - nominal) / nominal * 100 > p.tolerancia;
+  if (e && fora(l.vi, e.tensaoEntrada)) { r.vi = true; r.motivos.push('Tensão de entrada ' + pnNum(l.vi, 1) + ' V (nominal ' + e.tensaoEntrada + ' V ± ' + p.tolerancia + '%)'); }
+  if (e && fora(l.vo, e.tensaoSaida)) { r.vo = true; r.motivos.push('Tensão de saída ' + pnNum(l.vo, 1) + ' V (nominal ' + e.tensaoSaida + ' V ± ' + p.tolerancia + '%)'); }
+  if (r.carga !== null && r.carga >= p.cargaAlerta) r.motivos.push('Carga de ' + pnNum(r.carga) + '% (limite ' + p.cargaAlerta + '%)');
+  return r;
+}
+
+function pintarNobreaks(r) {
+  const d = r.dados;
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  el('subtitulo-pagina').textContent = ativos.length + ' nobreak(s) monitorado(s) · ' + d.totalLeituras + ' leitura(s) lançada(s)';
+  el('acoes-topo').innerHTML = d.permissoes.lancar
+    ? `<button class="botao" onclick="trocarAbaNB('lancar')">Lançar leituras da semana</button>` : '';
+  const abas = [['painel', 'Painel'], ['lancar', 'Lançar semana'], ['historico', 'Histórico'], ['equipamentos', 'Equipamentos']]
+    .filter((a) => a[0] !== 'lancar' || d.permissoes.lancar);
+  if (!abas.some((a) => a[0] === ABA_NB)) ABA_NB = 'painel';
+  el('pagina').innerHTML = pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
+  pintarAbaNB(d);
+}
+
+function trocarAbaNB(aba) {
+  ABA_NB = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  pintarAbaNB(DADOS);
+}
+
+function pintarAbaNB(d) {
+  const alvo = el('conteudo-nb'); if (!alvo) return;
+  try {
+    if (!d.equipamentos.length && ABA_NB !== 'equipamentos') {
+      alvo.innerHTML = `<div class="cartao pn-vazio-grande"><strong>Nenhum nobreak cadastrado nesta filial.</strong>
+        Cadastre os equipamentos (código, local e potência nominal) na aba <b>Equipamentos</b> — é a potência que
+        permite calcular a carga de saída.<br><br>
+        ${d.permissoes.cadastrar ? '<button class="botao" onclick="trocarAbaNB(\'equipamentos\')">Cadastrar nobreak</button>' : ''}</div>`;
+      return;
+    }
+    if (ABA_NB === 'lancar') return nbLancar(d, alvo);
+    if (ABA_NB === 'historico') { alvo.innerHTML = nbHistorico(d); return; }
+    if (ABA_NB === 'equipamentos') { alvo.innerHTML = nbEquipamentos(d); return; }
+    alvo.innerHTML = nbPainel(d);
+  } catch (e) {
+    alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+  }
+}
+
+/* ---------- PAINEL ---------- */
+function nbPainel(d) {
+  const p = d.parametros;
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  const hoje = d.hoje, segunda = pnSegunda(hoje);
+  const doDia = d.leituras.filter((l) => l.data === hoje);
+  const daSemana = d.leituras.filter((l) => l.data >= segunda && l.data <= hoje);
+  const diasSemana = Math.round((pnParaData(hoje) - pnParaData(segunda)) / 86400000) + 1;
+  const ultimos7 = d.leituras.filter((l) => l.data > pnSomarDias(hoje, -7));
+
+  const estados = ativos.map((e) => {
+    const minhas = d.leituras.filter((l) => l.nobreak === e.codigo);
+    const ultima = minhas[minhas.length - 1] || null;
+    const av = ultima ? nbAvaliar(ultima, e, p) : null;
+    const hojeN = minhas.filter((l) => l.data === hoje).length;
+    let chip;
+    if (!ultima) chip = ['neutro', 'Sem leituras'];
+    else if (av.motivos.length) chip = ['alerta', 'Alerta'];
+    else if (ultima.data < pnSomarDias(hoje, -1)) chip = ['atencao', 'Leitura atrasada'];
+    else chip = ['ok', 'Normal'];
+    return { e: e, ultima: ultima, av: av, hojeN: hojeN, chip: chip };
+  });
+
+  const cargas = ultimos7.map((l) => nbAvaliar(l, nbEquip(d, l.nobreak), p).carga).filter((v) => v !== null);
+  const cargaMedia = cargas.length ? cargas.reduce((s, v) => s + v, 0) / cargas.length : null;
+  const emAlerta = estados.filter((s) => s.chip[0] === 'alerta').length;
+  const esperadasHoje = ativos.length * p.porDia;
+
+  if (!NB_GRAFICO.nobreak || !nbEquip(d, NB_GRAFICO.nobreak)) NB_GRAFICO.nobreak = (ativos[0] || d.equipamentos[0]).codigo;
+
+  return `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(doDia.length + ' / ' + esperadasHoje, 'Leituras hoje', doDia.length >= esperadasHoje ? 'verde' : 'amarelo', p.porDia + ' por nobreak')}
+      ${pnKpi(daSemana.length + ' / ' + (esperadasHoje * diasSemana), 'Leituras na semana', daSemana.length >= esperadasHoje * diasSemana ? 'verde' : 'azul', 'desde segunda')}
+      ${pnKpi(emAlerta, 'Em alerta agora', emAlerta ? 'vermelho' : 'verde', 'tensão fora ou carga alta')}
+      ${pnKpi(cargaMedia === null ? '—' : pnPct(cargaMedia), 'Carga média — 7 dias', cargaMedia !== null && cargaMedia >= p.cargaAlerta ? 'vermelho' : 'azul', 'limite ' + p.cargaAlerta + '%')}
+    </div>
+
+    <div class="pn-grade tres" style="margin-bottom:16px">
+      ${estados.map((s) => nbCartao(s, d)).join('')}
+    </div>
+
+    <div class="cartao" style="margin-bottom:16px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Tendência</span>
+        <span class="pn-linha">
+          <select onchange="NB_GRAFICO.nobreak=this.value;pintarAbaNB(DADOS)" style="width:auto">
+            ${d.equipamentos.map((e) => `<option value="${esc(e.codigo)}" ${e.codigo === NB_GRAFICO.nobreak ? 'selected' : ''}>${esc(e.codigo)}${e.local ? ' — ' + esc(e.local) : ''}</option>`).join('')}
+          </select>
+          <select onchange="NB_GRAFICO.dias=Number(this.value);pintarAbaNB(DADOS)" style="width:auto">
+            ${[7, 30, 90].map((n) => `<option value="${n}" ${NB_GRAFICO.dias === n ? 'selected' : ''}>últimos ${n} dias</option>`).join('')}
+          </select>
+        </span>
+      </div>
+      ${nbGraficos(d)}
+    </div>
+
+    <div class="cartao">
+      <div class="cartao-titulo">Médias do período <span class="pn-mini">(últimos ${d.leituras.length ? 'dias carregados' : '—'})</span></div>
+      ${nbMedias(d)}
+    </div>`;
+}
+
+function nbCartao(s, d) {
+  const e = s.e, u = s.ultima, p = d.parametros;
+  const carga = s.av ? s.av.carga : null;
+  const larg = carga === null ? 0 : Math.min(100, carga);
+  const med = (rot, v, casas, classe, foraFlag) => `<div class="${classe}"><span>${rot}</span><b class="${foraFlag ? 'fora' : ''}">${u ? pnNum(v, casas) : '—'}</b></div>`;
+  return `<div class="cartao nb-cartao">
+    <div class="nb-topo">
+      <div><div class="nb-codigo">${esc(e.codigo)}</div>
+        <div class="pn-mini">${esc(e.local || 'local não informado')}${e.modelo ? ' · ' + esc(e.modelo) : ''}${e.potencia ? ' · ' + pnNum(e.potencia) + ' VA' : ''}</div></div>
+      <span class="pn-chip ${s.chip[0]}">${s.chip[1]}</span>
+    </div>
+    <div class="nb-carga"><b>${carga === null ? '—' : pnPct(carga)}</b><span class="pn-mini">carga de saída${e.potencia ? '' : ' · cadastre a potência'}</span></div>
+    <div class="nb-trilho"><span class="${carga !== null && carga >= p.cargaAlerta ? 'alto' : ''}" style="width:${larg}%"></span>
+      <i style="left:${Math.min(100, p.cargaAlerta)}%" title="limite ${p.cargaAlerta}%"></i></div>
+    <div class="nb-medidas">
+      ${med('Vi (V)', u && u.vi, 1, 'entrada', s.av && s.av.vi)}${med('Ii (A)', u && u.ii, 2, 'entrada')}${med('Pi (VA)', u && u.pi, 0, 'entrada')}
+      ${med('Vo (V)', u && u.vo, 1, 'saida', s.av && s.av.vo)}${med('Io (A)', u && u.io, 2, 'saida')}${med('Po (VA)', u && u.po, 0, 'saida')}
+    </div>
+    <div class="pn-mini" style="margin-top:10px">${u ? 'Última leitura: ' + pnDataLonga(u.data) + ' às ' + esc(u.hora || '—') + ' (' + u.leitura + 'ª)' : 'Nenhuma leitura lançada ainda.'}
+      · hoje ${s.hojeN}/${p.porDia}</div>
+    ${s.av && s.av.motivos.length ? `<ul class="nb-motivos">${s.av.motivos.map((m) => '<li>' + esc(m) + '</li>').join('')}</ul>` : ''}
+  </div>`;
+}
+
+function nbGraficos(d) {
+  const e = nbEquip(d, NB_GRAFICO.nobreak);
+  const desde = pnSomarDias(d.hoje, -NB_GRAFICO.dias);
+  const ls = d.leituras.filter((l) => l.nobreak === NB_GRAFICO.nobreak && l.data > desde);
+  if (!ls.length) return '<div class="vazio">Sem leituras deste nobreak no período.</div>';
+  const rot = ls.map((l) => pnData(l.data) + ' ' + (l.hora || l.leitura + 'ª'));
+  const p = d.parametros;
+  const refs = [];
+  if (e && e.tensaoEntrada) refs.push({ valor: e.tensaoEntrada, nome: 'nominal entrada ' + e.tensaoEntrada + ' V', cor: '#3B82F6' });
+  if (e && e.tensaoSaida && e.tensaoSaida !== e.tensaoEntrada) refs.push({ valor: e.tensaoSaida, nome: 'nominal saída ' + e.tensaoSaida + ' V', cor: 'var(--verde)' });
+  const cargas = ls.map((l) => nbAvaliar(l, e, p).carga);
+  return `
+    <div class="pn-legenda"><span><i style="background:#3B82F6"></i>Vi — entrada</span><span><i style="background:var(--verde)"></i>Vo — saída</span>
+      <span style="color:var(--tinta-fraca)"><i class="tracejada"></i>tensão nominal</span></div>
+    ${pnGraficoLinhas(rot, [{ nome: 'Vi (V)', cor: '#3B82F6', pontos: ls.map((l) => l.vi) },
+                             { nome: 'Vo (V)', cor: 'var(--verde)', pontos: ls.map((l) => l.vo) }], { referencias: refs, titulo: 'Tensões' })}
+    <div class="pn-legenda" style="margin-top:14px"><span><i style="background:var(--neon-ambar)"></i>Carga de saída (%)</span>
+      <span style="color:var(--alerta)"><i class="tracejada"></i>limite ${p.cargaAlerta}%</span></div>
+    ${e && e.potencia
+      ? pnGraficoLinhas(rot, [{ nome: 'Carga (%)', cor: 'var(--neon-ambar)', pontos: cargas }],
+          { min: 0, referencias: [{ valor: p.cargaAlerta, nome: 'limite', cor: 'var(--alerta)' }], altura: 170, titulo: 'Carga' })
+      : '<div class="vazio">Cadastre a potência nominal deste nobreak para ver a carga.</div>'}`;
+}
+
+function nbMedias(d) {
+  const p = d.parametros;
+  const media = (arr) => { const v = arr.filter((x) => x !== null && x !== undefined); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+  const linhas = d.equipamentos.map((e) => {
+    const ls = d.leituras.filter((l) => l.nobreak === e.codigo);
+    const cargas = ls.map((l) => nbAvaliar(l, e, p).carga).filter((v) => v !== null);
+    const poMax = ls.map((l) => l.po).filter((v) => v !== null);
+    return { e: e, n: ls.length, vi: media(ls.map((l) => l.vi)), ii: media(ls.map((l) => l.ii)), pi: media(ls.map((l) => l.pi)),
+      vo: media(ls.map((l) => l.vo)), io: media(ls.map((l) => l.io)), po: media(ls.map((l) => l.po)),
+      carga: media(cargas), poMax: poMax.length ? Math.max(...poMax) : null, cargaMax: cargas.length ? Math.max(...cargas) : null };
+  });
+  return `<div class="pn-tabela-rolagem"><table><thead><tr><th>Nobreak</th><th class="numero">Leituras</th>
+    <th class="numero">Vi (V)</th><th class="numero">Ii (A)</th><th class="numero">Pi (VA)</th>
+    <th class="numero">Vo (V)</th><th class="numero">Io (A)</th><th class="numero">Po (VA)</th>
+    <th class="numero">Carga méd.</th><th class="numero">Po máx.</th><th class="numero">Carga máx.</th></tr></thead>
+    <tbody>${linhas.map((x) => `<tr><td><strong>${esc(x.e.codigo)}</strong></td><td class="numero">${x.n}</td>
+      <td class="numero">${pnNum(x.vi, 1)}</td><td class="numero">${pnNum(x.ii, 2)}</td><td class="numero">${pnNum(x.pi)}</td>
+      <td class="numero">${pnNum(x.vo, 1)}</td><td class="numero">${pnNum(x.io, 2)}</td><td class="numero">${pnNum(x.po)}</td>
+      <td class="numero">${pnPct(x.carga)}</td><td class="numero">${pnNum(x.poMax)}</td>
+      <td class="numero" style="${x.cargaMax !== null && x.cargaMax >= p.cargaAlerta ? 'color:var(--alerta);font-weight:700' : ''}">${pnPct(x.cargaMax)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="dica">Carga = Po medido ÷ potência nominal cadastrada. Po / Pi mostra quanto o nobreak entrega do que puxa da rede.
+      As médias usam as leituras dos últimos ${120} dias.</p>`;
+}
+
+/* ---------- LANCAR SEMANA (a folha de papel na tela) ---------- */
+const NB_COLS = ['vi', 'ii', 'pi', 'vo', 'io', 'po'];
+
+async function nbLancar(d, alvo) {
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  if (!NB_SEMANA.nobreak || !nbEquip(d, NB_SEMANA.nobreak)) NB_SEMANA.nobreak = (ativos[0] || d.equipamentos[0]).codigo;
+  if (!NB_SEMANA.inicio) NB_SEMANA.inicio = pnSegunda(d.hoje);
+  const inicio = NB_SEMANA.inicio, fim = pnSomarDias(inicio, 6);
+  const desdeCarregado = pnSomarDias(d.hoje, -120);
+
+  alvo.innerHTML = `<div class="cartao"><div class="vazio">Montando a folha…</div></div>`;
+  let leituras;
+  if (inicio > desdeCarregado) {
+    leituras = d.leituras.filter((l) => l.nobreak === NB_SEMANA.nobreak && l.data >= inicio && l.data <= fim);
+  } else {
+    try { leituras = (await executarAcaoSrv('semanaNobreak', { nobreak: NB_SEMANA.nobreak, inicio: inicio })).leituras; }
+    catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; return; }
+  }
+  const mapa = {};
+  leituras.forEach((l) => { mapa[l.data + '|' + l.leitura] = l; });
+  const e = nbEquip(d, NB_SEMANA.nobreak);
+  const porDia = d.parametros.porDia || 3;
+
+  let linhas = '';
+  for (let i = 0; i < 7; i++) {
+    const dia = pnSomarDias(inicio, i);
+    const dt = pnParaData(dia);
+    for (let n = 1; n <= porDia; n++) {
+      const l = mapa[dia + '|' + n] || {};
+      const cel = (k) => `<td><input inputmode="decimal" data-k="${k}" value="${l[k] === null || l[k] === undefined ? '' : Number(l[k]).toLocaleString('pt-BR', { maximumFractionDigits: 3, useGrouping: false })}"
+        oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>`;
+      linhas += `<tr class="${n === 1 ? 'novo-dia' : ''} ${dia === d.hoje ? 'hoje' : ''}" data-data="${dia}" data-leitura="${n}" data-existe="${l.id ? '1' : ''}">
+        ${n === 1 ? `<td class="nb-dia" rowspan="${porDia}">${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(dia)}</small></td>` : ''}
+        <td>${n}ª</td>
+        <td><input class="hora" data-k="hora" placeholder="__:__" value="${esc(l.hora || '')}" oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>
+        ${cel('vi')}${cel('ii')}${cel('pi')}${cel('vo')}${cel('io')}${cel('po')}
+        <td class="carga" data-carga></td>
+        <td><input class="oc" data-k="ocorrencia" value="${esc(l.ocorrencia || '')}" placeholder="ocorrência (opcional)" oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>
+      </tr>`;
+    }
+  }
+
+  alvo.innerHTML = `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="pn-linha">
+        <div class="campo"><label>Nobreak</label>
+          <select id="nb-sel" onchange="NB_SEMANA.nobreak=this.value;pintarAbaNB(DADOS)">
+            ${d.equipamentos.map((x) => `<option value="${esc(x.codigo)}" ${x.codigo === NB_SEMANA.nobreak ? 'selected' : ''}>${esc(x.codigo)}${x.local ? ' — ' + esc(x.local) : ''}${x.ativo ? '' : ' (desativado)'}</option>`).join('')}
+          </select></div>
+        <div class="campo"><label>Semana</label>
+          <div class="pn-linha" style="gap:6px">
+            <button class="icone-botao" onclick="NB_SEMANA.inicio=pnSomarDias(NB_SEMANA.inicio,-7);pintarAbaNB(DADOS)" title="Semana anterior">◀</button>
+            <input type="date" value="${inicio}" onchange="if(this.value){NB_SEMANA.inicio=pnSegunda(this.value);pintarAbaNB(DADOS)}" style="width:auto">
+            <button class="icone-botao" onclick="NB_SEMANA.inicio=pnSomarDias(NB_SEMANA.inicio,7);pintarAbaNB(DADOS)" title="Próxima semana">▶</button>
+          </div></div>
+        <div class="pn-mini" style="padding-bottom:10px">${pnDataLonga(inicio)} a ${pnDataLonga(fim)} ·
+          ${leituras.length} leitura(s) já lançada(s)${e && e.potencia ? ' · potência ' + pnNum(e.potencia) + ' VA' : ''}</div>
+      </div>
+      <p class="dica">Mesma ordem da folha: hora, <b style="color:#2563EB">ENTRADA</b> (Vi, Ii, Pi) e depois
+        <b style="color:var(--verde)">SAÍDA</b> (Vo, Io, Po). Pode usar vírgula. <b>Enter</b> pula para o próximo campo.
+        Apagar todos os números de uma linha apaga aquela leitura.</p>
+    </div>
+    <div class="cartao">
+      <div class="pn-tabela-rolagem" style="max-height:62vh;overflow:auto">
+        <table class="nb-folha" id="nb-folha">
+          <thead><tr><th>Dia</th><th>Leitura</th><th>Hora</th>
+            <th class="entrada">Vi (V)</th><th class="entrada">Ii (A)</th><th class="entrada">Pi (VA)</th>
+            <th class="saida">Vo (V)</th><th class="saida">Io (A)</th><th class="saida">Po (VA)</th>
+            <th>Carga</th><th>Ocorrências</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
+        <span class="pn-mini" id="nb-pendentes" style="align-self:center"></span>
+        <button class="botao secundario" onclick="pintarAbaNB(DADOS)">Descartar alterações</button>
+        <button class="botao" onclick="nbGravarSemana()">Gravar semana</button>
+      </div>
+    </div>`;
+  document.querySelectorAll('#nb-folha tbody tr').forEach(nbRecalcularLinha);
+}
+
+function nbAoDigitar(inp) {
+  inp.classList.add('alterado');
+  nbRecalcularLinha(inp.closest('tr'));
+  const n = document.querySelectorAll('#nb-folha input.alterado').length;
+  el('nb-pendentes').textContent = n ? n + ' campo(s) alterado(s) — não esqueça de gravar' : '';
+}
+
+function nbRecalcularLinha(tr) {
+  const e = nbEquip(DADOS, NB_SEMANA.nobreak);
+  const po = pnLerNumero((tr.querySelector('[data-k="po"]') || {}).value, true);
+  const td = tr.querySelector('[data-carga]');
+  if (!td) return;
+  if (e && e.potencia && po !== null) {
+    const c = po / e.potencia * 100;
+    td.textContent = pnPct(c);
+    td.classList.toggle('alta', c >= DADOS.parametros.cargaAlerta);
+  } else { td.textContent = ''; td.classList.remove('alta'); }
+}
+
+/* Enter anda para o proximo campo, como numa planilha. */
+function nbTeclado(ev, inp) {
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const todos = [...document.querySelectorAll('#nb-folha input')];
+  const i = todos.indexOf(inp);
+  if (todos[i + 1]) { todos[i + 1].focus(); todos[i + 1].select && todos[i + 1].select(); }
+}
+
+function nbGravarSemana() {
+  const linhas = [];
+  let invalido = '';
+  document.querySelectorAll('#nb-folha tbody tr').forEach((tr) => {
+    const alterada = tr.querySelector('input.alterado');
+    if (!alterada && !tr.dataset.existe) return;          // nada a fazer nesta linha
+    if (!alterada) return;                                 // existe e nao mudou
+    const l = { data: tr.dataset.data, leitura: Number(tr.dataset.leitura) };
+    tr.querySelectorAll('input').forEach((inp) => {
+      const k = inp.dataset.k;
+      if (k === 'hora' || k === 'ocorrencia') l[k] = inp.value.trim();
+      else {
+        const bruto = inp.value.trim();
+        const n = pnLerNumero(bruto, k === 'pi' || k === 'po');
+        if (bruto && n === null) invalido = invalido || (pnDataLonga(l.data) + ' ' + l.leitura + 'ª: "' + bruto + '" não é número');
+        l[k] = n;
+      }
+    });
+    linhas.push(l);
+  });
+  if (invalido) return avisar(invalido, true);
+  if (!linhas.length) return avisar('Nenhuma alteração para gravar.');
+  agir('lancarLeituras', { nobreak: NB_SEMANA.nobreak, leituras: linhas }, 'Leituras gravadas').catch(() => {});
+}
+
+/* ---------- HISTORICO ---------- */
+function nbHistorico(d) {
+  const meses = [...new Set(d.leituras.map((l) => l.data.slice(0, 7)))].sort().reverse();
+  if (!NB_HIST.mes || meses.indexOf(NB_HIST.mes) === -1) NB_HIST.mes = meses[0] || '';
+  const p = d.parametros;
+  const lista = d.leituras.filter((l) => (!NB_HIST.nobreak || l.nobreak === NB_HIST.nobreak) && (!NB_HIST.mes || l.data.slice(0, 7) === NB_HIST.mes))
+    .slice().reverse();
+  return `<div class="cartao">
+    <div class="pn-linha" style="margin-bottom:12px">
+      <div class="campo"><label>Nobreak</label><select onchange="NB_HIST.nobreak=this.value;pintarAbaNB(DADOS)">
+        <option value="">Todos</option>${d.equipamentos.map((e) => `<option ${NB_HIST.nobreak === e.codigo ? 'selected' : ''}>${esc(e.codigo)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Mês</label><select onchange="NB_HIST.mes=this.value;pintarAbaNB(DADOS)">
+        ${meses.map((m) => `<option value="${m}" ${NB_HIST.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('') || '<option>—</option>'}</select></div>
+      <div class="pn-mini" style="padding-bottom:10px">${lista.length} leitura(s)</div>
+    </div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Leit.</th><th>Hora</th><th>Nobreak</th>
+      <th class="numero">Vi</th><th class="numero">Ii</th><th class="numero">Pi</th><th class="numero">Vo</th><th class="numero">Io</th><th class="numero">Po</th>
+      <th class="numero">Carga</th><th class="numero">Po/Pi</th><th>Ocorrência</th><th></th></tr></thead>
+      <tbody>${lista.map((l) => {
+        const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
+        return `<tr><td>${pnDiaSemana(l.data)} ${pnDataLonga(l.data)}</td><td>${l.leitura}ª</td><td>${esc(l.hora)}</td><td><strong>${esc(l.nobreak)}</strong></td>
+          <td class="numero" style="${av.vi ? 'color:var(--alerta);font-weight:700' : ''}">${pnNum(l.vi, 1)}</td><td class="numero">${pnNum(l.ii, 2)}</td><td class="numero">${pnNum(l.pi)}</td>
+          <td class="numero" style="${av.vo ? 'color:var(--alerta);font-weight:700' : ''}">${pnNum(l.vo, 1)}</td><td class="numero">${pnNum(l.io, 2)}</td><td class="numero">${pnNum(l.po)}</td>
+          <td class="numero" style="${av.carga !== null && av.carga >= p.cargaAlerta ? 'color:var(--alerta);font-weight:700' : ''}">${pnPct(av.carga)}</td>
+          <td class="numero">${pnPct(av.poPi)}</td><td>${esc(l.ocorrencia)}</td>
+          <td>${d.permissoes.lancar ? `<button class="icone-botao" onclick="nbAbrirSemanaDe(${jsArg(l.nobreak)},${jsArg(l.data)})">Corrigir</button>` : ''}</td></tr>`;
+      }).join('') || '<tr><td colspan="14" class="vazio">Nenhuma leitura com esses filtros.</td></tr>'}</tbody></table></div>
+    <p class="dica">O histórico mostra os últimos 120 dias. Leituras mais antigas continuam no banco e aparecem na aba
+      <b>Lançar semana</b> ao navegar até a semana delas.</p>
+  </div>`;
+}
+
+function nbAbrirSemanaDe(codigo, data) {
+  NB_SEMANA = { nobreak: codigo, inicio: pnSegunda(data) };
+  trocarAbaNB('lancar');
+}
+
+/* ---------- EQUIPAMENTOS ---------- */
+function nbEquipamentos(d) {
+  return `<div class="cartao" style="margin-bottom:14px">
+    <div class="cartao-titulo linha-titulo"><span>Nobreaks cadastrados</span>
+      <span class="pn-linha">
+        ${d.permissoes.cadastrar ? `<button class="icone-botao" onclick="nbFormImportar()">Importar planilha antiga</button>
+        <button class="botao" onclick="nbFormEquip()">Novo nobreak</button>` : ''}
+      </span></div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Código</th><th>Local</th><th>Modelo</th>
+      <th class="numero">Potência (VA)</th><th class="numero">Tensão entrada</th><th class="numero">Tensão saída</th><th>Situação</th><th></th></tr></thead>
+      <tbody>${d.equipamentos.map((e) => `<tr><td><strong>${esc(e.codigo)}</strong></td><td>${esc(e.local || '—')}</td><td>${esc(e.modelo || '—')}</td>
+        <td class="numero">${e.potencia ? pnNum(e.potencia) : '<span class="pendente-entrega">falta</span>'}</td>
+        <td class="numero">${e.tensaoEntrada ? e.tensaoEntrada + ' V' : '—'}</td><td class="numero">${e.tensaoSaida ? e.tensaoSaida + ' V' : '—'}</td>
+        <td>${e.ativo ? '<span class="pn-chip ok">monitorado</span>' : '<span class="pn-chip neutro">desativado</span>'}</td>
+        <td>${d.permissoes.cadastrar ? `<button class="icone-botao" onclick="nbFormEquip(${jsArg(e.id)})">Editar</button>` : ''}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="vazio">Nenhum nobreak cadastrado.</td></tr>'}</tbody></table></div>
+    <p class="dica">A <b>potência nominal</b> faz a carga (%) funcionar. As tensões nominais servem para o alerta:
+      leitura fora de ±${d.parametros.tolerancia}% da nominal acende o alerta. Os limites ficam em Configuração › Sistema.</p>
+  </div>`;
+}
+
+function nbFormEquip(id) {
+  const e = id ? DADOS.equipamentos.find((x) => x.id === id) : null;
+  abrirJanela(e ? 'Editar ' + e.codigo : 'Novo nobreak', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Código</label><input id="ne-codigo" value="${esc(e ? e.codigo : '')}" placeholder="NB-04"></div>
+      <div class="campo"><label>Local</label><input id="ne-local" value="${esc(e ? e.local : '')}" placeholder="onde ele fica"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Modelo</label><input id="ne-modelo" value="${esc(e ? e.modelo : '')}"></div>
+      <div class="campo"><label>Potência nominal (VA)</label><input id="ne-pot" inputmode="decimal" value="${e && e.potencia ? e.potencia : ''}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Tensão nominal de entrada (V)</label><input id="ne-te" inputmode="decimal" value="${e && e.tensaoEntrada ? e.tensaoEntrada : '220'}"></div>
+      <div class="campo"><label>Tensão nominal de saída (V)</label><input id="ne-ts" inputmode="decimal" value="${e && e.tensaoSaida ? e.tensaoSaida : '120'}"></div>
+    </div>
+    <div class="campo"><label>Observação</label><input id="ne-obs" value="${esc(e ? e.observacao : '')}"></div>
+    <label class="marcador"><input type="checkbox" id="ne-ativo" ${!e || e.ativo ? 'checked' : ''}> Monitorado (aparece no painel e na folha)</label>`, `
+    ${e ? `<button class="botao perigo" onclick="agir('excluirNobreak',{id:${jsArg(e.id)}},'Nobreak removido').catch(()=>{})">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarNobreak',{id:${jsArg(e ? e.id : '')},codigo:val('ne-codigo'),local:val('ne-local'),modelo:val('ne-modelo'),potencia:val('ne-pot'),tensaoEntrada:val('ne-te'),tensaoSaida:val('ne-ts'),observacao:val('ne-obs'),ativo:marcado('ne-ativo')},'Nobreak salvo').catch(()=>{})">Salvar</button>`);
+}
+
+function nbFormImportar() {
+  abrirJanela('Importar a planilha antiga de nobreaks', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">Cole o link da planilha
+      <b>Monitoramento de Nobreaks</b> (a que tem as abas Cadastro e Lancamentos). O GSL traz os nobreaks
+      e todas as leituras. Leitura repetida não entra duas vezes, e a linha de exemplo é ignorada.</p>
+    <div class="campo"><label>Link da planilha</label><input id="nb-link" placeholder="https://docs.google.com/spreadsheets/d/..."></div>
+    <p class="dica">Se a planilha estiver em .xlsx no Drive, abra no Google Planilhas e use Arquivo › Salvar como Planilhas Google antes.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('importarNobreaks',{link:val('nb-link')}).catch(()=>{})">Importar</button>`);
+}
+
+
+/* =====================================================================
+   LIMPEZA CD
+   ===================================================================== */
+let ABA_LP = 'gestao';                 // gestao | acoes | custos
+let LP_FILTRO = { status: 'abertas', origem: '', zona: '', crit: '', busca: '' };
+
+function pintarLimpeza(r) {
+  const d = r.dados;
+  el('subtitulo-pagina').textContent = 'Ações das vistorias e custo dos produtos · referência ' + pnRotuloMes(d.mes);
+  el('acoes-topo').innerHTML = d.permissoes.gerir ? `
+    <button class="botao secundario" onclick="lpFormImportar()">Importar planilha antiga</button>
+    <button class="botao" onclick="lpFormAcao()">Nova ação</button>` : '';
+  el('pagina').innerHTML = pnAbas([['gestao', 'Gestão'], ['acoes', 'Ações'], ['custos', 'Custos']], ABA_LP, 'trocarAbaLP') +
+    '<div id="conteudo-lp"></div>';
+  pintarAbaLP(d);
+}
+
+function trocarAbaLP(aba) {
+  ABA_LP = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  pintarAbaLP(DADOS);
+}
+
+function pintarAbaLP(d) {
+  const alvo = el('conteudo-lp'); if (!alvo) return;
+  try {
+    alvo.innerHTML = ABA_LP === 'acoes' ? lpAcoes(d) : ABA_LP === 'custos' ? lpCustos(d) : lpGestao(d);
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+/* ---------- GESTAO ---------- */
+function lpGestao(d) {
+  const k = d.kpis;
+  const abertas = d.acoes.filter((a) => a.aberta);
+  const zonaNome = {}; d.zonas.forEach((z) => { zonaNome[z.zona] = z.zona + ' — ' + z.descricao; });
+  const contar = (lista, campo) => {
+    const m = {}; lista.forEach((a) => { const v = a[campo] || '(sem)'; m[v] = (m[v] || 0) + 1; });
+    return Object.keys(m).map((x) => [x, m[x]]).sort((a, b) => b[1] - a[1]);
+  };
+  const porZona = contar(abertas, 'zona').map((p) => [zonaNome[p[0]] || p[0], p[1]]);
+  const ordemCrit = { Alta: 0, 'Média': 1, Baixa: 2 };
+  const porCrit = contar(abertas, 'criticidade').sort((a, b) => ordemCrit[a[0]] - ordemCrit[b[0]]);
+  const vencem = abertas.filter((a) => a.prazo).sort((a, b) => a.prazo.localeCompare(b.prazo)).slice(0, 8);
+  const maxCompra = Math.max(...d.comprasPorMes.map((m) => m.total), 1);
+  const custoProd = d.produtos.filter((p) => p.ativo && p.custoMes).map((p) => [p.produto, p.custoMes]).sort((a, b) => b[1] - a[1]);
+  const emUso = d.embalagens.filter((e) => e.emUso).sort((a, b) => (a.deveRenderAte || '9').localeCompare(b.deveRenderAte || '9'));
+
+  return `
+    <div class="pn-linha" style="margin-bottom:14px">
+      <div class="campo"><label>Mês de referência</label>
+        <input type="month" value="${esc(d.mes)}" onchange="if(this.value) abrir('limpeza',{mes:this.value})" style="width:auto"></div>
+    </div>
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(k.abertas, 'Ações em aberto', 'azul', 'acompanhar a tendência')}
+      ${pnKpi(k.atrasadas, 'Atrasadas', k.atrasadas ? 'vermelho' : 'verde', 'meta: zero')}
+      ${pnKpi(k.altas, 'Criticidade alta abertas', k.altas ? 'vermelho' : 'verde', 'correção imediata')}
+      ${pnKpi(k.abertasMes, 'Abertas no mês', 'azul', k.deVistoria + ' vieram de vistoria')}
+      ${pnKpi(pnMoedaCurta(k.comprasMes), 'Compras do mês', 'amarelo', pnMoeda(k.comprasMes), true)}
+      ${pnKpi(pnMoedaCurta(k.custoPrevistoMes), 'Custo previsto / mês', 'amarelo', 'produtos em uso', true)}
+    </div>
+    <div class="pn-grade duas" style="margin-bottom:14px">
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Ações abertas por zona</div>${pnBarras(porZona, 'azul')}</div>
+      <div class="cartao"><div class="cartao-titulo">Ações abertas por criticidade</div>
+        ${porCrit.length ? porCrit.map((p) => barra(p[0], String(p[1]), Math.max(...porCrit.map((x) => x[1]), 1), p[1],
+          p[0] === 'Alta' ? 'alerta' : p[0] === 'Média' ? 'amarela' : '')).join('') : '<div class="vazio">Nenhuma ação aberta. 👏</div>'}
+        <p class="dica">Alta = correção imediata. Média = no prazo combinado. Baixa = entra na rotina.</p></div>
+    </div>
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">As 8 ações que vencem primeiro</div>
+      ${vencem.length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Prazo</th><th>Crit.</th><th>Zona</th><th>Local</th>
+        <th>O que foi encontrado</th><th>Ação</th><th>Responsável</th><th>Situação</th></tr></thead><tbody>
+        ${vencem.map((a) => `<tr class="${a.atrasada ? 'lp-atrasada' : ''}"><td><strong>${pnDataLonga(a.prazo)}</strong><div class="lp-sub">${lpPrazoTexto(a)}</div></td>
+          <td><span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span></td><td>${esc(a.zona || '—')}</td><td>${esc(a.local || '—')}</td>
+          <td>${esc(a.problema)}</td><td>${esc(a.acao)}</td><td>${esc(a.responsavel || '—')}</td><td>${lpEtiqueta(a)}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="vazio">Nenhuma ação aberta com prazo.</div>'}
+    </div>
+    <div class="pn-grade duas" style="margin-bottom:14px">
+      <div class="cartao"><div class="cartao-titulo">Compras — últimos 6 meses</div>
+        <div class="serie">${d.comprasPorMes.map((m) => `<div class="serie-col" title="${pnRotuloMes(m.mes)}: ${pnMoeda(m.total)}">
+          <div class="serie-rotulo">${m.total ? pnNum(m.total) : ''}</div>
+          <div class="serie-barra ${m.mes === d.mes ? 'amarela' : 'verde'}" style="height:${Math.max(2, m.total / maxCompra * 100)}%"></div>
+          <div class="serie-rotulo">${pnRotuloMes(m.mes)}</div></div>`).join('')}</div></div>
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Custo mensal previsto por produto</div>
+        ${pnBarras(custoProd, 'amarela', pnMoeda)}
+        <p class="dica">Custo por aplicação × aplicações por dia × 30. Vem da aba Custos › Produtos.</p></div>
+    </div>
+    <div class="cartao">
+      <div class="cartao-titulo">Embalagens abertas — quando devem acabar</div>
+      ${emUso.length ? `<table><thead><tr><th>Produto</th><th>Aberta em</th><th>Deve render até</th><th class="numero">Dias restantes</th><th>Situação</th></tr></thead><tbody>
+        ${emUso.map((e) => `<tr><td><strong>${esc(e.produto)}</strong></td><td>${pnDataLonga(e.abertura)}</td><td>${pnDataLonga(e.deveRenderAte)}</td>
+          <td class="numero" style="${e.diasRestantes !== null && e.diasRestantes < 0 ? 'color:var(--alerta);font-weight:700' : ''}">${e.diasRestantes === null ? '—' : e.diasRestantes}</td>
+          <td>${esc(e.situacao)}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="vazio">Nenhuma embalagem aberta registrada. Registre em Custos › Embalagens.</div>'}
+    </div>`;
+}
+
+function lpPrazoTexto(a) {
+  if (!a.aberta || a.diasParaPrazo === null) return '';
+  if (a.diasParaPrazo < 0) return 'atrasada ' + (-a.diasParaPrazo) + ' dia(s)';
+  if (a.diasParaPrazo === 0) return 'vence hoje';
+  return 'faltam ' + a.diasParaPrazo + ' dia(s)';
+}
+
+function lpEtiqueta(a) {
+  if (a.atrasada) return '<span class="etiqueta atrasada">Atrasada</span>';
+  const cls = { 'Aberta': 'pendente', 'Em andamento': 'aguardando', 'Concluída': 'concluido', 'Cancelada': 'cancelada' }[a.status] || 'pendente';
+  return `<span class="etiqueta ${cls}">${esc(a.status)}</span>`;
+}
+
+/* ---------- ACOES ---------- */
+function lpAcoes(d) {
+  const f = LP_FILTRO;
+  const casa = (a) => {
+    if (f.status === 'abertas' && !a.aberta) return false;
+    if (f.status === 'atrasadas' && !a.atrasada) return false;
+    if (f.status === 'concluidas' && a.status !== 'Concluída') return false;
+    if (f.origem === 'vistorias' && !/vistoria/i.test(a.origem)) return false;
+    if (f.origem && f.origem !== 'vistorias' && a.origem !== f.origem) return false;
+    if (f.zona && a.zona !== f.zona) return false;
+    if (f.crit && a.criticidade !== f.crit) return false;
+    if (f.busca && (a.local + ' ' + a.problema + ' ' + a.acao + ' ' + a.responsavel).toLowerCase().indexOf(f.busca) === -1) return false;
+    return true;
+  };
+  const lista = d.acoes.filter(casa);
+  const conta = { abertas: d.acoes.filter((a) => a.aberta).length, atrasadas: d.acoes.filter((a) => a.atrasada).length,
+    concluidas: d.acoes.filter((a) => a.status === 'Concluída').length, todas: d.acoes.length };
+  const chip = (id, nome) => `<button class="lp-filtro ${f.status === id ? 'ativo' : ''}" onclick="LP_FILTRO.status=${jsArg(id)};pintarAbaLP(DADOS)">${nome}<b>${conta[id]}</b></button>`;
+  return `<div class="cartao">
+    <div class="lp-filtros">
+      ${chip('abertas', 'Abertas')}${chip('atrasadas', 'Atrasadas')}${chip('concluidas', 'Concluídas')}${chip('todas', 'Todas')}
+      <select style="width:auto" onchange="LP_FILTRO.origem=this.value;pintarAbaLP(DADOS)">
+        <option value="">Todas as origens</option>
+        <option value="vistorias" ${f.origem === 'vistorias' ? 'selected' : ''}>Só vistorias</option>
+        ${d.listas.origens.map((o) => `<option ${f.origem === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="LP_FILTRO.zona=this.value;pintarAbaLP(DADOS)">
+        <option value="">Todas as zonas</option>${d.zonas.map((z) => `<option value="${esc(z.zona)}" ${f.zona === z.zona ? 'selected' : ''}>${esc(z.zona)} — ${esc(z.descricao)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="LP_FILTRO.crit=this.value;pintarAbaLP(DADOS)">
+        <option value="">Toda criticidade</option>${d.listas.criticidades.map((c) => `<option ${f.crit === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+      <span class="campo-busca"><input placeholder="Buscar local, problema, ação" value="${esc(f.busca)}"
+        onchange="LP_FILTRO.busca=this.value.toLowerCase().trim();pintarAbaLP(DADOS)"></span>
+      ${d.permissoes.gerir ? '<button class="icone-botao" onclick="lpFormZonas()">Zonas</button>' : ''}
+    </div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Aberta em</th><th>Zona / local</th><th>O que foi encontrado → ação</th>
+      <th>Crit.</th><th>Responsável</th><th>Prazo</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${lista.map((a) => `<tr class="${a.atrasada ? 'lp-atrasada' : ''}">
+        <td>${pnDataLonga(a.data)}<div class="lp-sub">${esc(a.origem)}${a.turno ? ' · turno ' + esc(a.turno) : ''}</div></td>
+        <td><strong>${esc(a.zona || '—')}</strong><div class="lp-sub">${esc(a.local)}</div></td>
+        <td><div class="lp-problema">${esc(a.problema)}</div><div class="lp-sub">→ ${esc(a.acao)}</div>
+          ${a.reincidencia > 1 ? `<div class="lp-sub" style="color:var(--alerta)">reincidente: ${a.reincidencia}× neste local</div>` : ''}
+          ${a.evidencia ? `<div class="lp-sub">evidência: ${esc(a.evidencia)}</div>` : ''}</td>
+        <td><span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span></td>
+        <td>${esc(a.responsavel || '—')}</td>
+        <td>${pnDataLonga(a.prazo)}<div class="lp-sub">${a.aberta ? lpPrazoTexto(a) : (a.fechamento ? 'fechada em ' + pnDataLonga(a.fechamento) : '')}</div></td>
+        <td>${lpEtiqueta(a)}${a.diasAberta !== null ? `<div class="lp-sub">${a.diasAberta} dia(s)</div>` : ''}</td>
+        <td style="white-space:nowrap">${d.permissoes.gerir ? `${a.aberta ? `<button class="icone-botao" onclick="lpFormConcluir(${jsArg(a.id)})">Concluir</button>` : ''}
+          <button class="icone-botao" onclick="lpFormAcao(${jsArg(a.id)})">Editar</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="8" class="vazio">Nenhuma ação com esses filtros.</td></tr>'}
+    </tbody></table></div>
+    <p class="dica">Só entra aqui o que saiu <b>não conforme</b> nas vistorias, rondas e auditorias. O papel continua sendo o registro detalhado.</p>
+  </div>`;
+}
+
+function lpOpcoes(lista, atual) { return lista.map((x) => `<option ${x === atual ? 'selected' : ''}>${esc(x)}</option>`).join(''); }
+
+function lpFormAcao(id) {
+  const d = DADOS;
+  const a = id ? d.acoes.find((x) => x.id === id) : null;
+  const hoje = d.hoje;
+  abrirJanela(a ? 'Editar ação' : 'Nova ação de limpeza', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Data</label><input type="date" id="la-data" value="${esc(a ? a.data : hoje)}"></div>
+      <div class="campo"><label>Origem</label><select id="la-origem">${lpOpcoes(d.listas.origens, a ? a.origem : 'Vistoria setorial')}</select></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Zona</label><select id="la-zona"><option value="">—</option>
+        ${d.zonas.filter((z) => z.ativo || (a && a.zona === z.zona)).map((z) => `<option value="${esc(z.zona)}" ${a && a.zona === z.zona ? 'selected' : ''}>${esc(z.zona)} — ${esc(z.descricao)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Local exato</label><input id="la-local" value="${esc(a ? a.local : '')}" placeholder="Ex.: Banheiro da central"></div>
+    </div>
+    <div class="campo"><label>O que foi encontrado</label><textarea id="la-problema" rows="2">${esc(a ? a.problema : '')}</textarea></div>
+    <div class="campo"><label>Ação definida</label><textarea id="la-acao" rows="2">${esc(a ? a.acao : '')}</textarea></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Criticidade</label><select id="la-crit">${lpOpcoes(d.listas.criticidades, a ? a.criticidade : 'Média')}</select></div>
+      <div class="campo"><label>Turno</label><select id="la-turno"><option value="">—</option>${lpOpcoes(d.listas.turnos, a ? a.turno : '')}</select></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Responsável</label><input id="la-resp" list="la-resps" value="${esc(a ? a.responsavel : 'Supervisor de Limpeza')}">
+        <datalist id="la-resps">${d.listas.responsaveis.map((r) => `<option value="${esc(r)}">`).join('')}</datalist></div>
+      <div class="campo"><label>Prazo</label><input type="date" id="la-prazo" value="${esc(a ? a.prazo : '')}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Situação</label><select id="la-status">${lpOpcoes(d.listas.status, a ? a.status : 'Aberta')}</select></div>
+      <div class="campo"><label>Custo da ação (R$, opcional)</label><input id="la-custo" inputmode="decimal" value="${a && a.custo !== null ? String(a.custo).replace('.', ',') : ''}"></div>
+    </div>
+    <div class="campo"><label>Evidência / nº do chamado</label><input id="la-evid" value="${esc(a ? a.evidencia : '')}" placeholder="foto no Drive, CH-0151…"></div>`, `
+    ${a ? `<button class="botao perigo" onclick="agir('excluirAcaoLimpeza',{id:${jsArg(a.id)}},'Ação excluída').catch(()=>{})">Excluir</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarAcaoLimpeza',{id:${jsArg(a ? a.id : '')},data:val('la-data'),origem:val('la-origem'),zona:val('la-zona'),local:val('la-local'),
+      problema:val('la-problema'),acao:val('la-acao'),criticidade:val('la-crit'),turno:val('la-turno'),responsavel:val('la-resp'),
+      prazo:val('la-prazo'),status:val('la-status'),custo:val('la-custo'),evidencia:val('la-evid')},'Ação salva').catch(()=>{})">Salvar</button>`);
+}
+
+function lpFormConcluir(id) {
+  const a = DADOS.acoes.find((x) => x.id === id);
+  abrirJanela('Concluir ação', `
+    <p style="margin:0 0 12px"><b>${esc(a.problema)}</b><br><span class="pn-mini">→ ${esc(a.acao)}</span></p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Concluída em</label><input type="date" id="lc-data" value="${DADOS.hoje}"></div>
+      <div class="campo"><label>Custo (R$, opcional)</label><input id="lc-custo" inputmode="decimal"></div>
+    </div>
+    <div class="campo"><label>Evidência / nº do chamado</label><input id="lc-evid" value="${esc(a.evidencia)}"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('concluirAcaoLimpeza',{id:${jsArg(id)},fechamento:val('lc-data'),custo:val('lc-custo'),evidencia:val('lc-evid')},'Ação concluída').catch(()=>{})">Concluir</button>`);
+}
+
+function lpFormZonas() {
+  const zonas = DADOS.zonas;
+  abrirJanela('Zonas do CD', `
+    <p class="dica" style="margin:0 0 12px">Preencha com as ruas e áreas reais. Zona desmarcada some das listas, mas as ações antigas continuam com ela.</p>
+    <table id="lz-tabela"><thead><tr><th>Zona</th><th>Descrição</th><th>Em uso</th></tr></thead><tbody>
+      ${zonas.map((z) => `<tr data-id="${esc(z.id)}"><td><input class="lz-zona" value="${esc(z.zona)}" style="width:70px"></td>
+        <td><input class="lz-desc" value="${esc(z.descricao)}"></td><td><input type="checkbox" class="lz-ativo" ${z.ativo ? 'checked' : ''}></td></tr>`).join('')}
+      <tr data-id=""><td><input class="lz-zona" placeholder="Z11" style="width:70px"></td><td><input class="lz-desc" placeholder="nova zona"></td><td><input type="checkbox" class="lz-ativo" checked></td></tr>
+    </tbody></table>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="lpSalvarZonas()">Salvar zonas</button>`);
+}
+
+function lpSalvarZonas() {
+  const zonas = [...document.querySelectorAll('#lz-tabela tbody tr')].map((tr) => ({
+    id: tr.dataset.id, zona: tr.querySelector('.lz-zona').value, descricao: tr.querySelector('.lz-desc').value,
+    ativo: tr.querySelector('.lz-ativo').checked })).filter((z) => z.zona.trim());
+  agir('salvarZona', { zonas: zonas }, 'Zonas salvas').catch(() => {});
+}
+
+/* ---------- CUSTOS ---------- */
+function lpCustos(d) {
+  const g = d.permissoes.gerir;
+  return `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo linha-titulo"><span>Produtos — custo, concentração e rendimento</span>
+        ${g ? '<button class="botao" onclick="lpFormProduto()">Novo produto</button>' : ''}</div>
+      <div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th>Tipo</th><th class="numero">Embalagem</th><th class="numero">Preço</th>
+        <th class="numero">Diluição</th><th class="numero">ml / aplic.</th><th class="numero">Aplic. / emb.</th><th class="numero">R$ / aplic.</th>
+        <th class="numero">R$ / L solução</th><th class="numero">Aplic. / dia</th><th class="numero">Dura (dias)</th><th class="numero">R$ / mês</th><th></th></tr></thead>
+        <tbody>${d.produtos.map((p) => `<tr style="${p.ativo ? '' : 'opacity:.55'}"><td><strong>${esc(p.produto)}</strong><div class="lp-sub">${esc(p.onde)}</div></td>
+          <td>${esc(p.tipo)}</td><td class="numero">${pnNum(p.embalagemMl)} ml</td><td class="numero">${pnMoeda(p.preco)}</td>
+          <td class="numero">${p.pronto ? 'pronto uso' : pnNum(p.diluicao) + ' ml/L'}</td><td class="numero">${pnNum(p.mlAplicacao)}</td>
+          <td class="numero">${pnNum(p.aplicacoesEmbalagem, 1)}</td><td class="numero">${pnMoeda(p.custoAplicacao)}</td><td class="numero">${pnMoeda(p.custoLitro)}</td>
+          <td class="numero">${pnNum(p.aplicacoesDia)}</td><td class="numero">${pnNum(p.duracaoDias, 1)}</td><td class="numero"><strong>${pnMoeda(p.custoMes)}</strong></td>
+          <td>${g ? `<button class="icone-botao" onclick="lpFormProduto(${jsArg(p.id)})">Editar</button>` : ''}</td></tr>`).join('')
+          || '<tr><td colspan="13" class="vazio">Nenhum produto cadastrado.</td></tr>'}</tbody></table></div>
+      <p class="dica">Concentrado: ml por aplicação = diluição (ml/L) × solução por aplicação (L). Pronto uso: solução × 1000.
+        Duração = aplicações por embalagem ÷ aplicações por dia.</p>
+    </div>
+
+    <div class="pn-grade">
+      <div class="cartao">
+        <div class="cartao-titulo linha-titulo"><span>Compras</span>${g ? '<button class="botao" onclick="lpFormCompra()">Registrar compra</button>' : ''}</div>
+        <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Produto / insumo</th><th class="numero">Qtd.</th><th class="numero">Unit.</th>
+          <th class="numero">Total</th><th>NF</th><th></th></tr></thead>
+          <tbody>${d.compras.slice(0, 60).map((c) => `<tr><td>${pnDataLonga(c.data)}</td><td>${esc(c.produto)}<div class="lp-sub">${esc(c.fornecedor)}</div></td>
+            <td class="numero">${pnNum(c.quantidade)}</td><td class="numero">${pnMoeda(c.precoUnit)}</td><td class="numero"><strong>${pnMoeda(c.total)}</strong></td>
+            <td>${esc(c.nf)}</td><td>${g ? `<button class="icone-botao" onclick="lpFormCompra(${jsArg(c.id)})">Editar</button>` : ''}</td></tr>`).join('')
+            || '<tr><td colspan="7" class="vazio">Nenhuma compra registrada.</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo linha-titulo"><span>Embalagens — previsto × real</span>${g ? '<button class="botao" onclick="lpFormEmbalagem()">Abrir embalagem</button>' : ''}</div>
+        <div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th>Aberta</th><th>Deve render até</th><th>Terminou</th>
+          <th class="numero">Previsto</th><th class="numero">Rendeu</th><th>Situação</th><th></th></tr></thead>
+          <tbody>${d.embalagens.slice(0, 60).map((e) => `<tr><td><strong>${esc(e.produto)}</strong>${e.observacao ? `<div class="lp-sub">${esc(e.observacao)}</div>` : ''}</td>
+            <td>${pnData(e.abertura)}</td><td>${pnData(e.deveRenderAte)}</td><td>${e.termino ? pnData(e.termino) : '—'}</td>
+            <td class="numero">${e.previstoDias ? pnNum(e.previstoDias) + ' d' : '—'}</td><td class="numero">${e.diasRendeu !== null ? e.diasRendeu + ' d' : '—'}</td>
+            <td><span class="pn-chip ${/abaixo|verificar|Passou/.test(e.situacao) ? 'alerta' : /mais|Dentro/.test(e.situacao) ? 'ok' : 'neutro'}">${esc(e.situacao)}</span></td>
+            <td style="white-space:nowrap">${g ? `${e.emUso ? `<button class="icone-botao" onclick="lpFormEmbalagem(${jsArg(e.id)},true)">Terminou</button>` : ''}
+              <button class="icone-botao" onclick="lpFormEmbalagem(${jsArg(e.id)})">Editar</button>` : ''}</td></tr>`).join('')
+            || '<tr><td colspan="8" class="vazio">Nenhuma embalagem registrada.</td></tr>'}</tbody></table></div>
+        <p class="dica">Rendeu menos que 90% do previsto é sinal de diluição errada ou desperdício — vale conversar com o turno.</p>
+      </div>
+    </div>`;
+}
+
+function lpFormProduto(id) {
+  const d = DADOS;
+  const p = id ? d.produtos.find((x) => x.id === id) : null;
+  const v = (x) => (x === null || x === undefined) ? '' : String(x).replace('.', ',');
+  abrirJanela(p ? 'Editar ' + p.produto : 'Novo produto', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Produto</label><input id="lp-produto" value="${esc(p ? p.produto : '')}"></div>
+      <div class="campo"><label>Tipo</label><select id="lp-tipo">${lpOpcoes(d.listas.tipos, p ? p.tipo : 'Concentrado')}</select></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Embalagem (ml)</label><input id="lp-emb" inputmode="decimal" value="${v(p && p.embalagemMl)}"></div>
+      <div class="campo"><label>Preço da embalagem (R$)</label><input id="lp-preco" inputmode="decimal" value="${v(p && p.preco)}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Diluição (ml por litro) — concentrado</label><input id="lp-dil" inputmode="decimal" value="${v(p && p.diluicao)}"></div>
+      <div class="campo"><label>Solução por aplicação (L)</label><input id="lp-sol" inputmode="decimal" value="${v(p && p.solucaoL)}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Aplicações por dia (estimativa)</label><input id="lp-dia" inputmode="decimal" value="${v(p && p.aplicacoesDia)}"></div>
+      <div class="campo"><label>Onde é usado</label><input id="lp-onde" value="${esc(p ? p.onde : '')}"></div>
+    </div>
+    <label class="marcador"><input type="checkbox" id="lp-ativo" ${!p || p.ativo ? 'checked' : ''}> Em uso (entra no custo previsto)</label>`, `
+    ${p ? `<button class="botao perigo" onclick="agir('excluirProduto',{id:${jsArg(p.id)}},'Produto excluído').catch(()=>{})">Excluir</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarProduto',{id:${jsArg(p ? p.id : '')},produto:val('lp-produto'),tipo:val('lp-tipo'),embalagemMl:val('lp-emb'),preco:val('lp-preco'),
+      diluicao:val('lp-dil'),solucaoL:val('lp-sol'),aplicacoesDia:val('lp-dia'),onde:val('lp-onde'),ativo:marcado('lp-ativo')},'Produto salvo').catch(()=>{})">Salvar</button>`);
+}
+
+function lpFormCompra(id) {
+  const d = DADOS;
+  const c = id ? d.compras.find((x) => x.id === id) : null;
+  const v = (x) => (x === null || x === undefined) ? '' : String(x).replace('.', ',');
+  abrirJanela(c ? 'Editar compra' : 'Registrar compra', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Data</label><input type="date" id="lk-data" value="${esc(c ? c.data : d.hoje)}"></div>
+      <div class="campo"><label>Produto / insumo</label><input id="lk-prod" list="lk-prods" value="${esc(c ? c.produto : '')}">
+        <datalist id="lk-prods">${d.produtos.map((p) => `<option value="${esc(p.produto)}">`).join('')}</datalist></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Quantidade (embalagens)</label><input id="lk-qtd" inputmode="decimal" value="${v(c && c.quantidade)}"></div>
+      <div class="campo"><label>Preço unitário (R$)</label><input id="lk-unit" inputmode="decimal" value="${v(c && c.precoUnit)}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Fornecedor</label><input id="lk-forn" value="${esc(c ? c.fornecedor : '')}"></div>
+      <div class="campo"><label>NF / pedido</label><input id="lk-nf" value="${esc(c ? c.nf : '')}"></div>
+    </div>
+    <div class="campo"><label>Observação</label><input id="lk-obs" value="${esc(c ? c.observacao : '')}"></div>
+    ${c ? '' : `<label class="marcador"><input type="checkbox" id="lk-abrir"> Já abri uma embalagem desta compra hoje (entra no controle de rendimento)</label>`}`, `
+    ${c ? `<button class="botao perigo" onclick="agir('excluirCompra',{id:${jsArg(c.id)}},'Compra excluída').catch(()=>{})">Excluir</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarCompra',{id:${jsArg(c ? c.id : '')},data:val('lk-data'),produto:val('lk-prod'),quantidade:val('lk-qtd'),precoUnit:val('lk-unit'),
+      fornecedor:val('lk-forn'),nf:val('lk-nf'),observacao:val('lk-obs'),abrirEmbalagem:marcado('lk-abrir'),abertura:DADOS.hoje},'Compra registrada').catch(()=>{})">Salvar</button>`);
+}
+
+function lpFormEmbalagem(id, terminar) {
+  const d = DADOS;
+  const e = id ? d.embalagens.find((x) => x.id === id) : null;
+  abrirJanela(terminar ? 'Embalagem terminou' : (e ? 'Editar embalagem' : 'Abrir embalagem'), `
+    <div class="campo-duplo">
+      <div class="campo"><label>Produto</label><select id="le-prod">${d.produtos.map((p) => `<option ${e && e.produto === p.produto ? 'selected' : ''}>${esc(p.produto)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Data de abertura</label><input type="date" id="le-abertura" value="${esc(e ? e.abertura : d.hoje)}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Data da compra</label><input type="date" id="le-compra" value="${esc(e ? e.dataCompra : '')}"></div>
+      <div class="campo"><label>NF / pedido</label><input id="le-nf" value="${esc(e ? e.nf : '')}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Preço pago (R$)</label><input id="le-preco" inputmode="decimal" value="${e && e.preco !== null ? String(e.preco).replace('.', ',') : ''}"></div>
+      <div class="campo"><label>Data real de término</label><input type="date" id="le-termino" value="${esc(e ? (e.termino || (terminar ? d.hoje : '')) : '')}"></div>
+    </div>
+    <div class="campo"><label>Causa provável / observação</label><input id="le-obs" value="${esc(e ? e.observacao : '')}" placeholder="Ex.: diluição feita no olho no turno B"></div>`, `
+    ${e ? `<button class="botao perigo" onclick="agir('excluirEmbalagem',{id:${jsArg(e.id)}},'Registro excluído').catch(()=>{})">Excluir</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarEmbalagem',{id:${jsArg(e ? e.id : '')},produto:val('le-prod'),abertura:val('le-abertura'),dataCompra:val('le-compra'),
+      nf:val('le-nf'),preco:val('le-preco'),termino:val('le-termino'),observacao:val('le-obs')},'Embalagem salva').catch(()=>{})">Salvar</button>`);
+}
+
+function lpFormImportar() {
+  abrirJanela('Importar a planilha antiga da limpeza', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">Cole o link da planilha
+      <b>Gestão da Limpeza</b> (a versão online). O GSL traz as <b>não conformidades</b> (viram ações), os
+      <b>produtos</b>, as <b>compras</b>, o <b>rendimento</b> das embalagens e as <b>zonas</b>. O que já foi
+      importado não entra de novo. Registros e resumo dos turnos ficam de fora — saíram do painel.</p>
+    <div class="campo"><label>Link da planilha</label><input id="lp-link" placeholder="https://docs.google.com/spreadsheets/d/..."></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('importarLimpeza',{link:val('lp-link')}).catch(()=>{})">Importar</button>`);
+}
+
+/* =====================================================================
+   QUADRO DO CD — o BI de funcoes, igual, com o motivo do desligamento
+   ===================================================================== */
+let BQ = { aba: 'quadro', turno: '', funcao: '', busca: '', ordK: 'nome', ordA: 1, motivo: '', ordDes: 'data' };
+
+function pintarQuadro(r) {
+  const d = r.dados;
+  el('acoes-topo').innerHTML = '';
+  if (!d.configurado) {
+    el('subtitulo-pagina').textContent = 'Efetivo por função, turno e movimentação';
+    el('pagina').innerHTML = `<div class="cartao pn-vazio-grande">
+      <strong>Falta ligar o Quadro à planilha de apoio desta filial.</strong>
+      É a mesma planilha do BI de funções: abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS.
+      ${d.podeConfigurar ? `<div class="pn-linha" style="justify-content:center;margin-top:16px">
+        <input id="bq-link" placeholder="https://docs.google.com/spreadsheets/d/..." style="max-width:460px">
+        <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link')}).catch(()=>{})">Ligar planilha</button></div>`
+        : '<br><br>Peça para quem configura o sistema ligar a planilha.'}</div>`;
+    return;
+  }
+  el('subtitulo-pagina').textContent = 'Planilhas de apoio TA · TB · TC — efetivo por função, turno e movimentação';
+  el('acoes-topo').innerHTML = `
+    <span class="pn-mini" style="align-self:center">Efetivo em base <b class="pn-num" style="font-size:18px">${(d.apoio || []).length}</b></span>
+    <button class="botao secundario" onclick="agir('atualizarQuadro',{}).catch(()=>{})">Atualizar dados</button>
+    ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
+  if (d.erro) { el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
+
+  el('pagina').innerHTML = `<div class="bi-quadro">
+    ${pnAbas([['quadro', 'Quadro atual'], ['mov', 'Movimentação'], ['desligados', 'Desligados e motivos']], BQ.aba, 'bqAba')}
+    <div id="bq-conteudo"></div>
+    <p class="bq-rodape">Fonte: ${d.fonte ? `<a href="${esc(d.fonte.url)}" target="_blank">${esc(d.fonte.nome)}</a>` : 'planilha de apoio'} —
+      abas APOIO TA, APOIO TB e APOIO TC · CADMITIDOS e CDESLIGADOS.
+      ${d.atualizado ? 'Dados lidos em ' + new Date(d.atualizado).toLocaleString('pt-BR') + '.' : ''}</p>
+  </div>`;
+  bqDesenhar();
+}
+
+function bqAba(qual) {
+  BQ.aba = qual;
+  document.querySelectorAll('.bi-quadro .abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + qual + "'") !== -1));
+  bqDesenhar();
+}
+
+function bqTrocarFonte() {
+  abrirJanela('Planilha do Quadro do CD', `
+    <div class="campo"><label>Link da planilha de apoio</label><input id="bq-link2" value="${esc(DADOS.fonte ? DADOS.fonte.url : '')}"></div>
+    <p class="dica">A conta que implantou o GSL precisa ter acesso de leitura a essa planilha.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link2')}).catch(()=>{})">Salvar</button>`);
+}
+
+const BQ_CORES = { TA: 'var(--s1)', TB: 'var(--s2)', TC: 'var(--s3)' };
+const bqCor = (t) => BQ_CORES[t] || 'var(--bq-ink-2)';
+const bqUniq = (a) => { const s = {}, o = []; a.forEach((v) => { if (v && !s[v]) { s[v] = 1; o.push(v); } }); return o; };
+const bqContar = (arr, k) => { const m = {}; arr.forEach((r) => { m[r[k]] = (m[r[k]] || 0) + 1; }); return m; };
+const bqOrdenar = (m) => Object.keys(m).map((k) => [k, m[k]]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+function bqBase() {
+  return (DADOS.apoio || []).map((r) => ({ cod: String(r.cod || '').trim(), nome: (r.nome || '').trim(),
+    equipe: (r.equipe || '').trim().toUpperCase(), funcao: (r.funcao || '').trim().toUpperCase() })).filter((r) => r.nome || r.cod);
+}
+function bqBarras(pares, cor, clicavel, escolhido) {
+  const max = pares.length ? pares[0][1] : 1;
+  return pares.map((p) => `<div class="bq-barra ${clicavel ? 'clicavel' : ''} ${escolhido === p[0] ? 'escolhida' : ''}"
+      ${clicavel ? `onclick="${clicavel}(${jsArg(p[0])})"` : ''} title="${esc(p[0])}: ${p[1]}">
+    <span class="bq-nm">${esc(p[0])}</span><span class="bq-trilho"><span class="bq-fill" style="width:${Math.max(2, Math.round(p[1] / max * 100))}%;${cor ? 'background:' + cor : ''}"></span></span>
+    <span class="bq-vl bq-num">${p[1]}</span></div>`).join('');
+}
+
+function bqDesenhar() {
+  const alvo = el('bq-conteudo'); if (!alvo) return;
+  try {
+    if (BQ.aba === 'mov') alvo.innerHTML = bqMovimentacao();
+    else if (BQ.aba === 'desligados') alvo.innerHTML = bqDesligados();
+    else { alvo.innerHTML = bqQuadroEstrutura(); bqRender(); }
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+/* ---------- QUADRO ATUAL (igual ao BI) ---------- */
+function bqQuadroEstrutura() {
+  const base = bqBase();
+  const turnos = bqUniq(base.map((r) => r.equipe)).sort();
+  const funcoes = bqUniq(base.map((r) => r.funcao)).sort();
+  return `
+    <div class="bq-filtros">
+      <div class="bq-campo"><span class="bq-rot">Turno / Equipe</span>
+        <div class="bq-pills">${[''].concat(turnos).map((t) => `<button class="bq-pill" aria-pressed="${BQ.turno === t}" onclick="BQ.turno=${jsArg(t)};bqDesenhar()">${t ? esc(t) : 'TODOS'}</button>`).join('')}</div></div>
+      <div class="bq-campo"><label class="bq-rot">Função</label>
+        <select onchange="BQ.funcao=this.value;bqRender()"><option value="">Todas as funções</option>
+          ${funcoes.map((f) => `<option value="${esc(f)}" ${BQ.funcao === f ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
+      <div class="bq-campo bq-busca"><label class="bq-rot">Buscar colaborador ou código</label>
+        <input type="search" value="${esc(BQ.busca)}" placeholder="Ex.: 48231 ou José Carlos" oninput="BQ.busca=this.value.toLowerCase().trim();bqRender()"></div>
+      <button class="bq-limpar" onclick="BQ.turno='';BQ.funcao='';BQ.busca='';bqDesenhar()">Limpar filtros</button>
+    </div>
+    <div class="bq-kpis">
+      <div class="bq-kpi"><span class="bq-rot">Colaboradores</span><b id="bqTotal">0</b><small id="bqTotalSub"></small></div>
+      <div class="bq-kpi"><span class="bq-rot">Funções distintas</span><b id="bqFun">0</b><small>no recorte atual</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Maior função</span><b id="bqMaiorN">0</b><small id="bqMaior">—</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Média por turno</span><b id="bqMedia">0</b><small id="bqMediaSub"></small></div>
+    </div>
+    <div class="bq-grade">
+      <div class="bq-card"><h2>Efetivo por função</h2><p class="bq-sub">Quantidade de colaboradores em cada função, do maior para o menor.</p>
+        <div id="bqBarrasFuncao"></div></div>
+      <div style="display:grid;gap:14px">
+        <div class="bq-card"><h2>Distribuição por turno</h2><p class="bq-sub">Participação de cada equipe no efetivo filtrado.</p>
+          <div class="bq-stack" id="bqStackTurno"></div><div class="bq-leg" id="bqLegTurno"></div></div>
+        <div class="bq-card"><h2>Função × Turno</h2><p class="bq-sub">Quantos de cada função existem em cada equipe. Quanto mais escuro, maior o número.</p>
+          <div class="bq-rolagem"><table class="bq-mtz"><thead id="bqMtzHead"></thead><tbody id="bqMtzBody"></tbody></table></div>
+          <div class="bq-escala"><span>menos</span><i style="background:var(--seq-1)"></i><i style="background:var(--seq-2)"></i><i style="background:var(--seq-3)"></i><i style="background:var(--seq-4)"></i><i style="background:var(--seq-5)"></i><span>mais</span></div></div>
+      </div>
+    </div>
+    <div class="bq-card" style="margin-top:14px">
+      <h2>Colaboradores <span class="bq-num" id="bqCount" style="color:var(--bq-ink-2);font-weight:500"></span></h2>
+      <p class="bq-sub">Clique no cabeçalho para ordenar.</p>
+      <div class="bq-rolagem" style="max-height:440px;overflow-y:auto">
+        <table><thead><tr>
+          <th class="n" onclick="bqOrdem('cod')">Cód. produtivo</th><th onclick="bqOrdem('nome')">Colaborador</th>
+          <th onclick="bqOrdem('equipe')">Equipe</th><th onclick="bqOrdem('funcao')">Função</th>
+        </tr></thead><tbody id="bqTbl"></tbody></table>
+      </div>
+      <p class="bq-vazio" id="bqTblVazio" hidden>Nenhum colaborador com esses filtros.</p>
+    </div>`;
+}
+
+function bqOrdem(k) { BQ.ordA = (BQ.ordK === k) ? -BQ.ordA : 1; BQ.ordK = k; bqRender(); }
+
+function bqRender() {
+  const base = bqBase();
+  const turnos = bqUniq(base.map((r) => r.equipe)).sort();
+  const d = base.filter((r) => (!BQ.turno || r.equipe === BQ.turno) && (!BQ.funcao || r.funcao === BQ.funcao) &&
+    (!BQ.busca || (r.nome + ' ' + r.cod).toLowerCase().indexOf(BQ.busca) >= 0));
+  el('bqTotal').textContent = d.length;
+  el('bqTotalSub').textContent = 'de ' + base.length + ' na base';
+  const porFun = bqOrdenar(bqContar(d, 'funcao'));
+  el('bqFun').textContent = porFun.length;
+  el('bqMaiorN').textContent = porFun.length ? porFun[0][1] : 0;
+  el('bqMaior').textContent = porFun.length ? porFun[0][0] : '—';
+  const porEq = bqContar(d, 'equipe'), nEq = Object.keys(porEq).length;
+  el('bqMedia').textContent = nEq ? Math.round(d.length / nEq) : 0;
+  el('bqMediaSub').textContent = nEq ? ('em ' + nEq + (nEq > 1 ? ' equipes' : ' equipe')) : 'sem equipe no recorte';
+  el('bqBarrasFuncao').innerHTML = porFun.length ? bqBarras(porFun) : '<p class="bq-vazio">Nenhum colaborador com esses filtros.</p>';
+  const eqs = turnos.filter((t) => porEq[t]);
+  el('bqStackTurno').innerHTML = eqs.map((t) => {
+    const pct = porEq[t] / d.length * 100;
+    return `<div style="flex:${porEq[t]};background:${bqCor(t)}">${pct > 9 ? esc(t) + ' ' + porEq[t] : ''}</div>`;
+  }).join('') || '<div style="flex:1;background:var(--bq-surface-2)"></div>';
+  el('bqLegTurno').innerHTML = eqs.map((t) => `<span><i style="background:${bqCor(t)}"></i>${esc(t)} — <b class="bq-num">${porEq[t]}</b> (${Math.round(porEq[t] / d.length * 100)}%)</span>`).join('')
+    || '<span>Sem dados no recorte.</span>';
+  el('bqMtzHead').innerHTML = '<tr><th>Função</th>' + turnos.map((t) => `<th class="n">${esc(t)}</th>`).join('') + '<th class="n">Total</th></tr>';
+  const cel = {}; let maxC = 0;
+  d.forEach((r) => { const k = r.funcao + '|' + r.equipe; cel[k] = (cel[k] || 0) + 1; if (cel[k] > maxC) maxC = cel[k]; });
+  el('bqMtzBody').innerHTML = porFun.map((p) => '<tr><td>' + esc(p[0]) + '</td>' + turnos.map((t) => {
+    const v = cel[p[0] + '|' + t] || 0;
+    const i = v === 0 ? 0 : Math.min(5, Math.ceil(v / maxC * 5));
+    return `<td class="c" style="background:${i === 0 ? 'transparent' : 'var(--seq-' + i + ')'};color:${v ? (i >= 4 ? '#fff' : 'var(--seq-ink)') : 'var(--bq-ink-3)'}">${v || '–'}</td>`;
+  }).join('') + `<td class="c" style="color:var(--bq-ink)">${p[1]}</td></tr>`).join('');
+  const k = BQ.ordK, a = BQ.ordA;
+  const lista = d.slice().sort((x, y) => k === 'cod' ? (Number(x[k]) - Number(y[k])) * a : String(x[k]).localeCompare(String(y[k])) * a);
+  el('bqCount').textContent = '(' + lista.length + ')';
+  el('bqTblVazio').hidden = lista.length > 0;
+  el('bqTbl').innerHTML = lista.map((r) => `<tr><td class="n">${esc(r.cod)}</td><td>${esc(r.nome)}</td>
+    <td><span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span></td><td>${esc(r.funcao)}</td></tr>`).join('');
+}
+
+/* ---------- MOVIMENTACAO (igual ao BI + motivos) ---------- */
+function bqMovimentacao() {
+  const adm = DADOS.adm || [], des = DADOS.des || [];
+  if (!adm.length && !des.length) return '<div class="bq-card"><p class="bq-vazio">Sem dados nas abas CADMITIDOS e CDESLIGADOS.</p></div>';
+  const m = (r) => String(r.mes || '').trim();
+  const meses = bqUniq(adm.map(m).concat(des.map(m))).sort();
+  const cAdm = {}, cDes = {};
+  adm.forEach((r) => { cAdm[m(r)] = (cAdm[m(r)] || 0) + 1; });
+  des.forEach((r) => { cDes[m(r)] = (cDes[m(r)] || 0) + 1; });
+  const saldo = adm.length - des.length;
+  const efetivo = bqBase().length || 1;
+  const turns = meses.map((k) => ((cAdm[k] || 0) + (cDes[k] || 0)) / 2 / efetivo * 100);
+  const media = turns.reduce((s, v) => s + v, 0) / (turns.length || 1);
+  const corT = (v) => v >= 4 ? 'var(--grave)' : (v >= 2.5 ? 'var(--atencao)' : 'var(--bom)');
+  const maxM = Math.max(...meses.map((k) => Math.max(cAdm[k] || 0, cDes[k] || 0)).concat([1]));
+  const porFun = bqOrdenar(bqContar(des, 'funcao'));
+  const tipos = bqContar(des, 'tipo'), tks = Object.keys(tipos).sort();
+  const corTipo = (t) => ({ 'VOLUNTARIO': 'var(--s1)', 'VOLUNTÁRIO': 'var(--s1)', 'INVOLUNTARIO': 'var(--s2)', 'INVOLUNTÁRIO': 'var(--s2)' })[t.toUpperCase()] || 'var(--bq-ink-2)';
+  const motivos = bqOrdenar(bqContar(des.map((r) => ({ motivo: r.motivo || 'Não informado' })), 'motivo'));
+
+  return `
+    <div class="bq-kpis" id="bqMov">
+      <div class="bq-kpi"><span class="bq-rot">Admitidos no período</span><b>${adm.length}</b><small>aba CADMITIDOS</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Desligados no período</span><b>${des.length}</b><small>aba CDESLIGADOS</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Saldo</span><b style="color:${saldo >= 0 ? 'var(--bom)' : 'var(--grave)'}">${(saldo > 0 ? '+' : '') + saldo}</b><small>admissões menos desligamentos</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Turnover médio</span><b style="color:${corT(media)}">${media.toFixed(1).replace('.', ',')}%</b><small>média mensal do período</small></div>
+    </div>
+    <div class="bq-card">
+      <h2>Admissões e desligamentos por mês</h2><p class="bq-sub">Duas séries lado a lado. Valores acima de cada coluna.</p>
+      <div class="bq-leg" style="margin-bottom:10px"><span><i style="background:var(--s1)"></i>Admitidos</span><span><i style="background:var(--s2)"></i>Desligados</span></div>
+      <div class="bq-meses">${meses.map((k) => { const a = cAdm[k] || 0, dd = cDes[k] || 0; return `<div class="bq-mes"><div class="bq-duplas">
+        <span style="height:${a / maxM * 100}%;background:var(--s1)" title="${k}: ${a} admitidos"><b>${a}</b></span>
+        <span style="height:${dd / maxM * 100}%;background:var(--s2)" title="${k}: ${dd} desligados"><b>${dd}</b></span></div></div>`; }).join('')}</div>
+      <div class="bq-meses" style="height:auto;border:none;padding:0">${meses.map((k) => `<div class="bq-rotmes">${pnRotuloMes(k)}</div>`).join('')}</div>
+    </div>
+    <div class="bq-grade" style="margin-top:14px">
+      <div style="display:grid;gap:14px">
+        <div class="bq-card"><h2>Desligamentos por função</h2><p class="bq-sub">Onde o quadro mais perde gente no período.</p>
+          ${porFun.length ? bqBarras(porFun, 'var(--s2)') : '<p class="bq-vazio">Sem desligamentos no período.</p>'}</div>
+        <div class="bq-card bq-compacto"><h2>Motivos de desligamento</h2><p class="bq-sub">Coluna MOTIVO da aba CDESLIGADOS. Clique num motivo para ver quem saiu por ele.</p>
+          ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS ainda não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome e preencha o motivo de cada demissão.</div>'}
+          ${motivos.length ? bqBarras(motivos, 'var(--s2)', 'bqVerMotivo') : '<p class="bq-vazio">Sem desligamentos no período.</p>'}</div>
+      </div>
+      <div style="display:grid;gap:14px">
+        <div class="bq-card"><h2>Tipo de desligamento</h2><p class="bq-sub">Voluntário = pedido do colaborador. Involuntário = decisão da empresa.</p>
+          <div class="bq-stack">${tks.map((t) => { const pct = tipos[t] / des.length * 100; return `<div style="flex:${tipos[t]};background:${corTipo(t)}">${pct > 12 ? tipos[t] : ''}</div>`; }).join('')}</div>
+          <div class="bq-leg">${tks.map((t) => `<span><i style="background:${corTipo(t)}"></i>${esc(t)} — <b class="bq-num">${tipos[t]}</b> (${Math.round(tipos[t] / des.length * 100)}%)</span>`).join('')}</div></div>
+        <div class="bq-card"><h2>Turnover mês a mês</h2><p class="bq-sub">((admitidos + desligados) ÷ 2) ÷ efetivo do mês.</p>
+          <div class="bq-rolagem"><table><thead><tr><th>Mês</th><th class="n">Adm.</th><th class="n">Des.</th><th class="n">Turnover</th></tr></thead>
+            <tbody>${meses.map((k, i) => `<tr><td>${pnRotuloMes(k)}</td><td class="n">${cAdm[k] || 0}</td><td class="n">${cDes[k] || 0}</td>
+              <td class="n" style="color:${corT(turns[i])};font-weight:600">${turns[i].toFixed(1).replace('.', ',')}%</td></tr>`).join('')}</tbody></table></div></div>
+      </div>
+    </div>`;
+}
+
+function bqVerMotivo(motivo) { BQ.motivo = motivo; bqAba('desligados'); }
+
+/* ---------- DESLIGADOS E MOTIVOS (novo) ---------- */
+function bqDesligados() {
+  const des = (DADOS.des || []).map((r) => Object.assign({}, r, { motivo: r.motivo || 'Não informado' }));
+  if (!des.length) return '<div class="bq-card"><p class="bq-vazio">Sem desligamentos na aba CDESLIGADOS.</p></div>';
+  const motivos = bqOrdenar(bqContar(des, 'motivo'));
+  const semMotivo = des.filter((r) => r.motivo === 'Não informado').length;
+  const lista = des.filter((r) => !BQ.motivo || r.motivo === BQ.motivo)
+    .sort((a, b) => BQ.ordDes === 'nome' ? a.nome.localeCompare(b.nome) : String(b.data || b.mes).localeCompare(String(a.data || a.mes)));
+  return `
+    ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS ainda não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome e preencha o motivo de cada demissão — ele aparece aqui automaticamente.</div>'}
+    <div class="bq-grade desligados">
+      <div class="bq-card bq-compacto"><h2>Motivos de desligamento</h2>
+        <p class="bq-sub">${des.length} desligado(s) · ${semMotivo ? semMotivo + ' sem motivo preenchido' : 'todos com motivo'}. Clique para filtrar a lista.</p>
+        ${bqBarras(motivos, 'var(--s2)', 'bqFiltrarMotivo', BQ.motivo)}
+        ${BQ.motivo ? '<button class="bq-limpar" style="margin:8px 0 0" onclick="bqFiltrarMotivo(\'\')">Mostrar todos os motivos</button>' : ''}</div>
+      <div class="bq-card"><h2>Desligados ${BQ.motivo ? '— ' + esc(BQ.motivo) : ''} <span class="bq-num" style="color:var(--bq-ink-2);font-weight:500">(${lista.length})</span></h2>
+        <p class="bq-sub">Do mais recente para o mais antigo.</p>
+        <div class="bq-rolagem" style="max-height:520px;overflow-y:auto"><table>
+          <thead><tr><th onclick="BQ.ordDes='data';bqDesenhar()">Data</th><th onclick="BQ.ordDes='nome';bqDesenhar()">Colaborador</th><th>Equipe</th><th>Função</th><th>Tipo</th><th>Motivo</th></tr></thead>
+          <tbody>${lista.map((r) => `<tr><td>${r.data ? pnDataLonga(r.data) : pnRotuloMes(r.mes)}</td><td>${esc(r.nome)}${r.cod ? `<div class="lp-sub">${esc(r.cod)}</div>` : ''}</td>
+            <td>${r.equipe ? `<span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span>` : '—'}</td><td>${esc(r.funcao)}</td>
+            <td>${esc(r.tipo)}</td><td class="motivo">${r.motivo === 'Não informado' ? '<span style="color:var(--bq-ink-3)">não informado</span>' : esc(r.motivo)}</td></tr>`).join('')}</tbody>
+        </table></div></div>
+    </div>`;
+}
+
+function bqFiltrarMotivo(m) { BQ.motivo = (BQ.motivo === m) ? '' : m; bqDesenhar(); }
+
+/* =====================================================================
+   ESTOQUE DE TI
+   ===================================================================== */
+let ABA_EST = 'painel';     // painel | itens | movimentos | inventario
+let EST_FILTRO = { busca: '', categoria: '', situacao: '' };
+let EST_MOV = { tipo: '', item: '', destino: '', mes: '', busca: '' };
+const EST_ROTULO = { OK: ['ok', 'Normal'], REPOR: ['atencao', 'Repor'], ZERADO: ['alerta', 'Zerado'], INATIVO: ['neutro', 'Inativo'] };
+const EST_TIPO_CHIP = { ENTRADA: 'ok', DEVOLUCAO: 'ok', SAIDA: 'atencao', BAIXA: 'alerta', AJUSTE: 'neutro' };
+const EST_TIPO_NOME = { ENTRADA: 'Entrada', SAIDA: 'Saída', DEVOLUCAO: 'Devolução', BAIXA: 'Baixa', AJUSTE: 'Ajuste' };
+
+function estItem(codigo) { return (DADOS.itens || []).find((i) => i.codigo === codigo) || null; }
+
+function pintarEstoque(r) {
+  const d = r.dados, p = d.permissoes;
+  const ativos = d.itens.filter((i) => i.ativo);
+  el('subtitulo-pagina').textContent = ativos.length + ' item(ns) no catálogo · ' + d.totalMovimentos + ' movimentação(ões)';
+  el('acoes-topo').innerHTML =
+    (p.movimentar ? `<button class="botao secundario" onclick="estFormMov('SAIDA')">Registrar saída</button>
+                     <button class="botao" onclick="estFormMov('ENTRADA')">Registrar entrada</button>` : '') +
+    (p.cadastrar ? `<button class="botao secundario" onclick="estFormItem()">Novo item</button>` : '');
+  const abas = [['painel', 'Painel'], ['itens', 'Itens'], ['movimentos', 'Movimentações']]
+    .concat(p.cadastrar ? [['inventario', 'Inventário']] : []);
+  if (!abas.some((a) => a[0] === ABA_EST)) ABA_EST = 'painel';
+  el('pagina').innerHTML = pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
+  pintarAbaEst(d);
+}
+
+function trocarAbaEst(aba) {
+  ABA_EST = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + aba + "'") !== -1));
+  pintarAbaEst(DADOS);
+}
+
+function pintarAbaEst(d) {
+  const alvo = el('conteudo-est'); if (!alvo) return;
+  try {
+    if (!d.itens.length && ABA_EST !== 'movimentos') {
+      alvo.innerHTML = `<div class="cartao pn-vazio-grande"><strong>Nenhum item cadastrado ainda.</strong>
+        Cadastre um por um em <b>Novo item</b>, ou copie a lista de uma planilha e cole em <b>Colar da planilha</b>
+        — nome, categoria, marca, modelo, unidade, mínimo, local e saldo inicial, nessa ordem.<br><br>
+        ${d.permissoes.cadastrar ? `<button class="botao" onclick="estFormItem()">Novo item</button>
+          <button class="botao secundario" onclick="estFormLote()">Colar da planilha</button>` : ''}</div>`;
+      return;
+    }
+    if (ABA_EST === 'itens') alvo.innerHTML = estItens(d);
+    else if (ABA_EST === 'movimentos') alvo.innerHTML = estMovimentos(d);
+    else if (ABA_EST === 'inventario') alvo.innerHTML = estInventario(d);
+    else alvo.innerHTML = estPainel(d);
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+const estChip = (sit) => { const c = EST_ROTULO[sit] || EST_ROTULO.OK; return `<span class="pn-chip ${c[0]}">${c[1]}</span>`; };
+const estQtd = (n, un) => `<span class="pn-num">${pnNum(n, Number.isInteger(Number(n)) ? 0 : 2)}</span> <span class="pn-mini">${esc(un || '')}</span>`;
+
+/* ---------- PAINEL ---------- */
+function estPainel(d) {
+  const ativos = d.itens.filter((i) => i.ativo);
+  const repor = ativos.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO')
+    .sort((a, b) => (a.saldo - a.minimo) - (b.saldo - b.minimo));
+  const mes = d.hoje.slice(0, 7);
+  const doMes = d.movimentos.filter((m) => (m.data || '').slice(0, 7) === mes);
+  const unidades = ativos.reduce((s, i) => s + Math.max(0, i.saldo), 0);
+  const saidasMes = doMes.filter((m) => m.tipo === 'SAIDA');
+  const porDestino = {};
+  saidasMes.forEach((m) => { const k = m.destino || '(sem destino)'; porDestino[k] = (porDestino[k] || 0) + m.quantidade; });
+  const porCat = {};
+  ativos.forEach((i) => { porCat[i.categoria] = (porCat[i.categoria] || 0) + Math.max(0, i.saldo); });
+  const ordenar = (o) => Object.keys(o).map((k) => [k, o[k]]).sort((a, b) => b[1] - a[1]);
+
+  return `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(ativos.length, 'Itens no catálogo', 'azul', ordenar(porCat).length + ' categoria(s)')}
+      ${pnKpi(pnNum(unidades), 'Unidades em estoque', 'verde', 'soma de todos os saldos')}
+      ${pnKpi(repor.length, 'Precisam de reposição', repor.length ? 'vermelho' : 'verde',
+        ativos.filter((i) => i.situacao === 'ZERADO').length + ' zerado(s)')}
+      ${pnKpi(saidasMes.reduce((s, m) => s + m.quantidade, 0), 'Unidades entregues no mês', 'amarelo', saidasMes.length + ' saída(s) · ' + pnRotuloMes(mes))}
+    </div>
+    <div class="pn-grade duas" style="margin-bottom:14px">
+      <div class="cartao">
+        <div class="cartao-titulo">Precisa repor</div>
+        ${repor.length ? `<table><thead><tr><th>Item</th><th class="numero">Saldo</th><th class="numero">Mínimo</th><th></th></tr></thead><tbody>
+          ${repor.slice(0, 12).map((i) => `<tr><td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
+            <td class="numero" style="color:${i.saldo <= 0 ? 'var(--alerta)' : 'var(--laranja-escuro)'};font-weight:700">${estQtd(i.saldo, i.unidade)}</td>
+            <td class="numero">${pnNum(i.minimo)}</td>
+            <td>${d.permissoes.movimentar ? `<button class="icone-botao" onclick="estFormMov('ENTRADA',${jsArg(i.codigo)})">Entrada</button>` : ''}</td></tr>`).join('')}
+          </tbody></table>${repor.length > 12 ? `<p class="dica">E mais ${repor.length - 12}. Veja todos em Itens › Repor.</p>` : ''}`
+        : '<div class="vazio">Nenhum item abaixo do mínimo. 👍</div>'}
+        <p class="dica">Entra aqui o item com saldo igual ou abaixo do estoque mínimo cadastrado, e o que zerou.</p>
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo">Últimas movimentações</div>
+        ${d.movimentos.length ? `<table><tbody>${d.movimentos.slice(0, 10).map((m) => {
+          const i = estItem(m.item);
+          return `<tr><td style="white-space:nowrap">${pnData(m.data)}</td>
+            <td><span class="pn-chip ${EST_TIPO_CHIP[m.tipo]}">${EST_TIPO_NOME[m.tipo]}</span></td>
+            <td>${esc(i ? i.nome : m.item)}<div class="lp-sub">${esc(m.destino || m.documento || m.observacao || '')}</div></td>
+            <td class="numero pn-num" style="font-weight:700">${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</td></tr>`;
+        }).join('')}</tbody></table>` : '<div class="vazio">Nenhuma movimentação ainda.</div>'}
+      </div>
+    </div>
+    <div class="pn-grade duas">
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Para onde foi — saídas de ${pnRotuloMes(mes)}</div>
+        ${pnBarras(ordenar(porDestino), 'azul')}</div>
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Unidades em estoque por categoria</div>
+        ${pnBarras(ordenar(porCat).filter((x) => x[1] > 0), 'amarela')}</div>
+    </div>`;
+}
+
+/* ---------- ITENS ---------- */
+function estItens(d) {
+  const f = EST_FILTRO;
+  const cont = { '': d.itens.filter((i) => i.ativo).length, REPOR: 0, ZERADO: 0, INATIVO: 0 };
+  d.itens.forEach((i) => { if (cont[i.situacao] !== undefined) cont[i.situacao]++; });
+  const lista = d.itens.filter((i) => {
+    if (f.situacao) { if (i.situacao !== f.situacao) return false; }
+    else if (!i.ativo) return false;
+    if (f.categoria && i.categoria !== f.categoria) return false;
+    if (f.busca && (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) === -1) return false;
+    return true;
+  });
+  const chip = (id, nome) => `<button class="lp-filtro ${f.situacao === id ? 'ativo' : ''}" onclick="EST_FILTRO.situacao=${jsArg(id)};pintarAbaEst(DADOS)">${nome}<b>${cont[id]}</b></button>`;
+  const p = d.permissoes;
+  return `<div class="cartao">
+    <div class="lp-filtros">
+      ${chip('', 'Ativos')}${chip('REPOR', 'Repor')}${chip('ZERADO', 'Zerados')}${chip('INATIVO', 'Inativos')}
+      <select style="width:auto" onchange="EST_FILTRO.categoria=this.value;pintarAbaEst(DADOS)">
+        <option value="">Todas as categorias</option>${d.listas.categorias.map((c) => `<option ${f.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <span class="campo-busca"><input id="est-busca" placeholder="Buscar código, nome, marca, local" value="${esc(f.busca)}"
+        oninput="EST_FILTRO.busca=this.value.toLowerCase().trim();estRefiltrarItens()"></span>
+      ${p.cadastrar ? '<button class="icone-botao" onclick="estFormLote()">Colar da planilha</button>' : ''}
+    </div>
+    <div class="pn-tabela-rolagem" id="est-tabela-itens">${estTabelaItens(lista, p)}</div>
+  </div>`;
+}
+
+/* Busca digitada nao redesenha a caixa (senao perde o foco a cada letra). */
+function estRefiltrarItens() {
+  const f = EST_FILTRO, d = DADOS;
+  const lista = d.itens.filter((i) => (f.situacao ? i.situacao === f.situacao : i.ativo) &&
+    (!f.categoria || i.categoria === f.categoria) &&
+    (!f.busca || (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) !== -1));
+  el('est-tabela-itens').innerHTML = estTabelaItens(lista, d.permissoes);
+}
+
+function estTabelaItens(lista, p) {
+  return `<table><thead><tr><th>Código</th><th>Item</th><th>Categoria</th><th>Local</th>
+    <th class="numero">Saldo</th><th class="numero">Mínimo</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${lista.map((i) => `<tr>
+      <td class="mono">${esc(i.codigo)}</td>
+      <td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc([i.marca, i.modelo].filter(Boolean).join(' · '))}</div></td>
+      <td>${esc(i.categoria)}</td><td>${esc(i.local || '—')}</td>
+      <td class="numero" style="font-size:15px;font-weight:700;${i.saldo <= 0 ? 'color:var(--alerta)' : ''}">${estQtd(i.saldo, i.unidade)}</td>
+      <td class="numero">${i.minimo ? pnNum(i.minimo) : '—'}</td>
+      <td>${estChip(i.situacao)}</td>
+      <td style="white-space:nowrap">
+        ${p.movimentar && i.ativo ? `<button class="icone-botao" onclick="estFormMov('ENTRADA',${jsArg(i.codigo)})">Entrada</button>
+          <button class="icone-botao" onclick="estFormMov('SAIDA',${jsArg(i.codigo)})" ${i.saldo <= 0 ? 'disabled' : ''}>Saída</button>` : ''}
+        <button class="icone-botao" onclick="estHistorico(${jsArg(i.codigo)})">Histórico</button>
+        ${p.cadastrar ? `<button class="icone-botao" onclick="estFormItem(${jsArg(i.id)})">Editar</button>` : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="vazio">Nenhum item com esses filtros.</td></tr>'}
+  </tbody></table>`;
+}
+
+/* ---------- MOVIMENTACOES ---------- */
+function estMovimentos(d) {
+  const f = EST_MOV;
+  const meses = [...new Set(d.movimentos.map((m) => (m.data || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const lista = d.movimentos.filter((m) => {
+    if (f.tipo && m.tipo !== f.tipo) return false;
+    if (f.item && m.item !== f.item) return false;
+    if (f.destino && m.destino !== f.destino) return false;
+    if (f.mes && (m.data || '').slice(0, 7) !== f.mes) return false;
+    if (f.busca) {
+      const i = estItem(m.item);
+      const t = (m.item + ' ' + (i ? i.nome : '') + ' ' + m.destino + ' ' + m.solicitante + ' ' + m.documento + ' ' + m.serie + ' ' + m.observacao).toLowerCase();
+      if (t.indexOf(f.busca) === -1) return false;
+    }
+    return true;
+  });
+  return `<div class="cartao">
+    <div class="lp-filtros">
+      <select style="width:auto" onchange="EST_MOV.tipo=this.value;pintarAbaEst(DADOS)"><option value="">Todos os tipos</option>
+        ${d.listas.tipos.map((t) => `<option value="${t.id}" ${f.tipo === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select>
+      <select style="width:auto;max-width:260px" onchange="EST_MOV.item=this.value;pintarAbaEst(DADOS)"><option value="">Todos os itens</option>
+        ${d.itens.map((i) => `<option value="${esc(i.codigo)}" ${f.item === i.codigo ? 'selected' : ''}>${esc(i.nome)}</option>`).join('')}</select>
+      <select style="width:auto;max-width:220px" onchange="EST_MOV.destino=this.value;pintarAbaEst(DADOS)"><option value="">Todos os destinos</option>
+        ${d.listas.destinos.map((x) => `<option ${f.destino === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="EST_MOV.mes=this.value;pintarAbaEst(DADOS)"><option value="">Todos os meses</option>
+        ${meses.map((m) => `<option value="${m}" ${f.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('')}</select>
+      <span class="campo-busca"><input placeholder="Buscar série, patrimônio, NF, pessoa" value="${esc(f.busca)}"
+        onchange="EST_MOV.busca=this.value.toLowerCase().trim();pintarAbaEst(DADOS)"></span>
+      <span class="pn-mini">${lista.length} lançamento(s)</span>
+    </div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Tipo</th><th>Item</th><th class="numero">Qtd.</th>
+      <th>Destino / solicitante</th><th>Documento · série</th><th>Observação</th><th></th></tr></thead><tbody>
+      ${lista.slice(0, 300).map((m) => {
+        const i = estItem(m.item);
+        return `<tr><td style="white-space:nowrap">${pnDataLonga(m.data)}</td>
+          <td><span class="pn-chip ${EST_TIPO_CHIP[m.tipo]}">${EST_TIPO_NOME[m.tipo]}</span></td>
+          <td><strong>${esc(i ? i.nome : m.item)}</strong><div class="lp-sub">${esc(m.item)}</div></td>
+          <td class="numero pn-num" style="font-weight:700;color:${m.efeito < 0 ? 'var(--laranja-escuro)' : 'var(--verde)'}">${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</td>
+          <td>${esc(m.destino || '—')}${m.solicitante ? `<div class="lp-sub">${esc(m.solicitante)}</div>` : ''}</td>
+          <td>${esc(m.documento || '—')}${m.serie ? `<div class="lp-sub">${esc(m.serie)}</div>` : ''}</td>
+          <td style="max-width:260px">${esc(m.observacao)}<div class="lp-sub">${esc((m.por || '').split('@')[0])}</div></td>
+          <td>${d.permissoes.cadastrar && !/^ESTORNO/.test(m.observacao) ? `<button class="icone-botao" onclick="estFormEstorno(${jsArg(m.id)})">Estornar</button>` : ''}</td></tr>`;
+      }).join('') || '<tr><td colspan="8" class="vazio">Nenhuma movimentação com esses filtros.</td></tr>'}
+    </tbody></table></div>
+    ${lista.length > 300 ? '<p class="dica">Mostrando as 300 mais recentes. Use os filtros para achar as demais.</p>' : ''}
+    <p class="dica">Esta lista cobre os últimos ${d.diasMovimentos || 90} dias. O histórico completo de cada item está no botão
+      <b>Histórico</b>, na aba Itens.</p>
+    <p class="dica">Lançamento errado não se apaga: <b>Estornar</b> lança o movimento contrário e o histórico mostra os dois.</p>
+  </div>`;
+}
+
+/* ---------- INVENTARIO ---------- */
+function estInventario(d) {
+  const ativos = d.itens.filter((i) => i.ativo);
+  return `<div class="cartao">
+    <p class="dica" style="margin:0 0 12px">Conte o que está fisicamente no estoque e digite na coluna <b>Contado</b>.
+      Só os itens preenchidos e diferentes do sistema viram ajuste. Deixe em branco o que não contou.
+      Item movimentado por outra pessoa depois que esta tela abriu fica de fora — o aviso diz quais contar de novo.</p>
+    <div class="pn-linha" style="margin-bottom:10px">
+      <span class="campo-busca"><input placeholder="Filtrar a lista" oninput="estFiltrarInventario(this.value)"></span>
+    </div>
+    <div class="pn-tabela-rolagem"><table id="est-inv"><thead><tr><th>Item</th><th>Local</th><th class="numero">No sistema</th>
+      <th class="numero">Contado</th><th class="numero">Diferença</th></tr></thead><tbody>
+      ${ativos.map((i) => `<tr data-busca="${esc((i.codigo + ' ' + i.nome + ' ' + i.local + ' ' + i.categoria).toLowerCase())}">
+        <td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
+        <td>${esc(i.local || '—')}</td>
+        <td class="numero">${estQtd(i.saldo, i.unidade)}</td>
+        <td class="numero"><input inputmode="decimal" style="width:90px;text-align:right" data-codigo="${esc(i.codigo)}" data-saldo="${i.saldo}"
+          oninput="estDiferenca(this)"></td>
+        <td class="numero pn-num" data-dif></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="campo" style="margin-top:12px"><label>Observação do inventário (opcional)</label><input id="est-inv-obs" placeholder="Ex.: inventário mensal de setembro"></div>
+    <div style="display:flex;justify-content:flex-end"><button class="botao" onclick="estAplicarInventario()">Aplicar contagem</button></div>
+  </div>`;
+}
+function estFiltrarInventario(t) {
+  const q = String(t || '').toLowerCase().trim();
+  document.querySelectorAll('#est-inv tbody tr').forEach((tr) => { tr.style.display = !q || tr.dataset.busca.indexOf(q) !== -1 ? '' : 'none'; });
+}
+function estDiferenca(inp) {
+  const td = inp.closest('tr').querySelector('[data-dif]');
+  const n = pnLerNumero(inp.value);
+  if (n === null) { td.textContent = ''; return; }
+  const dif = n - Number(inp.dataset.saldo);
+  td.textContent = (dif > 0 ? '+' : '') + pnNum(dif, Number.isInteger(dif) ? 0 : 2);
+  td.style.color = dif === 0 ? 'var(--tinta-fraca)' : (dif < 0 ? 'var(--alerta)' : 'var(--verde)');
+  td.style.fontWeight = '700';
+}
+function estAplicarInventario() {
+  const contagens = [...document.querySelectorAll('#est-inv input[data-codigo]')]
+    .filter((i) => i.value.trim() !== '')
+    // saldoVisto: o saldo que a tela mostrava. Se mudou no servidor, o item nao e ajustado (ver acaoInventarioEstoque).
+    .map((i) => ({ codigo: i.dataset.codigo, contado: pnLerNumero(i.value), saldoVisto: Number(i.dataset.saldo) }));
+  if (!contagens.length) return avisar('Preencha a contagem de pelo menos um item.', true);
+  if (contagens.some((c) => c.contado === null)) return avisar('Há contagem que não é número.', true);
+  agir('inventarioEstoque', { contagens: contagens, observacao: val('est-inv-obs') }, 'Inventário aplicado')
+    .then((r) => { if (r && r.mudaram && r.mudaram.length) avisar(r.recado, true); })
+    .catch(() => {});
+}
+
+/* ---------- JANELAS ---------- */
+function estFormItem(id) {
+  const d = DADOS;
+  const i = id ? d.itens.find((x) => x.id === id) : null;
+  abrirJanela(i ? 'Editar ' + i.nome : 'Novo item', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Nome do item</label><input id="ei-nome" value="${esc(i ? i.nome : '')}" placeholder="Ex.: Mouse USB"></div>
+      <div class="campo"><label>Código (vazio = automático)</label><input id="ei-codigo" value="${esc(i ? i.codigo : '')}" placeholder="TI-0001"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Categoria</label><input id="ei-cat" list="ei-cats" value="${esc(i ? i.categoria : '')}">
+        <datalist id="ei-cats">${d.listas.categorias.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div class="campo"><label>Unidade</label><select id="ei-un">${d.listas.unidades.map((u) => `<option ${i && i.unidade === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Marca</label><input id="ei-marca" value="${esc(i ? i.marca : '')}"></div>
+      <div class="campo"><label>Modelo</label><input id="ei-modelo" value="${esc(i ? i.modelo : '')}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Estoque mínimo</label><input id="ei-min" inputmode="decimal" value="${i && i.minimo ? i.minimo : ''}" placeholder="avisa quando chegar nisso"></div>
+      <div class="campo"><label>Onde fica guardado</label><input id="ei-local" value="${esc(i ? i.local : '')}" placeholder="Ex.: Armário da TI, prateleira 2"></div>
+    </div>
+    ${i ? '' : `<div class="campo"><label>Saldo inicial (opcional)</label><input id="ei-saldo" inputmode="decimal" placeholder="quanto tem hoje — vira uma entrada"></div>`}
+    <div class="campo"><label>Observação</label><input id="ei-obs" value="${esc(i ? i.observacao : '')}"></div>
+    ${i ? `<label class="marcador"><input type="checkbox" id="ei-ativo" ${i.ativo ? 'checked' : ''}> Item em uso (aparece nas listas)</label>` : ''}`, `
+    ${i ? `<button class="botao perigo" onclick="agir('excluirItemEstoque',{id:${jsArg(i.id)}},'Item removido').catch(()=>{})">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarItemEstoque',{id:${jsArg(i ? i.id : '')},nome:val('ei-nome'),codigo:val('ei-codigo'),categoria:val('ei-cat'),
+      unidade:val('ei-un'),marca:val('ei-marca'),modelo:val('ei-modelo'),minimo:val('ei-min'),local:val('ei-local'),
+      saldoInicial:val('ei-saldo'),observacao:val('ei-obs'),ativo:${i ? "marcado('ei-ativo')" : 'true'}},'Item salvo').catch(()=>{})">Salvar</button>`);
+}
+
+function estFormLote() {
+  abrirJanela('Cadastrar itens colando da planilha', `
+    <p style="margin:0 0 10px;line-height:1.7;color:var(--tinta-media)">Na planilha, deixe as colunas nesta ordem,
+      selecione as linhas, copie (<b>Ctrl+C</b>) e cole aqui (<b>Ctrl+V</b>). Só o nome é obrigatório; a linha de títulos é ignorada.</p>
+    <div class="pn-tabela-rolagem" style="margin-bottom:10px"><table><thead><tr>
+      <th>Nome</th><th>Categoria</th><th>Marca</th><th>Modelo</th><th>Unidade</th><th>Mínimo</th><th>Local</th><th>Saldo inicial</th><th>Código</th></tr></thead>
+      <tbody><tr><td>Mouse USB</td><td>Periféricos</td><td>Logitech</td><td>M90</td><td>un</td><td>5</td><td>Armário TI</td><td>12</td><td class="pn-mini">(vazio = TI-0001…)</td></tr></tbody></table></div>
+    <div class="campo"><label>Linhas copiadas</label><textarea id="el-texto" rows="8" style="font-family:monospace;font-size:12px"></textarea></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('importarItensEstoque',{texto:val('el-texto')}).catch(()=>{})">Cadastrar itens</button>`);
+}
+
+function estFormMov(tipo, codigo) {
+  const d = DADOS;
+  const ativos = d.itens.filter((i) => i.ativo);
+  if (!ativos.length) return avisar('Cadastre um item primeiro.', true);
+  const titulos = { ENTRADA: 'Registrar entrada', SAIDA: 'Registrar saída', DEVOLUCAO: 'Registrar devolução', BAIXA: 'Registrar baixa' };
+  abrirJanela(titulos[tipo] || 'Movimentação', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Tipo</label><select id="em-tipo" onchange="estAjustarFormMov()">
+        ${['ENTRADA', 'SAIDA', 'DEVOLUCAO', 'BAIXA'].map((t) => `<option value="${t}" ${t === tipo ? 'selected' : ''}>${EST_TIPO_NOME[t]}</option>`).join('')}</select></div>
+      <div class="campo"><label>Data</label><input type="date" id="em-data" value="${d.hoje}"></div>
+    </div>
+    <div class="campo"><label>Item</label><select id="em-item" onchange="estAjustarFormMov()">
+      ${ativos.map((i) => `<option value="${esc(i.codigo)}" ${i.codigo === codigo ? 'selected' : ''}>${esc(i.nome)} — ${esc(i.codigo)} (saldo ${pnNum(i.saldo)} ${esc(i.unidade)})</option>`).join('')}</select></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Quantidade</label><input id="em-qtd" inputmode="decimal" value="1"></div>
+      <div class="campo"><label id="em-rot-destino">Destino (setor ou pessoa)</label><input id="em-destino" list="em-destinos" placeholder="Ex.: Recebimento, Portaria, Coord. turno B">
+        <datalist id="em-destinos">${d.listas.destinos.map((x) => `<option value="${esc(x)}">`).join('')}</datalist></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Solicitante / quem recebeu</label><input id="em-solic"></div>
+      <div class="campo"><label>NF, pedido ou chamado</label><input id="em-doc"></div>
+    </div>
+    <div class="campo"><label>Nº de série ou patrimônio (opcional)</label><input id="em-serie" placeholder="separe vários por vírgula"></div>
+    <div class="campo"><label>Observação</label><input id="em-obs"></div>
+    <p class="dica" id="em-saldo"></p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('movimentarEstoque',{tipo:val('em-tipo'),data:val('em-data'),item:val('em-item'),quantidade:val('em-qtd'),
+      destino:val('em-destino'),solicitante:val('em-solic'),documento:val('em-doc'),serie:val('em-serie'),observacao:val('em-obs')}).catch(()=>{})">Registrar</button>`);
+  estAjustarFormMov();
+}
+
+function estAjustarFormMov() {
+  const tipo = val('em-tipo'), i = estItem(val('em-item'));
+  const rot = { ENTRADA: 'Origem (fornecedor, outra filial) — opcional', SAIDA: 'Destino (setor ou pessoa)',
+    DEVOLUCAO: 'Devolvido por (setor ou pessoa)', BAIXA: 'Motivo / onde estava' }[tipo];
+  if (el('em-rot-destino')) el('em-rot-destino').textContent = rot;
+  if (el('em-saldo') && i) el('em-saldo').innerHTML = `Saldo atual de <b>${esc(i.nome)}</b>: <b>${pnNum(i.saldo)} ${esc(i.unidade)}</b>` +
+    (i.minimo ? ` · mínimo ${pnNum(i.minimo)}` : '') + (i.local ? ` · guardado em ${esc(i.local)}` : '');
+}
+
+function estFormEstorno(id) {
+  const m = DADOS.movimentos.find((x) => x.id === id);
+  const i = estItem(m.item);
+  abrirJanela('Estornar lançamento', `
+    <p style="margin:0 0 12px;line-height:1.7"><b>${EST_TIPO_NOME[m.tipo]}</b> de ${pnDataLonga(m.data)} ·
+      ${esc(i ? i.nome : m.item)} · ${m.efeito > 0 ? '+' : ''}${m.efeito}<br>
+      <span class="pn-mini">O GSL lança o movimento contrário, com a data de hoje. O original continua no histórico.</span></p>
+    <div class="campo"><label>Motivo</label><input id="es-motivo" placeholder="Ex.: lançado no item errado"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao perigo" onclick="agir('estornarMovimento',{id:${jsArg(id)},motivo:val('es-motivo')},'Lançamento estornado').catch(()=>{})">Estornar</button>`);
+}
+
+/*
+ * Historico completo do item — vem do servidor na hora (a tela so leva ~90
+ * dias). O saldo corrido parte do saldo-base que o servidor calcula, entao
+ * a ultima linha sempre bate com o saldo atual.
+ */
+let EST_HIST_PEDIDO = 0;
+async function estHistorico(codigo) {
+  const i = estItem(codigo);
+  const pedido = ++EST_HIST_PEDIDO;
+  const titulo = 'Histórico · ' + (i ? i.nome : codigo);
+  const rodape = '<button class="botao" onclick="fecharJanela()">Fechar</button>';
+  abrirJanela(titulo, '<div class="vazio">Carregando o histórico…</div>', rodape);
+  let r;
+  try { r = await executarAcaoSrv('historicoItemEstoque', { codigo: codigo }); }
+  catch (e) {
+    if (pedido === EST_HIST_PEDIDO) el('janela-corpo').innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+    return;
+  }
+  // Janela fechada ou outro historico pedido no meio: nao escreve por cima.
+  if (pedido !== EST_HIST_PEDIDO || el('janela').classList.contains('oculto')) return;
+  let saldo = Number(r.saldoBase) || 0;
+  const linhas = (r.movimentos || []).slice().reverse().map((m) => { saldo += m.efeito; return { m: m, saldo: saldo }; }).reverse();
+  const casas = (n) => (Number.isInteger(n) ? 0 : 2);
+  abrirJanela(titulo, `
+    <p class="pn-mini" style="margin:0 0 10px">${esc(codigo)} · saldo atual <b>${pnNum(r.saldo, casas(r.saldo))} ${esc(r.unidade || '')}</b></p>
+    ${linhas.length ? `<div class="pn-tabela-rolagem" style="max-height:55vh;overflow:auto"><table><thead><tr><th>Data</th><th>Tipo</th>
+      <th class="numero">Qtd.</th><th class="numero">Saldo</th><th>Destino · doc.</th></tr></thead><tbody>
+      ${linhas.map((x) => `<tr><td>${pnDataLonga(x.m.data)}</td><td><span class="pn-chip ${EST_TIPO_CHIP[x.m.tipo]}">${EST_TIPO_NOME[x.m.tipo]}</span></td>
+        <td class="numero pn-num">${x.m.efeito > 0 ? '+' : ''}${pnNum(x.m.efeito, casas(x.m.efeito))}</td>
+        <td class="numero pn-num"><b>${pnNum(x.saldo, casas(x.saldo))}</b></td>
+        <td>${esc([x.m.destino, x.m.documento, x.m.serie].filter(Boolean).join(' · ') || x.m.observacao || '—')}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="vazio">Nenhuma movimentação deste item.</div>'}
+    <p class="dica">${r.total > linhas.length
+      ? `Mostrando os ${linhas.length} lançamentos mais recentes de ${r.total}; o saldo corrido já parte do que havia antes deles (${pnNum(r.saldoBase, casas(r.saldoBase))}).`
+      : `Todos os ${r.total} lançamento(s) deste item.`}</p>`, rodape);
+}
+</script>

@@ -769,6 +769,35 @@ function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
   return abrirSessaoPara_(email, filial);
 }
 
+/*
+ * TROCAR O PROPRIO PIN (4.2.2). Pede o PIN atual (quem achou a sessao aberta
+ * num computador compartilhado nao troca o PIN de outra pessoa) e conta os
+ * erros junto com os da entrada: 5 erros bloqueiam por 10 minutos.
+ */
+function acaoTrocarMeuPin(usuario, params) {
+  const email = String(usuario.email || '').toLowerCase().trim();
+  const atual = String(params.atual || '').trim();
+  const novo = String(params.novo || '').trim();
+  const conf = String(params.confirmacao || '').trim();
+  if (pinBloqueado_(email)) throw new Error('PIN errado muitas vezes. Espere 10 minutos e tente de novo.');
+  const registro = registroDeAcesso_(email);
+  if (!registro || !String(registro.PIN_HASH || '').trim()) {
+    throw new Error('Seu cadastro ainda não tem PIN. Saia e entre de novo para criar o seu.');
+  }
+  if (resumoPin_(email, atual) !== String(registro.PIN_HASH).trim()) {
+    const restam = PIN_TENTATIVAS - contarErroPin_(email);
+    throw new Error(restam > 0 ? 'O PIN atual está incorreto. ' + (restam === 1 ? 'Resta 1 tentativa.' : 'Restam ' + restam + ' tentativas.')
+      : 'PIN errado muitas vezes. Espere 10 minutos e tente de novo.');
+  }
+  if (!/^\d{4,6}$/.test(novo)) throw new Error('O PIN novo tem de 4 a 6 números.');
+  if (novo !== conf) throw new Error('Os dois campos do PIN novo não são iguais.');
+  if (novo === atual) throw new Error('O PIN novo é igual ao atual.');
+  zerarErrosPin_(email);
+  atualizar('ACESSOS', registro.ID, { PIN_HASH: resumoPin_(email, novo), PIN_EM: agoraTexto() }, email);
+  limparCache('ACESSOS');
+  return { ok: true, recado: 'PIN trocado. Use o novo na próxima entrada.' };
+}
+
 /* Cria a sessao e devolve a mesma carga que o doGet mandaria (APP ou ESCOLHER_FILIAL). */
 function abrirSessaoPara_(email, filial) {
   const token = criarSessao_(email);

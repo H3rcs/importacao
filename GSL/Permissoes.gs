@@ -199,9 +199,20 @@ function carregarPerfis() {
 
 function permissoesDe(perfil) {
   const perfis = carregarPerfis();
-  return perfis[String(perfil || '').toUpperCase().trim()] ||
-         perfis[PERFIL_PADRAO_NOVO_USUARIO] ||
-         PERFIL_MINIMO;
+  const nome = String(perfil || '').toUpperCase().trim();
+  /*
+   * O ADMIN ve e pode TUDO, qualquer que seja a linha dele na tabela PERFIS
+   * (4.2.2). Banco que veio de versao antiga podia ter a linha ADMIN sem as
+   * colunas novas marcadas (TELA_NOBREAKS, TELA_LIMPEZA, TELA_QUADRO,
+   * TELA_ESTOQUE, PODE_GERIR_FILIAIS...) e o administrador nao via os
+   * paineis nem a tela de Filiais.
+   */
+  if (nome === 'ADMIN') {
+    const base = perfis.ADMIN || PERFIL_MINIMO;
+    return { escopo: 'TODOS', telas: TELAS.map(function (t) { return t.id; }),
+             podes: CAPACIDADES.slice(), descricao: base.descricao || 'Administrador', id: base.id };
+  }
+  return perfis[nome] || perfis[PERFIL_PADRAO_NOVO_USUARIO] || PERFIL_MINIMO;
 }
 
 /* --- As perguntas que o resto do sistema faz --- */
@@ -265,7 +276,7 @@ function modulosDe(usuario) {
     return telas.some(function (t) { return t.modulo === m.id; });
   }).map(function (m) {
     return { id: m.id, nome: m.nome, frase: m.frase, acao: m.acao, icone: m.icone, cor: m.cor,
-             oculto: estadoDoPainel(m.id) === PAINEL_OCULTO,
+             oculto: m.id !== 'config' && estadoDoPainel(m.id) !== PAINEL_ATIVO,
              telas: telas.filter(function (t) { return t.modulo === m.id; }).map(function (t) { return t.id; }) };
   });
 }

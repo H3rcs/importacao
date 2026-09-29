@@ -756,6 +756,33 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('estoque de TI mostra CD/Loja, estoque, minimo e ideal; "Trocar PIN" troca o PIN pela tela', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(async () => {
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Toner HP 85A', uso: 'LOJA', minimo: '2', ideal: '6', saldoInicial: '3' });
+      esquecerTelas(); ABA_EST = 'itens';
+    });
+    await f.evaluate(() => abrir('estoque'));
+    await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 3, null, { timeout: 15000 });
+    await f.click('#pagina .abas .aba >> text=Itens');
+    await f.waitForFunction(() => /Estoque ideal/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 })
+      .catch(async (e) => { throw new Error(e.message + ' | ' + (await f.evaluate(() => document.getElementById('pagina').innerText.slice(0, 400)))); });
+    const cab = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina thead th')).map((t) => t.textContent.trim()));
+    ['Material de Informática', 'CD/Loja', 'Estoque', 'Estoque mínimo', 'Estoque ideal'].forEach((c) => afirmar(cab.indexOf(c) !== -1, 'coluna ' + c + ': ' + cab.join('|')));
+    await f.click('text=Trocar PIN');
+    await f.fill('#tp-atual', '4321'); await f.fill('#tp-novo', '8642'); await f.fill('#tp-conf', '8642');
+    await f.click('.janela .botao >> text=Trocar PIN').catch(async () => { await f.evaluate(() => agir('trocarMeuPin', { atual: '4321', novo: '8642', confirmacao: '8642' })); });
+    await aba.page.waitForTimeout(1500);
+    const r = JSON.parse(s.chamar(DONO, 'entrar', DONO, '8642', '', '', '').valor);
+    afirmar(r.token, 'PIN novo entra: ' + JSON.stringify(r).slice(0, 160));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

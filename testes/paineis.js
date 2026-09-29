@@ -346,6 +346,59 @@ caso('atualizacao de versao nao religa o Estoque que o administrador desligou na
   afirmar(m.props.script.VERSAO_ESQUEMA !== '8.2', 'a migracao rodou: versao ' + m.props.script.VERSAO_ESQUEMA);
 });
 
+/* ------------------------------------------------------------------ */
+/* ADMIN VE TUDO · ESTOQUE CD/LOJA · TROCAR PIN                        */
+/* ------------------------------------------------------------------ */
+
+caso('ADMIN ve todas as telas e paineis mesmo com PERFIS e paineis da filial incompletos (banco antigo)', () => {
+  const m = mundo(); let c = ctx(m);
+  // banco antigo: linha ADMIN sem as telas/capacidades novas; principal so com calendario e assiduidade
+  const adm = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'ADMIN');
+  const apaga = {};
+  Object.keys(adm).forEach((k) => { if (/^TELA_(NOBREAKS|LIMPEZA|QUADRO|ESTOQUE|FILIAIS)$|^PODE_(GERIR_FILIAIS|GERIR_ESTOQUE|GERIR_LIMPEZA|LANCAR_NOBREAK)$/.test(k)) apaga[k] = 'NAO'; });
+  c.atualizar('PERFIS', adm.ID, apaga, DONO);
+  const pr = c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL));
+  c.atualizar('FILIAIS', pr.ID, { PAINEIS: JSON.stringify({ calendario: 'ATIVO', assiduidade: 'ATIVO' }) }, DONO);
+  m.cache.clear();
+  const s = entrar(m, DONO, '4321');
+  const r = JSON.parse(chamar(m, DONO, 'retomarSessao', { t: s.t, f: s.f }).valor);
+  const telas = r.telas.map((t) => t.id);
+  ['filiais', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'config', 'acessos'].forEach((id) => afirmar(telas.indexOf(id) !== -1, 'ADMIN sem a tela ' + id + ': ' + telas.join(',')));
+  const mods = r.modulos || [];
+  const est = mods.find((x) => x.id === 'estoque');
+  afirmar(!mods.length || (est && est.oculto), 'estoque aparece marcado como oculto para o admin');
+  tela(m, s, 'estoque'); tela(m, s, 'filiais'); tela(m, s, 'quadro');
+  // quem nao e admin continua sem os paineis desligados
+  const g = entrar(m, GERENTE, '5555');
+  const rg = JSON.parse(chamar(m, GERENTE, 'retomarSessao', { t: g.t, f: g.f }).valor);
+  afirmar(!rg.telas.some((t) => t.id === 'estoque' || t.id === 'nobreaks'), 'gerente: ' + rg.telas.map((t) => t.id).join(','));
+});
+
+caso('estoque de TI: material do CD/Loja com estoque, minimo e ideal (e quanto falta para o ideal)', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  acao(m, s, 'salvarItemEstoque', { nome: 'Toner HP 85A', uso: 'LOJA', minimo: '2', ideal: '6', saldoInicial: '3' });
+  acao(m, s, 'importarItensEstoque', { texto: 'Mouse USB\tPeriféricos\tLogitech\tM90\tun\t5\tArmário TI\t12\t\tCD/LOJA\t15' });
+  const itens = tela(m, s, 'estoque').itens;
+  const toner = itens.find((i) => i.nome === 'Toner HP 85A'), mouse = itens.find((i) => i.nome === 'Mouse USB');
+  afirmar(toner.uso === 'LOJA' && toner.minimo === 2 && toner.ideal === 6 && toner.saldo === 3 && toner.faltaIdeal === 3, 'toner: ' + JSON.stringify(toner));
+  afirmar(mouse.uso === 'CD/LOJA' && mouse.ideal === 15 && mouse.faltaIdeal === 3, 'mouse: ' + JSON.stringify(mouse));
+  const e = erroDe(() => acao(m, s, 'salvarItemEstoque', { nome: 'Cabo', minimo: '10', ideal: '4' }));
+  afirmar(/não pode ser menor que o mínimo/.test(e), 'ideal < minimo: ' + e);
+});
+
+caso('trocar o proprio PIN: confere o atual, e o novo passa a valer', () => {
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  const e1 = erroDe(() => acao(m, s, 'trocarMeuPin', { atual: '1111', novo: '2468', confirmacao: '2468' }));
+  afirmar(/PIN atual está incorreto/.test(e1), 'atual errado: ' + e1);
+  const e2 = erroDe(() => acao(m, s, 'trocarMeuPin', { atual: '5555', novo: '2468', confirmacao: '2469' }));
+  afirmar(/não são iguais/.test(e2), 'confirmacao: ' + e2);
+  acao(m, s, 'trocarMeuPin', { atual: '5555', novo: '2468', confirmacao: '2468' });
+  const velho = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '5555', '', '', '').valor);
+  afirmar(!velho.token, 'PIN antigo nao entra');
+  const novo = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '2468', '', '', '').valor);
+  afirmar(novo.token, 'PIN novo entra: ' + JSON.stringify(novo).slice(0, 160));
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

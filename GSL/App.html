@@ -390,6 +390,20 @@ function sessaoTerminou() {
   mostrarEntrada({ erroEntrada: 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.' });
 }
 
+/* A propria pessoa troca o PIN (o "senha" do GSL). */
+function formTrocarPin() {
+  abrirJanela('Trocar meu PIN', `
+    <div class="campo"><label>PIN atual</label><input id="tp-atual" type="text" class="pin-mascara" inputmode="numeric" maxlength="6" autocomplete="off"></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>PIN novo (4 a 6 números)</label><input id="tp-novo" type="text" class="pin-mascara" inputmode="numeric" maxlength="6" autocomplete="off"></div>
+      <div class="campo"><label>Repita o PIN novo</label><input id="tp-conf" type="text" class="pin-mascara" inputmode="numeric" maxlength="6" autocomplete="off"></div>
+    </div>
+    <p class="dica">Esqueceu o PIN atual? Peça ao administrador: Pessoas e acessos › Zerar PIN.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('trocarMeuPin',{atual:val('tp-atual'),novo:val('tp-novo'),confirmacao:val('tp-conf')}).catch(()=>{})">Trocar PIN</button>`);
+  setTimeout(() => { const c = el('tp-atual'); if (c) c.focus(); }, 60);
+}
+
 function confirmarZerarPin(nome) {
   return window.confirm('Zerar o PIN de ' + nome + '? Na próxima entrada a pessoa cria um PIN novo.');
 }

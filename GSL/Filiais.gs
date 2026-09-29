@@ -235,8 +235,11 @@ function estadoDoPainel(idPainel) {
 function painelVisivel(usuario, idPainel) {
   const estado = estadoDoPainel(idPainel);
   if (estado === PAINEL_ATIVO) return true;
-  if (estado === PAINEL_OCULTO) return ehAdministrador(usuario);
-  return false;
+  // O administrador ve todos os paineis em toda filial (4.2.2): os que nao
+  // estao ativos aparecem para ele marcados como ocultos, para montar e
+  // ligar. Antes um painel que nunca tinha sido ligado na filial (banco
+  // antigo) sumia ate para o ADMIN — e ele nao tinha como achar.
+  return ehAdministrador(usuario);
 }
 
 /* ------------------------------------------------------------------ */

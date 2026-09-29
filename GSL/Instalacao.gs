@@ -95,7 +95,7 @@ const ESQUEMA = {
    * TIPO: ENTRADA · SAIDA · DEVOLUCAO · BAIXA · AJUSTE (este guarda a diferenca, +/-)
    */
   EST_ITENS:      ['CODIGO', 'NOME', 'CATEGORIA', 'MARCA', 'MODELO', 'UNIDADE', 'ESTOQUE_MINIMO',
-                   'LOCAL', 'OBSERVACAO', 'ATIVO'],
+                   'LOCAL', 'OBSERVACAO', 'ATIVO', 'USO', 'ESTOQUE_IDEAL'],
   EST_MOVIMENTOS: ['DATA', 'TIPO', 'ITEM', 'QUANTIDADE', 'DESTINO', 'SOLICITANTE', 'DOCUMENTO',
                    'SERIE', 'OBSERVACAO', 'REGISTRADO_POR'],
 
@@ -261,7 +261,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.3';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro
+const VERSAO_ESQUEMA = '8.4';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com uso (CD/Loja) e estoque ideal
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a

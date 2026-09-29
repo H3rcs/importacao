@@ -32,6 +32,16 @@ const EST_DIAS_HISTORICO = 90;
 const EST_HISTORICO_MAX = 1000;   // teto de linhas do historico de um item (o saldo-base cobre o resto)
 
 function estNum_(v) { const n = num_(v); return n === null ? 0 : n; }
+
+/* Onde o material de informatica e usado: no CD, na loja ou nos dois. */
+const EST_USOS = ['CD', 'LOJA', 'CD/LOJA'];
+function usoEstoque_(v) {
+  const t = String(v || '').toUpperCase().replace(/\s+/g, '').replace(/[E+&]/g, '/').replace(/\/+/g, '/');
+  if (t === 'CD') return 'CD';
+  if (t === 'LOJA') return 'LOJA';
+  if (t.indexOf('CD') !== -1 && t.indexOf('LOJA') !== -1) return 'CD/LOJA';
+  return '';
+}
 /* Soma de decimais (0,3 - 0,1 - 0,2) deixa resto de ponto flutuante: arredonda. */
 function estArred_(n) { return Math.round(n * 1e6) / 1e6; }
 
@@ -64,6 +74,8 @@ function itensEstoque_() {
       modelo: String(i.MODELO || '').trim(),
       unidade: String(i.UNIDADE || 'un').trim() || 'un',
       minimo: estNum_(i.ESTOQUE_MINIMO),
+      ideal: estNum_(i.ESTOQUE_IDEAL),
+      uso: usoEstoque_(i.USO),
       local: String(i.LOCAL || '').trim(),
       observacao: String(i.OBSERVACAO || '').trim(),
       ativo: String(i.ATIVO || 'SIM').trim() === '' || marcado(i.ATIVO)
@@ -114,6 +126,8 @@ function dadosEstoque(usuario, params) {
 
   itens.forEach(function (i) {
     i.saldo = saldo[i.codigo] || 0;
+    // Quanto falta para chegar ao estoque ideal (0 = esta no ideal ou acima).
+    i.faltaIdeal = i.ideal && i.saldo < i.ideal ? estArred_(i.ideal - Math.max(0, i.saldo)) : 0;
     i.ultimaSaida = ultimaSaida[i.codigo] || '';
     i.ultimaEntrada = ultimaEntrada[i.codigo] || '';
     i.situacao = !i.ativo ? 'INATIVO' : (i.saldo <= 0 ? 'ZERADO' : (i.minimo && i.saldo <= i.minimo ? 'REPOR' : 'OK'));
@@ -148,6 +162,7 @@ function dadosEstoque(usuario, params) {
       tipos: EST_TIPOS.map(function (t) { return { id: t, nome: EST_NOMES_TIPO[t] }; }),
       categorias: Object.keys(categorias).sort(),
       unidades: EST_UNIDADES,
+      usos: EST_USOS,
       destinos: Object.keys(destinos).sort()
     },
     permissoes: {
@@ -170,6 +185,8 @@ function camposItem_(p) {
     MODELO: String(p.modelo || '').trim(),
     UNIDADE: String(p.unidade || 'un').trim() || 'un',
     ESTOQUE_MINIMO: num_(p.minimo) === null ? '' : num_(p.minimo),
+    ESTOQUE_IDEAL: num_(p.ideal) === null ? '' : num_(p.ideal),
+    USO: usoEstoque_(p.uso),
     LOCAL: String(p.local || '').trim(),
     OBSERVACAO: String(p.observacao || '').trim(),
     ATIVO: p.ativo === false ? 'NAO' : 'SIM'
@@ -189,6 +206,9 @@ function proximoCodigoEstoque_(itens) {
 function acaoSalvarItemEstoque(usuario, params) {
   const campos = camposItem_(params);
   if (!campos.NOME) throw new Error('Informe o nome do item (ex.: Mouse USB).');
+  if (campos.ESTOQUE_IDEAL !== '' && campos.ESTOQUE_MINIMO !== '' && campos.ESTOQUE_IDEAL < campos.ESTOQUE_MINIMO) {
+    throw new Error('O estoque ideal (' + campos.ESTOQUE_IDEAL + ') não pode ser menor que o mínimo (' + campos.ESTOQUE_MINIMO + ').');
+  }
   if (String(params.codigo || '').trim() && !campos.CODIGO) {
     throw new Error('Código inválido: use só letras, números, ponto, hífen ou sublinhado (ex.: TI-0001).');
   }
@@ -244,7 +264,7 @@ function acaoExcluirItemEstoque(usuario, params) {
  * CADASTRO EM LOTE — colar da planilha.
  * Uma linha por item, colunas separadas por TAB (o que o Excel/Planilhas
  * copia) ou ponto e virgula, nesta ordem:
- *   nome | categoria | marca | modelo | unidade | minimo | local | saldo inicial | codigo
+ *   nome | categoria | marca | modelo | unidade | minimo | local | saldo inicial | codigo | uso (CD/LOJA) | ideal
  * So o nome e obrigatorio. Linha de cabecalho e ignorada.
  */
 function acaoImportarItensEstoque(usuario, params) {
@@ -269,7 +289,7 @@ function acaoImportarItensEstoque(usuario, params) {
       if (!codigo) { codigo = 'TI-' + String(proximo).padStart(4, '0'); proximo++; }
       if (porCodigo[codigo]) { ignoradas.push(nome + ' (código ' + codigo + ' já existe)'); return; }
       const campos = camposItem_({ codigo: codigo, nome: nome, categoria: c[1], marca: c[2], modelo: c[3],
-        unidade: c[4], minimo: c[5], local: c[6] });
+        unidade: c[4], minimo: c[5], local: c[6], uso: c[9], ideal: c[10] });
       novos.push(campos);
       porCodigo[codigo] = true; porNome[nome.toLowerCase()] = true;
       const saldo = num_(c[7]);

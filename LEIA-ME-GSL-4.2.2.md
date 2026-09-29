@@ -16,6 +16,13 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
 - **fonte do Google bloqueada ou lenta:** a abertura esperava a fonte;
 - **`location.reload()` dentro da moldura do Google:** a tela voltava em branco.
 
+## Depois da primeira publicação
+
+- **O ADMIN vê tudo.** A tabela PERFIS e os painéis gravados na filial podiam vir incompletos de versões antigas, e o administrador não via Filiais e painéis, Nobreaks, Limpeza, Quadro do CD (onde se liga a planilha do BI) e Estoque de TI. Agora o ADMIN tem todas as telas e permissões, sem depender da tabela PERFIS. Ele também vê todos os painéis em qualquer filial. Um painel que não está ligado para os outros aparece para ele com o selo **oculto**; para ligar para todos, use **Filiais e painéis**.
+- **Cadastrar outro CD** (Campina Grande, Ponte Nova…): **Configuração › Filiais e painéis › Nova filial**. Informe nome, cidade, código (ex.: CPG, PNV) e os painéis. O sistema cria a planilha da filial sozinho.
+- **Estoque de TI:** cada item tem **CD/Loja** (onde o material é usado: CD, Loja ou os dois) e **Estoque ideal**. A lista de itens mostra Material de Informática, CD/Loja, Estoque, Estoque mínimo, Estoque ideal e quanto falta para o ideal, e tem filtro por CD/Loja. Em **Colar da planilha**, CD/Loja e Ideal são as duas últimas colunas. O esquema subiu para 8.4 e as colunas novas são criadas sozinhas.
+- **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
 ## O que foi corrigido
 
 **Abertura e entrada**
@@ -113,8 +120,8 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração (19 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (33 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (22 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (34 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

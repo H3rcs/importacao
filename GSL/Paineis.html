@@ -1296,7 +1296,7 @@ function bqFiltrarMotivo(m) { BQ.motivo = (BQ.motivo === m) ? '' : m; bqDesenhar
    ESTOQUE DE TI
    ===================================================================== */
 let ABA_EST = 'painel';     // painel | itens | movimentos | inventario
-let EST_FILTRO = { busca: '', categoria: '', situacao: '' };
+let EST_FILTRO = { busca: '', categoria: '', situacao: '', uso: '' };
 let EST_MOV = { tipo: '', item: '', destino: '', mes: '', busca: '' };
 const EST_ROTULO = { OK: ['ok', 'Normal'], REPOR: ['atencao', 'Repor'], ZERADO: ['alerta', 'Zerado'], INATIVO: ['neutro', 'Inativo'] };
 const EST_TIPO_CHIP = { ENTRADA: 'ok', DEVOLUCAO: 'ok', SAIDA: 'atencao', BAIXA: 'alerta', AJUSTE: 'neutro' };
@@ -1372,10 +1372,11 @@ function estPainel(d) {
     <div class="pn-grade duas" style="margin-bottom:14px">
       <div class="cartao">
         <div class="cartao-titulo">Precisa repor</div>
-        ${repor.length ? `<table><thead><tr><th>Item</th><th class="numero">Saldo</th><th class="numero">Mínimo</th><th></th></tr></thead><tbody>
+        ${repor.length ? `<table><thead><tr><th>Item</th><th class="numero">Estoque</th><th class="numero">Mínimo</th><th class="numero">Ideal</th><th></th></tr></thead><tbody>
           ${repor.slice(0, 12).map((i) => `<tr><td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
             <td class="numero" style="color:${i.saldo <= 0 ? 'var(--alerta)' : 'var(--laranja-escuro)'};font-weight:700">${estQtd(i.saldo, i.unidade)}</td>
             <td class="numero">${pnNum(i.minimo)}</td>
+            <td class="numero">${i.ideal ? pnNum(i.ideal) : '—'}</td>
             <td>${d.permissoes.movimentar ? `<button class="icone-botao" onclick="estFormMov('ENTRADA',${jsArg(i.codigo)})">Entrada</button>` : ''}</td></tr>`).join('')}
           </tbody></table>${repor.length > 12 ? `<p class="dica">E mais ${repor.length - 12}. Veja todos em Itens › Repor.</p>` : ''}`
         : '<div class="vazio">Nenhum item abaixo do mínimo. 👍</div>'}
@@ -1409,6 +1410,7 @@ function estItens(d) {
     if (f.situacao) { if (i.situacao !== f.situacao) return false; }
     else if (!i.ativo) return false;
     if (f.categoria && i.categoria !== f.categoria) return false;
+    if (f.uso && i.uso !== f.uso) return false;
     if (f.busca && (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) === -1) return false;
     return true;
   });
@@ -1419,6 +1421,8 @@ function estItens(d) {
       ${chip('', 'Ativos')}${chip('REPOR', 'Repor')}${chip('ZERADO', 'Zerados')}${chip('INATIVO', 'Inativos')}
       <select style="width:auto" onchange="EST_FILTRO.categoria=this.value;pintarAbaEst(DADOS)">
         <option value="">Todas as categorias</option>${d.listas.categorias.map((c) => `<option ${f.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="EST_FILTRO.uso=this.value;pintarAbaEst(DADOS)">
+        <option value="">CD e Loja</option>${(d.listas.usos || []).map((u) => `<option value="${esc(u)}" ${f.uso === u ? 'selected' : ''}>${u === 'CD/LOJA' ? 'Usado nos dois' : 'Só ' + (u === 'CD' ? 'CD' : 'Loja')}</option>`).join('')}</select>
       <span class="campo-busca"><input id="est-busca" placeholder="Buscar código, nome, marca, local" value="${esc(f.busca)}"
         oninput="EST_FILTRO.busca=this.value.toLowerCase().trim();estRefiltrarItens()"></span>
       ${p.cadastrar ? '<button class="icone-botao" onclick="estFormLote()">Colar da planilha</button>' : ''}
@@ -1431,27 +1435,31 @@ function estItens(d) {
 function estRefiltrarItens() {
   const f = EST_FILTRO, d = DADOS;
   const lista = d.itens.filter((i) => (f.situacao ? i.situacao === f.situacao : i.ativo) &&
-    (!f.categoria || i.categoria === f.categoria) &&
+    (!f.categoria || i.categoria === f.categoria) && (!f.uso || i.uso === f.uso) &&
     (!f.busca || (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) !== -1));
   el('est-tabela-itens').innerHTML = estTabelaItens(lista, d.permissoes);
 }
 
 function estTabelaItens(lista, p) {
-  return `<table><thead><tr><th>Código</th><th>Item</th><th>Categoria</th><th>Local</th>
-    <th class="numero">Saldo</th><th class="numero">Mínimo</th><th>Situação</th><th></th></tr></thead><tbody>
+  return `<table><thead><tr><th>Código</th><th>Material de Informática</th><th>CD/Loja</th><th>Categoria</th><th>Local</th>
+    <th class="numero">Estoque</th><th class="numero">Estoque mínimo</th><th class="numero">Estoque ideal</th>
+    <th class="numero">Falta p/ ideal</th><th>Situação</th><th></th></tr></thead><tbody>
     ${lista.map((i) => `<tr>
       <td class="mono">${esc(i.codigo)}</td>
       <td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc([i.marca, i.modelo].filter(Boolean).join(' · '))}</div></td>
+      <td>${esc(i.uso || '—')}</td>
       <td>${esc(i.categoria)}</td><td>${esc(i.local || '—')}</td>
       <td class="numero" style="font-size:15px;font-weight:700;${i.saldo <= 0 ? 'color:var(--alerta)' : ''}">${estQtd(i.saldo, i.unidade)}</td>
       <td class="numero">${i.minimo ? pnNum(i.minimo) : '—'}</td>
+      <td class="numero">${i.ideal ? pnNum(i.ideal) : '—'}</td>
+      <td class="numero">${i.faltaIdeal ? pnNum(i.faltaIdeal, Number.isInteger(i.faltaIdeal) ? 0 : 2) : '—'}</td>
       <td>${estChip(i.situacao)}</td>
       <td style="white-space:nowrap">
         ${p.movimentar && i.ativo ? `<button class="icone-botao" onclick="estFormMov('ENTRADA',${jsArg(i.codigo)})">Entrada</button>
           <button class="icone-botao" onclick="estFormMov('SAIDA',${jsArg(i.codigo)})" ${i.saldo <= 0 ? 'disabled' : ''}>Saída</button>` : ''}
         <button class="icone-botao" onclick="estHistorico(${jsArg(i.codigo)})">Histórico</button>
         ${p.cadastrar ? `<button class="icone-botao" onclick="estFormItem(${jsArg(i.id)})">Editar</button>` : ''}</td>
-    </tr>`).join('') || '<tr><td colspan="8" class="vazio">Nenhum item com esses filtros.</td></tr>'}
+    </tr>`).join('') || '<tr><td colspan="11" class="vazio">Nenhum item com esses filtros.</td></tr>'}
   </tbody></table>`;
 }
 
@@ -1575,6 +1583,11 @@ function estFormItem(id) {
     </div>
     <div class="campo-duplo">
       <div class="campo"><label>Estoque mínimo</label><input id="ei-min" inputmode="decimal" value="${i && i.minimo ? i.minimo : ''}" placeholder="avisa quando chegar nisso"></div>
+      <div class="campo"><label>Estoque ideal</label><input id="ei-ideal" inputmode="decimal" value="${i && i.ideal ? i.ideal : ''}" placeholder="quanto deveria ter"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Material usado no</label><select id="ei-uso"><option value="">—</option>
+        ${d.listas.usos.map((u) => `<option value="${esc(u)}" ${i && i.uso === u ? 'selected' : ''}>${u === 'CD/LOJA' ? 'CD e Loja' : (u === 'CD' ? 'CD' : 'Loja')}</option>`).join('')}</select></div>
       <div class="campo"><label>Onde fica guardado</label><input id="ei-local" value="${esc(i ? i.local : '')}" placeholder="Ex.: Armário da TI, prateleira 2"></div>
     </div>
     ${i ? '' : `<div class="campo"><label>Saldo inicial (opcional)</label><input id="ei-saldo" inputmode="decimal" placeholder="quanto tem hoje — vira uma entrada"></div>`}
@@ -1583,7 +1596,7 @@ function estFormItem(id) {
     ${i ? `<button class="botao perigo" onclick="agir('excluirItemEstoque',{id:${jsArg(i.id)}},'Item removido').catch(()=>{})">Remover</button>` : ''}
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('salvarItemEstoque',{id:${jsArg(i ? i.id : '')},nome:val('ei-nome'),codigo:val('ei-codigo'),categoria:val('ei-cat'),
-      unidade:val('ei-un'),marca:val('ei-marca'),modelo:val('ei-modelo'),minimo:val('ei-min'),local:val('ei-local'),
+      unidade:val('ei-un'),marca:val('ei-marca'),modelo:val('ei-modelo'),minimo:val('ei-min'),ideal:val('ei-ideal'),uso:val('ei-uso'),local:val('ei-local'),
       saldoInicial:val('ei-saldo'),observacao:val('ei-obs'),ativo:${i ? "marcado('ei-ativo')" : 'true'}},'Item salvo').catch(()=>{})">Salvar</button>`);
 }
 
@@ -1592,8 +1605,8 @@ function estFormLote() {
     <p style="margin:0 0 10px;line-height:1.7;color:var(--tinta-media)">Na planilha, deixe as colunas nesta ordem,
       selecione as linhas, copie (<b>Ctrl+C</b>) e cole aqui (<b>Ctrl+V</b>). Só o nome é obrigatório; a linha de títulos é ignorada.</p>
     <div class="pn-tabela-rolagem" style="margin-bottom:10px"><table><thead><tr>
-      <th>Nome</th><th>Categoria</th><th>Marca</th><th>Modelo</th><th>Unidade</th><th>Mínimo</th><th>Local</th><th>Saldo inicial</th><th>Código</th></tr></thead>
-      <tbody><tr><td>Mouse USB</td><td>Periféricos</td><td>Logitech</td><td>M90</td><td>un</td><td>5</td><td>Armário TI</td><td>12</td><td class="pn-mini">(vazio = TI-0001…)</td></tr></tbody></table></div>
+      <th>Nome</th><th>Categoria</th><th>Marca</th><th>Modelo</th><th>Unidade</th><th>Mínimo</th><th>Local</th><th>Saldo inicial</th><th>Código</th><th>CD/Loja</th><th>Ideal</th></tr></thead>
+      <tbody><tr><td>Mouse USB</td><td>Periféricos</td><td>Logitech</td><td>M90</td><td>un</td><td>5</td><td>Armário TI</td><td>12</td><td class="pn-mini">(vazio = TI-0001…)</td><td>CD/LOJA</td><td>15</td></tr></tbody></table></div>
     <div class="campo"><label>Linhas copiadas</label><textarea id="el-texto" rows="8" style="font-family:monospace;font-size:12px"></textarea></div>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('importarItensEstoque',{texto:val('el-texto')}).catch(()=>{})">Cadastrar itens</button>`);

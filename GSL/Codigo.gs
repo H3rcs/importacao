@@ -430,6 +430,8 @@ const ACOES = {
    * justamente quem tem menos permissao para contornar sozinho.
    */
   enviarFeedback:      { capacidade: null,            funcao: 'acaoEnviarFeedback' },
+  // Cada pessoa troca o proprio PIN (confere o atual).
+  trocarMeuPin:        { capacidade: null,            funcao: 'acaoTrocarMeuPin' },
   resolverFeedback:    { capacidade: 'GERIR_ACESSOS', funcao: 'acaoResolverFeedback' },
 
   // configuracao

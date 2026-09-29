@@ -317,7 +317,7 @@ function tendenciaContinua_(usuario) {
     s.inj += faltasInj_(a);
     s.atest += Number(a.ATESTADOS) || 0;
     // Pessoa, nao linha: quem mudou de turno tem uma linha por turno.
-    s.pessoas[String(a.MATRICULA)] = true;
+    s.pessoas[matChave_(a.MATRICULA)] = true;
   });
 
   const meta = metaAbsenteismo_();
@@ -433,7 +433,7 @@ function maisNovaGravacao_(a, b) {
 function lerAgr_() {
   const melhor = {}, ordem = [];
   listar('AGR_COLAB').forEach(function (a) {
-    const k = normalizarCompetenciaRH_(a.COMPETENCIA) + '|' + String(a.MATRICULA) + '|' + String(a.TURNO || '');
+    const k = normalizarCompetenciaRH_(a.COMPETENCIA) + '|' + matChave_(a.MATRICULA) + '|' + String(a.TURNO || '');
     if (!melhor[k]) { melhor[k] = a; ordem.push(k); return; }
     if (maisNovaGravacao_(a, melhor[k])) melhor[k] = a;
   });
@@ -451,7 +451,8 @@ function lerAgr_() {
  *   1. vale a competencia DONA do dia pela regra do RH (21 -> 20): 25/08 e
  *      da 2026-09, 18/08 e da 2026-08;
  *   2. se nenhuma for a dona, vale a de rotulo mais recente;
- *   3. mesma competencia duas vezes: vale a gravacao mais nova.
+ *   3. mesma competencia duas vezes: vale a gravacao mais nova (na mesma
+ *      gravacao, o lancamento de maior peso — ver pesoDoDia_).
  * Devolve true se `a` prevalece sobre `b`.
  */
 function prevalece_(a, b) {
@@ -461,6 +462,13 @@ function prevalece_(a, b) {
     if (ca === dono) return true;
     if (cb === dono) return false;
     return ca > cb;
+  }
+  // Mesma gravacao (a pessoa em dois blocos da mesma folha): a linha de
+  // baixo ganhava sempre, mesmo sendo "Transferencia" contra uma falta de
+  // verdade — e a falta sumia do Periodo e da ficha. Vale o peso do dia.
+  if (String(a.CRIADO_EM || '') === String(b.CRIADO_EM || '')) {
+    const pa = pesoDoDia_(a), pb = pesoDoDia_(b);
+    if (pa !== pb) return pa > pb;
   }
   return maisNovaGravacao_(a, b);
 }
@@ -631,7 +639,7 @@ const CAMPOS_SOMA_ = ['registros', 'trabalhados', 'ausencias', 'faltas', 'faltas
 /* Uma linha do AGR_COLAB como numeros. */
 function pedacoDoAgr_(a) {
   return {
-    matricula: String(a.MATRICULA), nome: String(a.NOME || ''), turno: String(a.TURNO || ''),
+    matricula: matExibida_(a.MATRICULA), nome: String(a.NOME || ''), turno: String(a.TURNO || ''),
     registros: Number(a.REGISTROS) || 0,
     trabalhados: Number(a.TRABALHADOS) || 0,
     ausencias: Number(a.AUSENCIAS) || 0,
@@ -790,7 +798,7 @@ function acaoPeriodo(usuario, params) {
   linhas.forEach(function (f) {
     if (!validas[normalizarCompetenciaRH_(f.COMPETENCIA)]) return;
     f._iso = isoDaFato_(f.DATA);
-    const chave = String(f.MATRICULA) + '|' + f._iso;
+    const chave = matChave_(f.MATRICULA) + '|' + f._iso;
     if (!vencedoras[chave] || prevalece_(f, vencedoras[chave])) vencedoras[chave] = f;
   });
 
@@ -811,7 +819,7 @@ function acaoPeriodo(usuario, params) {
     if (ehNaoDefinido_(cat)) return;
     if (!passaNoTipo_(filtro, catN_(cat))) return;
 
-    const mat = String(f.MATRICULA);
+    const mat = matChave_(f.MATRICULA);
     if (!colab[mat]) colab[mat] = { turno: turno, registros: 0, datas: [] };
     colab[mat].registros++;
     colab[mat].datas.push(iso);
@@ -827,12 +835,12 @@ function acaoPeriodo(usuario, params) {
   let lista = [];
   if (mostraIndividual) {
     const nomesMap = {};
-    listar('COLABORADORES').forEach(function (c) { nomesMap[String(c.MATRICULA)] = c.NOME; });
+    listar('COLABORADORES').forEach(function (c) { nomesMap[matChave_(c.MATRICULA)] = c.NOME; });
     lista = Object.keys(colab).map(function (mat) {
       const c = colab[mat];
       c.datas.sort();
       return {
-        matricula: mat, nome: nomesMap[mat] || mat, turno: c.turno, registros: c.registros,
+        matricula: matExibida_(mat), nome: nomesMap[mat] || matExibida_(mat), turno: c.turno, registros: c.registros,
         primeira: brDoIso_(c.datas[0]),
         ultima: brDoIso_(c.datas[c.datas.length - 1]),
         datas: c.datas.map(function (dt) { return { data: brDoIso_(dt) }; }),
@@ -992,7 +1000,7 @@ function acaoFichaColaborador(usuario, params) {
   if (!podeVerIndividual_(usuario)) {
     throw new Error('Seu nível de acesso vê apenas os números agregados.');
   }
-  const mat = String((params && params.matricula) || '').trim();
+  const mat = matChave_((params && params.matricula) || '');
   if (!mat) throw new Error('Matrícula não informada.');
   const validas = competenciasCadastradas_();
 
@@ -1002,7 +1010,7 @@ function acaoFichaColaborador(usuario, params) {
    */
   const porComp = {};
   lerAgr_().forEach(function (a) {
-    if (String(a.MATRICULA) !== mat) return;
+    if (matChave_(a.MATRICULA) !== mat) return;
     const c = normalizarCompetenciaRH_(a.COMPETENCIA);
     if (!c || !validas[c]) return;
     (porComp[c] = porComp[c] || []).push(pedacoDoAgr_(a));
@@ -1046,7 +1054,7 @@ function acaoFichaColaborador(usuario, params) {
   // Nome e turno ATUAIS: o COLABORADORES e atualizado a cada importacao
   // com o turno do dia mais recente da pessoa.
   const cadastro = listar('COLABORADORES').filter(function (c) {
-    return String(c.MATRICULA) === mat;
+    return matChave_(c.MATRICULA) === mat;
   })[0];
   if (cadastro) {
     nome = String(cadastro.NOME || '') || nome;
@@ -1061,7 +1069,7 @@ function acaoFichaColaborador(usuario, params) {
    * numa folha e atestado na outra aparecia duas vezes.
    */
   const porDia = {};
-  lerFatoOnde_('MATRICULA', function (v) { return String(v).trim() === mat; }, 0).forEach(function (f) {
+  lerFatoOnde_('MATRICULA', function (v) { return matChave_(v) === mat; }, 0).forEach(function (f) {
     if (!validas[normalizarCompetenciaRH_(f.COMPETENCIA)]) return;
     f._iso = isoDaFato_(f.DATA);
     if (!f._iso) return;
@@ -1091,7 +1099,7 @@ function acaoFichaColaborador(usuario, params) {
   });
 
   return {
-    matricula: mat, nome: nome || mat, turno: turno,
+    matricula: matExibida_(mat), nome: nome || matExibida_(mat), turno: turno,
     meta: metaAbsenteismo_(),
     historico: historico,
     ausencias: ausencias,
@@ -1246,11 +1254,35 @@ function importarArquivoRH_(arq, quem, espera) {
     ]);
   });
 
+  /*
+   * UMA PESSOA, UM DIA, UM LANCAMENTO — ja na importacao (4.2.2).
+   *
+   * Quem muda de turno aparece em dois blocos da folha, e as vezes uma
+   * linha ou uma coluna vem repetida. Cada celula virava uma linha da
+   * FATO: o dia contava duas vezes no painel e no Colaboradores, e o
+   * Periodo e a ficha escolhiam uma das duas pela posicao na folha. Fica o
+   * lancamento de maior peso (ver pesoDoDia_) e a previa avisa quem foi.
+   */
+  const umPorDia = {}, repetidos = {};
+  linhasFato.forEach(function (l) {
+    const k = matChave_(l[3]) + '|' + l[0];
+    const atual = umPorDia[k];
+    if (!atual) { umPorDia[k] = l; return; }
+    repetidos[l[3]] = true;
+    if (pesoDoDia_({ AUSENCIA: l[7], CATEGORIA: l[6] }) > pesoDoDia_({ AUSENCIA: atual[7], CATEGORIA: atual[6] })) umPorDia[k] = l;
+  });
+  if (Object.keys(repetidos).length) {
+    linhasFato.length = 0;
+    Object.keys(umPorDia).forEach(function (k) { linhasFato.push(umPorDia[k]); });
+  }
+
   // Agregados e payload do painel — calculados ja, fora da trava.
   const agr = calcularAgregado_(compArq, linhasFato, ext.nomes);
 
   const lp = Object.keys(pend);
+  const rp = Object.keys(repetidos);
   const avisos = (lp.length ? ['Códigos fora da legenda: ' + lp.join(', ')] : [])
+    .concat(rp.length ? ['Matrícula(s) com dois lançamentos no mesmo dia (ficou um): ' + rp.slice(0, 10).join(', ')] : [])
     .concat(avisosDeRejeitadas_(ext.rejeitadas));
 
   /*
@@ -1319,13 +1351,13 @@ function importarArquivoRH_(arq, quem, espera) {
 function gravarColaboradores_(nomes, quem) {
   const colabExistentes = {};
   listar('COLABORADORES').forEach(function (c) {
-    colabExistentes[String(c.MATRICULA)] = c;
+    colabExistentes[matChave_(c.MATRICULA)] = c;
   });
 
   const novosColab = [], mudancasColab = [];
   Object.keys(nomes).forEach(function (mat) {
     const d = nomes[mat];
-    const atual = colabExistentes[String(mat)];
+    const atual = colabExistentes[matChave_(mat)];
     if (!atual) {
       novosColab.push({ MATRICULA: mat, NOME: d.nome, TURNO: d.turno });
       return;
@@ -1382,8 +1414,8 @@ function recalcularDaFato_(comp, quem, espera) {
     const porDia = {};
     linhas.forEach(function (f) {
       f._iso = isoDaFato_(f.DATA);
-      const k = String(f.MATRICULA) + '|' + f._iso;
-      if (!porDia[k] || maisNovaGravacao_(f, porDia[k])) porDia[k] = f;
+      const k = matChave_(f.MATRICULA) + '|' + f._iso;
+      if (!porDia[k] || prevalece_(f, porDia[k])) porDia[k] = f;
     });
 
     const linhasFato = Object.keys(porDia).sort().map(function (k) {
@@ -1397,11 +1429,11 @@ function recalcularDaFato_(comp, quem, espera) {
     // Nome da epoca (AGR_COLAB da competencia); sem ele, o do cadastro.
     const nomes = {};
     listar('COLABORADORES').forEach(function (c) {
-      nomes[String(c.MATRICULA)] = { nome: String(c.NOME || '') };
+      nomes[matChave_(c.MATRICULA)] = { nome: String(c.NOME || '') };
     });
     listar('AGR_COLAB').forEach(function (a) {
       if (normalizarCompetenciaRH_(a.COMPETENCIA) !== comp) return;
-      if (String(a.NOME || '')) nomes[String(a.MATRICULA)] = { nome: String(a.NOME) };
+      if (String(a.NOME || '')) nomes[matChave_(a.MATRICULA)] = { nome: String(a.NOME) };
     });
 
     const agr = calcularAgregado_(comp, linhasFato, nomes);
@@ -1582,7 +1614,8 @@ function calcularAgregado_(comp, linhasFato, nomes) {
     const c = pedacos[k];
     const assid = c.registros ? Math.round(((c.registros - c.aus) / c.registros) * 1000) / 10 : 0;
     return {
-      COMPETENCIA: comp, MATRICULA: c.mat, NOME: nomes[c.mat] ? nomes[c.mat].nome : '(sem nome)',
+      COMPETENCIA: comp, MATRICULA: c.mat,
+      NOME: (nomes[c.mat] || nomes[matChave_(c.mat)] || {}).nome || '(sem nome)',
       TURNO: c.turno,
       REGISTROS: c.registros, TRABALHADOS: c.trab, AUSENCIAS: c.aus,
       FALTAS: c.inj + c.just + c.disc,
@@ -2039,12 +2072,18 @@ function colunasDeData_(m, linCab, nCol) {
    * virando o mês toda vez que o número do dia diminui.
    */
   let ano = inicio.getFullYear(), mes = inicio.getMonth(), anterior = 0;
+  const ignoradas = [];
   const cols = melhor.map(function (d, i) {
     if (i > 0 && d.dia < anterior) {
       mes++;
       if (mes > 11) { mes = 0; ano++; }
     }
     anterior = d.dia;
+    const dt = new Date(ano, mes, d.dia, 12, 0, 0);
+    // Dia que nao existe no mes (a coluna "31" num mes de 30, que o modelo
+    // fixo de 31 colunas traz): virava o dia 1 do mes seguinte, que ja tem
+    // coluna propria — a mesma data duas vezes. A coluna e ignorada.
+    if (dt.getDate() !== d.dia) { ignoradas.push(d.dia); return null; }
     /*
      * MEIO-DIA, não meia-noite. A data montada aqui atravessa o
      * Utilities.formatDate mais adiante; ancorada à meia-noite, qualquer
@@ -2052,12 +2091,13 @@ function colunasDeData_(m, linCab, nCol) {
      * verão) empurra o dia para trás e a folha inteira anda um dia. Ao
      * meio-dia sobram doze horas de folga para cada lado.
      */
-    return { col: d.col, data: new Date(ano, mes, d.dia, 12, 0, 0) };
-  });
+    return { col: d.col, data: dt };
+  }).filter(Boolean);
 
   const aviso = 'O cabeçalho da grade traz o número do dia, não a data. Montei o período a ' +
     'partir de “DATA INICIAL” (' + formatarData(inicio) + '): de ' +
     formatarData(cols[0].data) + ' a ' + formatarData(cols[cols.length - 1].data) + '. ' +
+    (ignoradas.length ? 'Coluna(s) de dia que não existe(m) no mês, ignorada(s): ' + ignoradas.join(', ') + '. ' : '') +
     'Confira se bate com a folha antes de importar.';
 
   return { cols: cols, origem: 'numero-do-dia', motivo: '', aviso: aviso };
@@ -2227,6 +2267,37 @@ function codigo_(v) {
   // "6,1" (virgula decimal) e o mesmo codigo que "6.1"
   if (/^\d+,\d+$/.test(s)) s = s.replace(',', '.');
   return s;
+}
+
+/*
+ * MATRICULA — uma chave so (4.2.2). Versoes antigas gravaram a matricula
+ * como NUMERO (12345) antes de a base virar texto; as novas gravam como
+ * veio da folha ('012345'). Comparando o texto cru, a mesma pessoa virava
+ * duas — e a mesma data aparecia duas vezes no Periodo, uma em cada linha.
+ * Toda comparacao passa por matChave_ (sem zeros a esquerda); o que vai
+ * para a tela passa por matExibida_ (completa com zeros ate
+ * RH_DIGITOS_MATRICULA, como na folha do RH).
+ */
+function matChave_(v) { return codigo_(v).replace(/^0+(?=\d)/, ''); }
+
+var _digitosMat = null;
+function matExibida_(v) {
+  const k = matChave_(v);
+  if (!/^\d+$/.test(k)) return k;
+  if (_digitosMat === null) _digitosMat = cfgD_().digitos;
+  return k.length < _digitosMat ? ('0000000000' + k).slice(-_digitosMat) : k;
+}
+
+/*
+ * Peso de um lancamento do dia, para quando a mesma pessoa tem dois no
+ * mesmo dia (dois blocos de turno na folha, linha ou coluna repetida):
+ * ausencia > categoria definida > Outros > fora da legenda.
+ */
+function pesoDoDia_(f) {
+  if (String(f.AUSENCIA) === 'Sim') return 3;
+  const c = catN_(f.CATEGORIA);
+  if (ehNaoDefinido_(c)) return 0;
+  return c === 'OUTROS' ? 1 : 2;
 }
 
 /*
@@ -2493,7 +2564,8 @@ function arquivosRH() {
 /* A competencia do RH e "aaaa-mm". Se a celula virou Date, formata de volta. */
 function normalizarCompetenciaRH_(valor) {
   if (valor instanceof Date) return Utilities.formatDate(valor, fuso(), 'yyyy-MM');
-  return String(valor || '').trim();
+  const t = String(valor || '').trim();
+  return competenciaDigitada_(t) || t;
 }
 
 /*

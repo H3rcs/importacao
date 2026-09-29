@@ -412,6 +412,26 @@ caso('trocar o proprio PIN: confere o atual, e o novo passa a valer', () => {
   afirmar(novo.token, 'PIN novo entra: ' + JSON.stringify(novo).slice(0, 160));
 });
 
+caso('quadro do CD: le os admitidos da aba "CDADMITIDOS" (titulo em cima, datas como data, texto e "ago/2025")', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (a, b, c) => new m.DataDoScript(a, b, c);
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'APOIO TA': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO'], ['1', 'ANA', 'TA', 'CONFERENTE'], ['2', 'BRUNO', 'TA', 'SEPARADOR']],
+    'CDADMITIDOS': [['ADMITIDOS 2025'], ['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA ADMISSÃO'],
+      ['3', 'CARLA', 'TB', 'SEPARADOR', D(2025, 7, 11)],
+      ['4', 'DIEGO', 'TC', 'CONFERENTE', '02/09/2025'],
+      ['5', 'EVA', 'TA', 'OPERADOR', 'ago/2025']],
+    'CDESLIGADOS': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'],
+      ['6', 'FABIO', 'TB', 'SEPARADOR', D(2025, 7, 20), 'Pedido', 'Outro emprego']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  afirmar(d.adm.length === 3, 'admitidos: ' + JSON.stringify(d.adm));
+  afirmar(d.adm.map((a) => a.mes).sort().join() === '2025-08,2025-08,2025-09', 'meses: ' + d.adm.map((a) => a.mes).join());
+  afirmar(d.des.length === 1 && d.apoio.length === 2, 'desligados ' + d.des.length + ' apoio ' + d.apoio.length);
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

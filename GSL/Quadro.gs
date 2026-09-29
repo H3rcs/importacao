@@ -13,6 +13,32 @@
 const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];
 const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
+
+/*
+ * A aba e achada pelo nome sem diferenciar maiuscula, acento, espaco ou
+ * pontuacao, e por apelidos: a planilha de apoio de algumas filiais chama
+ * "CDADMITIDOS" (e nao "CADMITIDOS") — e a aba inteira era ignorada, sem
+ * admitido nenhum no Quadro.
+ */
+const QUADRO_APELIDOS = {
+  CADMITIDOS: { nomes: ['CADMITIDOS', 'CDADMITIDOS', 'ADMITIDOS', 'ADMISSOES', 'CADMISSOES', 'CDADMISSOES'], pedacos: ['ADMITID', 'ADMISS'] },
+  CDESLIGADOS: { nomes: ['CDESLIGADOS', 'CDDESLIGADOS', 'DESLIGADOS', 'DESLIGAMENTOS', 'CDESLIGAMENTOS', 'CDDESLIGAMENTOS'], pedacos: ['DESLIG', 'DEMITID', 'DEMISS'] }
+};
+function chaveAbaQ_(nome) { return normalizaQ_(nome).replace(/[^A-Z0-9]/g, ''); }
+function abaQuadro_(ss, nomeAba) {
+  const exata = ss.getSheetByName(nomeAba);
+  if (exata) return exata;
+  const abas = ss.getSheets();
+  const alvo = chaveAbaQ_(nomeAba);
+  const ap = QUADRO_APELIDOS[nomeAba] || { nomes: [], pedacos: [] };
+  const nomes = [alvo].concat(ap.nomes);
+  const porNome = abas.filter(function (a) { return nomes.indexOf(chaveAbaQ_(a.getName())) !== -1; })[0];
+  if (porNome) return porNome;
+  return abas.filter(function (a) {
+    const k = chaveAbaQ_(a.getName());
+    return ap.pedacos.some(function (x) { return k.indexOf(x) !== -1; });
+  })[0] || null;
+}
 const QUADRO_CACHE_SEGUNDOS = 300;
 
 function idPlanilhaQuadro_() {
@@ -71,7 +97,7 @@ exigirPorta_();
       nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
       equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase(),
       funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase(),
-      mes:    aoMesQ_(pegaQ_(linha, ['ADMISS', 'DATA'], ['MOTIVO', 'TIPO']))
+      mes:    aoMesQ_(pegaQ_(linha, ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], ['MOTIVO', 'TIPO']))
     };
   }).filter(function (r) { return r.mes; });
 
@@ -98,12 +124,18 @@ exigirPorta_();
 
 /** Le uma aba inteira como [{CABECALHO: valor}]. Aba inexistente devolve []. */
 function lerAbaQuadro_(ss, nomeAba) {
-  const aba = ss.getSheetByName(nomeAba);
+  const aba = abaQuadro_(ss, nomeAba);
   if (!aba) return [];
   const valores = aba.getDataRange().getValues();
   if (valores.length <= 1) return [];
-  const cab = valores[0].map(function (c) { return normalizaQ_(c); });
-  return valores.slice(1).map(function (linha) {
+  // O cabecalho nem sempre e a 1a linha (titulo em cima): e a primeira das
+  // 10 primeiras que tem uma coluna de nome/colaborador.
+  let iCab = 0;
+  for (let i = 0; i < Math.min(10, valores.length); i++) {
+    if (valores[i].some(function (c) { const t = normalizaQ_(c); return t.indexOf('COLABORADOR') !== -1 || t === 'NOME' || t.indexOf('NOME ') === 0; })) { iCab = i; break; }
+  }
+  const cab = valores[iCab].map(function (c) { return normalizaQ_(c); });
+  return valores.slice(iCab + 1).map(function (linha) {
     const obj = {};
     cab.forEach(function (nome, i) { if (nome && obj[nome] === undefined) obj[nome] = linha[i]; });
     return obj;
@@ -113,7 +145,7 @@ function lerAbaQuadro_(ss, nomeAba) {
 }
 
 function temColunaQ_(ss, nomeAba, pedaco) {
-  const aba = ss.getSheetByName(nomeAba);
+  const aba = abaQuadro_(ss, nomeAba);
   if (!aba || aba.getLastColumn() < 1) return false;
   return aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
     .some(function (c) { return normalizaQ_(c).indexOf(pedaco) !== -1; });
@@ -151,9 +183,20 @@ function aoMesQ_(v) {
   return d ? d.slice(0, 7) : '';
 }
 
+const MESES_Q = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 function dataQ_(v) {
-  if (v instanceof Date && !isNaN(v)) return Utilities.formatDate(v, fuso(), 'yyyy-MM-dd');
+  if (v && typeof v.getTime === 'function' && !isNaN(v.getTime())) return Utilities.formatDate(v, fuso(), 'yyyy-MM-dd');
+  // Numero de serie do Sheets/Excel (dias desde 30/12/1899).
+  if (typeof v === 'number' && v > 20000 && v < 80000) {
+    return Utilities.formatDate(new Date(Math.round((v - 25569) * 86400000)), 'UTC', 'yyyy-MM-dd');
+  }
   const s = txtQ_(v);
+  // "ago/2025", "Agosto de 2025", "AGO-25"
+  const mx = normalizaQ_(s).match(/^([A-Z]{3})[A-Z]*\s*(?:DE\s*)?[\/\-\s]?\s*(\d{2,4})$/);
+  if (mx && MESES_Q.indexOf(mx[1]) !== -1) {
+    const ano = mx[2].length === 2 ? '20' + mx[2] : mx[2];
+    return ano + '-' + ('0' + (MESES_Q.indexOf(mx[1]) + 1)).slice(-2) + '-01';
+  }
   const iso = s.match(/^(\d{4})[\/\-](\d{1,2})(?:[\/\-](\d{1,2}))?/);
   if (iso) return iso[1] + '-' + ('0' + iso[2]).slice(-2) + '-' + ('0' + (iso[3] || '1')).slice(-2);
   const br = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
@@ -178,7 +221,7 @@ exigirPorta_();
     const ss = SpreadsheetApp.openById(id);
     nome = ss.getName();
     const faltam = QUADRO_ABAS_APOIO.concat([QUADRO_ABA_ADMITIDOS, QUADRO_ABA_DESLIGADOS])
-      .filter(function (a) { return !ss.getSheetByName(a); });
+      .filter(function (a) { return !abaQuadro_(ss, a); });
     if (faltam.length === 5) throw new Error('A planilha não tem nenhuma das abas esperadas (APOIO TA, APOIO TB, APOIO TC, CADMITIDOS, CDESLIGADOS).');
   } catch (e) {
     throw new Error(String(e.message || e).indexOf('abas') !== -1 ? e.message

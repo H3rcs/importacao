@@ -160,7 +160,7 @@ class Mundo {
     const raiz = this.novaPasta('Meu Drive', null);
     this.raiz = raiz.id;
   }
-  novoId(prefixo) { return (prefixo || 'id') + '_' + (++this.seq).toString(36) + crypto.randomBytes(6).toString('hex'); }
+  novoId(prefixo) { return (prefixo || 'id') + '_' + (++this.seq).toString(36) + crypto.randomBytes(12).toString('hex'); }  // tamanho de ID do Drive (>= 20)
   novaPasta(nome, pai) {
     const p = { id: this.novoId('pasta'), nome: nome, pais: new Set(pai ? [pai] : []), lixo: false };
     this.pastas.set(p.id, p); return p;

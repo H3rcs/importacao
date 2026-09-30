@@ -798,6 +798,52 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('nobreaks: hora so com numeros, historico no formato da folha e exportar Excel/PDF', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { ABA_NB = 'lancar'; abrir('nobreaks'); });
+    await f.waitForSelector('#nb-folha input.hora', { timeout: 15000 });
+    const hora = f.locator('#nb-folha input.hora').first();
+    await hora.click(); await hora.pressSequentially('0830');
+    afirmar(await hora.inputValue() === '08:30', 'mascara: ' + await hora.inputValue());
+    const seg = f.locator('#nb-folha input.hora').nth(1);
+    await seg.click(); await seg.pressSequentially('14'); await seg.press('Tab');
+    afirmar(await seg.inputValue() === '14:00', 'completa ao sair: ' + await seg.inputValue());
+    // valores da 1a e 2a leitura
+    await f.evaluate(() => {
+      const trs = document.querySelectorAll('#nb-folha tbody tr');
+      [0, 1].forEach((i) => ['vi', 'ii', 'pi', 'vo', 'io', 'po'].forEach((k, j) => {
+        const inp = trs[i].querySelector('[data-k="' + k + '"]'); inp.value = String([220, 5, 1100, 120, 8, 960][j] + i); nbAoDigitar(inp);
+      }));
+      nbGravarSemana();
+    });
+    await f.waitForFunction(() => (DADOS.leituras || []).some((l) => l.hora === '08:30') && DADOS.leituras.some((l) => l.hora === '14:00'), null, { timeout: 15000 });
+    await f.evaluate(() => { NB_HIST.mes = ''; trocarAbaNB('historico'); });
+    await f.waitForSelector('table.nb-historico td.nb-dia', { timeout: 15000 });
+    const cab = await f.evaluate(() => Array.from(document.querySelectorAll('table.nb-historico th')).map((t) => t.textContent.trim()).join('|'));
+    afirmar(/Vi \(V\).*Po \(VA\).*Carga/.test(cab) && /08:30/.test(await f.evaluate(() => document.querySelector('table.nb-historico').textContent)), 'historico: ' + cab);
+    // Excel
+    const [down] = await Promise.all([aba.page.waitForEvent('download', { timeout: 15000 }), f.click('text=Exportar Excel')]);
+    const caminho = require('path').join(require('os').tmpdir(), 'gsl-nb-' + Date.now() + '.xlsx');
+    await down.saveAs(caminho);
+    const lista = require('child_process').execSync('unzip -l "' + caminho + '"').toString();
+    const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet1.xml').toString();
+    if (process.env.GUARDAR_XLSX) require('fs').copyFileSync(caminho, process.env.GUARDAR_XLSX);
+    require('fs').unlinkSync(caminho);
+    afirmar(/xl\/workbook.xml/.test(lista) && /sheet2.xml/.test(lista), 'zip: ' + lista);
+    afirmar(/08:30/.test(folha) && /<v>960<\/v>/.test(folha), 'planilha: ' + folha.slice(0, 300));
+    // PDF (janela de impressao)
+    const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
+    await janela.waitForLoadState();
+    const texto = await janela.evaluate(() => document.body.innerText);
+    afirmar(/Relatório de nobreaks/.test(texto) && /08:30/.test(texto) && /Resumo/.test(texto), 'pdf: ' + texto.slice(0, 200));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

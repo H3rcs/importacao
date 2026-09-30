@@ -48,6 +48,136 @@ const pnKpi = (valor, rotulo, cor, sub, compacto) => `<div class="cartao kpi ${c
 const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) ? '—'
   : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 
+/*
+ * EXPORTAR PARA EXCEL (.xlsx de verdade, sem biblioteca externa).
+ * abas: [{ nome, linhas: [[celula, ...], ...] }] — numero vira numero,
+ * o resto vira texto. O arquivo e um zip "sem compressao" com o XML
+ * minimo que o Excel, o LibreOffice e o Google Planilhas abrem.
+ */
+function pnBaixarXlsx(nomeArquivo, abas) {
+  const xml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const col = (i) => { let s = ''; i++; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const NS = 'http:\/\/schemas.openxmlformats.org';
+  // (montado em pedacos: o HtmlService trataria o cabecalho XML como scriptlet)
+  const XML_CAB = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>';
+  const planilha = (linhas) => {
+    const larg = [];
+    linhas.forEach((l) => l.forEach((c, j) => { larg[j] = Math.min(60, Math.max(larg[j] || 8, String(c === null || c === undefined ? '' : c).length + 2)); }));
+    const cols = larg.length ? '<cols>' + larg.map((w, j) => `<col min="${j + 1}" max="${j + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>' : '';
+    const dados = linhas.map((l, i) => `<row r="${i + 1}">` + l.map((c, j) => {
+      const ref = col(j) + (i + 1);
+      if (c === null || c === undefined || c === '') return '';
+      if (typeof c === 'number' && isFinite(c)) return `<c r="${ref}"><v>${c}</v></c>`;
+      const negrito = i === 0 || (i > 0 && !linhas[i - 1].length);   // titulo e o cabecalho logo depois da linha vazia
+      return `<c r="${ref}" t="inlineStr"${negrito ? ' s="1"' : ''}><is><t xml:space="preserve">${xml(c)}</t></is></c>`;
+    }).join('') + '</row>').join('');
+    return `${XML_CAB}<worksheet xmlns="${NS}/spreadsheetml/2006/main">${cols}<sheetData>${dados}</sheetData></worksheet>`;
+  };
+  const nomes = abas.map((a, i) => String(a.nome || ('Aba ' + (i + 1))).replace(/[\\\/?*\[\]:]/g, ' ').slice(0, 31));
+  const arquivos = [
+    ['[Content_Types].xml', `${XML_CAB}<Types xmlns="${NS}/package/2006/content-types">` +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      abas.map((a, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '</Types>'],
+    ['_rels/.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `${XML_CAB}<workbook xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheets>` +
+      nomes.map((n, i) => `<sheet name="${xml(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
+      abas.map((a, i) => `<Relationship Id="rId${i + 1}" Type="${NS}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+      `<Relationship Id="rId${abas.length + 1}" Type="${NS}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/styles.xml', `${XML_CAB}<styleSheet xmlns="${NS}/spreadsheetml/2006/main">` +
+      '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="12"/><name val="Calibri"/></font></fonts>' +
+      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>']
+  ].concat(abas.map((a, i) => ['xl/worksheets/sheet' + (i + 1) + '.xml', planilha(a.linhas)]));
+  pnBaixarBlob(nomeArquivo, pnZipSemCompressao(arquivos), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/* Zip no modo "store": [[nome, texto], ...] -> Uint8Array. */
+function pnZipSemCompressao(arquivos) {
+  const tabela = pnZipSemCompressao.tabela || (pnZipSemCompressao.tabela = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+    return t;
+  })());
+  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = tabela[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const enc = new TextEncoder();
+  const partes = [], centrais = [];
+  let pos = 0;
+  const cab = (tam) => { const b = new Uint8Array(tam); return { b, v: new DataView(b.buffer) }; };
+  arquivos.forEach(([nome, texto]) => {
+    const n = enc.encode(nome), dados = enc.encode(texto), crc = crc32(dados);
+    const h = cab(30);
+    h.v.setUint32(0, 0x04034b50, true); h.v.setUint16(4, 20, true); h.v.setUint16(6, 0x0800, true); h.v.setUint16(8, 0, true);
+    h.v.setUint16(10, 0, true); h.v.setUint16(12, 0x21, true); h.v.setUint32(14, crc, true);
+    h.v.setUint32(18, dados.length, true); h.v.setUint32(22, dados.length, true); h.v.setUint16(26, n.length, true); h.v.setUint16(28, 0, true);
+    const c = cab(46);
+    c.v.setUint32(0, 0x02014b50, true); c.v.setUint16(4, 20, true); c.v.setUint16(6, 20, true); c.v.setUint16(8, 0x0800, true);
+    c.v.setUint16(10, 0, true); c.v.setUint16(12, 0, true); c.v.setUint16(14, 0x21, true); c.v.setUint32(16, crc, true);
+    c.v.setUint32(20, dados.length, true); c.v.setUint32(24, dados.length, true); c.v.setUint16(28, n.length, true);
+    c.v.setUint32(42, pos, true);
+    partes.push(h.b, n, dados); centrais.push(c.b, n);
+    pos += 30 + n.length + dados.length;
+  });
+  const tamCentral = centrais.reduce((s, b) => s + b.length, 0);
+  const fim = cab(22);
+  fim.v.setUint32(0, 0x06054b50, true); fim.v.setUint16(8, arquivos.length, true); fim.v.setUint16(10, arquivos.length, true);
+  fim.v.setUint32(12, tamCentral, true); fim.v.setUint32(16, pos, true);
+  const tudo = partes.concat(centrais, [fim.b]);
+  const saida = new Uint8Array(tudo.reduce((s, b) => s + b.length, 0));
+  let o = 0; tudo.forEach((b) => { saida.set(b, o); o += b.length; });
+  return saida;
+}
+
+function pnBaixarBlob(nome, bytes, tipo) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nome; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
+  avisar('Arquivo gerado: ' + nome);
+}
+
+/*
+ * RELATORIO EM PDF: abre o relatorio numa janela propria, ja formatado
+ * para A4 deitado, e chama a impressao — no destino, "Salvar como PDF".
+ */
+function pnImprimirRelatorio(titulo, subtitulo, corpoHtml) {
+  const w = window.open('', '_blank');
+  if (!w) return avisar('O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo.', true);
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  w.document.open();
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)} — ${esc(subtitulo)}</title>
+    <style>
+      @page { size: A4 landscape; margin: 12mm; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #14152B; font-size: 11px; margin: 0; }
+      header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #111785; padding-bottom: 8px; margin-bottom: 12px; }
+      header h1 { font-size: 18px; margin: 0; color: #111785; } header .sub { font-size: 12px; color: #555; margin-top: 2px; }
+      header .marca { text-align: right; font-size: 11px; color: #555; } header .marca b { color: #111785; font-size: 13px; }
+      h2 { font-size: 13px; margin: 16px 0 6px; color: #111785; }
+      table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #ddd; padding: 4px 5px; text-align: right; white-space: nowrap; }
+      th { background: #F1F2F8; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; text-align: center; }
+      th.en { color: #2563EB; border-bottom: 2px solid #3B82F6; } th.sa { color: #1B7F4B; border-bottom: 2px solid #1B7F4B; }
+      td:first-child, td:nth-child(2) { text-align: left; } td.oc { text-align: left; white-space: normal; }
+      table.folha tr.novo td { border-top: 1.5px solid #999; } tr.alerta td { color: #C62828; }
+      thead { display: table-header-group; } tr { page-break-inside: avoid; }
+      .nota { color: #666; font-size: 10px; margin-top: 8px; }
+      .barra { margin: 0 0 12px; } .barra button { font-size: 13px; padding: 6px 14px; }
+      @media print { .barra { display: none; } }
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">Imprimir / Salvar como PDF</button></div>
+    <header><div><h1>${esc(titulo)}</h1><div class="sub">${esc(subtitulo)}</div></div>
+      <div class="marca"><b>GSL Bartofil</b><br>${esc(filial)}<br>gerado em ${esc(new Date().toLocaleString('pt-BR'))}</div></header>
+    ${corpoHtml}</body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) {} }, 400);
+}
+
 /* Abas internas de um painel. */
 function pnAbas(lista, atual, funcao) {
   return `<div class="abas">${lista.map(([id, nome]) => `<button class="aba ${atual === id ? 'ativa' : ''}" data-aba="${esc(id)}"
@@ -250,7 +380,7 @@ async function atualizarFiliaisDaSessao() {
 let ABA_NB = 'painel';          // painel | lancar | historico | equipamentos
 let NB_GRAFICO = { nobreak: '', dias: 30 };
 let NB_SEMANA = { nobreak: '', inicio: '' };
-let NB_HIST = { nobreak: '', mes: '' };
+let NB_HIST = { nobreak: '', mes: undefined };   // mes '' = todos os meses
 
 function nbEquip(d, codigo) { return d.equipamentos.find((e) => e.codigo === codigo) || null; }
 
@@ -474,7 +604,8 @@ async function nbLancar(d, alvo) {
       linhas += `<tr class="${n === 1 ? 'novo-dia' : ''} ${dia === d.hoje ? 'hoje' : ''}" data-data="${dia}" data-leitura="${n}" data-existe="${l.id ? '1' : ''}">
         ${n === 1 ? `<td class="nb-dia" rowspan="${porDia}">${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(dia)}</small></td>` : ''}
         <td>${n}ª</td>
-        <td><input class="hora" data-k="hora" placeholder="__:__" value="${esc(l.hora || '')}" oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>
+        <td><input class="hora" data-k="hora" inputmode="numeric" maxlength="5" placeholder="0000" value="${esc(l.hora || '')}"
+          oninput="nbMascaraHora(this);nbAoDigitar(this)" onblur="nbFecharHora(this)" onkeydown="nbTeclado(event,this)"></td>
         ${cel('vi')}${cel('ii')}${cel('pi')}${cel('vo')}${cel('io')}${cel('po')}
         <td class="carga" data-carga></td>
         <td><input class="oc" data-k="ocorrencia" value="${esc(l.ocorrencia || '')}" placeholder="ocorrência (opcional)" oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>
@@ -498,7 +629,8 @@ async function nbLancar(d, alvo) {
         <div class="pn-mini" style="padding-bottom:10px">${pnDataLonga(inicio)} a ${pnDataLonga(fim)} ·
           ${leituras.length} leitura(s) já lançada(s)${e && e.potencia ? ' · potência ' + pnNum(e.potencia) + ' VA' : ''}</div>
       </div>
-      <p class="dica">Mesma ordem da folha: hora, <b style="color:#2563EB">ENTRADA</b> (Vi, Ii, Pi) e depois
+      <p class="dica">Hora só com números: <b>0830</b> vira 08:30, <b>14</b> vira 14:00 (não precisa dos dois pontos).
+        Mesma ordem da folha: hora, <b style="color:#2563EB">ENTRADA</b> (Vi, Ii, Pi) e depois
         <b style="color:var(--verde)">SAÍDA</b> (Vo, Io, Po). Pode usar vírgula. <b>Enter</b> pula para o próximo campo.
         Apagar todos os números de uma linha apaga aquela leitura.</p>
     </div>
@@ -519,6 +651,32 @@ async function nbLancar(d, alvo) {
       </div>
     </div>`;
   document.querySelectorAll('#nb-folha tbody tr').forEach(nbRecalcularLinha);
+}
+
+/*
+ * HORA SO COM NUMEROS. Os dois pontos entram sozinhos enquanto a pessoa
+ * digita (830 -> 8:30, 1415 -> 14:15) e, ao sair do campo, a hora fica
+ * completa (8 -> 08:00). "8h" tambem vale: a letra e ignorada.
+ */
+function nbMascaraHora(inp) {
+  const d = String(inp.value || '').replace(/\D/g, '').slice(0, 4);
+  const v = d.length === 3 ? d.slice(0, 1) + ':' + d.slice(1) : (d.length === 4 ? d.slice(0, 2) + ':' + d.slice(2) : d);
+  if (v !== inp.value) inp.value = v;
+}
+function nbHoraValida(bruto) {
+  const d = String(bruto || '').replace(/\D/g, '');
+  if (!d) return '';
+  let h, m;
+  if (d.length <= 2) { h = Number(d); m = 0; }
+  else if (d.length === 3) { h = Number(d.slice(0, 1)); m = Number(d.slice(1)); }
+  else { h = Number(d.slice(0, 2)); m = Number(d.slice(2, 4)); }
+  if (h > 23 || m > 59) return null;
+  return ('0' + h).slice(-2) + ':' + ('0' + m).slice(-2);
+}
+function nbFecharHora(inp) {
+  const h = nbHoraValida(inp.value);
+  inp.classList.toggle('invalida', h === null);
+  if (h !== null && h !== inp.value) inp.value = h;
 }
 
 function nbAoDigitar(inp) {
@@ -559,7 +717,11 @@ function nbGravarSemana() {
     const l = { data: tr.dataset.data, leitura: Number(tr.dataset.leitura) };
     tr.querySelectorAll('input').forEach((inp) => {
       const k = inp.dataset.k;
-      if (k === 'hora' || k === 'ocorrencia') l[k] = inp.value.trim();
+      if (k === 'hora') {
+        const h = nbHoraValida(inp.value);
+        if (h === null) invalido = invalido || (pnDataLonga(l.data) + ' ' + l.leitura + 'ª: hora "' + inp.value + '" não existe');
+        l.hora = h || '';
+      } else if (k === 'ocorrencia') l[k] = inp.value.trim();
       else {
         const bruto = inp.value.trim();
         const n = pnLerNumero(bruto, k === 'pi' || k === 'po');
@@ -574,36 +736,122 @@ function nbGravarSemana() {
   agir('lancarLeituras', { nobreak: NB_SEMANA.nobreak, leituras: linhas }, 'Leituras gravadas').catch(() => {});
 }
 
-/* ---------- HISTORICO ---------- */
+/* ---------- HISTORICO (mesma cara da folha de lancamento) ---------- */
+function nbListaHistorico(d) {
+  return d.leituras.filter((l) => (!NB_HIST.nobreak || l.nobreak === NB_HIST.nobreak) && (!NB_HIST.mes || l.data.slice(0, 7) === NB_HIST.mes))
+    .slice().sort((a, b) => a.data.localeCompare(b.data) || a.nobreak.localeCompare(b.nobreak) || (a.leitura - b.leitura));
+}
+
 function nbHistorico(d) {
   const meses = [...new Set(d.leituras.map((l) => l.data.slice(0, 7)))].sort().reverse();
-  if (!NB_HIST.mes || meses.indexOf(NB_HIST.mes) === -1) NB_HIST.mes = meses[0] || '';
+  if (NB_HIST.mes === undefined || (NB_HIST.mes && meses.indexOf(NB_HIST.mes) === -1)) NB_HIST.mes = meses[0] || '';
   const p = d.parametros;
-  const lista = d.leituras.filter((l) => (!NB_HIST.nobreak || l.nobreak === NB_HIST.nobreak) && (!NB_HIST.mes || l.data.slice(0, 7) === NB_HIST.mes))
-    .slice().reverse();
-  return `<div class="cartao">
-    <div class="pn-linha" style="margin-bottom:12px">
+  const lista = nbListaHistorico(d);
+  const grupos = {};
+  lista.forEach((l) => { const k = l.data + '|' + l.nobreak; grupos[k] = (grupos[k] || 0) + 1; });
+  let anterior = '';
+  const linhas = lista.map((l) => {
+    const k = l.data + '|' + l.nobreak;
+    const primeira = k !== anterior; anterior = k;
+    const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
+    const n = (v, casas, alerta) => `<td class="numero${alerta ? ' nb-fora' : ''}">${pnNum(v, casas)}</td>`;
+    const dt = pnParaData(l.data);
+    return `<tr class="${primeira ? 'novo-dia' : ''} ${l.data === d.hoje ? 'hoje' : ''}">
+      ${primeira ? `<td class="nb-dia" rowspan="${grupos[k]}">${NB_HIST.nobreak ? '' : `<span class="nb-cod">${esc(l.nobreak)}</span>`}${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(l.data)}</small></td>` : ''}
+      <td>${l.leitura}ª</td><td>${esc(l.hora || '—')}</td>
+      ${n(l.vi, 1, av.vi)}${n(l.ii, 2)}${n(l.pi)}${n(l.vo, 1, av.vo)}${n(l.io, 2)}${n(l.po)}
+      <td class="carga ${av.carga !== null && av.carga >= p.cargaAlerta ? 'alta' : ''}">${pnPct(av.carga)}</td>
+      <td class="numero">${pnPct(av.poPi)}</td>
+      <td class="nb-oc">${esc(l.ocorrencia || '')}</td>
+      ${primeira ? `<td rowspan="${grupos[k]}">${d.permissoes.lancar ? `<button class="icone-botao" onclick="nbAbrirSemanaDe(${jsArg(l.nobreak)},${jsArg(l.data)})">Corrigir</button>` : ''}</td>` : ''}
+    </tr>`;
+  }).join('');
+  return `<div class="cartao" style="margin-bottom:14px">
+    <div class="pn-linha">
       <div class="campo"><label>Nobreak</label><select onchange="NB_HIST.nobreak=this.value;pintarAbaNB(DADOS)">
         <option value="">Todos</option>${d.equipamentos.map((e) => `<option ${NB_HIST.nobreak === e.codigo ? 'selected' : ''}>${esc(e.codigo)}</option>`).join('')}</select></div>
       <div class="campo"><label>Mês</label><select onchange="NB_HIST.mes=this.value;pintarAbaNB(DADOS)">
-        ${meses.map((m) => `<option value="${m}" ${NB_HIST.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('') || '<option>—</option>'}</select></div>
+        ${meses.map((m) => `<option value="${m}" ${NB_HIST.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('')}
+        <option value="" ${NB_HIST.mes === '' ? 'selected' : ''}>Todos (últimos 120 dias)</option></select></div>
       <div class="pn-mini" style="padding-bottom:10px">${lista.length} leitura(s)</div>
+      <div style="margin-left:auto;display:flex;gap:8px;padding-bottom:6px">
+        <button class="botao secundario" onclick="nbExportarExcel()" ${lista.length ? '' : 'disabled'}>Exportar Excel</button>
+        <button class="botao secundario" onclick="nbExportarPdf()" ${lista.length ? '' : 'disabled'}>Exportar PDF</button>
+      </div>
     </div>
-    <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Leit.</th><th>Hora</th><th>Nobreak</th>
-      <th class="numero">Vi</th><th class="numero">Ii</th><th class="numero">Pi</th><th class="numero">Vo</th><th class="numero">Io</th><th class="numero">Po</th>
-      <th class="numero">Carga</th><th class="numero">Po/Pi</th><th>Ocorrência</th><th></th></tr></thead>
-      <tbody>${lista.map((l) => {
-        const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
-        return `<tr><td>${pnDiaSemana(l.data)} ${pnDataLonga(l.data)}</td><td>${l.leitura}ª</td><td>${esc(l.hora)}</td><td><strong>${esc(l.nobreak)}</strong></td>
-          <td class="numero" style="${av.vi ? 'color:var(--alerta);font-weight:700' : ''}">${pnNum(l.vi, 1)}</td><td class="numero">${pnNum(l.ii, 2)}</td><td class="numero">${pnNum(l.pi)}</td>
-          <td class="numero" style="${av.vo ? 'color:var(--alerta);font-weight:700' : ''}">${pnNum(l.vo, 1)}</td><td class="numero">${pnNum(l.io, 2)}</td><td class="numero">${pnNum(l.po)}</td>
-          <td class="numero" style="${av.carga !== null && av.carga >= p.cargaAlerta ? 'color:var(--alerta);font-weight:700' : ''}">${pnPct(av.carga)}</td>
-          <td class="numero">${pnPct(av.poPi)}</td><td>${esc(l.ocorrencia)}</td>
-          <td>${d.permissoes.lancar ? `<button class="icone-botao" onclick="nbAbrirSemanaDe(${jsArg(l.nobreak)},${jsArg(l.data)})">Corrigir</button>` : ''}</td></tr>`;
-      }).join('') || '<tr><td colspan="14" class="vazio">Nenhuma leitura com esses filtros.</td></tr>'}</tbody></table></div>
-    <p class="dica">O histórico mostra os últimos 120 dias. Leituras mais antigas continuam no banco e aparecem na aba
-      <b>Lançar semana</b> ao navegar até a semana delas.</p>
+  </div>
+  <div class="cartao">
+    <div class="pn-tabela-rolagem" style="max-height:62vh;overflow:auto">
+      <table class="nb-folha nb-historico">
+        <thead><tr><th>Dia</th><th>Leitura</th><th>Hora</th>
+          <th class="entrada">Vi (V)</th><th class="entrada">Ii (A)</th><th class="entrada">Pi (VA)</th>
+          <th class="saida">Vo (V)</th><th class="saida">Io (A)</th><th class="saida">Po (VA)</th>
+          <th>Carga</th><th>Po/Pi</th><th>Ocorrências</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="13" class="vazio">Nenhuma leitura com esses filtros.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p class="dica">Em vermelho: tensão fora da faixa ou carga acima de ${pnNum(p.cargaAlerta)}%. O histórico mostra os últimos 120 dias;
+      leituras mais antigas aparecem na aba <b>Lançar semana</b> ao navegar até a semana delas.</p>
   </div>`;
+}
+
+/* ---------- EXPORTAR (Excel e PDF) ---------- */
+function nbDadosRelatorio() {
+  const d = DADOS, p = d.parametros;
+  const lista = nbListaHistorico(d);
+  const periodo = NB_HIST.mes ? pnRotuloMes(NB_HIST.mes) : 'Últimos 120 dias';
+  const linhas = lista.map((l) => {
+    const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
+    return { l, av, alerta: !!(av.vi || av.vo || (av.carga !== null && av.carga >= p.cargaAlerta)) };
+  });
+  const resumo = {};
+  linhas.forEach(({ l, av, alerta }) => {
+    const r = resumo[l.nobreak] || (resumo[l.nobreak] = { n: 0, somaCarga: 0, nCarga: 0, cargaMax: null, alertas: 0 });
+    r.n++; if (alerta) r.alertas++;
+    if (av.carga !== null) { r.somaCarga += av.carga; r.nCarga++; r.cargaMax = r.cargaMax === null ? av.carga : Math.max(r.cargaMax, av.carga); }
+  });
+  return { d, p, periodo, linhas, resumo, filtro: NB_HIST.nobreak || 'Todos os nobreaks' };
+}
+
+function nbExportarExcel() {
+  const r = nbDadosRelatorio();
+  const num = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '' : Number(Number(v).toFixed(casas));
+  const leituras = [['Data', 'Dia', 'Nobreak', 'Leitura', 'Hora', 'Vi (V)', 'Ii (A)', 'Pi (VA)', 'Vo (V)', 'Io (A)', 'Po (VA)', 'Carga (%)', 'Po/Pi (%)', 'Alerta', 'Ocorrência']]
+    .concat(r.linhas.map(({ l, av, alerta }) => [pnDataLonga(l.data), PN_SEMANA_LONGA[pnParaData(l.data).getDay()], l.nobreak, l.leitura, l.hora || '',
+      num(l.vi, 1), num(l.ii, 2), num(l.pi, 0), num(l.vo, 1), num(l.io, 2), num(l.po, 0), num(av.carga, 1), num(av.poPi, 1), alerta ? 'SIM' : '', l.ocorrencia || '']));
+  const resumo = [['Nobreak', 'Local', 'Potência (VA)', 'Leituras', 'Carga média (%)', 'Carga máxima (%)', 'Leituras em alerta']]
+    .concat(Object.keys(r.resumo).sort().map((k) => {
+      const x = r.resumo[k], e = nbEquip(r.d, k) || {};
+      return [k, e.local || '', num(e.potencia, 0), x.n, x.nCarga ? num(x.somaCarga / x.nCarga, 1) : '', num(x.cargaMax, 1), x.alertas];
+    }));
+  const titulo = [['Nobreaks — ' + r.filtro + ' — ' + r.periodo], ['Filial: ' + ((SESSAO && SESSAO.filial && SESSAO.filial.nome) || '') + ' · gerado em ' + new Date().toLocaleString('pt-BR')], []];
+  pnBaixarXlsx('Nobreaks ' + (NB_HIST.nobreak || 'todos') + ' ' + (NB_HIST.mes || 'ultimos-120-dias') + '.xlsx',
+    [{ nome: 'Leituras', linhas: titulo.concat(leituras) }, { nome: 'Resumo', linhas: titulo.concat(resumo) }]);
+}
+
+function nbExportarPdf() {
+  const r = nbDadosRelatorio();
+  let anterior = '';
+  const corpo = r.linhas.map(({ l, av, alerta }) => {
+    const k = l.data + '|' + l.nobreak, novo = k !== anterior; anterior = k;
+    return `<tr class="${novo ? 'novo' : ''}${alerta ? ' alerta' : ''}"><td>${novo ? PN_SEMANA_LONGA[pnParaData(l.data).getDay()].slice(0, 3) + ' ' + pnDataLonga(l.data) : ''}</td>
+      <td>${novo ? esc(l.nobreak) : ''}</td><td>${l.leitura}ª</td><td>${esc(l.hora || '')}</td>
+      <td>${pnNum(l.vi, 1)}</td><td>${pnNum(l.ii, 2)}</td><td>${pnNum(l.pi)}</td><td>${pnNum(l.vo, 1)}</td><td>${pnNum(l.io, 2)}</td><td>${pnNum(l.po)}</td>
+      <td><b>${pnPct(av.carga)}</b></td><td>${pnPct(av.poPi)}</td><td class="oc">${esc(l.ocorrencia || '')}</td></tr>`;
+  }).join('');
+  const resumo = Object.keys(r.resumo).sort().map((k) => {
+    const x = r.resumo[k], e = nbEquip(r.d, k) || {};
+    return `<tr><td><b>${esc(k)}</b></td><td class="oc">${esc(e.local || '')}</td><td>${pnNum(e.potencia)}</td><td>${x.n}</td>
+      <td>${x.nCarga ? pnPct(x.somaCarga / x.nCarga, 1) : '—'}</td><td>${pnPct(x.cargaMax, 1)}</td><td>${x.alertas}</td></tr>`;
+  }).join('');
+  pnImprimirRelatorio('Relatório de nobreaks', r.filtro + ' · ' + r.periodo, `
+    <h2>Resumo</h2>
+    <table><thead><tr><th>Nobreak</th><th>Local</th><th>Potência (VA)</th><th>Leituras</th><th>Carga média</th><th>Carga máxima</th><th>Em alerta</th></tr></thead><tbody>${resumo}</tbody></table>
+    <h2>Leituras</h2>
+    <table class="folha"><thead><tr><th>Dia</th><th>Nobreak</th><th>Leit.</th><th>Hora</th>
+      <th class="en">Vi (V)</th><th class="en">Ii (A)</th><th class="en">Pi (VA)</th><th class="sa">Vo (V)</th><th class="sa">Io (A)</th><th class="sa">Po (VA)</th>
+      <th>Carga</th><th>Po/Pi</th><th>Ocorrência</th></tr></thead><tbody>${corpo}</tbody></table>
+    <p class="nota">Em vermelho: tensão fora da faixa ou carga acima de ${pnNum(r.p.cargaAlerta)}%.</p>`);
 }
 
 function nbAbrirSemanaDe(codigo, data) {

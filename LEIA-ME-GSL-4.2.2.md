@@ -29,6 +29,11 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - As abas **Resumo**, **Movimentações** e **Inventário** continuam.
   - Em **Colar da planilha**, a última coluna é o estoque ideal. O esquema subiu para 8.4 e a coluna nova é criada sozinha.
 - **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS (ou CDADMITIDOS) e CDESLIGADOS. O nome da aba pode variar em maiúsculas, acentos e espaços; o título acima do cabeçalho é ignorado; a data de admissão pode ser data, texto (02/09/2025) ou mês ("ago/2025"). Depois de mudar a planilha, clique em **Atualizar dados** no Quadro (a leitura fica guardada por 5 minutos). Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
+- **Nobreaks:**
+  - **Hora só com números:** `0830` vira 08:30 e `14` vira 14:00 (não precisa dos dois pontos). Hora que não existe fica vermelha e não é gravada.
+  - O **Histórico** tem a mesma cara da folha de lançamento: dia agrupado, entrada em azul, saída em verde, carga e alerta em vermelho. O mês pode ser "Todos (últimos 120 dias)".
+  - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
+  - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
 ## O que foi corrigido
@@ -129,7 +134,7 @@ node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
 node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (22 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (34 cenários)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (35 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

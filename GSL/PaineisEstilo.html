@@ -123,6 +123,12 @@ tr.lp-atrasada td:first-child { padding-left: 10px; }
 .nb-folha td.carga { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 58px; }
 .nb-folha td.carga.alta { color: var(--alerta); }
 .nb-folha tr.hoje td.nb-dia { color: var(--azul-vivo); }
+.nb-folha input.hora.invalida { border-color: var(--alerta); background: rgba(198, 40, 40, .08); }
+.nb-historico td { padding: 7px 8px; }
+.nb-historico td.numero { text-align: right; font-variant-numeric: tabular-nums; }
+.nb-historico td.nb-fora { color: var(--alerta); font-weight: 700; }
+.nb-historico td.nb-oc { text-align: left; max-width: 260px; white-space: normal; color: var(--tinta-media); }
+.nb-historico .nb-cod { display: block; color: var(--tinta); font-size: 13px; letter-spacing: 0; }
 
 /* ---- limpeza ---- */
 /* Estoque de TI: alerta de estoque minimo, busca grande e botoes de entrada/saida. */

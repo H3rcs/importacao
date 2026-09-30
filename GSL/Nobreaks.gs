@@ -54,6 +54,9 @@ function horaDe_(v) {
   const t = String(v || '').trim();
   const m = t.match(/^(\d{1,2})\s*[:hH.]\s*(\d{2})/);
   if (m) return dd_(Number(m[1])) + ':' + m[2];
+  // So numeros, como a tela deixa digitar: "830" -> 08:30, "1415" -> 14:15.
+  const junto = t.match(/^(\d{1,2})(\d{2})$/);
+  if (junto && Number(junto[1]) < 24 && Number(junto[2]) < 60) return dd_(Number(junto[1])) + ':' + junto[2];
   const hh = t.match(/^(\d{1,2})\s*[hH]$/);
   if (hh) return dd_(Number(hh[1])) + ':00';
   const so = t.match(/^(\d{1,2})$/);

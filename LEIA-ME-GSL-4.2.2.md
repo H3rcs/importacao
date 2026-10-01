@@ -36,6 +36,35 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
+## Pedido de 01/10 (calendário, assiduidade, quadro, TI, limpeza, menu)
+
+- **Plano de Ação:** os coordenadores veem a tela, e cada um vê **só as ações em que é responsável**. Gerência e admin continuam vendo todas. Uma ação pode ter **mais de um responsável** (ação conjunta): todos são avisados por e-mail, e qualquer um deles pode concluir.
+- **Calendário — uma cor por situação:**
+  - pendente: cinza;
+  - atrasada: vermelho;
+  - entregue, aguardando validação: azul;
+  - aprovada: verde;
+  - reprovada: laranja;
+  - cancelada: cinza riscado.
+
+  A legenda fica abaixo do calendário. O arquivo entregue aparece como um anel branco, sem trocar a cor.
+- **E-mails com link para a tela certa:** o botão do e-mail abre o Calendário ou o Plano de Ação depois do e-mail e do PIN.
+- **Assiduidade:** ficaram só **Colaboradores** (lista ordenada por quem mais faltou: ausências, faltas injustificadas, justificadas, disciplinares, atestados) e **Período**. Os gráficos saíram. A **ficha** mostra as ausências por tipo e o dia a dia, com filtro **De / Até** e atalhos (este mês, 3 meses, 12 meses, tudo).
+- **Quadro do CD:** os admitidos da aba **CADMITIDOS** (Produtiva / Colaborador / Equipe / Função / Status, sem data) aparecem. Há uma aba nova, **Admitidos**, com totais por status, equipe e função e a lista com busca.
+- **Estoque de TI:**
+  - **Exportar Excel** e **Exportar PDF**, como nos Nobreaks.
+  - Correção: com estoque mínimo 1, ideal 1 e estoque 1, o item não pede mais reposição. O alerta só aparece quando o estoque chega ao mínimo e ainda está abaixo do ideal.
+- **Limpeza CD:**
+  - Gestão enxuta: ações em aberto e atrasadas, gasto do mês, produtos acabados sem reposição e as ações que vencem primeiro.
+  - A aba **Custos** virou **Compras e consumo**. Registre a compra (**lote** com vários produtos ou **individual**): data, fornecedor, NF e produtos com quantidade e preço. Não precisa cadastrar o produto antes.
+  - Quando um produto acabar, aperte **Acabou**: o sistema guarda a data e mede quanto durou.
+  - Depois, registre o **reabastecimento**: individual pelo botão **Reabastecer**, ou num lote novo. No lote, o sistema anota o reabastecimento sozinho.
+  - A tabela **Consumo por produto** mostra a duração média, a última duração, o custo por dia e o gasto total.
+  - As compras do formato antigo continuam contando no gasto do mês.
+- **Nível de acesso novo: SUPERVISOR** (Supervisão de limpeza). Vê e cuida só da Limpeza CD. Aparece sozinho em **Pessoas e acessos › Nível de acesso**.
+- **Configurações na barra lateral:** Configuração, Pessoas e acessos, Filiais e painéis e Relatos de erro saíram do meio da tela de módulos e ficam sempre no menu lateral. As telas e permissões são as mesmas.
+- O esquema subiu para 8.5. As tabelas novas da Limpeza (LP_LOTES, LP_ITENS) e o nível SUPERVISOR são criados sozinhos na primeira abertura.
+
 ## O que foi corrigido
 
 **Abertura e entrada**
@@ -133,8 +162,8 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (22 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (35 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (27 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (37 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

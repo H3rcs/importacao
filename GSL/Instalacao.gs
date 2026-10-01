@@ -89,6 +89,15 @@ const ESQUEMA = {
                   'APLICACOES_DIA', 'ONDE', 'ATIVO'],
   LP_COMPRAS:    ['DATA', 'PRODUTO', 'QUANTIDADE', 'PRECO_UNIT', 'FORNECEDOR', 'NF', 'OBSERVACAO'],
   LP_EMBALAGENS: ['PRODUTO', 'DATA_COMPRA', 'NF', 'PRECO', 'ABERTURA', 'TERMINO', 'OBSERVACAO'],
+  /*
+   * CUSTOS POR LOTE (4.2.2). Uma compra (lote ou individual) e os produtos
+   * que vieram nela. Cada produto do lote fica "em uso" ate alguem apertar
+   * "Acabou" (ACABOU_EM); depois espera o reabastecimento (REPOSTO_EM), que
+   * aponta para a compra que o repos (REPOSTO_POR).
+   */
+  LP_LOTES:      ['DATA', 'TIPO', 'FORNECEDOR', 'NF', 'OBSERVACAO'],
+  LP_ITENS:      ['LOTE', 'PRODUTO', 'QUANTIDADE', 'UNIDADE', 'PRECO_UNIT', 'INICIO',
+                  'ACABOU_EM', 'REPOSTO_EM', 'REPOSTO_POR', 'OBSERVACAO'],
 
   /*
    * ESTOQUE DE TI — catalogo e movimentacoes. O saldo e calculado.
@@ -261,7 +270,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.4';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal
+const VERSAO_ESQUEMA = '8.5';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -300,6 +309,13 @@ function garantirEsquema() {
 
   // 2 · tabelas de referencia vazias
   if (principal && !listar('PERFIS').length) { semearPerfis(); mexeu = true; }
+  // Nivel novo (SUPERVISOR) em banco que ja tem perfis: entra so ele.
+  if (principal && listar('PERFIS').length) {
+    const temPerfil = {};
+    listar('PERFIS').forEach(function (l) { temPerfil[String(l.PERFIL || '').toUpperCase().trim()] = true; });
+    const novos = perfisPadrao().filter(function (p) { return !temPerfil[p.PERFIL]; }).map(linhaPerfil);
+    if (novos.length) { inserirVarios('PERFIS', novos, 'migracao'); try { CacheService.getScriptCache().remove('perfis'); } catch (e) {} mexeu = true; }
+  }
   if (principal && colunasNovasPerfis.length && listar('PERFIS').length) {
     aplicarPadraoNasColunasNovas_(colunasNovasPerfis);
     mexeu = true;
@@ -557,6 +573,9 @@ function perfisPadrao() {
     { PERFIL: 'COORDENADOR', DESCRICAO: 'Coordenação de turno — entrega', ESCOPO: 'TURNO',
       telas: ['inicio', 'calendario', 'acoes', 'nobreaks'],
       podes: ['ANEXAR', 'ENTREGAR', 'LANCAR_NOBREAK'] },
+    /* Supervisor de limpeza (4.2.2): cuida da Limpeza CD — acoes, compras e consumo. */
+    { PERFIL: 'SUPERVISOR', DESCRICAO: 'Supervisão de limpeza', ESCOPO: 'TODOS',
+      telas: ['limpeza'], podes: ['GERIR_LIMPEZA'] },
     { PERFIL: 'CONSULTA', DESCRICAO: 'Somente leitura', ESCOPO: 'TODOS',
       telas: ['inicio', 'calendario', 'acoes', 'nobreaks', 'limpeza', 'quadro'], podes: [] },
     { PERFIL: 'PENDENTE', DESCRICAO: 'Aguardando liberação', ESCOPO: 'PROPRIAS', telas: [], podes: [] }

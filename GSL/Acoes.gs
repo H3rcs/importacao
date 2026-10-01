@@ -53,7 +53,9 @@ function hidratarAcao(r) {
     acao: String(r.ACAO || '').trim(),
     descricao: String(r.DESCRICAO || '').trim(),
     responsavel: String(r.RESPONSAVEL || '').trim(),
-    responsavelEmail: String(r.RESPONSAVEL_EMAIL || '').toLowerCase().trim(),
+    // Acao conjunta: RESPONSAVEL_EMAIL guarda um ou mais e-mails separados por virgula.
+    responsaveisEmails: emailsDaAcao_(r.RESPONSAVEL_EMAIL),
+    responsavelEmail: emailsDaAcao_(r.RESPONSAVEL_EMAIL)[0] || '',
     turno: String(r.TURNO || '').trim(),
     origem: String(r.ORIGEM || '').trim(),
     prazo: formatarData(prazo),
@@ -69,6 +71,16 @@ function hidratarAcao(r) {
   };
 }
 
+function emailsDaAcao_(valor) {
+  return String(valor || '').toLowerCase().split(/[,;\s]+/)
+    .map(function (e) { return e.trim(); })
+    .filter(function (e, i, l) { return e && e.indexOf('@') !== -1 && l.indexOf(e) === i; });
+}
+
+function ehDonoDaAcao_(acao, email) {
+  return acao.responsaveisEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
+}
+
 function listarAcoes() {
   return listar('ACOES').map(hidratarAcao);
 }
@@ -76,24 +88,14 @@ function listarAcoes() {
 /**
  * O que cada pessoa enxerga.
  *
- * Escopo TODOS ve tudo. Escopo TURNO ve as do proprio turno mais as
- * marcadas como "Todos". Escopo PROPRIAS ve as em que e responsavel —
- * mais as do turno dela, porque uma acao do turno A e assunto do
- * coordenador do turno A mesmo quando o responsavel e outra pessoa.
+ * Quem gere o plano (GERIR_ACOES) ou tem escopo TODOS (gerencia, consulta)
+ * ve tudo. Os demais — o coordenador — veem SO as acoes em que sao
+ * responsaveis (sozinhos ou junto com outros): cada um cuida das suas.
  */
 function acoesNoAlcance(usuario, todas) {
-  const escopo = escopoDe(usuario);
-  if (escopo.tipo === 'TODOS') return todas;
-
-  const turno = String(escopo.turno || '').toUpperCase().trim();
+  if (podeFazer(usuario, 'GERIR_ACOES') || escopoDe(usuario).tipo === 'TODOS') return todas;
   const email = String(usuario.email || '').toLowerCase().trim();
-
-  return todas.filter(function (a) {
-    if (a.responsavelEmail && a.responsavelEmail === email) return true;
-    const t = String(a.turno || '').toUpperCase().trim();
-    if (t === 'TODOS') return true;
-    return turno && t === turno;
-  });
+  return todas.filter(function (a) { return ehDonoDaAcao_(a, email); });
 }
 
 /**
@@ -176,7 +178,7 @@ function dadosAcoes(usuario, params) {
     contagens: {
       abertas: abertas.length,
       atrasadas: abertas.filter(function (a) { return a.status === 'Atrasada'; }).length,
-      minhas: abertas.filter(function (a) { return a.responsavelEmail === email; }).length,
+      minhas: abertas.filter(function (a) { return ehDonoDaAcao_(a, email); }).length,
       concluidas: minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.CONCLUIDA; }).length
     },
     ranking: rankingAcoesPorTurno(minhas),
@@ -226,19 +228,21 @@ function acaoSalvarAcao(usuario, params) {
   const turno = String(params.turno || 'Todos').trim();
   if (ACOES_TURNOS.indexOf(turno) === -1) throw new Error('Turno inválido: ' + turno);
 
-  const email = String(params.responsavelEmail || '').toLowerCase().trim();
-  let nome = String(params.responsavel || '').trim();
-  if (email) {
-    const achado = pessoasParaAcao().filter(function (p) { return p.email === email; })[0];
-    if (achado && !nome) nome = achado.nome;
-  }
-  if (!nome) throw new Error('Informe o responsável.');
+  // Um ou mais responsaveis (acao conjunta).
+  const emails = emailsDaAcao_([].concat(params.responsaveisEmails || [], params.responsavelEmail || []).join(','));
+  const pessoas = pessoasParaAcao();
+  const nomes = emails.map(function (e) {
+    const achado = pessoas.filter(function (p) { return p.email === e; })[0];
+    return achado ? achado.nome : e.split('@')[0];
+  });
+  let nome = nomes.join(', ') || String(params.responsavel || '').trim();
+  if (!nome) throw new Error('Escolha pelo menos um responsável.');
 
   const campos = {
     ACAO: titulo,
     DESCRICAO: String(params.descricao || '').trim(),
     RESPONSAVEL: nome,
-    RESPONSAVEL_EMAIL: email,
+    RESPONSAVEL_EMAIL: emails.join(','),
     TURNO: turno,
     ORIGEM: String(params.origem || '').trim(),
     PRAZO: paraISO(data)
@@ -264,10 +268,12 @@ function acaoSalvarAcao(usuario, params) {
    * nao pode sumir calado. Mesma regra da criacao de atividade.
    */
   let avisoEmail = '';
-  if (email) {
-    try { avisarAcaoNova(campos, email, nova); }
-    catch (e) { avisoEmail = 'Ação salva, mas o aviso por e-mail não saiu: ' + (e.message || e); }
-  }
+  const falhas = [];
+  emails.forEach(function (email) {
+    try { avisarAcaoNova(campos, email, nova, id); }
+    catch (e) { falhas.push(email + ' (' + (e.message || e) + ')'); }
+  });
+  if (falhas.length) avisoEmail = 'Ação salva, mas o aviso por e-mail não saiu para: ' + falhas.join('; ');
 
   const r = { id: id, recado: nova ? 'Ação criada.' : 'Ação atualizada.' };
   if (avisoEmail) r.avisoEmail = avisoEmail;
@@ -292,9 +298,8 @@ function acaoConcluirAcao(usuario, params) {
     const registro = obter('ACOES', id);
     if (!registro) throw new Error('Ação não encontrada.');
 
-    const dono = String(registro.RESPONSAVEL_EMAIL || '').toLowerCase().trim();
     const eu = String(usuario.email || '').toLowerCase().trim();
-    if (dono !== eu && !podeFazer(usuario, 'GERIR_ACOES')) {
+    if (emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) === -1 && !podeFazer(usuario, 'GERIR_ACOES')) {
       throw new Error('Esta ação é de ' + (registro.RESPONSAVEL || 'outra pessoa') + '. Só o responsável a conclui.');
     }
 
@@ -372,19 +377,20 @@ function htmlSeguro(t) {
  * Quem recebeu uma acao precisa saber sem depender de abrir o sistema.
  * Usa o mesmo enviador do resto do sistema (Emails.gs).
  */
-function avisarAcaoNova(campos, email, nova) {
+function avisarAcaoNova(campos, email, nova, id) {
   if (!email) return;
   const prazo = formatarData(paraData(campos.PRAZO));
   const assunto = (nova ? 'Nova ação: ' : 'Ação atualizada: ') + campos.ACAO;
 
   const corpo =
-    '<p>Você é o responsável por esta ação do plano de ação do GSL.</p>' +
+    '<p>Você é ' + (emailsDaAcao_(campos.RESPONSAVEL_EMAIL).length > 1 ? 'um dos responsáveis (' + htmlSeguro(campos.RESPONSAVEL) + ')' : 'o responsável') +
+    ' por esta ação do plano de ação do GSL.</p>' +
     '<p style="font-size:16px"><strong>' + htmlSeguro(campos.ACAO) + '</strong></p>' +
     (campos.DESCRICAO ? '<p>' + htmlSeguro(campos.DESCRICAO) + '</p>' : '') +
     '<p>Turno: <strong>' + htmlSeguro(campos.TURNO) + '</strong><br>' +
     'Entregar até: <strong>' + htmlSeguro(prazo) + '</strong></p>' +
     (campos.ORIGEM ? '<p style="color:#666">Origem: ' + htmlSeguro(campos.ORIGEM) + '</p>' : '') +
-    rodapeLink();
+    rodapeLink('acoes');
 
   enviar([email], assunto, corpo);
 }

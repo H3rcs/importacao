@@ -1038,6 +1038,7 @@ td.celula-medidor { min-width: 110px; }
 .kpi.vermelho,
 .kpi.alerta   { --cor: var(--alerta);     --par: var(--neon-ambar); }
 .kpi.azul     { --cor: var(--neon-ciano); --par: var(--neon-roxo); }
+.kpi.laranja  { --cor: #EA580C; --par: var(--neon-ambar); }
 
 /* Halo de canto: a unica cor de fundo, na propria cor do cartao. */
 .kpi::after {
@@ -1325,13 +1326,13 @@ tr:last-child td { border-bottom: 0; }
 /* ENTREGUE E NAO VALIDADA = LARANJA.
    Era amarelo e empatava com o amarelo do resto da tela; o gerente pediu
    uma cor que diga "chegou, falta eu olhar" sem virar alerta vermelho. */
-.etiqueta.aguardando { background: var(--laranja-tenue); color: var(--laranja-escuro); }
+.etiqueta.aguardando { background: rgba(37, 99, 235, .12); color: #1D4ED8; }
 .etiqueta.pendente, .etiqueta.iniciar { background: var(--linha); color: var(--tinta-media); }
 .etiqueta.atrasada, .etiqueta.atrasado { background: var(--vermelho-tenue); color: var(--alerta); }
-.etiqueta.reprovada { background: var(--vermelho-tenue); color: var(--alerta); border: 1px solid var(--alerta); }
+.etiqueta.reprovada { background: rgba(234, 88, 12, .12); color: #C2410C; border: 1px solid #EA580C; }
 .etiqueta.cancelada { background: var(--linha); color: var(--tinta-fraca); text-decoration: line-through; }
 [data-tema="escuro"] .etiqueta.aprovada { color: #4ADE80; }
-[data-tema="escuro"] .etiqueta.aguardando { color: var(--laranja); }
+[data-tema="escuro"] .etiqueta.aguardando { color: #93C5FD; }
 
 /* --- Grade do mes --- */
 .grade-mes {
@@ -1567,33 +1568,30 @@ tr:last-child td { border-bottom: 0; }
   font-size: 8px; font-weight: 900; line-height: 11px; text-align: center; color: inherit;
 }
 
+/*
+ * Uma cor por situacao (4.2.2) — antes toda atividade com arquivo ficava
+ * verde, entregue ou aprovada ou reprovada, e o calendario era um mar verde.
+ *   pendente  cinza      · atrasada  vermelho  · entregue (aguardando) azul
+ *   aprovada  verde      · reprovada laranja   · cancelada cinza riscado
+ */
 .pilula.pendente   { background: #64748B; }
 .pilula.pendente::before   { content: ''; }
-/* Ambar solido, igual nos dois temas: a pilula tem texto branco em cima,
-   entao ela nao pode seguir o token (que clareia no tema escuro). */
-.pilula.atrasada   { background: #8A6A00; }
-.pilula.atrasada::before   { content: '!'; color: #8A6A00; }
-.pilula.aguardando { background: var(--laranja); }
-.pilula.aguardando::before { content: '\2026'; color: var(--laranja); font-size: 9px; letter-spacing: -1px; }
+.pilula.atrasada   { background: #DC2626; }
+.pilula.atrasada::before   { content: '!'; color: #DC2626; }
+.pilula.aguardando { background: #2563EB; }
+.pilula.aguardando::before { content: '\2191'; color: #2563EB; }
 .pilula.aprovada   { background: #059669; }
 .pilula.aprovada::before   { content: '\2713'; color: #059669; }
-.pilula.reprovada  { background: #5C4600; }
-.pilula.reprovada::before  { content: '\2715'; color: #5C4600; }
+.pilula.reprovada  { background: #EA580C; }
+.pilula.reprovada::before  { content: '\2715'; color: #EA580C; }
 .pilula.cancelada  { background: #94A3B8; text-decoration: line-through; }
 .pilula.cancelada::before  { content: '\2715'; color: #94A3B8; }
-
-/* Entregue — o verde-esmeralda com check branco vence tudo. */
-.pilula.tem-anexo {
-  background: linear-gradient(135deg, #10B981, #059669) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #10B981 65%, transparent), 0 3px 10px -2px #059669 !important;
-  font-weight: 800;
-}
-.pilula.tem-anexo::before {
-  content: '\2713' !important; background: #fff !important; color: #059669 !important;
-  width: 13px; height: 13px; line-height: 13px; left: 4px; font-size: 9px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.3);
-}
-.pilula.tem-anexo:hover { filter: brightness(1.05); }
+/* Tem arquivo entregue: so um anel branco — a cor continua sendo a da situacao. */
+.pilula.tem-anexo { box-shadow: 0 0 0 2px #fff inset; font-weight: 800; }
+.legenda-mes .amostra.st { border-radius: 4px; }
+.legenda-mes .amostra.st-pendente { background: #64748B; } .legenda-mes .amostra.st-atrasada { background: #DC2626; }
+.legenda-mes .amostra.st-aguardando { background: #2563EB; } .legenda-mes .amostra.st-aprovada { background: #059669; }
+.legenda-mes .amostra.st-reprovada { background: #EA580C; } .legenda-mes .amostra.st-cancelada { background: #94A3B8; }
 
 /* FILTRO por KPI: quando um KPI esta ativo, as pilulas que nao batem
    com ele ficam apagadas, e as que batem ganham um anel. */
@@ -2119,4 +2117,13 @@ input.travado {
   background: #1f2233; color: #e8eaed; border-color: #3c4152;
 }
 [data-tema="escuro"] .botao-google:hover { background: #262a3d; }
+.ac-pessoas { max-height: 220px; overflow-y: auto; border: 1px solid var(--linha); border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+.ac-pessoas .marcador { display: flex; margin: 4px 0; }
+.ficha-periodo { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; margin: 4px 0 6px; }
+.ficha-periodo .campo { margin: 0; } .ficha-periodo input[type=date] { width: auto; }
+.ficha-atalhos { display: flex; gap: 6px; flex-wrap: wrap; }
+.ficha-tiles-tipos { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.ficha-ausencias td, .ficha-ausencias th { padding: 6px 8px; }
+.ficha-ausencias .ponto { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+.menu-secao { margin: 18px 10px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tinta-fraca); border-top: 1px solid var(--linha); padding-top: 12px; }
 </style>

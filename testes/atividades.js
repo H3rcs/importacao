@@ -75,7 +75,7 @@ caso('digesto: um endereco recusado nao deixa os outros turnos sem e-mail', () =
   c.acaoSalvarUsuario(adm, { email: 'coord.a.invalido@bartofil.com.br', nome: 'Coord A', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenador' });
   c = ctx(m); c.acaoSalvarUsuario(admin(c), { email: 'coord.b@bartofil.com.br', nome: 'Coord B', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coordenador' });
   c = ctx(m); c.acaoSalvarUsuario(admin(c), { email: 'coord.c@bartofil.com.br', nome: 'Coord C', perfil: 'COORDENADOR', turno: 'C', filiais: '*', papel: 'Coordenador' });
-  c = ctx(m); c.gerarCompetencia('SET 2026', DONO);
+  c = ctx(m); c.gerarCompetencia(c.competenciaDe(c.hoje()), DONO);   // o mes corrente (o digesto olha dele em diante)
   m.emails.length = 0;
   let erro = '';
   c = ctx(m);

@@ -717,32 +717,32 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
-  await cenario('paineis: aba clicada fica acesa; formularios da Limpeza nao trocam o produto nem escondem a conclusao', async () => {
+  await cenario('limpeza: aba acesa, compra em lote pela tela, "Acabou" e "Concluida em" na acao', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321', true);
     await esperarTela(aba, ['aplicacao']);
     const f = await frame(aba);
-    // produto cadastrado com maiuscula; embalagem aberta com o nome digitado em minuscula
-    await f.evaluate(async () => {
-      await executarAcaoSrv('salvarProduto', { produto: 'Alcool 70', tipo: 'Pronto uso', embalagemMl: '1000', preco: '9,90' });
-      await executarAcaoSrv('salvarProduto', { produto: 'Detergente Neutro', tipo: 'Concentrado', embalagemMl: '5000', preco: '45,90', diluicao: '10', solucaoL: '5', aplicacoesDia: '2' });
-      await executarAcaoSrv('salvarEmbalagem', { produto: 'detergente neutro', abertura: '2026-09-20' });
-      esquecerTelas();
-    });
-    await f.evaluate(() => abrir('limpeza'));
+    await f.evaluate(() => { esquecerTelas(); abrir('limpeza'); });
     await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 3, null, { timeout: 15000 });
-    await f.click('#pagina .abas .aba >> text=Custos');
+    await f.click('#pagina .abas .aba >> text=Compras e consumo');
     const acesa = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina .abas .aba.ativa')).map((b) => b.textContent.trim()));
-    afirmar(acesa.length === 1 && acesa[0] === 'Custos', 'aba acesa: ' + acesa.join(','));
-    // "Terminou" numa embalagem de nome em minuscula: o produto certo continua escolhido
-    const escolhido = await f.evaluate(() => {
-      const e = DADOS.embalagens.find((x) => /detergente/i.test(x.produto));
-      lpFormEmbalagem(e.id, true);
-      return document.getElementById('le-prod').value;
-    });
-    afirmar(escolhido === 'Detergente Neutro', 'produto no formulario: ' + escolhido);
-    await f.evaluate(() => fecharJanela());
+    afirmar(acesa.length === 1 && acesa[0] === 'Compras e consumo', 'aba acesa: ' + acesa.join(','));
+    // compra em lote pela tela
+    await f.click('text=Registrar compra (lote)');
+    await f.waitForSelector('#ll-linhas tr', { timeout: 10000 });
+    const linhas = f.locator('#ll-linhas tr');
+    await linhas.nth(0).locator('.ll-prod').fill('Detergente neutro 5L');
+    await linhas.nth(0).locator('.ll-qtd').fill('2');
+    await linhas.nth(0).locator('.ll-preco').fill('45,90');
+    await linhas.nth(1).locator('.ll-prod').fill('Pano de chão');
+    await f.click('.janela .botao >> text=Registrar compra');
+    await f.waitForFunction(() => (DADOS.itens || []).length === 2, null, { timeout: 15000 });
+    // acabou
+    await f.click('#conteudo-lp button:has-text("Acabou") >> nth=0');
+    await f.click('.janela .botao >> text=Registrar que acabou');
+    await f.waitForFunction(() => (DADOS.itens || []).some((i) => i.situacao === 'AGUARDANDO'), null, { timeout: 15000 });
+    afirmar(/Reabastecer/.test(await f.evaluate(() => document.getElementById('conteudo-lp').textContent)), 'botao Reabastecer aparece');
     // Nova acao: "Concluida em" aparece quando a situacao e Concluida
     const visivel = await f.evaluate(() => {
       lpFormAcao('');
@@ -840,6 +840,61 @@ async function rodar() {
     await janela.waitForLoadState();
     const texto = await janela.evaluate(() => document.body.innerText);
     afirmar(/Relatório de nobreaks/.test(texto) && /08:30/.test(texto) && /Resumo/.test(texto), 'pdf: ' + texto.slice(0, 200));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('assiduidade: abre na lista de colaboradores; ficha mostra ausencias por tipo com filtro de periodo', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    prepararAssiduidade(s);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('assiduidade', { competencia: '2025-08' }); });
+    await f.waitForSelector('#tabela-colab tbody tr', { timeout: 20000 });
+    const abas = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina > .abas .aba')).map((b) => b.textContent.trim()).join('|'));
+    afirmar(abas === 'Colaboradores|Período', 'abas: ' + abas);
+    await f.click('#tabela-colab tbody tr >> text=ANA SOUZA');
+    await f.waitForSelector('.ficha-periodo', { timeout: 15000 });
+    const tudo = await f.evaluate(() => document.querySelector('.ficha-tiles-tipos').textContent);
+    afirmar(/Falta injustificada/.test(tudo), 'tipos: ' + tudo);
+    const antes = await f.evaluate(() => document.querySelectorAll('.ficha-ausencias tbody tr').length);
+    await f.fill('#fp-de', '2025-08-10'); await f.fill('#fp-ate', '2025-08-31');
+    await f.click('.ficha-periodo >> text=Filtrar');
+    await f.waitForFunction((n) => { const t = document.querySelector('.ficha-periodo #fp-de'); return t && t.value === '2025-08-10' && document.querySelectorAll('.ficha-ausencias tbody tr').length < n; }, antes, { timeout: 15000 });
+    const datas = await f.evaluate(() => Array.from(document.querySelectorAll('.ficha-ausencias tbody tr td:first-child')).map((t) => t.textContent.trim()));
+    afirmar(datas.length >= 1 && datas.every((d) => /\/08\/2025/.test(d) && Number(d.slice(0, 2)) >= 10), 'periodo: ' + datas.join(',') + ' (antes ' + antes + ')');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('configuracoes na barra lateral; legenda de cores do calendario; Estoque de TI exporta Excel', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => abrirModulos());
+    const cards = await f.evaluate(() => Array.from(document.querySelectorAll('.holocard .holo-titulo')).map((t) => t.textContent.trim()));
+    afirmar(cards.indexOf('Configuração') === -1, 'cartao de configuracao saiu do meio: ' + cards.join(','));
+    afirmar(/Configurações/i.test(await f.evaluate(() => document.getElementById('menu').textContent)), 'secao no menu lateral');
+    await f.click('#menu >> text=Pessoas e acessos');
+    await f.waitForFunction(() => paginaAtual === 'acessos' && !/Carregando/.test(document.getElementById('pagina').innerText), null, { timeout: 15000 });
+    afirmar(/Configurações/i.test(await f.evaluate(() => document.getElementById('menu').textContent)), 'menu continua com a secao');
+    await f.evaluate(() => abrir('calendario'));
+    await f.waitForSelector('.legenda-mes .st-reprovada', { timeout: 15000 });
+    await f.evaluate(async () => { await executarAcaoSrv('salvarItemEstoque', { nome: 'Mouse', minimo: '1', ideal: '3', saldoInicial: '2' }); esquecerTelas(); abrir('estoque'); });
+    await f.waitForSelector('text=Exportar Excel', { timeout: 15000 });
+    const [down] = await Promise.all([aba.page.waitForEvent('download', { timeout: 15000 }), f.click('text=Exportar Excel')]);
+    const caminho = require('path').join(require('os').tmpdir(), 'gsl-ti-' + Date.now() + '.xlsx');
+    await down.saveAs(caminho);
+    const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet1.xml').toString();
+    require('fs').unlinkSync(caminho);
+    afirmar(/Mouse/.test(folha) && /Estoque ideal/.test(folha), 'planilha do estoque');
+    const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
+    await janela.waitForLoadState();
+    afirmar(/estoque de TI/i.test(await janela.evaluate(() => document.body.innerText)), 'relatorio PDF');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

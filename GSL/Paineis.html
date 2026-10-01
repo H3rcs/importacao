@@ -926,7 +926,7 @@ function pintarLimpeza(r) {
   el('acoes-topo').innerHTML = d.permissoes.gerir ? `
     <button class="botao secundario" onclick="lpFormImportar()">Importar planilha antiga</button>
     <button class="botao" onclick="lpFormAcao()">Nova ação</button>` : '';
-  el('pagina').innerHTML = pnAbas([['gestao', 'Gestão'], ['acoes', 'Ações'], ['custos', 'Custos']], ABA_LP, 'trocarAbaLP') +
+  el('pagina').innerHTML = pnAbas([['gestao', 'Gestão'], ['acoes', 'Ações'], ['custos', 'Compras e consumo']], ABA_LP, 'trocarAbaLP') +
     '<div id="conteudo-lp"></div>';
   pintarAbaLP(d);
 }
@@ -948,65 +948,39 @@ function pintarAbaLP(d) {
 function lpGestao(d) {
   const k = d.kpis;
   const abertas = d.acoes.filter((a) => a.aberta);
-  const zonaNome = {}; d.zonas.forEach((z) => { zonaNome[z.zona] = z.zona + ' — ' + z.descricao; });
-  const contar = (lista, campo) => {
-    const m = {}; lista.forEach((a) => { const v = a[campo] || '(sem)'; m[v] = (m[v] || 0) + 1; });
-    return Object.keys(m).map((x) => [x, m[x]]).sort((a, b) => b[1] - a[1]);
-  };
-  const porZona = contar(abertas, 'zona').map((p) => [zonaNome[p[0]] || p[0], p[1]]);
-  const ordemCrit = { Alta: 0, 'Média': 1, Baixa: 2 };
-  const porCrit = contar(abertas, 'criticidade').sort((a, b) => ordemCrit[a[0]] - ordemCrit[b[0]]);
   const vencem = abertas.filter((a) => a.prazo).sort((a, b) => a.prazo.localeCompare(b.prazo)).slice(0, 8);
+  const aguardando = (d.itens || []).filter((i) => i.situacao === 'AGUARDANDO').sort((a, b) => a.acabouEm.localeCompare(b.acabouEm));
+  const passou = (d.itens || []).filter((i) => i.passouDaMedia);
   const maxCompra = Math.max(...d.comprasPorMes.map((m) => m.total), 1);
-  const custoProd = d.produtos.filter((p) => p.ativo && p.custoMes).map((p) => [p.produto, p.custoMes]).sort((a, b) => b[1] - a[1]);
-  const emUso = d.embalagens.filter((e) => e.emUso).sort((a, b) => (a.deveRenderAte || '9').localeCompare(b.deveRenderAte || '9'));
-
   return `
-    <div class="pn-linha" style="margin-bottom:14px">
-      <div class="campo"><label>Mês de referência</label>
-        <input type="month" value="${esc(d.mes)}" onchange="if(this.value) abrir('limpeza',{mes:this.value})" style="width:auto"></div>
-    </div>
     <div class="grade grade-kpi" style="margin-bottom:16px">
-      ${pnKpi(k.abertas, 'Ações em aberto', 'azul', 'acompanhar a tendência')}
-      ${pnKpi(k.atrasadas, 'Atrasadas', k.atrasadas ? 'vermelho' : 'verde', 'meta: zero')}
-      ${pnKpi(k.altas, 'Criticidade alta abertas', k.altas ? 'vermelho' : 'verde', 'correção imediata')}
-      ${pnKpi(k.abertasMes, 'Abertas no mês', 'azul', k.deVistoria + ' vieram de vistoria')}
-      ${pnKpi(pnMoedaCurta(k.comprasMes), 'Compras do mês', 'amarelo', pnMoeda(k.comprasMes), true)}
-      ${pnKpi(pnMoedaCurta(k.custoPrevistoMes), 'Custo previsto / mês', 'amarelo', 'produtos em uso', true)}
+      ${pnKpi(k.abertas, 'Ações em aberto', 'azul', k.abertasMes + ' abertas em ' + pnRotuloMes(d.mes))}
+      ${pnKpi(k.atrasadas, 'Ações atrasadas', k.atrasadas ? 'vermelho' : 'verde', k.altas + ' de criticidade alta')}
+      ${pnKpi(pnMoedaCurta(k.comprasMes), 'Gasto do mês', 'amarelo', pnMoeda(k.comprasMes), true)}
+      ${pnKpi(k.aguardandoReposicao, 'Produtos acabados sem reposição', k.aguardandoReposicao ? 'vermelho' : 'verde', k.emUso + ' produto(s) em uso')}
     </div>
     <div class="pn-grade duas" style="margin-bottom:14px">
-      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Ações abertas por zona</div>${pnBarras(porZona, 'azul')}</div>
-      <div class="cartao"><div class="cartao-titulo">Ações abertas por criticidade</div>
-        ${porCrit.length ? porCrit.map((p) => barra(p[0], String(p[1]), Math.max(...porCrit.map((x) => x[1]), 1), p[1],
-          p[0] === 'Alta' ? 'alerta' : p[0] === 'Média' ? 'amarela' : '')).join('') : '<div class="vazio">Nenhuma ação aberta. 👏</div>'}
-        <p class="dica">Alta = correção imediata. Média = no prazo combinado. Baixa = entra na rotina.</p></div>
-    </div>
-    <div class="cartao" style="margin-bottom:14px">
-      <div class="cartao-titulo">As 8 ações que vencem primeiro</div>
-      ${vencem.length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Prazo</th><th>Crit.</th><th>Zona</th><th>Local</th>
-        <th>O que foi encontrado</th><th>Ação</th><th>Responsável</th><th>Situação</th></tr></thead><tbody>
-        ${vencem.map((a) => `<tr class="${a.atrasada ? 'lp-atrasada' : ''}"><td><strong>${pnDataLonga(a.prazo)}</strong><div class="lp-sub">${lpPrazoTexto(a)}</div></td>
-          <td><span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span></td><td>${esc(a.zona || '—')}</td><td>${esc(a.local || '—')}</td>
-          <td>${esc(a.problema)}</td><td>${esc(a.acao)}</td><td>${esc(a.responsavel || '—')}</td><td>${lpEtiqueta(a)}</td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="vazio">Nenhuma ação aberta com prazo.</div>'}
-    </div>
-    <div class="pn-grade duas" style="margin-bottom:14px">
-      <div class="cartao"><div class="cartao-titulo">Compras — últimos 6 meses</div>
+      <div class="cartao"><div class="cartao-titulo">Acabaram e esperam reabastecimento</div>
+        ${aguardando.length ? `<table><tbody>${aguardando.slice(0, 8).map((i) => `<tr><td><strong>${esc(i.produto)}</strong>
+          <div class="lp-sub">acabou em ${pnDataLonga(i.acabouEm)} · durou ${i.dias === null ? '—' : Math.max(1, i.dias) + ' dia(s)'}</div></td>
+          <td style="text-align:right">${d.permissoes.gerir ? `<button class="icone-botao" onclick="lpFormReabastecer(${jsArg(i.id)})">Reabastecer</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+          : '<div class="vazio">Nada esperando reposição. 👍</div>'}
+        ${passou.length ? `<p class="dica">${passou.length} produto(s) em uso há mais tempo que a duração média — confira se não acabou: ${passou.slice(0, 5).map((i) => esc(i.produto)).join(', ')}.</p>` : ''}
+      </div>
+      <div class="cartao"><div class="cartao-titulo">Gasto — últimos 6 meses</div>
         <div class="serie">${d.comprasPorMes.map((m) => `<div class="serie-col" title="${pnRotuloMes(m.mes)}: ${pnMoeda(m.total)}">
           <div class="serie-rotulo">${m.total ? pnNum(m.total) : ''}</div>
           <div class="serie-barra ${m.mes === d.mes ? 'amarela' : 'verde'}" style="height:${Math.max(2, m.total / maxCompra * 100)}%"></div>
           <div class="serie-rotulo">${pnRotuloMes(m.mes)}</div></div>`).join('')}</div></div>
-      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Custo mensal previsto por produto</div>
-        ${pnBarras(custoProd, 'amarela', pnMoeda)}
-        <p class="dica">Custo por aplicação × aplicações por dia × 30. Vem da aba Custos › Produtos.</p></div>
     </div>
     <div class="cartao">
-      <div class="cartao-titulo">Embalagens abertas — quando devem acabar</div>
-      ${emUso.length ? `<table><thead><tr><th>Produto</th><th>Aberta em</th><th>Deve render até</th><th class="numero">Dias restantes</th><th>Situação</th></tr></thead><tbody>
-        ${emUso.map((e) => `<tr><td><strong>${esc(e.produto)}</strong></td><td>${pnDataLonga(e.abertura)}</td><td>${pnDataLonga(e.deveRenderAte)}</td>
-          <td class="numero" style="${e.diasRestantes !== null && e.diasRestantes < 0 ? 'color:var(--alerta);font-weight:700' : ''}">${e.diasRestantes === null ? '—' : e.diasRestantes}</td>
-          <td>${esc(e.situacao)}</td></tr>`).join('')}</tbody></table>`
-        : '<div class="vazio">Nenhuma embalagem aberta registrada. Registre em Custos › Embalagens.</div>'}
+      <div class="cartao-titulo">As ações que vencem primeiro</div>
+      ${vencem.length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Prazo</th><th>Crit.</th><th>Local</th>
+        <th>O que foi encontrado</th><th>Responsável</th><th>Situação</th></tr></thead><tbody>
+        ${vencem.map((a) => `<tr class="${a.atrasada ? 'lp-atrasada' : ''}"><td><strong>${pnDataLonga(a.prazo)}</strong><div class="lp-sub">${lpPrazoTexto(a)}</div></td>
+          <td><span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span></td><td>${esc([a.zona, a.local].filter(Boolean).join(' · ') || '—')}</td>
+          <td>${esc(a.problema)}</td><td>${esc(a.responsavel || '—')}</td><td>${lpEtiqueta(a)}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="vazio">Nenhuma ação aberta com prazo.</div>'}
     </div>`;
 }
 
@@ -1160,48 +1134,132 @@ function lpSalvarZonas() {
 /* ---------- CUSTOS ---------- */
 function lpCustos(d) {
   const g = d.permissoes.gerir;
+  const itens = d.itens || [];
+  const emUso = itens.filter((i) => i.situacao === 'EM_USO').sort((a, b) => b.dias - a.dias);
+  const aguardando = itens.filter((i) => i.situacao === 'AGUARDANDO').sort((a, b) => a.acabouEm.localeCompare(b.acabouEm));
+  const qtd = (i) => pnNum(i.quantidade, Number.isInteger(Number(i.quantidade)) ? 0 : 2) + ' ' + esc(i.unidade);
   return `
+    ${g ? `<div class="pn-linha" style="margin-bottom:14px;gap:10px">
+      <button class="botao" onclick="lpFormLote()">Registrar compra (lote)</button>
+      <button class="botao secundario" onclick="lpFormLote('INDIVIDUAL')">Compra individual</button>
+      <span class="pn-mini" style="align-self:center">Registre a compra com os produtos que vieram. Quando um produto acabar, aperte <b>Acabou</b>: o sistema mede quanto durou.</span>
+    </div>` : ''}
     <div class="cartao" style="margin-bottom:14px">
-      <div class="cartao-titulo linha-titulo"><span>Produtos — custo, concentração e rendimento</span>
-        ${g ? '<button class="botao" onclick="lpFormProduto()">Novo produto</button>' : ''}</div>
-      <div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th>Tipo</th><th class="numero">Embalagem</th><th class="numero">Preço</th>
-        <th class="numero">Diluição</th><th class="numero">ml / aplic.</th><th class="numero">Aplic. / emb.</th><th class="numero">R$ / aplic.</th>
-        <th class="numero">R$ / L solução</th><th class="numero">Aplic. / dia</th><th class="numero">Dura (dias)</th><th class="numero">R$ / mês</th><th></th></tr></thead>
-        <tbody>${d.produtos.map((p) => `<tr style="${p.ativo ? '' : 'opacity:.55'}"><td><strong>${esc(p.produto)}</strong><div class="lp-sub">${esc(p.onde)}</div></td>
-          <td>${esc(p.tipo)}</td><td class="numero">${pnNum(p.embalagemMl)} ml</td><td class="numero">${pnMoeda(p.preco)}</td>
-          <td class="numero">${p.pronto ? 'pronto uso' : pnNum(p.diluicao) + ' ml/L'}</td><td class="numero">${pnNum(p.mlAplicacao)}</td>
-          <td class="numero">${pnNum(p.aplicacoesEmbalagem, 1)}</td><td class="numero">${pnMoeda(p.custoAplicacao)}</td><td class="numero">${pnMoeda(p.custoLitro)}</td>
-          <td class="numero">${pnNum(p.aplicacoesDia)}</td><td class="numero">${pnNum(p.duracaoDias, 1)}</td><td class="numero"><strong>${pnMoeda(p.custoMes)}</strong></td>
-          <td>${g ? `<button class="icone-botao" onclick="lpFormProduto(${jsArg(p.id)})">Editar</button>` : ''}</td></tr>`).join('')
-          || '<tr><td colspan="13" class="vazio">Nenhum produto cadastrado.</td></tr>'}</tbody></table></div>
-      <p class="dica">Concentrado: ml por aplicação = diluição (ml/L) × solução por aplicação (L). Pronto uso: solução × 1000.
-        Duração = aplicações por embalagem ÷ aplicações por dia.</p>
+      <div class="cartao-titulo">Em uso (${emUso.length})</div>
+      ${emUso.length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th>Comprado em</th><th class="numero">Qtd</th>
+        <th class="numero">Em uso há</th><th class="numero">Costuma durar</th><th></th></tr></thead><tbody>
+        ${emUso.map((i) => `<tr class="${i.passouDaMedia ? 'lp-atrasada' : ''}"><td><strong>${esc(i.produto)}</strong>
+            <div class="lp-sub">${i.tipoCompra === 'INDIVIDUAL' ? 'compra individual' : 'lote'}${i.fornecedor ? ' · ' + esc(i.fornecedor) : ''}${i.nf ? ' · NF ' + esc(i.nf) : ''}</div></td>
+          <td>${pnDataLonga(i.inicio)}</td><td class="numero">${qtd(i)}</td>
+          <td class="numero"><b>${i.dias === null ? '—' : i.dias + ' dia(s)'}</b></td>
+          <td class="numero">${i.duracaoMedia ? pnNum(i.duracaoMedia, 0) + ' dia(s)' : '—'}</td>
+          <td style="text-align:right">${g ? `<button class="botao est-menos secundario" onclick="lpFormAcabou(${jsArg(i.id)})">Acabou</button>` : ''}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="vazio">Nenhum produto em uso. Registre uma compra.</div>'}
     </div>
-
-    <div class="pn-grade">
-      <div class="cartao">
-        <div class="cartao-titulo linha-titulo"><span>Compras</span>${g ? '<button class="botao" onclick="lpFormCompra()">Registrar compra</button>' : ''}</div>
-        <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Produto / insumo</th><th class="numero">Qtd.</th><th class="numero">Unit.</th>
-          <th class="numero">Total</th><th>NF</th><th></th></tr></thead>
-          <tbody>${d.compras.slice(0, 60).map((c) => `<tr><td>${pnDataLonga(c.data)}</td><td>${esc(c.produto)}<div class="lp-sub">${esc(c.fornecedor)}</div></td>
-            <td class="numero">${pnNum(c.quantidade)}</td><td class="numero">${pnMoeda(c.precoUnit)}</td><td class="numero"><strong>${pnMoeda(c.total)}</strong></td>
-            <td>${esc(c.nf)}</td><td>${g ? `<button class="icone-botao" onclick="lpFormCompra(${jsArg(c.id)})">Editar</button>` : ''}</td></tr>`).join('')
-            || '<tr><td colspan="7" class="vazio">Nenhuma compra registrada.</td></tr>'}</tbody></table></div>
-      </div>
-      <div class="cartao">
-        <div class="cartao-titulo linha-titulo"><span>Embalagens — previsto × real</span>${g ? '<button class="botao" onclick="lpFormEmbalagem()">Abrir embalagem</button>' : ''}</div>
-        <div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th>Aberta</th><th>Deve render até</th><th>Terminou</th>
-          <th class="numero">Previsto</th><th class="numero">Rendeu</th><th>Situação</th><th></th></tr></thead>
-          <tbody>${d.embalagens.slice(0, 60).map((e) => `<tr><td><strong>${esc(e.produto)}</strong>${e.observacao ? `<div class="lp-sub">${esc(e.observacao)}</div>` : ''}</td>
-            <td>${pnData(e.abertura)}</td><td>${pnData(e.deveRenderAte)}</td><td>${e.termino ? pnData(e.termino) : '—'}</td>
-            <td class="numero">${e.previstoDias ? pnNum(e.previstoDias) + ' d' : '—'}</td><td class="numero">${e.diasRendeu !== null ? e.diasRendeu + ' d' : '—'}</td>
-            <td><span class="pn-chip ${/abaixo|verificar|Passou/.test(e.situacao) ? 'alerta' : /mais|Dentro/.test(e.situacao) ? 'ok' : 'neutro'}">${esc(e.situacao)}</span></td>
-            <td style="white-space:nowrap">${g ? `${e.emUso ? `<button class="icone-botao" onclick="lpFormEmbalagem(${jsArg(e.id)},true)">Terminou</button>` : ''}
-              <button class="icone-botao" onclick="lpFormEmbalagem(${jsArg(e.id)})">Editar</button>` : ''}</td></tr>`).join('')
-            || '<tr><td colspan="8" class="vazio">Nenhuma embalagem registrada.</td></tr>'}</tbody></table></div>
-        <p class="dica">Rendeu menos que 90% do previsto é sinal de diluição errada ou desperdício — vale conversar com o turno.</p>
-      </div>
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Acabaram — aguardando reabastecimento (${aguardando.length})</div>
+      ${aguardando.length ? `<table><thead><tr><th>Produto</th><th>Comprado em</th><th>Acabou em</th><th class="numero">Durou</th><th></th></tr></thead><tbody>
+        ${aguardando.map((i) => `<tr><td><strong>${esc(i.produto)}</strong></td><td>${pnDataLonga(i.inicio)}</td><td>${pnDataLonga(i.acabouEm)}</td>
+          <td class="numero"><b>${i.dias === null ? '—' : Math.max(1, i.dias) + ' dia(s)'}</b></td>
+          <td style="text-align:right;white-space:nowrap">${g ? `<button class="icone-botao" onclick="lpFormReabastecer(${jsArg(i.id)})">Reabastecer</button>
+            <button class="botao-texto" onclick="agir('voltarItemLimpeza',{id:${jsArg(i.id)}}).catch(()=>{})">Não acabou</button>` : ''}</td></tr>`).join('')}
+        </tbody></table>
+        <p class="dica">Reabastecer: compra individual deste produto. Se ele veio num lote novo, é só registrar o lote — o sistema anota o reabastecimento sozinho.</p>`
+        : '<div class="vazio">Nada esperando reposição.</div>'}
+    </div>
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Consumo por produto</div>
+      ${(d.consumo || []).length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Produto</th><th class="numero">Compras</th><th class="numero">Duração média</th>
+        <th class="numero">Última duração</th><th class="numero">Custo por dia</th><th class="numero">Gasto total</th><th class="numero">Último preço</th><th>Agora</th></tr></thead><tbody>
+        ${d.consumo.map((c) => `<tr><td><strong>${esc(c.produto)}</strong></td><td class="numero">${c.compras}</td>
+          <td class="numero">${c.duracaoMedia === null ? '—' : pnNum(c.duracaoMedia, 0) + ' dia(s)'}<div class="lp-sub">${c.ciclos} ciclo(s) medido(s)</div></td>
+          <td class="numero">${c.ultimaDuracao === null ? '—' : c.ultimaDuracao + ' dia(s)'}</td>
+          <td class="numero">${c.custoDia === null ? '—' : pnMoeda(c.custoDia)}</td><td class="numero">${pnMoeda(c.gasto)}</td>
+          <td class="numero">${c.ultimoPreco === null || c.ultimoPreco === undefined ? '—' : pnMoeda(c.ultimoPreco)}</td>
+          <td>${c.emUso ? '<span class="pn-chip ok">em uso</span>' : ''}${c.aguardando ? ' <span class="pn-chip alerta">acabou</span>' : ''}</td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="dica">Duração = da compra até o dia em que acabou. Custo por dia = valor pago ÷ dias que durou.</p>`
+        : '<div class="vazio">Aparece depois que os primeiros produtos acabarem.</div>'}
+    </div>
+    <div class="cartao">
+      <div class="cartao-titulo">Compras registradas</div>
+      ${(d.lotes || []).length ? `<div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Tipo</th><th>Fornecedor / NF</th><th>Produtos</th><th class="numero">Total</th><th></th></tr></thead><tbody>
+        ${d.lotes.map((l) => `<tr><td>${pnDataLonga(l.data)}</td><td>${l.tipo === 'INDIVIDUAL' ? 'Individual' : 'Lote'}</td>
+          <td>${esc(l.fornecedor || '—')}${l.nf ? `<div class="lp-sub">NF ${esc(l.nf)}</div>` : ''}</td>
+          <td>${l.itens.map((i) => `${esc(i.produto)} <span class="lp-sub" style="display:inline">${qtd(i)}</span>`).join(' · ')}</td>
+          <td class="numero">${pnMoeda(l.total)}</td>
+          <td>${g && !l.itens.some((i) => i.acabouEm) ? `<button class="botao-texto" onclick="if(confirm('Excluir esta compra?')) agir('excluirLoteLimpeza',{id:${jsArg(l.id)}}).catch(()=>{})">Excluir</button>` : ''}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="vazio">Nenhuma compra registrada ainda.</div>'}
+      ${(d.compras || []).length ? `<details style="margin-top:10px"><summary class="pn-mini">Compras no formato antigo (${d.compras.length}) — continuam contando no gasto do mês</summary>
+        <table><tbody>${d.compras.slice(0, 60).map((c) => `<tr><td>${pnDataLonga(c.data)}</td><td>${esc(c.produto)}</td><td class="numero">${pnNum(c.quantidade)}</td><td class="numero">${pnMoeda(c.total)}</td></tr>`).join('')}</tbody></table></details>` : ''}
     </div>`;
+}
+
+/* Compra: lote (varios produtos) ou individual (um). */
+function lpFormLote(tipo, produto) {
+  const individual = tipo === 'INDIVIDUAL';
+  const nomes = [...new Set((DADOS.consumo || []).map((c) => c.produto).concat((DADOS.produtos || []).map((p) => p.produto)))].sort();
+  const pendentes = (DADOS.itens || []).filter((i) => i.situacao === 'AGUARDANDO');
+  abrirJanela(individual ? 'Compra individual' : 'Registrar compra (lote)', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Data da compra</label><input type="date" id="ll-data" value="${DADOS.hoje}"></div>
+      <div class="campo"><label>Fornecedor (opcional)</label><input id="ll-forn"></div>
+    </div>
+    <div class="campo"><label>NF ou pedido (opcional)</label><input id="ll-nf"></div>
+    <datalist id="ll-nomes">${nomes.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+    <table class="ll-tabela"><thead><tr><th>Produto</th><th>Qtd</th><th>Unid.</th><th>Preço unit. (R$)</th>${individual ? '' : '<th></th>'}</tr></thead>
+      <tbody id="ll-linhas"></tbody></table>
+    ${individual ? '' : `<button class="icone-botao" onclick="lpLinhaLote()">+ Produto</button>
+      ${pendentes.length ? `<p class="dica">Acabaram e esperam reposição: ${pendentes.map((i) => `<button class="lp-filtro" onclick="lpLinhaLote(${jsArg(i.produto)})">+ ${esc(i.produto)}</button>`).join(' ')}</p>` : ''}`}
+    <div class="campo" style="margin-top:10px"><label>Observação (opcional)</label><input id="ll-obs"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="lpSalvarLote(${jsArg(individual ? 'INDIVIDUAL' : 'LOTE')})">Registrar compra</button>`);
+  lpLinhaLote(produto || '');
+  if (!individual && !produto) { lpLinhaLote(); lpLinhaLote(); }
+}
+function lpLinhaLote(produto) {
+  const tb = el('ll-linhas'); if (!tb) return;
+  const vazia = [...tb.querySelectorAll('.ll-prod')].find((x) => !x.value);
+  if (produto && vazia) { vazia.value = produto; return; }
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><input class="ll-prod" list="ll-nomes" placeholder="Ex.: Detergente neutro 5L" value="${esc(produto || '')}"></td>
+    <td><input class="ll-qtd" inputmode="decimal" value="1" style="width:64px"></td>
+    <td><select class="ll-un" style="width:auto">${['un', 'galão', 'caixa', 'fardo', 'litro', 'pacote', 'rolo'].map((u) => `<option>${u}</option>`).join('')}</select></td>
+    <td><input class="ll-preco" inputmode="decimal" style="width:96px"></td>
+    ${el('ll-linhas').closest('table').querySelectorAll('thead th').length > 4 ? '<td><button class="botao-texto" onclick="this.closest(\'tr\').remove()">remover</button></td>' : ''}`;
+  tb.appendChild(tr);
+}
+function lpSalvarLote(tipo, repoe) {
+  const itens = [...document.querySelectorAll('#ll-linhas tr')].map((tr) => ({
+    produto: tr.querySelector('.ll-prod').value.trim(), quantidade: tr.querySelector('.ll-qtd').value,
+    unidade: tr.querySelector('.ll-un').value, precoUnit: tr.querySelector('.ll-preco').value })).filter((i) => i.produto);
+  if (!itens.length) return avisar('Inclua pelo menos um produto.', true);
+  agir('salvarLoteLimpeza', { tipo, data: val('ll-data'), fornecedor: val('ll-forn'), nf: val('ll-nf'), observacao: val('ll-obs'), itens, repoe: repoe || [] }).catch(() => {});
+}
+function lpFormAcabou(id) {
+  const i = (DADOS.itens || []).find((x) => x.id === id); if (!i) return;
+  abrirJanela('Acabou — ' + i.produto, `
+    <p style="margin:0 0 12px">Comprado em <b>${pnDataLonga(i.inicio)}</b> · em uso há <b>${i.dias} dia(s)</b>${i.duracaoMedia ? ' · costuma durar ' + pnNum(i.duracaoMedia, 0) + ' dia(s)' : ''}.</p>
+    <div class="campo"><label>Acabou em</label><input type="date" id="la-acabou" value="${DADOS.hoje}"></div>
+    <div class="campo"><label>Observação (opcional)</label><input id="la-acabou-obs" placeholder="Ex.: vazamento, uso maior na semana do inventário"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('acabouItemLimpeza',{id:${jsArg(id)},data:val('la-acabou'),observacao:val('la-acabou-obs')}).catch(()=>{})">Registrar que acabou</button>`);
+}
+function lpFormReabastecer(id) {
+  const i = (DADOS.itens || []).find((x) => x.id === id); if (!i) return;
+  abrirJanela('Reabastecer — ' + i.produto, `
+    <p style="margin:0 0 12px">Acabou em <b>${pnDataLonga(i.acabouEm)}</b>. Como foi reposto?</p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Data do reabastecimento</label><input type="date" id="lr-data" value="${DADOS.hoje}"></div>
+      <div class="campo"><label>Quantidade</label><input id="lr-qtd" inputmode="decimal" value="${esc(String(i.quantidade || 1))}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Preço unit. (R$, opcional)</label><input id="lr-preco" inputmode="decimal" value="${i.precoUnit === null ? '' : String(i.precoUnit).replace('.', ',')}"></div>
+      <div class="campo"><label>Fornecedor / NF (opcional)</label><input id="lr-forn"></div>
+    </div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao secundario" onclick="lpFormLote('LOTE', ${jsArg(i.produto)})">Veio num lote novo</button>
+    <button class="botao" onclick="agir('reabastecerLimpeza',{id:${jsArg(id)},data:val('lr-data'),quantidade:val('lr-qtd'),precoUnit:val('lr-preco'),fornecedor:val('lr-forn')}).catch(()=>{})">Compra individual</button>`);
 }
 
 function lpFormProduto(id) {
@@ -1320,7 +1378,7 @@ function pintarQuadro(r) {
   if (d.erro) { el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
 
   el('pagina').innerHTML = `<div class="bi-quadro">
-    ${pnAbas([['quadro', 'Quadro atual'], ['mov', 'Movimentação'], ['desligados', 'Desligados e motivos']], BQ.aba, 'bqAba')}
+    ${pnAbas([['quadro', 'Quadro atual'], ['mov', 'Movimentação'], ['admitidos', 'Admitidos'], ['desligados', 'Desligados e motivos']], BQ.aba, 'bqAba')}
     <div id="bq-conteudo"></div>
     <p class="bq-rodape">Fonte: ${d.fonte ? `<a href="${esc(d.fonte.url)}" target="_blank">${esc(d.fonte.nome)}</a>` : 'planilha de apoio'} —
       abas APOIO TA, APOIO TB e APOIO TC · CADMITIDOS e CDESLIGADOS.
@@ -1331,7 +1389,7 @@ function pintarQuadro(r) {
 
 function bqAba(qual) {
   BQ.aba = qual;
-  document.querySelectorAll('.bi-quadro .abas .aba').forEach((b) => b.classList.toggle('ativa', (b.getAttribute('onclick') || '').indexOf("'" + qual + "'") !== -1));
+  document.querySelectorAll('.bi-quadro .abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === qual));
   bqDesenhar();
 }
 
@@ -1365,6 +1423,7 @@ function bqDesenhar() {
   try {
     if (BQ.aba === 'mov') alvo.innerHTML = bqMovimentacao();
     else if (BQ.aba === 'desligados') alvo.innerHTML = bqDesligados();
+    else if (BQ.aba === 'admitidos') alvo.innerHTML = bqAdmitidos();
     else { alvo.innerHTML = bqQuadroEstrutura(); bqRender(); }
   } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
 }
@@ -1460,7 +1519,10 @@ function bqMovimentacao() {
   const adm = DADOS.adm || [], des = DADOS.des || [];
   if (!adm.length && !des.length) return '<div class="bq-card"><p class="bq-vazio">Sem dados nas abas CADMITIDOS e CDESLIGADOS.</p></div>';
   const m = (r) => String(r.mes || '').trim();
-  const meses = bqUniq(adm.map(m).concat(des.map(m))).sort();
+  // Admitido sem data (a aba CADMITIDOS da filial nao tem data) conta no
+  // total, mas nao entra no grafico mes a mes.
+  const admSemData = adm.filter((r) => !m(r)).length;
+  const meses = bqUniq(adm.map(m).concat(des.map(m)).filter(Boolean)).sort();
   const cAdm = {}, cDes = {};
   adm.forEach((r) => { cAdm[m(r)] = (cAdm[m(r)] || 0) + 1; });
   des.forEach((r) => { cDes[m(r)] = (cDes[m(r)] || 0) + 1; });
@@ -1477,13 +1539,13 @@ function bqMovimentacao() {
 
   return `
     <div class="bq-kpis" id="bqMov">
-      <div class="bq-kpi"><span class="bq-rot">Admitidos no período</span><b>${adm.length}</b><small>aba CADMITIDOS</small></div>
+      <div class="bq-kpi"><span class="bq-rot">Admitidos</span><b>${adm.length}</b><small>aba CADMITIDOS${admSemData ? ' · ' + admSemData + ' sem data' : ''}</small></div>
       <div class="bq-kpi"><span class="bq-rot">Desligados no período</span><b>${des.length}</b><small>aba CDESLIGADOS</small></div>
       <div class="bq-kpi"><span class="bq-rot">Saldo</span><b style="color:${saldo >= 0 ? 'var(--bom)' : 'var(--grave)'}">${(saldo > 0 ? '+' : '') + saldo}</b><small>admissões menos desligamentos</small></div>
       <div class="bq-kpi"><span class="bq-rot">Turnover médio</span><b style="color:${corT(media)}">${media.toFixed(1).replace('.', ',')}%</b><small>média mensal do período</small></div>
     </div>
     <div class="bq-card">
-      <h2>Admissões e desligamentos por mês</h2><p class="bq-sub">Duas séries lado a lado. Valores acima de cada coluna.</p>
+      <h2>Admissões e desligamentos por mês</h2><p class="bq-sub">Duas séries lado a lado. Valores acima de cada coluna.${admSemData ? ` ${admSemData} admitido(s) sem data de admissão na planilha não entram neste gráfico — veja a aba <b>Admitidos</b>.` : ''}</p>
       <div class="bq-leg" style="margin-bottom:10px"><span><i style="background:var(--s1)"></i>Admitidos</span><span><i style="background:var(--s2)"></i>Desligados</span></div>
       <div class="bq-meses">${meses.map((k) => { const a = cAdm[k] || 0, dd = cDes[k] || 0; return `<div class="bq-mes"><div class="bq-duplas">
         <span style="height:${a / maxM * 100}%;background:var(--s1)" title="${k}: ${a} admitidos"><b>${a}</b></span>
@@ -1511,6 +1573,44 @@ function bqMovimentacao() {
 }
 
 function bqVerMotivo(motivo) { BQ.motivo = motivo; bqAba('desligados'); }
+
+/* ---------- ADMITIDOS (aba CADMITIDOS: Produtiva / Colaborador / Equipe / Funcao / Status) ---------- */
+function bqAdmitidos() {
+  const adm = DADOS.adm || [];
+  if (!adm.length) return '<div class="bq-card"><p class="bq-vazio">Nenhum admitido na aba CADMITIDOS (ou a aba não foi encontrada na planilha).</p></div>';
+  const st = (r) => r.status || 'SEM STATUS';
+  const porStatus = bqOrdenar(bqContar(adm.map((r) => ({ s: st(r) })), 's'));
+  const porEquipe = bqOrdenar(bqContar(adm.map((r) => ({ e: r.equipe || 'SEM EQUIPE' })), 'e'));
+  const porFuncao = bqOrdenar(bqContar(adm.map((r) => ({ f: r.funcao || 'SEM FUNÇÃO' })), 'f'));
+  const busca = String(BQ.buscaAdm || '').toLowerCase();
+  const lista = adm.filter((r) => (!BQ.statusAdm || st(r) === BQ.statusAdm) &&
+      (!busca || (r.cod + ' ' + r.nome + ' ' + r.funcao + ' ' + r.equipe).toLowerCase().indexOf(busca) !== -1))
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+  return `
+    <div class="bq-kpis">
+      <div class="bq-kpi"><span class="bq-rot">Admitidos</span><b>${adm.length}</b><small>aba CADMITIDOS</small></div>
+      ${porStatus.slice(0, 3).map(([k, n]) => `<div class="bq-kpi"><span class="bq-rot">${esc(k)}</span><b>${n}</b><small>${Math.round(n / adm.length * 100)}% dos admitidos</small></div>`).join('')}
+    </div>
+    <div class="bq-grade desligados">
+      <div style="display:grid;gap:14px">
+        <div class="bq-card bq-compacto"><h2>Status</h2><p class="bq-sub">Clique num status para filtrar a lista.</p>
+          ${bqBarras(porStatus, 'var(--s1)', 'bqFiltrarStatusAdm', BQ.statusAdm)}
+          ${BQ.statusAdm ? '<button class="bq-limpar" style="margin:8px 0 0" onclick="bqFiltrarStatusAdm(\'\')">Mostrar todos</button>' : ''}</div>
+        <div class="bq-card bq-compacto"><h2>Por equipe</h2>${bqBarras(porEquipe, 'var(--s3)')}</div>
+        <div class="bq-card bq-compacto"><h2>Por função</h2>${bqBarras(porFuncao, 'var(--s2)')}</div>
+      </div>
+      <div class="bq-card"><h2>Admitidos ${BQ.statusAdm ? '— ' + esc(BQ.statusAdm) : ''} <span class="bq-num" style="color:var(--bq-ink-2);font-weight:500">(${lista.length})</span></h2>
+        <input placeholder="Procurar nome, produtiva ou função…" value="${esc(BQ.buscaAdm || '')}" style="margin:6px 0 10px"
+          oninput="BQ.buscaAdm=this.value;clearTimeout(BQ.tAdm);BQ.tAdm=setTimeout(()=>{bqDesenhar();const c=document.querySelector('#bq-conteudo input');if(c){c.focus();c.setSelectionRange(c.value.length,c.value.length);}},250)">
+        <div class="bq-rolagem" style="max-height:560px;overflow-y:auto"><table>
+          <thead><tr><th>Produtiva</th><th>Colaborador</th><th>Equipe</th><th>Função</th><th>Status</th>${adm.some((r) => r.mes) ? '<th>Admissão</th>' : ''}</tr></thead>
+          <tbody>${lista.map((r) => `<tr><td class="bq-num">${esc(r.cod || '—')}</td><td>${esc(r.nome)}</td>
+            <td>${r.equipe ? `<span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span>` : '—'}</td>
+            <td>${esc(r.funcao || '—')}</td><td>${esc(r.status || '—')}</td>${adm.some((x) => x.mes) ? `<td>${r.mes ? pnRotuloMes(r.mes) : '—'}</td>` : ''}</tr>`).join('')}</tbody>
+        </table></div></div>
+    </div>`;
+}
+function bqFiltrarStatusAdm(s) { BQ.statusAdm = (BQ.statusAdm === s) ? '' : s; bqDesenhar(); }
 
 /* ---------- DESLIGADOS E MOTIVOS (novo) ---------- */
 function bqDesligados() {
@@ -1676,6 +1776,9 @@ function estItens(d) {
       <select style="width:auto" onchange="EST_FILTRO.categoria=this.value;pintarAbaEst(DADOS)">
         <option value="">Todas as categorias</option>${d.listas.categorias.map((c) => `<option ${f.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       ${p.cadastrar ? '<button class="icone-botao" onclick="estFormLote()">Colar da planilha</button>' : ''}
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button class="botao secundario" onclick="estExportarExcel()">Exportar Excel</button>
+        <button class="botao secundario" onclick="estExportarPdf()">Exportar PDF</button></span>
     </div>
     <div class="pn-tabela-rolagem" id="est-tabela-itens">${estTabelaItens(lista, p)}</div>
   </div>`;
@@ -1707,6 +1810,52 @@ function estTabelaItens(lista, p) {
         ${p.cadastrar ? `<button class="icone-botao" onclick="estFormItem(${jsArg(i.id)})">Editar</button>` : ''}</td>
     </tr>`).join('') || `<tr><td colspan="6" class="vazio">Nenhum material encontrado.${p.cadastrar ? ' <button class="icone-botao" onclick="estFormItem()">Cadastrar novo</button>' : ''}</td></tr>`}
   </tbody></table>`;
+}
+
+/* ---------- EXPORTAR (Excel e PDF) — mesma funcao da tela de Nobreaks ---------- */
+function estDadosRelatorio() {
+  const d = DADOS, f = EST_FILTRO;
+  const itens = d.itens.filter((i) => (f.situacao ? i.situacao === f.situacao : i.ativo) &&
+    (!f.categoria || i.categoria === f.categoria) &&
+    (!f.busca || (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) !== -1))
+    .slice().sort((a, b) => a.nome.localeCompare(b.nome));
+  const filtro = [f.situacao ? (EST_ROTULO[f.situacao] || [, f.situacao])[1] : 'Itens ativos', f.categoria, f.busca ? 'busca "' + f.busca + '"' : '']
+    .filter(Boolean).join(' · ');
+  const movs = d.movimentos.slice();
+  return { d, itens, movs, filtro };
+}
+
+function estExportarExcel() {
+  const r = estDadosRelatorio();
+  const sit = (i) => (EST_ROTULO[i.situacao] || [, i.situacao])[1];
+  const titulo = [['Estoque de TI — ' + r.filtro], ['Filial: ' + ((SESSAO && SESSAO.filial && SESSAO.filial.nome) || '') + ' · gerado em ' + new Date().toLocaleString('pt-BR')], []];
+  const estoque = [['Material de Informática', 'Código', 'Categoria', 'Marca', 'Modelo', 'Unidade', 'Estoque', 'Estoque mínimo', 'Estoque ideal', 'Falta p/ ideal', 'Situação', 'Local']]
+    .concat(r.itens.map((i) => [i.nome, i.codigo, i.categoria, i.marca, i.modelo, i.unidade, Number(i.saldo) || 0,
+      i.minimo || '', i.ideal || '', i.faltaIdeal || '', sit(i), i.local]));
+  const movs = [['Data', 'Tipo', 'Material', 'Código', 'Quantidade', 'Setor', 'Usuário', 'Documento', 'Observação', 'Estornado']]
+    .concat(r.movs.map((m) => { const i = estItem(m.item); return [pnDataLonga(m.data), EST_TIPO_NOME[m.tipo] || m.tipo, i ? i.nome : m.item, m.item,
+      Number(m.efeito) || 0, m.destino || '', m.solicitante || '', m.documento || '', m.observacao || '', m.estornado ? 'SIM' : '']; }));
+  pnBaixarXlsx('Estoque de TI ' + r.d.hoje + '.xlsx',
+    [{ nome: 'Estoque', linhas: titulo.concat(estoque) }, { nome: 'Movimentações', linhas: titulo.concat(movs) }]);
+}
+
+function estExportarPdf() {
+  const r = estDadosRelatorio();
+  const alerta = r.itens.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO');
+  const linha = (i) => `<tr class="${i.situacao === 'REPOR' || i.situacao === 'ZERADO' ? 'alerta' : ''}"><td><b>${esc(i.nome)}</b></td><td>${esc(i.codigo)}</td><td>${esc(i.categoria)}</td>
+    <td>${pnNum(i.saldo, Number.isInteger(Number(i.saldo)) ? 0 : 2)} ${esc(i.unidade)}</td><td>${i.minimo ? pnNum(i.minimo) : '—'}</td><td>${i.ideal ? pnNum(i.ideal) : '—'}</td>
+    <td>${i.faltaIdeal ? pnNum(i.faltaIdeal) : '—'}</td><td>${(EST_ROTULO[i.situacao] || [, i.situacao])[1]}</td><td class="oc">${esc(i.local || '')}</td></tr>`;
+  const movs = r.movs.slice(0, 300).map((m) => { const i = estItem(m.item); return `<tr${m.estornado ? ' style="text-decoration:line-through;color:#999"' : ''}><td>${pnDataLonga(m.data)}</td>
+    <td>${EST_TIPO_NOME[m.tipo] || esc(m.tipo)}</td><td>${esc(i ? i.nome : m.item)}</td><td><b>${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</b></td>
+    <td class="oc">${esc(m.destino || '')}</td><td class="oc">${esc(m.solicitante || '')}</td><td class="oc">${esc(m.documento || m.observacao || '')}</td></tr>`; }).join('');
+  const cab = '<tr><th>Material de Informática</th><th>Código</th><th>Categoria</th><th>Estoque</th><th>Mínimo</th><th>Ideal</th><th>Falta p/ ideal</th><th>Situação</th><th>Local</th></tr>';
+  pnImprimirRelatorio('Relatório do estoque de TI', r.filtro, `
+    ${alerta.length ? `<h2>No estoque mínimo ou zerados (${alerta.length})</h2><table><thead>${cab}</thead><tbody>${alerta.map(linha).join('')}</tbody></table>` : ''}
+    <h2>Estoque (${r.itens.length} itens)</h2>
+    <table><thead>${cab}</thead><tbody>${r.itens.map(linha).join('')}</tbody></table>
+    <h2>Movimentações recentes</h2>
+    <table><thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th>Qtd</th><th>Setor</th><th>Usuário</th><th>Documento / obs.</th></tr></thead><tbody>${movs}</tbody></table>
+    <p class="nota">Em vermelho: itens que chegaram ao estoque mínimo ou zeraram. Movimentações riscadas foram estornadas.</p>`);
 }
 
 /* ---------- MOVIMENTACOES ---------- */

@@ -177,6 +177,12 @@ function cargaDaPagina_(pedido) {
       if (!emailDaSessao_(_tokenDaVez)) {
         _tokenDaVez = '';
         const carga = { ok: true, instalado: true, entrada: 'ENTRAR', sessaoInvalida: !!pedido.t };
+        // Link de e-mail (?tela=calendario): depois da entrada, abre nessa tela.
+        const destino = String(pedido.tela || '').toLowerCase().trim();
+        if (!pedido.t && TELAS.some(function (x) { return x.id === destino; })) {
+          carga.telaDepois = destino;
+          carga.filialDepois = String(pedido.filial || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        }
         // Veio com sessao e ela acabou (1 h parada, ou saiu): a tela diz por que.
         if (pedido.t) carga.erroEntrada = 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.';
         return carga;
@@ -508,6 +514,11 @@ const ACOES = {
   excluirEmbalagem:    { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirEmbalagem', modulo: 'limpeza' },
   salvarZona:          { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarZona', modulo: 'limpeza' },
   importarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarLimpeza', modulo: 'limpeza' },
+  salvarLoteLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarLoteLimpeza', modulo: 'limpeza' },
+  excluirLoteLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirLoteLimpeza', modulo: 'limpeza' },
+  acabouItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoAcabouItemLimpeza', modulo: 'limpeza' },
+  voltarItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoVoltarItemLimpeza', modulo: 'limpeza' },
+  reabastecerLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoReabastecerLimpeza', modulo: 'limpeza' },
 
   // quadro do CD
   salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },

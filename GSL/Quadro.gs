@@ -82,7 +82,7 @@ exigirPorta_();
     const turnoPadrao = nomeAba.replace(/APOIO\s*/i, '').trim().toUpperCase();
     lerAbaQuadro_(ss, nomeAba).forEach(function (linha) {
       const reg = {
-        cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIVO'])),
+        cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
         nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
         equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase() || turnoPadrao,
         funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase()
@@ -91,20 +91,27 @@ exigirPorta_();
     });
   });
 
+  /*
+   * A aba de admitidos da filial e mais simples: Produtiva / Colaborador /
+   * Equipe / Funcao / Status — SEM data. Antes so entrava quem tinha data
+   * de admissao, e o Quadro mostrava zero admitidos. Agora todos entram; a
+   * data, quando existir, so serve para o grafico mes a mes.
+   */
   const adm = lerAbaQuadro_(ss, QUADRO_ABA_ADMITIDOS).map(function (linha) {
     return {
-      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIVO'])),
+      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
       nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
       equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase(),
       funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase(),
-      mes:    aoMesQ_(pegaQ_(linha, ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], ['MOTIVO', 'TIPO']))
+      status: txtQ_(pegaQ_(linha, ['STATUS', 'SITUACAO'])).toUpperCase(),
+      mes:    aoMesQ_(pegaQ_(linha, ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], ['MOTIVO', 'TIPO', 'STATUS', 'SITUACAO']))
     };
-  }).filter(function (r) { return r.mes; });
+  }).filter(function (r) { return r.nome || r.cod; });
 
   const des = lerAbaQuadro_(ss, QUADRO_ABA_DESLIGADOS).map(function (linha) {
     const quando = pegaQ_(linha, ['DESLIG', 'DEMISS', 'DATA'], ['MOTIVO', 'TIPO']);
     return {
-      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIVO'])),
+      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
       nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
       equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase(),
       funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase(),

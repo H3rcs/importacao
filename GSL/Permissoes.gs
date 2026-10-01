@@ -212,7 +212,16 @@ function permissoesDe(perfil) {
     return { escopo: 'TODOS', telas: TELAS.map(function (t) { return t.id; }),
              podes: CAPACIDADES.slice(), descricao: base.descricao || 'Administrador', id: base.id };
   }
-  return perfis[nome] || perfis[PERFIL_PADRAO_NOVO_USUARIO] || PERFIL_MINIMO;
+  const p = perfis[nome] || perfis[PERFIL_PADRAO_NOVO_USUARIO] || PERFIL_MINIMO;
+  /*
+   * Quem ve o Calendario ve o Plano de Acao (4.2.2): o coordenador precisa
+   * concluir as acoes dele, e a tela so mostra a cada um as acoes em que e
+   * responsavel. Banco antigo podia ter a linha COORDENADOR sem TELA_ACOES.
+   */
+  if (p.telas.indexOf('calendario') !== -1 && p.telas.indexOf('acoes') === -1) {
+    return { escopo: p.escopo, telas: p.telas.concat(['acoes']), podes: p.podes, descricao: p.descricao, id: p.id };
+  }
+  return p;
 }
 
 /* --- As perguntas que o resto do sistema faz --- */

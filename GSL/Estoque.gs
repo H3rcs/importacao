@@ -120,7 +120,14 @@ function dadosEstoque(usuario, params) {
     i.faltaIdeal = i.ideal && i.saldo < i.ideal ? estArred_(i.ideal - Math.max(0, i.saldo)) : 0;
     i.ultimaSaida = ultimaSaida[i.codigo] || '';
     i.ultimaEntrada = ultimaEntrada[i.codigo] || '';
-    i.situacao = !i.ativo ? 'INATIVO' : (i.saldo <= 0 ? 'ZERADO' : (i.minimo && i.saldo <= i.minimo ? 'REPOR' : 'OK'));
+    /*
+     * Alerta de reposicao: o saldo chegou ao minimo. Mas se ja esta no
+     * estoque IDEAL (ex.: minimo 1, ideal 1, saldo 1) nao ha o que repor —
+     * antes esse item ficava pedindo reposicao para sempre.
+     */
+    const noMinimo = i.minimo && i.saldo <= i.minimo;
+    const noIdeal = i.ideal && i.saldo >= i.ideal;
+    i.situacao = !i.ativo ? 'INATIVO' : (i.saldo <= 0 ? 'ZERADO' : (noMinimo && !noIdeal ? 'REPOR' : 'OK'));
   });
   itens.sort(function (a, b) { return a.nome.localeCompare(b.nome); });
 

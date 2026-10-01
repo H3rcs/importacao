@@ -1104,19 +1104,44 @@ function acaoFichaColaborador(usuario, params) {
     if (!f._iso) return;
     if (!porDia[f._iso] || prevalece_(f, porDia[f._iso])) porDia[f._iso] = f;
   });
-  const todas = Object.keys(porDia).map(function (k) { return porDia[k]; })
+  /*
+   * FILTRO DE PERIODO (4.2.2): de/ate em ISO. Sem filtro, o historico inteiro.
+   * A ficha e para consultar o status da pessoa — foco nas ausencias e nos
+   * tipos de ausencia dentro do periodo escolhido.
+   */
+  const de = /^\d{4}-\d{2}-\d{2}$/.test(String(params.de || '')) ? String(params.de) : '';
+  const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(params.ate || '')) ? String(params.ate) : '';
+  const noPeriodo = function (iso) { return (!de || iso >= de) && (!ate || iso <= ate); };
+  const diasNoPeriodo = Object.keys(porDia).filter(noPeriodo);
+  const todas = diasNoPeriodo.map(function (k) { return porDia[k]; })
     .filter(function (f) { return String(f.AUSENCIA) === 'Sim' && !ehNaoDefinido_(f.CATEGORIA); })
     .sort(function (a, b) { return b._iso.localeCompare(a._iso); });
 
+  // As familias que a gestao cobra, na ordem da legenda do RH.
+  const familia = function (cat) {
+    const c = catN_(cat);
+    if (c === 'FALTA' || c === 'FALTA INJUSTIFICADA') return 'Falta injustificada';
+    if (c === 'FALTA JUSTIFICADA') return 'Falta justificada';
+    if (c === 'FALTA DISCIPLINAR') return 'Falta disciplinar';
+    if (c === 'ATESTADO') return 'Atestado';
+    if (c === 'LICENCA LEGAL') return 'Licença legal';
+    return 'Outras ausências';
+  };
+  const ordemTipos = ['Falta injustificada', 'Falta justificada', 'Falta disciplinar', 'Atestado', 'Licença legal', 'Outras ausências'];
+  const porTipo = {};
+  ordemTipos.forEach(function (t) { porTipo[t] = 0; });
+  todas.forEach(function (a) { porTipo[familia(a.CATEGORIA)]++; });
+  const datasPeriodo = diasNoPeriodo.slice().sort();
+
   const mapaCodigos = lerDePara_();
-  const ausencias = todas.slice(0, 60).map(function (a) {
+  const ausencias = todas.slice(0, 500).map(function (a) {
     const t = traduz_(mapaCodigos, a.CODIGO);
     return {
       data: brDoIso_(a._iso), iso: a._iso,
       // A competencia vai junto: sem ela a lista parecia contradizer o
       // cabecalho (que resume um mes so).
       competencia: normalizarCompetenciaRH_(a.COMPETENCIA),
-      codigo: a.CODIGO, descricao: t.desc, categoria: String(a.CATEGORIA || '')
+      codigo: a.CODIGO, descricao: t.desc, categoria: String(a.CATEGORIA || ''), tipo: familia(a.CATEGORIA)
     };
   });
 
@@ -1130,9 +1155,17 @@ function acaoFichaColaborador(usuario, params) {
   return {
     matricula: matExibida_(mat), nome: nome || matExibida_(mat), turno: turno,
     meta: metaAbsenteismo_(),
-    historico: historico,
+    historico: historico.filter(function (h) {
+      // so as competencias que tocam o periodo
+      return (!ate || h.competencia + '-01' <= ate) && (!de || h.competencia + '-31' >= de);
+    }),
     ausencias: ausencias,
     totalAusencias: todas.length,
+    periodo: {
+      de: de, ate: ate, diasLancados: diasNoPeriodo.length, ausencias: todas.length,
+      primeiroDia: datasPeriodo[0] || '', ultimoDia: datasPeriodo[datasPeriodo.length - 1] || '',
+      porTipo: ordemTipos.map(function (t) { return { tipo: t, total: porTipo[t] }; })
+    },
     porCategoria: Object.keys(porCategoria).map(function (c) {
       return { categoria: c, total: porCategoria[c] };
     }).sort(function (a, b) { return b.total - a.total; })

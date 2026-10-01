@@ -337,7 +337,7 @@ async function entrarNoSistema(ev) {
   el('entrar-codigo').name = pedindoCodigo ? 'codigo' : '';
   // A filial da ultima pessoa neste computador NAO vai junto: quem tem mais
   // de uma escolhe (antes caia direto na filial de quem usou antes).
-  el('entrar-filial').value = '';
+  el('entrar-filial').value = (destinoDoLink() || {}).filial || '';
   el('entrar-bilhete').value = bilheteDaPagina();
   // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
   if (CANAL_BARRADO && URL_APP) { enviarFormEntrada(); return false; }
@@ -345,7 +345,7 @@ async function entrarNoSistema(ev) {
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
   try {
-    const r = await chamarJSON('entrar', email, pin, conf, '', codigo);
+    const r = await chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo);
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
       el('entrar-codigo-caixa').classList.toggle('oculto', !r.pedirCodigo);
@@ -583,9 +583,32 @@ function montarSessao(r) {
     CACHE_TELAS[chaveTela(r.telaEmbutida.id, p)] = { resposta: r.telaEmbutida.resposta, quando: Date.now() };
     return abrir(r.telaEmbutida.id, p);
   }
+  // Veio de um link de e-mail (?tela=calendario): abre direto nessa tela.
+  const destino = destinoDoLink();
+  if (destino) {
+    esquecerDestinoDoLink();
+    if ((r.telas || []).some((t) => t.id === destino.tela)) return abrir(destino.tela, {});
+  }
   abrirModulos();
   if (r.avisoTela) avisar(r.avisoTela, true);
 }
+
+/*
+ * DESTINO DO LINK DE E-MAIL. Guardado na aba (sessionStorage) para valer
+ * tambem depois da entrada pelo formulario de reserva (que recarrega a
+ * pagina). Usado uma vez so.
+ */
+function destinoDoLink() {
+  try {
+    const c = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) || {};
+    if (c.telaDepois) {
+      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: c.telaDepois, filial: c.filialDepois || '' }));
+      c.telaDepois = '';
+    }
+    return JSON.parse(sessionStorage.getItem('gsl_destino') || 'null');
+  } catch (e) { return null; }
+}
+function esquecerDestinoDoLink() { try { sessionStorage.removeItem('gsl_destino'); } catch (e) {} }
 
 /*
  * RESERVA DE LEITURA. Se o canal google.script.run for barrado nesta
@@ -775,15 +798,30 @@ const ICONES = {
 };
 
 function montarMenu(telas) {
-  const dentro = moduloAtual
+  const dentro = moduloAtual && moduloAtual !== 'config'
     ? telas.filter((t) => t.modulo === moduloAtual)
     : [];
+  // 4.2.2: as Configuracoes ficam sempre na barra lateral (mesmas telas e
+  // permissoes de antes) em vez de um cartao no meio da tela de modulos.
+  const config = telas.filter((t) => t.modulo === 'config');
+  const item = (t) => `
+    <button class="item-menu" data-pagina="${t.id}" onclick="abrirConfig(${jsArg(t.id)})">
+      <span class="tag-cor ${t.cor}"></span>${esc(t.nome)}
+    </button>`;
   el('menu').innerHTML =
     (moduloAtual ? `<button class="voltar-modulos" onclick="abrirModulos()">Voltar aos modulos</button>` : '') +
     dentro.map((t) => `
     <button class="item-menu" data-pagina="${t.id}" onclick="abrir(${jsArg(t.id)})">
       <span class="tag-cor ${t.cor}"></span>${esc(t.nome)}
-    </button>`).join('');
+    </button>`).join('') +
+    (config.length ? `<div class="menu-secao">Configurações</div>` + config.map(item).join('') : '');
+}
+
+/* Tela de configuracao aberta pela barra lateral: entra no "modulo" config sem duplicar o menu. */
+function abrirConfig(id) {
+  moduloAtual = 'config';
+  montarMenu(SESSAO.telas || []);
+  abrir(id);
 }
 
 /** Tela inicial: os holocards. Nao chama o servidor. */
@@ -801,7 +839,7 @@ function abrirModulos() {
   el('pagina').classList.remove('sem-entrada');
   paginaAnterior = 'modulos';
 
-  const mods = SESSAO.modulos || [];
+  const mods = (SESSAO.modulos || []).filter((m) => m.id !== 'config');   // config mora na barra lateral
   el('pagina').innerHTML = `
     <div class="tela-modulos">
       <div class="modulos-titulo">Selecione um modulo para continuar</div>
@@ -1322,9 +1360,9 @@ function pintarCalendario(r) {
     <div class="grade grade-kpi" style="margin-bottom:16px">
       ${kpiFiltro(d.resumo.total, 'Programadas', 'azul', 'todas')}
       ${kpiFiltro(d.resumo.aprovadas, 'Aprovadas', 'verde', 'aprovada')}
-      ${kpiFiltro(d.resumo.aguardando, 'Aguardando validacao', 'amarelo', 'aguardando')}
+      ${kpiFiltro(d.resumo.aguardando, 'Entregues — aguardando validação', 'azul', 'aguardando')}
       ${kpiFiltro(d.resumo.atrasadas, 'Atrasadas', 'vermelho', 'atrasada')}
-      ${kpiFiltro(d.resumo.reprovadas, 'Reprovadas', 'vermelho', 'reprovada')}
+      ${kpiFiltro(d.resumo.reprovadas, 'Reprovadas', 'laranja', 'reprovada')}
     </div>
 
     <div class="faixa-andamento ${esc(d.andamento.nivel)}">
@@ -1346,6 +1384,14 @@ function pintarCalendario(r) {
                       data-turno="${esc(i.turno)}"
                       onclick="abrirAtividade(${jsArg(i.id)})">${esc(i.tipo)}${i.turno !== 'Todos' ? ' ' + esc(i.turno) : ''}</button>`).join('')}
           </div>`).join('')).join('')}
+      </div>
+      <div class="legenda-mes">
+        <span><i class="amostra st st-pendente"></i>pendente</span>
+        <span><i class="amostra st st-atrasada"></i>atrasada</span>
+        <span><i class="amostra st st-aguardando"></i>entregue — aguardando validação</span>
+        <span><i class="amostra st st-aprovada"></i>aprovada</span>
+        <span><i class="amostra st st-reprovada"></i>reprovada</span>
+        <span><i class="amostra st st-cancelada"></i>cancelada</span>
       </div>
       <div class="legenda-mes">
         <span><i class="amostra hoje"></i>hoje</span>
@@ -1800,7 +1846,7 @@ async function baixar(idArquivo) {
    A aba ANÁLISE saiu. O único quadro dela que dizia algo — a tendência
    mês a mês — virou o gráfico contínuo do Painel.
    ============================================== */
-let ABA_RH = 'painel';          // painel | colaboradores | periodo
+let ABA_RH = 'colaboradores';   // colaboradores | periodo  (4.2.2: o painel de graficos saiu)
 let COLAB_CACHE = null;         // resposta da aba Colaboradores
 
 function pintarAssiduidade(r) {
@@ -1847,7 +1893,10 @@ function pintarAssiduidade(r) {
     </select>
     ${d.podeGerir ? `<button class="botao secundario" onclick="atualizarRH()" title="Relê a planilha do RH agora">↻ Atualizar dados</button>` : ''}`;
 
-  const abas = [['painel', 'Painel'], ['colaboradores', 'Colaboradores'], ['periodo', 'Período']];
+  // 4.2.2: a tela e usada para consultar a situacao de cada colaborador —
+  // ficou a consulta (com a ficha) e o Periodo. Os graficos sairam.
+  if (ABA_RH !== 'periodo') ABA_RH = 'colaboradores';
+  const abas = [['colaboradores', 'Colaboradores'], ['periodo', 'Período']];
   el('pagina').innerHTML = `
     <div class="abas">
       ${abas.map(([id, nome]) => `<button class="aba ${ABA_RH === id ? 'ativa' : ''}"
@@ -1880,7 +1929,7 @@ function pintarAbaRH(d) {
 function trocarAbaRH(aba) {
   ABA_RH = aba;
   const botoes = document.querySelectorAll('.abas .aba');
-  const ordem = ['painel', 'colaboradores', 'periodo'];
+  const ordem = ['colaboradores', 'periodo'];
   botoes.forEach((b) => b.classList.remove('ativa'));
   const i = ordem.indexOf(aba); if (botoes[i]) botoes[i].classList.add('ativa');
   pintarAbaRH(DADOS);
@@ -2059,15 +2108,9 @@ async function rhColaboradoresTela(d) {
 
 function desenharColaboradores(d) {
   const r = COLAB_CACHE;
-  const abas = [['turnos', 'Turnos'], ['destaques', 'Destaques'],
-                ['lista', 'Lista completa (' + r.lista.length + ')']];
-  el('conteudo-rh').innerHTML = rhKpis(d) + `
-    <div class="abas abas-internas">
-      ${abas.map(([id, nome]) => `<button class="aba ${ABA_COLAB === id ? 'ativa' : ''}"
-        onclick="trocarAbaColab(${jsArg(id)})">${nome}</button>`).join('')}
-    </div>
-    <div id="conteudo-colab"></div>`;
-  pintarAbaColab();
+  el('conteudo-rh').innerHTML = rhKpis(d) + '<div id="conteudo-colab"></div>';
+  el('conteudo-colab').innerHTML = colabLista(r);
+  const b = el('busca-colab'); if (b) b.focus();
 }
 
 function trocarAbaColab(aba) {
@@ -2201,7 +2244,7 @@ function colabDestaques(r) {
 }
 
 /* ---- Sub-aba 3: a tabela completa ---- */
-let ORDEM_COLAB = { campo: 'nome', desc: false };
+let ORDEM_COLAB = { campo: 'ausencias', desc: true };
 
 function colabLista(r) {
   const meta = (DADOS.kpis && DADOS.kpis.meta) || 5;
@@ -2218,18 +2261,17 @@ function colabLista(r) {
   return `
     <div class="cartao">
       <div class="cartao-titulo linha-titulo">
-        <span>${lista.length} colaborador(es) — clique numa linha para abrir a ficha</span>
+        <span>${lista.length} colaborador(es) em ${esc((DADOS && DADOS.competencia) || '')} — clique numa linha para abrir a ficha (com filtro de período)</span>
         <span class="campo-busca">
           <input id="busca-colab" placeholder="Buscar nome ou matrícula" oninput="filtrarColab()"></span>
       </div>
-      <p class="dica" style="margin:-4px 0 12px">Clique no título da coluna para ordenar.
-         A barra usa uma matiz só, em quatro tons: mais escura, maior o valor.</p>
+      <p class="dica" style="margin:-4px 0 12px">Quem mais faltou aparece primeiro. Clique no título da coluna para ordenar.</p>
       <div style="overflow-x:auto"><table id="tabela-colab">
         <thead><tr>
           ${col('matricula', 'Matrícula')}${col('nome', 'Nome')}${col('turno', 'Turno')}
-          ${col('registros', 'Dias lanç.', 1)}${col('trabalhados', 'Trab.', 1)}
-          ${col('ausencias', 'Ausên.', 1)}${col('faltasInjustificadas', 'F. inj.', 1)}
-          ${col('atestados', 'Atest.', 1)}${col('ferias', 'Férias', 1)}
+          ${col('ausencias', 'Ausências', 1)}${col('faltasInjustificadas', 'F. injust.', 1)}
+          ${col('faltasJustificadas', 'F. just.', 1)}${col('faltasDisciplinares', 'F. discipl.', 1)}
+          ${col('atestados', 'Atestados', 1)}
           ${col('assiduidade', 'Assiduidade', 1)}<th>Situação</th>
         </tr></thead>
         <tbody>${lista.map((c) => {
@@ -2237,9 +2279,9 @@ function colabLista(r) {
           return `<tr style="cursor:pointer" data-busca="${esc((c.nome + ' ' + c.matricula).toLowerCase())}"
               onclick="fichaColaborador(${jsArg(c.matricula)})">
             <td class="mono">${esc(c.matricula)}</td><td>${esc(c.nome)}</td><td>${esc(c.turno)}</td>
-            <td class="numero">${c.registros}</td><td class="numero">${c.trabalhados}</td>
-            <td class="numero">${c.ausencias}</td><td class="numero">${c.faltasInjustificadas}</td>
-            <td class="numero">${c.atestados}</td><td class="numero">${c.ferias}</td>
+            <td class="numero"><strong>${c.ausencias}</strong></td><td class="numero">${c.faltasInjustificadas || 0}</td>
+            <td class="numero">${c.faltasJustificadas || 0}</td><td class="numero">${c.faltasDisciplinares || 0}</td>
+            <td class="numero">${c.atestados || 0}</td>
             <td class="celula-medidor">
               <div class="medidor-linha">
                 <div class="medidor" style="margin:0">
@@ -2554,43 +2596,37 @@ function corCategoria(cat) {
   return 'var(--tinta-fraca)';
 }
 
-async function fichaColaborador(matricula) {
+/*
+ * FICHA DO COLABORADOR (4.2.2) — foco nas ausencias e nos tipos de
+ * ausencia, com filtro de periodo. Os graficos sairam.
+ */
+let FICHA = { matricula: '', de: '', ate: '' };
+async function fichaColaborador(matricula, de, ate) {
+  FICHA = { matricula: matricula, de: de || '', ate: ate || '' };
   abrirJanela('Ficha do colaborador', '<div class="vazio">Carregando…</div>', '');
   try {
-    const f = await executarAcaoSrv('fichaColaborador', { matricula: matricula });
-    abrirJanela('', montarFicha(f),
-      '<button class="botao" onclick="fecharJanela()">Fechar</button>');
-    // o título fica dentro do corpo, para caber o avatar e os chips
+    const f = await executarAcaoSrv('fichaColaborador', { matricula: matricula, de: FICHA.de, ate: FICHA.ate });
+    if (FICHA.matricula !== matricula) return;
+    abrirJanela('', montarFicha(f), '<button class="botao" onclick="fecharJanela()">Fechar</button>');
     const t = el('janela-titulo'); if (t) t.textContent = '';
   } catch (e) { avisar(e.message || e, true); }
 }
+function fichaPeriodo(de, ate) { fichaColaborador(FICHA.matricula, de, ate); }
+function fichaAtalho(meses) {
+  if (!meses) return fichaPeriodo('', '');
+  const h = new Date(); const ini = new Date(h.getFullYear(), h.getMonth() - meses + 1, 1);
+  const iso = (d) => d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  fichaPeriodo(iso(ini), iso(h));
+}
 
 function montarFicha(f) {
-  const h = (f.historico || [])[f.historico.length - 1] || {
-    registros: 0, trabalhados: 0, ausencias: 0, outros: 0, ferias: 0, folgas: 0,
-    licencas: 0, faltasInjustificadas: 0, faltasJustificadas: 0,
-    faltasDisciplinares: 0, atestados: 0, assiduidade: 0, competencia: '—'
-  };
-  const meta = f.meta || 5;
-  const s = situacaoAssid(h.assiduidade, meta);
-  const total = Math.max(1, h.registros);
-  const pct = (n) => Math.round(n / total * 1000) / 10;
-
-  /* A ORDEM É PARTE DA CORREÇÃO: trabalhados e ausências nas pontas,
-     "outros dias" no meio. Verde e âmbar encostados são a mesma cor
-     para quem tem daltonismo protanope. */
-  const faixas = [
-    { classe: 'faixa-trabalhado', cor: 'var(--faixa-trab)',   n: h.trabalhados, rotulo: 'Trabalhados' },
-    { classe: 'faixa-outros',     cor: 'var(--faixa-outros)', n: h.outros + h.ferias + h.folgas + h.licencas, rotulo: 'Outros dias' },
-    { classe: 'faixa-ausencia',   cor: 'var(--faixa-aus)',    n: h.ausencias,   rotulo: 'Ausências' }
-  ];
-
-  const tile = (n, r, cor) => `<div class="ficha-tile">
-    <div class="n"${cor ? ` style="color:${cor}"` : ''}>${n}</div><div class="r">${r}</div></div>`;
-
-  const temAusencia = h.ausencias > 0 || (f.ausencias || []).length > 0;
-  const temSerie = (f.historico || []).length > 1;
-
+  const p = f.periodo || { porTipo: [], ausencias: 0, diasLancados: 0 };
+  const corTipo = { 'Falta injustificada': 'var(--alerta)', 'Falta justificada': '#D97706', 'Falta disciplinar': '#7C3AED',
+    'Atestado': '#2563EB', 'Licença legal': '#0891B2', 'Outras ausências': 'var(--tinta-media)' };
+  const rotuloPeriodo = (p.de || p.ate)
+    ? (p.de ? pnDataLonga(p.de) : 'o início') + ' a ' + (p.ate ? pnDataLonga(p.ate) : 'hoje')
+    : 'todo o histórico' + (p.primeiroDia ? ' (' + pnDataLonga(p.primeiroDia) + ' a ' + pnDataLonga(p.ultimoDia) + ')' : '');
+  const pctAus = p.diasLancados ? Math.round(p.ausencias / p.diasLancados * 1000) / 10 : 0;
   return `
     <div class="ficha-topo">
       <div class="ficha-inicial">${esc(iniciaisDe(f.nome))}</div>
@@ -2599,101 +2635,52 @@ function montarFicha(f) {
         <div class="ficha-meta">
           <span class="ficha-chip mono">${esc(f.matricula)}</span>
           <span class="ficha-chip">Turno ${esc(f.turno || '—')}</span>
-          <span class="ficha-chip">${esc(h.competencia)}</span>
         </div>
       </div>
     </div>
 
-    <div class="ficha-heroi">
-      <div>
-        <div class="valor" style="color:var(--sit-${s.classe === 'bom' ? 'bom' : s.classe === 'atencao' ? 'atencao' : 'fora'})">${h.assiduidade}%</div>
-        <div style="font-size:11.5px;color:var(--tinta-media);margin-top:4px">de assiduidade</div>
-      </div>
-      <div class="lado">
-        <div class="rotulo">${h.trabalhados} de ${h.registros} dias lançados</div>
-        <div class="medidor sit-${s.classe}" style="margin:0 0 8px">
-          <i style="width:${Math.max(2, Math.min(100, h.assiduidade))}%"></i>
-          <span class="medidor-meta" style="left:${100 - meta}%"></span>
-        </div>
-        ${selo(s)}
-      </div>
+    <div class="ficha-periodo">
+      <div class="campo"><label>De</label><input type="date" id="fp-de" value="${esc(p.de || '')}"></div>
+      <div class="campo"><label>Até</label><input type="date" id="fp-ate" value="${esc(p.ate || '')}"></div>
+      <button class="botao" onclick="fichaPeriodo(val('fp-de'), val('fp-ate'))">Filtrar</button>
+      <span class="ficha-atalhos">
+        <button class="lp-filtro" onclick="fichaAtalho(1)">Este mês</button>
+        <button class="lp-filtro" onclick="fichaAtalho(3)">3 meses</button>
+        <button class="lp-filtro" onclick="fichaAtalho(12)">12 meses</button>
+        <button class="lp-filtro" onclick="fichaAtalho(0)">Tudo</button></span>
     </div>
 
-    <div class="ficha-secao">Como os ${h.registros} dias se dividem</div>
-    <div class="faixas">
-      ${faixas.map((x) => x.n > 0
-        ? `<span class="${x.classe}" style="width:${pct(x.n)}%" title="${x.rotulo}: ${x.n} dia(s)">${pct(x.n) >= 12 ? x.n : ''}</span>`
-        : '').join('')}
-    </div>
-    <div class="legenda-faixas">
-      ${faixas.map((x) => `<div><i style="background:${x.cor}"></i>${x.rotulo} <b>${x.n}</b>
-        ${x.rotulo === 'Outros dias' && x.n
-          ? `<small>${h.ferias} férias · ${h.folgas} folgas · ${h.licencas} licenças${h.outros ? ' · ' + h.outros + ' ajustes' : ''}</small>`
-          : ''}</div>`).join('')}
+    <div class="ficha-secao">Ausências em ${rotuloPeriodo}</div>
+    <div class="ficha-tiles ficha-tiles-tipos">
+      <div class="ficha-tile"><div class="n" style="color:${p.ausencias ? 'var(--alerta)' : 'var(--sit-bom)'}">${p.ausencias}</div>
+        <div class="r">ausência(s) em ${p.diasLancados} dia(s) lançados${p.diasLancados ? ' · ' + String(pctAus).replace('.', ',') + '%' : ''}</div></div>
+      ${p.porTipo.filter((t) => t.total || ['Falta injustificada', 'Atestado'].indexOf(t.tipo) !== -1).map((t) =>
+        `<div class="ficha-tile"><div class="n" style="color:${t.total ? corTipo[t.tipo] : 'var(--tinta-fraca)'}">${t.total}</div><div class="r">${esc(t.tipo)}</div></div>`).join('')}
     </div>
 
-    ${temAusencia ? `
-      <div class="ficha-secao">O que faltou</div>
-      <div class="ficha-tiles">
-        ${tile(h.faltasInjustificadas, 'Falta injust.', h.faltasInjustificadas ? 'var(--faixa-aus)' : '')}
-        ${tile(h.faltasJustificadas, 'Falta justif.')}
-        ${tile(h.faltasDisciplinares, 'Falta discipl.')}
-        ${tile(h.atestados, 'Atestados', h.atestados ? 'var(--faixa-outros)' : '')}
-      </div>
-      ${(f.porCategoria || []).length ? `
-        <div style="margin-bottom:14px">
-          ${(() => { const mx = Math.max(1, ...f.porCategoria.map((c) => c.total));
-            return f.porCategoria.map((c) => `
-              <div class="barra-linha">
-                <div class="barra-rotulo">${esc(c.categoria)}</div>
-                <div class="barra-trilho"><div class="barra-preenchida"
-                  style="width:${Math.max(3, Math.round(c.total / mx * 100))}%;background:${corCategoria(c.categoria)}"></div></div>
-                <div class="barra-valor">${c.total}</div>
-              </div>`).join(''); })()}
-        </div>` : ''}
-      ${(f.ausencias || []).length ? `
-        <p class="dica" style="margin:-2px 0 8px">
-          Historico completo da pessoa — inclui meses anteriores, por isso pode
-          trazer datas fora da competencia do topo.
-        </p>
-        <div style="max-height:220px;overflow-y:auto">
-          ${f.ausencias.map((a) => `
-            <div class="ausencia-linha">
-              <span class="ponto" style="background:${corCategoria(a.categoria)}"></span>
-              <span class="ausencia-dia">${esc(a.data)}</span>
-              ${a.competencia ? `<span class="cod">${esc(a.competencia)}</span>` : ''}
-              <span class="cod">${esc(a.codigo)}</span>
-              <span>${esc(a.descricao || '—')}</span>
-              <span class="cat">${esc(a.categoria)}</span>
-            </div>`).join('')}
-        </div>
-        ${f.ausencias.length >= 60 ? '<p class="dica">Mostrando as 60 ausências mais recentes.</p>' : ''}`
-        : ''}`
-      : `<div class="ficha-secao">O que faltou</div>
-         <div class="cartao" style="text-align:center;padding:26px 22px">
-           <div style="font-size:30px;line-height:1;color:var(--sit-bom)">✓</div>
-           <p style="margin:10px 0 0;font-weight:600">Nenhuma ausência no período</p>
-           <p class="dica" style="margin:4px 0 0">Presença em todos os ${h.registros} dias lançados.</p>
-         </div>`}
+    ${(f.ausencias || []).length ? `
+      <div class="ficha-secao">Dia a dia</div>
+      <div style="max-height:320px;overflow-y:auto"><table class="ficha-ausencias">
+        <thead><tr><th>Data</th><th>Tipo</th><th>Código</th><th>Descrição</th></tr></thead>
+        <tbody>${f.ausencias.map((a) => `<tr>
+          <td style="white-space:nowrap"><span class="ponto" style="background:${corTipo[a.tipo] || corCategoria(a.categoria)}"></span> ${esc(a.data)}</td>
+          <td><b style="color:${corTipo[a.tipo] || 'inherit'}">${esc(a.tipo || a.categoria)}</b></td>
+          <td class="mono">${esc(a.codigo)}</td><td>${esc(a.descricao || '—')}</td></tr>`).join('')}</tbody></table></div>
+      ${f.ausencias.length >= 500 ? '<p class="dica">Mostrando as 500 ausências mais recentes do período.</p>' : ''}`
+      : `<div class="cartao" style="text-align:center;padding:22px">
+           <div style="font-size:28px;line-height:1;color:var(--sit-bom)">✓</div>
+           <p style="margin:8px 0 0;font-weight:600">Nenhuma ausência no período</p></div>`}
 
-    ${temSerie ? `
+    ${(f.historico || []).length ? `
       <div class="ficha-secao">Mês a mês</div>
-      ${graficoLinha(f.historico.map((x) => ({ competencia: x.competencia, taxa: x.assiduidade })), null)}
-      <div style="overflow-x:auto;margin-top:10px"><table>
-        <thead><tr><th>Competência</th><th class="numero">Dias lanç.</th><th class="numero">Trab.</th>
-          <th class="numero">Ausên.</th><th class="numero">F. inj.</th><th class="numero">Atest.</th>
-          <th class="numero">Férias</th><th class="numero">Assid.</th></tr></thead>
-        <tbody>${f.historico.map((x) => `<tr>
-          <td><strong>${esc(x.competencia)}</strong></td>
-          <td class="numero">${x.registros}</td><td class="numero">${x.trabalhados}</td>
-          <td class="numero">${x.ausencias}</td><td class="numero">${x.faltasInjustificadas}</td>
-          <td class="numero">${x.atestados}</td><td class="numero">${x.ferias}</td>
-          <td class="numero"><strong>${x.assiduidade}%</strong></td>
-        </tr>`).join('')}</tbody></table></div>
-      <p class="dica">O histórico atravessa todas as competências já importadas — não para na
-         virada do mês.</p>`
-      : `<p class="dica" style="margin-top:16px">Só há uma competência importada para esta
-         pessoa. Quando houver mais, aparece aqui a evolução mês a mês.</p>`}`;
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>Competência</th><th class="numero">Dias lanç.</th><th class="numero">Ausências</th><th class="numero">F. injust.</th>
+          <th class="numero">F. just.</th><th class="numero">F. discipl.</th><th class="numero">Atestados</th><th class="numero">Assiduidade</th></tr></thead>
+        <tbody>${f.historico.slice().reverse().map((x) => `<tr>
+          <td><strong>${esc(x.competencia)}</strong></td><td class="numero">${x.registros}</td>
+          <td class="numero"><strong>${x.ausencias}</strong></td><td class="numero">${x.faltasInjustificadas}</td>
+          <td class="numero">${x.faltasJustificadas}</td><td class="numero">${x.faltasDisciplinares}</td>
+          <td class="numero">${x.atestados}</td><td class="numero">${x.assiduidade}%</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 }
 
 
@@ -3754,7 +3741,7 @@ function pintarAcoes(r) {
 
 /* Uma ação. O prazo vem antes da descrição: é o que decide a urgência. */
 function cartaoAcao(a, p) {
-  const minha = a.responsavelEmail === p.email;
+  const minha = (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1;
   const podeConcluir = a.situacao === 'PENDENTE' && (minha || p.gerir);
 
   let aviso = '';
@@ -3772,7 +3759,7 @@ function cartaoAcao(a, p) {
       </div>
       ${a.descricao ? `<div class="acao-descricao">${esc(a.descricao)}</div>` : ''}
       <div class="acao-meta">
-        <span><b>Responsável:</b> ${esc(a.responsavel || '—')}${minha ? ' <span class="marca-voce">você</span>' : ''}</span>
+        <span><b>${(a.responsaveisEmails || []).length > 1 ? 'Responsáveis' : 'Responsável'}:</b> ${esc(a.responsavel || '—')}${minha ? ' <span class="marca-voce">você</span>' : ''}</span>
         <span><b>Entregar até:</b> ${esc(a.prazo || '—')}</span>
         ${a.turno ? `<span><b>Turno:</b> ${esc(a.turno)}</span>` : ''}
         ${aviso}
@@ -3815,13 +3802,14 @@ function formAcao(id) {
     <div class="campo"><label>O que precisa ser feito</label>
       <textarea id="ac-descricao" rows="3"
         placeholder="Ex.: Verificar e acompanhar a iluminação para garantir que todas as lâmpadas foram trocadas">${a ? esc(a.descricao) : ''}</textarea></div>
-    <div class="campo"><label>Responsável</label>
-      <select id="ac-responsavel">
-        <option value="">— escolha —</option>
+    <div class="campo"><label>Responsáveis (marque um ou mais — ação conjunta)</label>
+      <input placeholder="Procurar pessoa…" oninput="const t=this.value.toLowerCase();document.querySelectorAll('.ac-pessoa').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(t)===-1?'none':''})">
+      <div class="ac-pessoas">
         ${(d.pessoas || []).map((pe) => `
-          <option value="${esc(pe.email)}" ${a && a.responsavelEmail === pe.email ? 'selected' : ''}>
-            ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}</option>`).join('')}
-      </select></div>
+          <label class="marcador ac-pessoa"><input type="checkbox" class="ac-resp" value="${esc(pe.email)}"
+            ${a && (a.responsaveisEmails || [a.responsavelEmail]).indexOf(pe.email) !== -1 ? 'checked' : ''}>
+            ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}${pe.papel ? ' · ' + esc(pe.papel) : ''}</label>`).join('')}
+      </div></div>
     <div class="campo-duplo">
       <div class="campo"><label>Entregar até</label>
         <input type="date" id="ac-prazo" value="${a ? esc(a.prazoISO) : ''}"></div>
@@ -3842,13 +3830,14 @@ function salvarAcao(id) {
   const params = {
     acao: val('ac-acao'),
     descricao: val('ac-descricao'),
-    responsavelEmail: val('ac-responsavel'),
+    responsaveisEmails: [...document.querySelectorAll('.ac-resp')].filter((c) => c.checked).map((c) => c.value),
     prazo: val('ac-prazo'),
     turno: val('ac-turno'),
     origem: val('ac-origem')
   };
   if (id) params.id = id;
-  agir('salvarAcao', params, id ? 'Ação atualizada' : 'Ação criada — responsável avisado');
+  if (!params.responsaveisEmails.length) return avisar('Marque pelo menos um responsável.', true);
+  agir('salvarAcao', params, id ? 'Ação atualizada' : (params.responsaveisEmails.length > 1 ? 'Ação criada — responsáveis avisados' : 'Ação criada — responsável avisado'));
 }
 
 function excluirAcao(id) {

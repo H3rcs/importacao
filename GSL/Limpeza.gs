@@ -166,6 +166,183 @@ function zonasLimpeza_() {
     });
 }
 
+/* ------------------------------------------------------------------ */
+/* CUSTOS POR LOTE (4.2.2)                                             */
+/*                                                                     */
+/* O supervisor registra a COMPRA (data, fornecedor, NF e os produtos   */
+/* que vieram). Cada produto fica em uso ate ele apertar "Acabou": o    */
+/* sistema guarda a data e mede quanto durou. Depois ele registra o     */
+/* reabastecimento — compra individual ou num lote novo — e o ciclo     */
+/* recomeca. Sem cadastro previo de produto: o nome digitado basta.     */
+/* ------------------------------------------------------------------ */
+
+function chaveProdutoLp_(nome) { return normalizarTexto_(nome).replace(/\s+/g, ' ').trim(); }
+
+function lotesLimpeza_(hojeIso) {
+  const lotes = {};
+  listar('LP_LOTES').forEach(function (l) {
+    lotes[l.ID] = { id: l.ID, data: isoDe_(l.DATA), tipo: String(l.TIPO || 'LOTE').toUpperCase().trim() === 'INDIVIDUAL' ? 'INDIVIDUAL' : 'LOTE',
+      fornecedor: String(l.FORNECEDOR || '').trim(), nf: String(l.NF || '').trim(), observacao: String(l.OBSERVACAO || '').trim(),
+      itens: [], total: 0 };
+  });
+  const itens = listar('LP_ITENS').map(function (i) {
+    const lote = lotes[i.LOTE] || null;
+    const qtd = num_(i.QUANTIDADE), unit = num_(i.PRECO_UNIT);
+    const inicio = isoDe_(i.INICIO) || (lote ? lote.data : '');
+    const acabou = isoDe_(i.ACABOU_EM), reposto = isoDe_(i.REPOSTO_EM);
+    const dias = inicio ? diasEntre_(inicio, acabou || hojeIso) : null;
+    const it = {
+      id: i.ID, lote: String(i.LOTE || ''), produto: String(i.PRODUTO || '').trim(), chave: chaveProdutoLp_(i.PRODUTO),
+      quantidade: qtd, unidade: String(i.UNIDADE || 'un').trim() || 'un', precoUnit: unit,
+      total: (qtd && unit) ? Math.round(qtd * unit * 100) / 100 : null,
+      inicio: inicio, acabouEm: acabou, repostoEm: reposto, repostoPor: String(i.REPOSTO_POR || ''),
+      dias: dias, situacao: !acabou ? 'EM_USO' : (reposto ? 'REPOSTO' : 'AGUARDANDO'),
+      dataCompra: lote ? lote.data : '', tipoCompra: lote ? lote.tipo : '', fornecedor: lote ? lote.fornecedor : '', nf: lote ? lote.nf : '',
+      observacao: String(i.OBSERVACAO || '').trim()
+    };
+    if (lote) { lote.itens.push(it); lote.total += it.total || 0; }
+    return it;
+  }).filter(function (i) { return i.produto; });
+
+  // Consumo por produto: quanto dura (so o que ja acabou), quanto custa.
+  const porProduto = {};
+  itens.forEach(function (i) {
+    const p = porProduto[i.chave] || (porProduto[i.chave] = { produto: i.produto, compras: 0, quantidade: 0, gasto: 0,
+      duracoes: [], custosDia: [], emUso: 0, aguardando: 0, ultimaCompra: '', ultimoPreco: null });
+    p.compras++; p.quantidade += i.quantidade || 0; p.gasto += i.total || 0;
+    if (i.situacao === 'EM_USO') p.emUso++;
+    if (i.situacao === 'AGUARDANDO') p.aguardando++;
+    if (i.acabouEm && i.dias !== null) {
+      const d = Math.max(1, i.dias);
+      p.duracoes.push({ dias: d, acabou: i.acabouEm });
+      if (i.total) p.custosDia.push(i.total / d);
+    }
+    if (!p.ultimaCompra || i.dataCompra > p.ultimaCompra) { p.ultimaCompra = i.dataCompra; p.ultimoPreco = i.precoUnit; p.produto = i.produto; }
+  });
+  const consumo = Object.keys(porProduto).map(function (k) {
+    const p = porProduto[k];
+    const media = p.duracoes.length ? p.duracoes.reduce(function (s, x) { return s + x.dias; }, 0) / p.duracoes.length : null;
+    const ultima = p.duracoes.slice().sort(function (a, b) { return b.acabou.localeCompare(a.acabou); })[0];
+    return { produto: p.produto, chave: k, compras: p.compras, quantidade: p.quantidade, gasto: Math.round(p.gasto * 100) / 100,
+      duracaoMedia: media === null ? null : Math.round(media * 10) / 10, ultimaDuracao: ultima ? ultima.dias : null,
+      ciclos: p.duracoes.length,
+      custoDia: p.custosDia.length ? Math.round(p.custosDia.reduce(function (s, x) { return s + x; }, 0) / p.custosDia.length * 100) / 100 : null,
+      emUso: p.emUso, aguardando: p.aguardando, ultimaCompra: p.ultimaCompra, ultimoPreco: p.ultimoPreco };
+  }).sort(function (a, b) { return a.produto.localeCompare(b.produto); });
+
+  // Em uso ha mais tempo que a media: provavel que esteja acabando (ou que esqueceram de apertar).
+  const mediaDe = {}; consumo.forEach(function (c) { mediaDe[c.chave] = c.duracaoMedia; });
+  itens.forEach(function (i) { i.duracaoMedia = mediaDe[i.chave]; i.passouDaMedia = i.situacao === 'EM_USO' && i.duracaoMedia && i.dias > i.duracaoMedia; });
+
+  const listaLotes = Object.keys(lotes).map(function (k) { const l = lotes[k]; l.total = Math.round(l.total * 100) / 100; return l; })
+    .sort(function (a, b) { return (b.data || '').localeCompare(a.data || ''); });
+  return { lotes: listaLotes, itens: itens, consumo: consumo };
+}
+
+function itensDaCompra_(lista) {
+  const itens = (lista || []).map(function (i) {
+    return { PRODUTO: String(i.produto || '').trim(), QUANTIDADE: milOuVazio_(i.quantidade),
+             UNIDADE: String(i.unidade || 'un').trim() || 'un', PRECO_UNIT: milOuVazio_(i.precoUnit) };
+  }).filter(function (i) { return i.PRODUTO; });
+  if (!itens.length) throw new Error('Inclua pelo menos um produto na compra.');
+  itens.forEach(function (i) {
+    if (!(i.QUANTIDADE > 0)) throw new Error('Informe a quantidade de "' + i.PRODUTO + '" (maior que zero).');
+    if (i.PRECO_UNIT !== '' && !(i.PRECO_UNIT >= 0)) throw new Error('Preço inválido em "' + i.PRODUTO + '".');
+  });
+  return itens;
+}
+
+/*
+ * Registra a compra e seus produtos. O reabastecimento e automatico: para
+ * cada produto comprado, o item mais antigo do mesmo produto que ja acabou
+ * e ainda esperava reposicao fica "reposto" por esta compra. `repoe` (ids)
+ * escolhe os itens explicitamente (botao Reabastecer).
+ */
+function acaoSalvarLoteLimpeza(usuario, params) {
+  const data = isoDe_(params.data) || paraISO(hoje());
+  const tipo = String(params.tipo || 'LOTE').toUpperCase() === 'INDIVIDUAL' ? 'INDIVIDUAL' : 'LOTE';
+  const itens = itensDaCompra_(params.itens);
+  if (tipo === 'INDIVIDUAL' && itens.length > 1) throw new Error('Compra individual tem um produto só. Para vários, registre um lote.');
+  return comTrava(function () {
+    const idLote = inserir('LP_LOTES', { DATA: data, TIPO: tipo, FORNECEDOR: String(params.fornecedor || '').trim(),
+      NF: String(params.nf || '').trim(), OBSERVACAO: String(params.observacao || '').trim() }, usuario.email);
+    inserirVarios('LP_ITENS', itens.map(function (i) {
+      return Object.assign({ LOTE: idLote, INICIO: data, ACABOU_EM: '', REPOSTO_EM: '', REPOSTO_POR: '', OBSERVACAO: '' }, i);
+    }), usuario.email);
+
+    const pendentes = listar('LP_ITENS').filter(function (i) {
+      return isoDe_(i.ACABOU_EM) && !isoDe_(i.REPOSTO_EM) && String(i.LOTE) !== String(idLote);
+    }).sort(function (a, b) { return isoDe_(a.ACABOU_EM).localeCompare(isoDe_(b.ACABOU_EM)); });
+    const escolhidos = [].concat(params.repoe || []).map(String);
+    const repostos = [];
+    itens.forEach(function (novo) {
+      const k = chaveProdutoLp_(novo.PRODUTO);
+      const alvo = pendentes.filter(function (p) {
+        return repostos.indexOf(p.ID) === -1 && (escolhidos.length ? escolhidos.indexOf(String(p.ID)) !== -1 : chaveProdutoLp_(p.PRODUTO) === k);
+      })[0];
+      if (alvo) repostos.push(alvo.ID);
+    });
+    if (repostos.length) {
+      atualizarVarios('LP_ITENS', repostos.map(function (id) { return { id: id, campos: { REPOSTO_EM: data, REPOSTO_POR: idLote } }; }), usuario.email);
+    }
+    return { ok: true, id: idLote, recado: (tipo === 'INDIVIDUAL' ? 'Compra individual' : 'Lote com ' + itens.length + ' produto(s)') +
+      ' registrado' + (repostos.length ? ' · ' + repostos.length + ' reabastecimento(s) anotado(s)' : '') + '.' };
+  });
+}
+
+function acaoExcluirLoteLimpeza(usuario, params) {
+  return comTrava(function () {
+    const lote = obter('LP_LOTES', params.id);
+    if (!lote) throw new Error('Compra não encontrada.');
+    const itens = listar('LP_ITENS').filter(function (i) { return String(i.LOTE) === String(params.id); });
+    if (itens.some(function (i) { return isoDe_(i.ACABOU_EM); })) {
+      throw new Error('Esta compra já tem produto marcado como acabado — o histórico de duração depende dela. Corrija o produto em vez de excluir a compra.');
+    }
+    // Quem esta compra tinha reabastecido volta a esperar reposicao.
+    const repostos = listar('LP_ITENS').filter(function (i) { return String(i.REPOSTO_POR) === String(params.id); });
+    if (repostos.length) atualizarVarios('LP_ITENS', repostos.map(function (i) { return { id: i.ID, campos: { REPOSTO_EM: '', REPOSTO_POR: '' } }; }), usuario.email);
+    itens.forEach(function (i) { excluir('LP_ITENS', i.ID, usuario.email); });
+    excluir('LP_LOTES', params.id, usuario.email);
+    return { ok: true, recado: 'Compra excluída.' };
+  });
+}
+
+function acaoAcabouItemLimpeza(usuario, params) {
+  return comTrava(function () {
+    const it = obter('LP_ITENS', params.id);
+    if (!it) throw new Error('Produto não encontrado.');
+    if (isoDe_(it.ACABOU_EM)) throw new Error('Este produto já estava marcado como acabado em ' + formatarData(paraData(isoDe_(it.ACABOU_EM))) + '.');
+    const data = isoDe_(params.data) || paraISO(hoje());
+    const inicio = isoDe_(it.INICIO);
+    if (inicio && data < inicio) throw new Error('A data em que acabou é anterior à compra (' + formatarData(paraData(inicio)) + ').');
+    atualizar('LP_ITENS', params.id, { ACABOU_EM: data, OBSERVACAO: String(params.observacao || it.OBSERVACAO || '').trim() }, usuario.email);
+    const dias = inicio ? Math.max(1, diasEntre_(inicio, data)) : null;
+    return { ok: true, recado: String(it.PRODUTO) + ' acabou' + (dias ? ' — durou ' + dias + ' dia(s)' : '') + '. Registre o reabastecimento quando chegar.' };
+  });
+}
+
+/* Apertou "Acabou" por engano: volta para em uso (so se ainda nao foi reposto). */
+function acaoVoltarItemLimpeza(usuario, params) {
+  return comTrava(function () {
+    const it = obter('LP_ITENS', params.id);
+    if (!it) throw new Error('Produto não encontrado.');
+    if (isoDe_(it.REPOSTO_EM)) throw new Error('Este produto já foi reabastecido; não dá para voltar.');
+    atualizar('LP_ITENS', params.id, { ACABOU_EM: '' }, usuario.email);
+    return { ok: true, recado: String(it.PRODUTO) + ' voltou para em uso.' };
+  });
+}
+
+/* Reabastecer um produto que acabou com uma compra individual. */
+function acaoReabastecerLimpeza(usuario, params) {
+  const it = obter('LP_ITENS', params.id);
+  if (!it) throw new Error('Produto não encontrado.');
+  return acaoSalvarLoteLimpeza(usuario, {
+    tipo: 'INDIVIDUAL', data: params.data, fornecedor: params.fornecedor, nf: params.nf, observacao: params.observacao,
+    itens: [{ produto: it.PRODUTO, quantidade: params.quantidade, unidade: it.UNIDADE, precoUnit: params.precoUnit }],
+    repoe: [it.ID]
+  });
+}
+
 function dadosLimpeza(usuario, params) {
   const hojeIso = paraISO(hoje());
   const mes = /^\d{4}-\d{2}$/.test(String(params.mes || '')) ? params.mes : hojeIso.slice(0, 7);
@@ -174,12 +351,18 @@ function dadosLimpeza(usuario, params) {
   const produtos = produtosLimpeza_();
   const embalagens = embalagensLimpeza_(produtos, hojeIso);
   const compras = comprasLimpeza_();
+  const porLote = lotesLimpeza_(hojeIso);
+  // Gasto do mes: compras por lote + compras do formato antigo.
+  const gastoNoMes = function (k) {
+    return somar(porLote.lotes.filter(function (l) { return (l.data || '').slice(0, 7) === k; }), 'total') +
+           somar(compras.filter(function (c) { return (c.data || '').slice(0, 7) === k; }), 'total');
+  };
 
+  const somar = function (l, k) { return l.reduce(function (s, x) { return s + (Number(x[k]) || 0); }, 0); };
   const abertas = acoes.filter(function (a) { return a.aberta; });
   const doMes = acoes.filter(function (a) { return (a.data || '').slice(0, 7) === mes; });
   const concluidasMes = acoes.filter(function (a) { return a.status === 'Concluída' && (a.fechamento || '').slice(0, 7) === mes; });
   const comprasMes = compras.filter(function (c) { return (c.data || '').slice(0, 7) === mes; });
-  const somar = function (l, k) { return l.reduce(function (s, x) { return s + (Number(x[k]) || 0); }, 0); };
 
   // Compras dos ultimos 6 meses, para a tendencia.
   const meses = [];
@@ -187,7 +370,7 @@ function dadosLimpeza(usuario, params) {
   for (let i = 5; i >= 0; i--) {
     const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
     const k = paraISO(d).slice(0, 7);
-    meses.push({ mes: k, total: somar(compras.filter(function (c) { return (c.data || '').slice(0, 7) === k; }), 'total') });
+    meses.push({ mes: k, total: Math.round(gastoNoMes(k) * 100) / 100 });
   }
 
   return {
@@ -200,7 +383,9 @@ function dadosLimpeza(usuario, params) {
       abertasMes: doMes.length,
       deVistoria: doMes.filter(function (a) { return /VISTORIA/.test(normalizarTexto_(a.origem)); }).length,
       concluidasMes: concluidasMes.length,
-      comprasMes: somar(comprasMes, 'total'),
+      comprasMes: Math.round(gastoNoMes(mes) * 100) / 100,
+      emUso: porLote.itens.filter(function (i) { return i.situacao === 'EM_USO'; }).length,
+      aguardandoReposicao: porLote.itens.filter(function (i) { return i.situacao === 'AGUARDANDO'; }).length,
       custoPrevistoMes: somar(produtos.filter(function (p) { return p.ativo; }), 'custoMes'),
       custoAcoesMes: somar(doMes, 'custo'),
       embalagensAtrasadas: embalagens.filter(function (e) { return e.emUso && e.diasRestantes !== null && e.diasRestantes < 0; }).length
@@ -210,6 +395,9 @@ function dadosLimpeza(usuario, params) {
     produtos: produtos,
     embalagens: embalagens,
     compras: compras,
+    lotes: porLote.lotes,
+    itens: porLote.itens,
+    consumo: porLote.consumo,
     zonas: zonasLimpeza_(),
     listas: {
       status: LP_STATUS, origens: LP_ORIGENS, criticidades: LP_CRITICIDADES,

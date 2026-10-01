@@ -137,7 +137,7 @@ function digestoMatinal() {
       secao('VENCE AMANHA', COR_AZUL, amanha, hojeN) +
       secao('PROXIMOS ' + janela + ' DIA(S)', COR_VERDE, proximos, hojeN) +
       '<p style="margin-top:14px">Para entregar, abra o sistema, clique na atividade e anexe o arquivo. ' +
-      'O status muda sozinho assim que o anexo entra.</p>' + rodapeLink();
+      'O status muda sozinho assim que o anexo entra.</p>' + rodapeLink('calendario');
 
     // cc a gestao so quando o atraso persiste
     const ccGestao = atrasadas.some(function (a) {
@@ -200,7 +200,7 @@ function briefingGerente() {
     aguardando.map(function (a) {
       return '<li>' + htmlSeguro(a.atividade) + ' — ' + a.competencia + ' · Turno ' + a.turno + ' · ' + htmlSeguro(a.coordenador) +
              ' · entregue em ' + a.entregueEm + '</li>';
-    }).join('') + '</ul>' + rodapeLink();
+    }).join('') + '</ul>' + rodapeLink('calendario');
 
   enviar(emailsDaGestao(), 'Fila de validacao — ' + aguardando.length + ' entrega(s)', corpo);
 }
@@ -212,7 +212,7 @@ function briefingGerente() {
 function avisarEntregaRecebida(a, usuario) {
   enviar(emailsDaGestao(), 'Entrega recebida — ' + a.atividade + ' (' + a.semana + ' · Turno ' + a.turno + ')',
     '<p>O coordenador <b>' + htmlSeguro(a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega:</p>' +
-    bloco(a) + '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink());
+    bloco(a) + '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink('calendario'));
 }
 
 function avisarValidacao(a, validacao, usuario) {
@@ -221,16 +221,16 @@ function avisarValidacao(a, validacao, usuario) {
     enviar(destino, 'Aprovada — ' + a.atividade + ' (' + a.semana + ')',
       '<p>Boa noticia! O gerente <b>aprovou</b> a sua entrega:</p>' + bloco(a) +
       (a.motivo ? caixa('Feedback do gerente:', a.motivo, COR_VERDE, '#E8F5E9')
-                : '<p style="color:#6b7280">Sem observacoes registradas.</p>') + rodapeLink());
+                : '<p style="color:#6b7280">Sem observacoes registradas.</p>') + rodapeLink('calendario'));
   } else if (validacao === 'Reprovado') {
     enviar(destino, 'Reprovada — ' + a.atividade + ' (' + a.semana + ')',
       '<p>O gerente <b>reprovou</b> a entrega abaixo.</p>' + bloco(a) +
       caixa('Motivo informado:', a.motivo, COR_ALERTA, COR_ALERTA_FUNDO) +
-      '<p>Corrija e anexe novamente pelo sistema.</p>' + rodapeLink());
+      '<p>Corrija e anexe novamente pelo sistema.</p>' + rodapeLink('calendario'));
   } else {
     enviar(destino, 'Atividade cancelada — ' + a.atividade + ' (' + a.semana + ')',
       '<p>A atividade abaixo foi <b>cancelada</b> e nao precisa mais ser entregue:</p>' + bloco(a) +
-      caixa('Motivo:', a.motivo || 'Cancelada pela gestao.', '#6b7280', '#E5E7EB') + rodapeLink());
+      caixa('Motivo:', a.motivo || 'Cancelada pela gestao.', '#6b7280', '#E5E7EB') + rodapeLink('calendario'));
   }
 }
 
@@ -239,13 +239,13 @@ function avisarSetorDefinido(a) {
   enviar(emailsDoTurno(a), 'Setor definido para a vistoria da ' + a.semana + ': ' + a.setor,
     '<p>O gerente definiu o setor da sua vistoria semanal:</p>' + bloco(a) +
     '<p>Imprima o checklist, faca a inspecao no setor <b>' + htmlSeguro(a.setor) +
-    '</b>, escaneie o checklist preenchido e anexe pelo sistema.</p>' + rodapeLink());
+    '</b>, escaneie o checklist preenchido e anexe pelo sistema.</p>' + rodapeLink('calendario'));
 }
 
 function avisarRemarcacao(a, prazoAntigo, motivo) {
   enviar(emailsDoTurno(a).concat(emailsDaGestao()), 'Prazo remarcado — ' + a.atividade,
     '<p>O prazo da atividade abaixo mudou de <b>' + prazoAntigo + '</b> para <b>' + a.prazo + '</b>.</p>' +
-    bloco(a) + caixa('Motivo:', motivo, COR_AMAR, '#FFFBE0') + rodapeLink());
+    bloco(a) + caixa('Motivo:', motivo, COR_AMAR, '#FFFBE0') + rodapeLink('calendario'));
 }
 
 function avisarEntregaEmPdf(a, qtdArquivos, url, usuario, reentrega) {
@@ -258,7 +258,7 @@ function avisarEntregaEmPdf(a, qtdArquivos, url, usuario, reentrega) {
     '<p>O coordenador <b>' + htmlSeguro(a.coordenador || 'do turno ' + a.turno) + '</b> anexou a entrega (' +
     qtdArquivos + ' arquivo(s) em um PDF unico):</p>' + bloco(a) +
     '<p><a href="' + url + '" style="color:' + COR_AZUL + '">Abrir o PDF da entrega</a></p>' +
-    '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink());
+    '<p>Valide no sistema: Aprovado ou Reprovado.</p>' + rodapeLink('calendario'));
 }
 
 /*
@@ -292,7 +292,7 @@ function avisarNovaAtividade(a) {
   const copia = (a.turno === 'Todos') ? [] : gestao;
   enviar(destino, 'Nova atividade — ' + a.atividade + ' (' + a.semana + ')',
     '<p>O gerente adicionou uma atividade para voce:</p>' + bloco(a) +
-    '<p>Prazo: <b>' + a.prazo + '</b>. Entregue pelo sistema quando concluir.</p>' + rodapeLink(),
+    '<p>Prazo: <b>' + a.prazo + '</b>. Entregue pelo sistema quando concluir.</p>' + rodapeLink('calendario'),
     copia);
   // Quem devolve a lista permite a tela dizer PARA QUEM foi. Sem isso a
   // unica forma de conferir o envio era perguntar aos coordenadores.
@@ -312,14 +312,14 @@ function unicos_(lista) {
 /* Vaga de rotina avulsa (que nao e treinamento) agendada pelo gerente. */
 function avisarAgendamento(a) {
   enviar(emailsDoTurno(a).concat(emailsDaGestao()), 'Atividade agendada para ' + a.prazo + ' — ' + a.atividade,
-    '<p>O gerente agendou esta atividade:</p>' + bloco(a) + rodapeLink());
+    '<p>O gerente agendou esta atividade:</p>' + bloco(a) + rodapeLink('calendario'));
 }
 
 function avisarTreinamento(a) {
   enviar(emailsDoTurno(a).concat(emailsDaGestao()), 'Treinamento marcado para ' + a.prazo,
     '<p>O gerente programou um <b>treinamento com colaboradores</b>:</p>' + bloco(a) +
     '<p>Programe com os supervisores o dia e a hora da equipe e registre a lista de presenca pelo sistema.</p>' +
-    rodapeLink());
+    rodapeLink('calendario'));
 }
 
 /* ------------------------------------------------------------------ */
@@ -402,13 +402,21 @@ function caixa(titulo, texto, corBarra, fundo) {
     ';padding:10px 14px;margin:12px 0"><b>' + titulo + '</b><br>' + htmlSeguro(texto) + '</div>';
 }
 
-function rodapeLink() {
+/*
+ * Botao do e-mail. Com `tela` (4.2.2), o link leva direto para a tela do
+ * assunto (calendario, acoes...): depois do e-mail e do PIN, o sistema abre
+ * nela em vez da tela inicial. O e-mail de uma filial leva para a filial.
+ */
+function rodapeLink(tela) {
   let url = urlDoApp_();       // respeita a propriedade URL_APP (ver Codigo.gs)
-  // O e-mail de uma filial leva direto para ela.
-  try { if (!ehFilialPrincipal()) url += '?filial=' + encodeURIComponent(filialAtual().codigo); } catch (e) {}
+  const partes = [];
+  try { if (!ehFilialPrincipal()) partes.push('filial=' + encodeURIComponent(filialAtual().codigo)); } catch (e) {}
+  if (tela) partes.push('tela=' + encodeURIComponent(tela));
+  if (partes.length) url += '?' + partes.join('&');
+  const nomes = { calendario: 'Abrir o Calendário no GSL', acoes: 'Abrir o Plano de Ação no GSL' };
   return '<p style="margin-top:18px"><a href="' + url +
     '" style="background:' + COR_AZUL + ';color:#fff;padding:9px 16px;text-decoration:none;' +
-    'border-radius:6px;display:inline-block">Abrir o GSL Bartofil</a></p>';
+    'border-radius:6px;display:inline-block">' + (nomes[tela] || 'Abrir o GSL Bartofil') + '</a></p>';
 }
 
 function emailsDoTurno(a) {

@@ -54,6 +54,7 @@ function somarDias_(iso, dias) {
 /* ------------------------------------------------------------------ */
 
 function acoesLimpeza_(hojeIso) {
+  const coment = comentariosPorAcao_('LP_ACOES');
   const lista = listar('LP_ACOES').map(function (a) {
     const status = statusLimpeza_(a.STATUS);
     const data = isoDe_(a.DATA), prazo = isoDe_(a.PRAZO), fechamento = isoDe_(a.FECHAMENTO);
@@ -66,6 +67,7 @@ function acoesLimpeza_(hojeIso) {
       acao: String(a.ACAO || '').trim(), responsavel: String(a.RESPONSAVEL || '').trim(),
       prazo: prazo, status: status, fechamento: fechamento,
       evidencia: String(a.EVIDENCIA || '').trim(), custo: num_(a.CUSTO),
+      depende: String(a.DEPENDE || '').trim(), comentarios: coment[String(a.ID || '')] || [],
       aberta: aberta,
       atrasada: aberta && !!prazo && prazo < hojeIso,
       diasAberta: data ? (fechamento ? diasEntre_(data, fechamento) : (aberta ? diasEntre_(data, hojeIso) : null)) : null,
@@ -476,6 +478,36 @@ function acaoConcluirAcaoLimpeza(usuario, params) {
 }
 
 function acaoExcluirAcaoLimpeza(usuario, params) { return excluir('LP_ACOES', params.id, usuario.email); }
+
+/*
+ * Comentar uma acao da Limpeza (4.2.2): o que avancou, a situacao em que
+ * ficou (Aberta, Em andamento ou Concluida) e o que falta para concluir.
+ * Vira o historico da acao ate a conclusao.
+ */
+function acaoComentarAcaoLimpeza(usuario, params) {
+  const texto = String(params.texto || '').trim();
+  const depende = String(params.depende || '').trim();
+  if (!texto) throw new Error('Escreva o comentário: o que avançou, o que foi feito.');
+  const novo = params.situacao ? statusLimpeza_(params.situacao) : '';
+  return comTrava(function () {
+    const a = obter('LP_ACOES', params.id);
+    if (!a) throw new Error('Ação não encontrada.');
+    const atual = statusLimpeza_(a.STATUS);
+    if (atual === 'Cancelada') throw new Error('Esta ação foi cancelada. Para continuar, edite e reabra antes.');
+    const campos = {};
+    if (novo && novo !== 'Cancelada' && novo !== atual) {
+      campos.STATUS = novo;
+      if (novo === 'Concluída') {
+        campos.FECHAMENTO = paraISO(hoje());
+        conferirFechamento_(isoDe_(a.DATA), campos.FECHAMENTO);
+      } else if (atual === 'Concluída') campos.FECHAMENTO = '';
+    }
+    campos.DEPENDE = (novo || atual) === 'Concluída' ? '' : depende;
+    gravarComentario_(usuario, 'LP_ACOES', String(params.id), texto, novo || atual, campos.DEPENDE);
+    atualizar('LP_ACOES', params.id, campos, usuario.email);
+    return { ok: true, recado: campos.STATUS === 'Concluída' ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.' };
+  });
+}
 
 /* Conclusao antes da data da acao dava "dias em aberto" negativo. */
 function conferirFechamento_(dataIso, fechamentoIso) {

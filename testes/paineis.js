@@ -506,6 +506,35 @@ caso('plano de acao: coordenador ve so as suas (inclusive conjuntas) e conclui',
   afirmar(!outra, 'nao ve a acao do Pedro');
 });
 
+caso('comentarios: historico no Plano de Acao (andamento, depende de, concluir) e na Limpeza', () => {
+  const m = mundo();
+  const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarUsuario', { email: 'pedro@bartofil.com.br', nome: 'Pedro', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coord' });
+  acao(m, adm, 'salvarAcao', { acao: 'Trocar lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  const maria = entrar(m, COORD, '1234');
+  let a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
+  const e0 = erroDe(() => acao(m, maria, 'comentarAcao', { id: a.id, texto: '' }));
+  afirmar(/Escreva o comentário/.test(e0), 'texto vazio: ' + e0);
+  acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Lâmpadas compradas', situacao: 'Aguardando', depende: 'manutenção agendar' });
+  const pedro = entrar(m, 'pedro@bartofil.com.br', '2222');
+  const e1 = erroDe(() => acao(m, pedro, 'comentarAcao', { id: a.id, texto: 'oi' }));
+  afirmar(/Só os responsáveis/.test(e1), 'outro coordenador: ' + e1);
+  a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
+  afirmar(a.andamento === 'Aguardando' && a.depende === 'manutenção agendar' && a.comentarios.length === 1 && a.comentarios[0].nome === 'Maria Souza', 'apos 1o: ' + JSON.stringify(a).slice(0, 300));
+  acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Trocadas as 14 lâmpadas', situacao: 'Concluída' });
+  a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
+  afirmar(a.situacao === 'CONCLUIDA' && a.comentarios.length === 2 && a.comentarios[1].texto === 'Trocadas as 14 lâmpadas' && !a.depende, 'concluida pelo comentario');
+  // Limpeza
+  acao(m, adm, 'salvarAcaoLimpeza', { data: '2026-09-01', problema: 'Piso quebrado', acao: 'Trocar piso', status: 'Aberta', turno: 'A' });
+  let la = tela(m, adm, 'limpeza').acoes.find((x) => x.problema === 'Piso quebrado');
+  acao(m, adm, 'comentarAcaoLimpeza', { id: la.id, texto: 'Orçamento pedido', situacao: 'Em andamento', depende: 'aprovação da gerência' });
+  la = tela(m, adm, 'limpeza').acoes.find((x) => x.id === la.id);
+  afirmar(la.status === 'Em andamento' && la.depende === 'aprovação da gerência' && la.comentarios.length === 1, 'limpeza: ' + JSON.stringify(la).slice(0, 300));
+  acao(m, adm, 'comentarAcaoLimpeza', { id: la.id, texto: 'Piso trocado', situacao: 'Concluída' });
+  la = tela(m, adm, 'limpeza').acoes.find((x) => x.id === la.id);
+  afirmar(la.status === 'Concluída' && la.fechamento && la.comentarios.length === 2 && !la.depende, 'limpeza concluida');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

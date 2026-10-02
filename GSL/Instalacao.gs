@@ -84,7 +84,7 @@ const ESQUEMA = {
    */
   LP_ZONAS:      ['ZONA', 'DESCRICAO', 'ATIVO'],
   LP_ACOES:      ['DATA', 'TURNO', 'ORIGEM', 'ZONA', 'LOCAL', 'PROBLEMA', 'CRITICIDADE',
-                  'ACAO', 'RESPONSAVEL', 'PRAZO', 'STATUS', 'FECHAMENTO', 'EVIDENCIA', 'CUSTO'],
+                  'ACAO', 'RESPONSAVEL', 'PRAZO', 'STATUS', 'FECHAMENTO', 'EVIDENCIA', 'CUSTO', 'DEPENDE'],
   LP_PRODUTOS:   ['PRODUTO', 'TIPO', 'EMBALAGEM_ML', 'PRECO', 'DILUICAO_ML_L', 'SOLUCAO_L',
                   'APLICACOES_DIA', 'ONDE', 'ATIVO'],
   LP_COMPRAS:    ['DATA', 'PRODUTO', 'QUANTIDADE', 'PRECO_UNIT', 'FORNECEDOR', 'NF', 'OBSERVACAO'],
@@ -115,7 +115,14 @@ const ESQUEMA = {
    * SITUACAO: PENDENTE · CONCLUIDA · CANCELADA. Sem validacao.
    */
   ACOES:      ['ACAO', 'DESCRICAO', 'RESPONSAVEL', 'RESPONSAVEL_EMAIL', 'TURNO',
-               'ORIGEM', 'PRAZO', 'SITUACAO', 'CONCLUIDO_EM', 'CONCLUIDO_POR', 'OBSERVACAO'],
+               'ORIGEM', 'PRAZO', 'SITUACAO', 'CONCLUIDO_EM', 'CONCLUIDO_POR', 'OBSERVACAO',
+               'ANDAMENTO', 'DEPENDE'],
+  /*
+   * HISTORICO DE COMENTARIOS das acoes (4.2.2) — do Plano de Acao (ORIGEM
+   * ACOES) e da Limpeza (ORIGEM LP_ACOES). Cada comentario guarda o que
+   * avancou, a situacao em que a acao ficou e o que ela espera para concluir.
+   */
+  COMENTARIOS: ['ORIGEM', 'ACAO_ID', 'TEXTO', 'SITUACAO', 'DEPENDE', 'AUTOR', 'AUTOR_NOME'],
 
   /*
    * CONVERSA — uma linha por mensagem.
@@ -270,7 +277,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.5';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR
+const VERSAO_ESQUEMA = '8.6';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a

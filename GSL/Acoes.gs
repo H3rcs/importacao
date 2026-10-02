@@ -66,6 +66,8 @@ function hidratarAcao(r) {
     concluidoEm: String(r.CONCLUIDO_EM || '').trim(),
     concluidoPor: String(r.CONCLUIDO_POR || '').trim(),
     observacao: String(r.OBSERVACAO || '').trim(),
+    andamento: String(r.ANDAMENTO || '').trim(),
+    depende: String(r.DEPENDE || '').trim(),
     criadoEm: String(r.CRIADO_EM || '').trim(),
     criadoPor: String(r.CRIADO_POR || '').trim()
   };
@@ -82,7 +84,85 @@ function ehDonoDaAcao_(acao, email) {
 }
 
 function listarAcoes() {
-  return listar('ACOES').map(hidratarAcao);
+  const coment = comentariosPorAcao_('ACOES');
+  return listar('ACOES').map(function (r) {
+    const a = hidratarAcao(r);
+    a.comentarios = coment[a.id] || [];
+    return a;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* COMENTARIOS — o historico de andamento de uma acao (4.2.2)          */
+/* ------------------------------------------------------------------ */
+
+const ANDAMENTOS_ACAO = ['Em andamento', 'Aguardando', 'Concluída'];
+
+/* { idDaAcao: [ {em, autor, nome, texto, situacao, depende}, ... mais antigo primeiro ] } */
+function comentariosPorAcao_(origem) {
+  const mapa = {};
+  let linhas = [];
+  try { linhas = listar('COMENTARIOS'); } catch (e) { return mapa; }   // banco ainda sem a tabela
+  linhas.forEach(function (c) {
+    if (String(c.ORIGEM || '') !== origem) return;
+    const id = String(c.ACAO_ID || '');
+    (mapa[id] = mapa[id] || []).push({
+      id: String(c.ID || ''), em: String(c.CRIADO_EM || ''), autor: String(c.AUTOR || ''),
+      nome: String(c.AUTOR_NOME || '') || String(c.AUTOR || '').split('@')[0],
+      texto: String(c.TEXTO || ''), situacao: String(c.SITUACAO || ''), depende: String(c.DEPENDE || '')
+    });
+  });
+  Object.keys(mapa).forEach(function (k) {
+    mapa[k].sort(function (a, b) { return ordemCriado_(a.em).localeCompare(ordemCriado_(b.em)); });
+  });
+  return mapa;
+}
+/* 'dd/MM/yyyy HH:mm:ss' -> 'yyyyMMddHHmmss' para ordenar. */
+function ordemCriado_(t) {
+  const m = String(t || '').match(/^(\d{2})\/(\d{2})\/(\d{4})\s*(\d{2})?:?(\d{2})?:?(\d{2})?/);
+  return m ? m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00') + (m[6] || '00') : String(t || '');
+}
+
+function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende) {
+  inserir('COMENTARIOS', {
+    ORIGEM: origem, ACAO_ID: idAcao, TEXTO: texto, SITUACAO: situacao || '', DEPENDE: depende || '',
+    AUTOR: usuario.email, AUTOR_NOME: usuario.nome || ''
+  }, usuario.email);
+}
+
+/*
+ * Comentar uma acao do Plano: quem avancou registra o que fez, em que
+ * situacao a acao ficou e do que ela depende para concluir. Pode comentar
+ * quem e responsavel por ela ou quem gere o plano. "Concluída" conclui a
+ * acao (mesma regra do botao Concluir).
+ */
+function acaoComentarAcao(usuario, params) {
+  const id = String(params.id || '').trim();
+  const texto = String(params.texto || '').trim();
+  const situacao = String(params.situacao || '').trim();
+  const depende = String(params.depende || '').trim();
+  if (!texto) throw new Error('Escreva o comentário: o que avançou, o que foi feito.');
+  if (situacao && ANDAMENTOS_ACAO.indexOf(situacao) === -1) throw new Error('Situação inválida: ' + situacao);
+  return comTrava(function () {
+    const registro = obter('ACOES', id);
+    if (!registro) throw new Error('Ação não encontrada.');
+    const eu = String(usuario.email || '').toLowerCase().trim();
+    if (emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) === -1 && !podeFazer(usuario, 'GERIR_ACOES')) {
+      throw new Error('Só os responsáveis pela ação (ou a gestão) podem comentar nela.');
+    }
+    const atual = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
+    if (atual === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
+    gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende);
+    const campos = {};
+    if (situacao && situacao !== 'Concluída') campos.ANDAMENTO = situacao;
+    if (situacao !== 'Concluída') campos.DEPENDE = situacao === 'Em andamento' && !depende ? '' : depende;
+    if (situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA) {
+      campos.SITUACAO = ACOES_SITUACAO.CONCLUIDA; campos.CONCLUIDO_EM = agoraTexto(); campos.CONCLUIDO_POR = usuario.email;
+      campos.OBSERVACAO = texto; campos.ANDAMENTO = 'Concluída'; campos.DEPENDE = '';
+    }
+    if (Object.keys(campos).length) atualizar('ACOES', id, campos, usuario.email);
+    return { recado: situacao === 'Concluída' ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.' };
+  });
 }
 
 /**

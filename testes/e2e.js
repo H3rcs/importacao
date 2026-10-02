@@ -830,7 +830,7 @@ async function rodar() {
     const caminho = require('path').join(require('os').tmpdir(), 'gsl-nb-' + Date.now() + '.xlsx');
     await down.saveAs(caminho);
     const lista = require('child_process').execSync('unzip -l "' + caminho + '"').toString();
-    const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet1.xml').toString();
+    const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet2.xml').toString();
     if (process.env.GUARDAR_XLSX) require('fs').copyFileSync(caminho, process.env.GUARDAR_XLSX);
     require('fs').unlinkSync(caminho);
     afirmar(/xl\/workbook.xml/.test(lista) && /sheet2.xml/.test(lista), 'zip: ' + lista);
@@ -839,7 +839,10 @@ async function rodar() {
     const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
     await janela.waitForLoadState();
     const texto = await janela.evaluate(() => document.body.innerText);
-    afirmar(/Relatório de nobreaks/.test(texto) && /08:30/.test(texto) && /Resumo/.test(texto), 'pdf: ' + texto.slice(0, 200));
+    afirmar(/Folha de leituras/.test(texto) && /08:30/.test(texto) && /ENTRADA/.test(texto) && /SAÍDA/.test(texto), 'pdf: ' + texto.slice(0, 200));
+    const linhasFolha = await janela.evaluate(() => document.querySelectorAll('table.nb-folha-pdf tbody tr').length);
+    afirmar(linhasFolha === 21, 'folha com 7 dias x 3 leituras: ' + linhasFolha);
+    if (process.env.FOTO_PDF) await janela.screenshot({ path: process.env.FOTO_PDF, fullPage: true });
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });
@@ -895,6 +898,55 @@ async function rodar() {
     const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
     await janela.waitForLoadState();
     afirmar(/estoque de TI/i.test(await janela.evaluate(() => document.body.innerText)), 'relatorio PDF');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('assiduidade com o Google barrando (HTTP 403): a lista de colaboradores aparece e a ficha abre pela pagina', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    prepararAssiduidade(s);
+    const aba = await abrirAba(s, DONO, { bloqueio403: true });
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
+    let f = await frame(aba);
+    // um clique de verdade que abre a Assiduidade pela navegacao de reserva
+    await f.evaluate(() => { const b = document.createElement('button'); b.id = 'ir-assid'; b.textContent = 'ir';
+      b.onclick = () => abrirPorNavegacao('assiduidade', { competencia: '2025-08' }); document.body.prepend(b); });
+    await f.click('#ir-assid');
+    await aba.page.waitForTimeout(2500);
+    f = await frame(aba);
+    await f.waitForSelector('#tabela-colab tbody tr', { timeout: 20000 });
+    const txt = await f.evaluate(() => document.getElementById('conteudo-rh').innerText);
+    afirmar(!/403|NetworkError/.test(txt), 'sem erro de 403: ' + txt.slice(0, 200));
+    await f.click('#tabela-colab tbody tr >> text=ANA SOUZA');
+    await aba.page.waitForTimeout(2500);
+    f = await frame(aba);
+    await f.waitForSelector('.ficha-periodo', { timeout: 20000 });
+    afirmar(/ANA SOUZA/.test(await f.evaluate(() => document.querySelector('.ficha-nome').textContent)), 'ficha da Ana');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('plano de acao: comentar pela tela gera historico e mostra o "depende de" no cartao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(async () => {
+      await executarAcaoSrv('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SESSAO.usuario.email] });
+      esquecerTelas(); abrir('acoes', { situacao: 'TODAS' });
+    });
+    await f.waitForSelector('.cartao-acao button:has-text("Comentários")', { timeout: 15000 });
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    await f.fill('#cm-texto', 'Lâmpadas compradas');
+    await f.selectOption('#cm-sit', 'Aguardando');
+    await f.fill('#cm-dep', 'manutenção agendar');
+    await f.click('.janela .botao >> text=Registrar comentário');
+    await f.waitForFunction(() => /Depende de:/.test((document.querySelector('.cartao-acao') || {}).textContent || ''), null, { timeout: 15000 });
+    const card = await f.evaluate(() => document.querySelector('.cartao-acao').textContent);
+    afirmar(/Aguardando/.test(card) && /Lâmpadas compradas/.test(card) && /Comentários \(1\)/.test(card), 'cartao: ' + card.replace(/\s+/g, ' ').slice(0, 300));
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.coment-item').length) === 1, 'historico no dialogo');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

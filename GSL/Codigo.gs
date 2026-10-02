@@ -424,6 +424,8 @@ const ACOES = {
    */
   salvarAcao:          { capacidade: 'GERIR_ACOES',   funcao: 'acaoSalvarAcao', modulo: 'calendario' },
   concluirAcao:        { capacidade: null,            funcao: 'acaoConcluirAcao', modulo: 'calendario' },
+  // Comentar: o responsavel (ou a gestao) registra o andamento — ver Acoes.gs.
+  comentarAcao:        { capacidade: null,            funcao: 'acaoComentarAcao', modulo: 'calendario' },
   reabrirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoReabrirAcao', modulo: 'calendario' },
   cancelarAcao:        { capacidade: 'GERIR_ACOES',   funcao: 'acaoCancelarAcao', modulo: 'calendario' },
   excluirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoExcluirAcao', modulo: 'calendario' },
@@ -515,6 +517,7 @@ const ACOES = {
   salvarZona:          { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarZona', modulo: 'limpeza' },
   importarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarLimpeza', modulo: 'limpeza' },
   salvarLoteLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarLoteLimpeza', modulo: 'limpeza' },
+  comentarAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoComentarAcaoLimpeza', modulo: 'limpeza' },
   excluirLoteLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirLoteLimpeza', modulo: 'limpeza' },
   acabouItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoAcabouItemLimpeza', modulo: 'limpeza' },
   voltarItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoVoltarItemLimpeza', modulo: 'limpeza' },

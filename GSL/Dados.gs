@@ -74,7 +74,27 @@ const DIA_INICIO_COMPETENCIA = 21;
    TELA PRINCIPAL
    ========================================================================== */
 
+/*
+ * A tela ja leva a LISTA de colaboradores (e, se pedida, a FICHA) dentro do
+ * proprio carregamento (4.2.2). Antes a lista era uma segunda chamada ao
+ * google.script.run — e onde o Google barra essa chamada (HTTP 403: varias
+ * contas no navegador, tela aberta pela navegacao de reserva) a aba ficava
+ * so com "NetworkError: ... HTTP 403", sem nenhum colaborador para clicar.
+ */
 function dadosAssiduidade(usuario, params) {
+  const d = dadosAssiduidadeBase_(usuario, params);
+  if (d && !d.semRH && !d.semDados && d.competencia && podeVerIndividual_(usuario)) {
+    try { d.colab = acaoColaboradores(usuario, { competencia: d.competencia, minimo: 10 }); }
+    catch (e) { d.erroColab = String(e.message || e); }
+    if (params && params.ficha) {
+      try { d.ficha = acaoFichaColaborador(usuario, { matricula: params.ficha, de: params.de, ate: params.ate }); }
+      catch (e) { d.erroFicha = String(e.message || e); }
+    }
+  }
+  return d;
+}
+
+function dadosAssiduidadeBase_(usuario, params) {
   exigirTela(usuario, 'assiduidade');
 
   const arquivos = arquivosOrdenados_();

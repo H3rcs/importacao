@@ -146,7 +146,7 @@ function pnBaixarBlob(nome, bytes, tipo) {
  * RELATORIO EM PDF: abre o relatorio numa janela propria, ja formatado
  * para A4 deitado, e chama a impressao — no destino, "Salvar como PDF".
  */
-function pnImprimirRelatorio(titulo, subtitulo, corpoHtml) {
+function pnImprimirRelatorio(titulo, subtitulo, corpoHtml, cssExtra) {
   const w = window.open('', '_blank');
   if (!w) return avisar('O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo.', true);
   const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
@@ -168,6 +168,7 @@ function pnImprimirRelatorio(titulo, subtitulo, corpoHtml) {
       .nota { color: #666; font-size: 10px; margin-top: 8px; }
       .barra { margin: 0 0 12px; } .barra button { font-size: 13px; padding: 6px 14px; }
       @media print { .barra { display: none; } }
+      ${cssExtra || ''}
     </style></head><body>
     <div class="barra"><button onclick="window.print()">Imprimir / Salvar como PDF</button></div>
     <header><div><h1>${esc(titulo)}</h1><div class="sub">${esc(subtitulo)}</div></div>
@@ -813,45 +814,128 @@ function nbDadosRelatorio() {
   return { d, p, periodo, linhas, resumo, filtro: NB_HIST.nobreak || 'Todos os nobreaks' };
 }
 
+/*
+ * As leituras filtradas montadas como a FOLHA DE LANCAMENTO: por nobreak e
+ * por semana (segunda a domingo), todos os dias e todas as leituras do dia
+ * — as que nao foram lancadas aparecem em branco, como no papel.
+ */
+function nbFolhasDoRelatorio() {
+  const d = DADOS, p = d.parametros, porDia = p.porDia || 3;
+  const lista = nbListaHistorico(d);
+  const mapa = {}, semanas = {};
+  lista.forEach((l) => {
+    mapa[l.nobreak + '|' + l.data + '|' + l.leitura] = l;
+    const k = l.nobreak + '|' + pnSegunda(l.data);
+    semanas[k] = true;
+  });
+  return Object.keys(semanas).sort().map((k) => {
+    const [codigo, inicio] = k.split('|');
+    const e = nbEquip(d, codigo) || { codigo };
+    const dias = [];
+    for (let i = 0; i < 7; i++) {
+      const dia = pnSomarDias(inicio, i);
+      const leituras = [];
+      for (let n = 1; n <= porDia; n++) {
+        const l = mapa[codigo + '|' + dia + '|' + n] || null;
+        leituras.push({ n, l, av: l ? nbAvaliar(l, e, p) : null });
+      }
+      dias.push({ dia, leituras });
+    }
+    return { e, codigo, inicio, fim: pnSomarDias(inicio, 6), dias };
+  });
+}
+
 function nbExportarExcel() {
   const r = nbDadosRelatorio();
+  const folhas = nbFolhasDoRelatorio();
+  if (!folhas.length) return avisar('Nenhuma leitura no período escolhido.', true);
   const num = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '' : Number(Number(v).toFixed(casas));
-  const leituras = [['Data', 'Dia', 'Nobreak', 'Leitura', 'Hora', 'Vi (V)', 'Ii (A)', 'Pi (VA)', 'Vo (V)', 'Io (A)', 'Po (VA)', 'Carga (%)', 'Po/Pi (%)', 'Alerta', 'Ocorrência']]
-    .concat(r.linhas.map(({ l, av, alerta }) => [pnDataLonga(l.data), PN_SEMANA_LONGA[pnParaData(l.data).getDay()], l.nobreak, l.leitura, l.hora || '',
-      num(l.vi, 1), num(l.ii, 2), num(l.pi, 0), num(l.vo, 1), num(l.io, 2), num(l.po, 0), num(av.carga, 1), num(av.poPi, 1), alerta ? 'SIM' : '', l.ocorrencia || '']));
-  const resumo = [['Nobreak', 'Local', 'Potência (VA)', 'Leituras', 'Carga média (%)', 'Carga máxima (%)', 'Leituras em alerta']]
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const abas = folhas.map((fl) => {
+    const e = fl.e;
+    const linhas = [
+      ['Folha de leituras — ' + fl.codigo + ' — semana ' + pnDataLonga(fl.inicio) + ' a ' + pnDataLonga(fl.fim)],
+      ['Local: ' + (e.local || '—') + ' · Modelo: ' + (e.modelo || '—') + ' · Potência: ' + (e.potencia ? e.potencia + ' VA' : '—') + ' · ' + filial],
+      [],
+      ['Dia', 'Data', 'Leitura', 'Hora', 'Vi (V)', 'Ii (A)', 'Pi (VA)', 'Vo (V)', 'Io (A)', 'Po (VA)', 'Carga (%)', 'Ocorrências']
+    ];
+    fl.dias.forEach((dd) => dd.leituras.forEach((x, i) => {
+      const l = x.l || {}, av = x.av || {};
+      linhas.push([i === 0 ? PN_SEMANA_LONGA[pnParaData(dd.dia).getDay()] : '', i === 0 ? pnDataLonga(dd.dia) : '', x.n + 'ª', l.hora || '',
+        num(l.vi, 1), num(l.ii, 2), num(l.pi, 0), num(l.vo, 1), num(l.io, 2), num(l.po, 0), x.l ? num(av.carga, 1) : '', l.ocorrencia || '']);
+    }));
+    return { nome: (fl.codigo + ' ' + fl.inicio.slice(8, 10) + '-' + fl.inicio.slice(5, 7)).slice(0, 31), linhas };
+  });
+  const resumo = [['Nobreaks — ' + r.filtro + ' — ' + r.periodo], ['Filial: ' + filial + ' · gerado em ' + new Date().toLocaleString('pt-BR')], [],
+    ['Nobreak', 'Local', 'Potência (VA)', 'Leituras', 'Carga média (%)', 'Carga máxima (%)', 'Leituras em alerta']]
     .concat(Object.keys(r.resumo).sort().map((k) => {
       const x = r.resumo[k], e = nbEquip(r.d, k) || {};
       return [k, e.local || '', num(e.potencia, 0), x.n, x.nCarga ? num(x.somaCarga / x.nCarga, 1) : '', num(x.cargaMax, 1), x.alertas];
     }));
-  const titulo = [['Nobreaks — ' + r.filtro + ' — ' + r.periodo], ['Filial: ' + ((SESSAO && SESSAO.filial && SESSAO.filial.nome) || '') + ' · gerado em ' + new Date().toLocaleString('pt-BR')], []];
   pnBaixarXlsx('Nobreaks ' + (NB_HIST.nobreak || 'todos') + ' ' + (NB_HIST.mes || 'ultimos-120-dias') + '.xlsx',
-    [{ nome: 'Leituras', linhas: titulo.concat(leituras) }, { nome: 'Resumo', linhas: titulo.concat(resumo) }]);
+    [{ nome: 'Resumo', linhas: resumo }].concat(abas));
 }
 
 function nbExportarPdf() {
   const r = nbDadosRelatorio();
-  let anterior = '';
-  const corpo = r.linhas.map(({ l, av, alerta }) => {
-    const k = l.data + '|' + l.nobreak, novo = k !== anterior; anterior = k;
-    return `<tr class="${novo ? 'novo' : ''}${alerta ? ' alerta' : ''}"><td>${novo ? PN_SEMANA_LONGA[pnParaData(l.data).getDay()].slice(0, 3) + ' ' + pnDataLonga(l.data) : ''}</td>
-      <td>${novo ? esc(l.nobreak) : ''}</td><td>${l.leitura}ª</td><td>${esc(l.hora || '')}</td>
-      <td>${pnNum(l.vi, 1)}</td><td>${pnNum(l.ii, 2)}</td><td>${pnNum(l.pi)}</td><td>${pnNum(l.vo, 1)}</td><td>${pnNum(l.io, 2)}</td><td>${pnNum(l.po)}</td>
-      <td><b>${pnPct(av.carga)}</b></td><td>${pnPct(av.poPi)}</td><td class="oc">${esc(l.ocorrencia || '')}</td></tr>`;
+  const folhas = nbFolhasDoRelatorio();
+  if (!folhas.length) return avisar('Nenhuma leitura no período escolhido.', true);
+  const num = (v, casas) => (v === null || v === undefined) ? '' : pnNum(v, casas);
+  const corpo = folhas.map((fl) => {
+    const e = fl.e;
+    const linhas = fl.dias.map((dd) => dd.leituras.map((x, i) => {
+      const l = x.l || {}, av = x.av || {};
+      const dt = pnParaData(dd.dia);
+      return `<tr class="${i === 0 ? 'novo-dia' : ''}">
+        ${i === 0 ? `<td class="dia" rowspan="${dd.leituras.length}">${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(dd.dia)}</small></td>` : ''}
+        <td class="c">${x.n}ª</td><td class="c">${esc(l.hora || '')}</td>
+        <td class="${av.vi ? 'fora' : ''}">${num(l.vi, 1)}</td><td>${num(l.ii, 2)}</td><td>${num(l.pi)}</td>
+        <td class="${av.vo ? 'fora' : ''}">${num(l.vo, 1)}</td><td>${num(l.io, 2)}</td><td>${num(l.po)}</td>
+        <td class="carga ${av.carga !== null && av.carga !== undefined && av.carga >= r.p.cargaAlerta ? 'alta' : ''}">${x.l ? pnPct(av.carga) : ''}</td>
+        <td class="oc">${esc(l.ocorrencia || '')}</td></tr>`;
+    }).join('')).join('');
+    return `<section class="folha-nb">
+      <div class="cab-folha">
+        <div><span class="rot">Nobreak</span><b>${esc(fl.codigo)}</b></div>
+        <div><span class="rot">Local</span><b>${esc(e.local || '—')}</b></div>
+        <div><span class="rot">Modelo</span><b>${esc(e.modelo || '—')}</b></div>
+        <div><span class="rot">Potência</span><b>${e.potencia ? pnNum(e.potencia) + ' VA' : '—'}</b></div>
+        <div><span class="rot">Tensão nominal</span><b>${e.tensaoEntrada || '—'} V / ${e.tensaoSaida || '—'} V</b></div>
+        <div><span class="rot">Semana</span><b>${pnDataLonga(fl.inicio)} a ${pnDataLonga(fl.fim)}</b></div>
+      </div>
+      <table class="nb-folha-pdf">
+        <thead>
+          <tr><th rowspan="2">Dia</th><th rowspan="2">Leitura</th><th rowspan="2">Hora</th>
+            <th colspan="3" class="g-en">ENTRADA</th><th colspan="3" class="g-sa">SAÍDA</th>
+            <th rowspan="2">Carga</th><th rowspan="2">Ocorrências</th></tr>
+          <tr><th class="en">Vi (V)</th><th class="en">Ii (A)</th><th class="en">Pi (VA)</th>
+            <th class="sa">Vo (V)</th><th class="sa">Io (A)</th><th class="sa">Po (VA)</th></tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </section>`;
   }).join('');
-  const resumo = Object.keys(r.resumo).sort().map((k) => {
-    const x = r.resumo[k], e = nbEquip(r.d, k) || {};
-    return `<tr><td><b>${esc(k)}</b></td><td class="oc">${esc(e.local || '')}</td><td>${pnNum(e.potencia)}</td><td>${x.n}</td>
-      <td>${x.nCarga ? pnPct(x.somaCarga / x.nCarga, 1) : '—'}</td><td>${pnPct(x.cargaMax, 1)}</td><td>${x.alertas}</td></tr>`;
-  }).join('');
-  pnImprimirRelatorio('Relatório de nobreaks', r.filtro + ' · ' + r.periodo, `
-    <h2>Resumo</h2>
-    <table><thead><tr><th>Nobreak</th><th>Local</th><th>Potência (VA)</th><th>Leituras</th><th>Carga média</th><th>Carga máxima</th><th>Em alerta</th></tr></thead><tbody>${resumo}</tbody></table>
-    <h2>Leituras</h2>
-    <table class="folha"><thead><tr><th>Dia</th><th>Nobreak</th><th>Leit.</th><th>Hora</th>
-      <th class="en">Vi (V)</th><th class="en">Ii (A)</th><th class="en">Pi (VA)</th><th class="sa">Vo (V)</th><th class="sa">Io (A)</th><th class="sa">Po (VA)</th>
-      <th>Carga</th><th>Po/Pi</th><th>Ocorrência</th></tr></thead><tbody>${corpo}</tbody></table>
-    <p class="nota">Em vermelho: tensão fora da faixa ou carga acima de ${pnNum(r.p.cargaAlerta)}%.</p>`);
+  pnImprimirRelatorio('Folha de leituras dos nobreaks', r.filtro + ' · ' + r.periodo, corpo +
+    `<p class="nota">Carga = Po ÷ potência nominal. Em vermelho: tensão fora da faixa (± ${pnNum(r.p.tolerancia)}%) ou carga acima de ${pnNum(r.p.cargaAlerta)}%.
+      Linhas em branco: leitura não lançada.</p>`, `
+      .folha-nb { page-break-after: always; break-after: page; }
+      .folha-nb:last-of-type { page-break-after: auto; break-after: auto; }
+      .cab-folha { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px 14px; border: 1.5px solid #111785; border-radius: 6px;
+        padding: 8px 12px; margin-bottom: 8px; background: #F7F8FC; }
+      .cab-folha .rot { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #666; }
+      .cab-folha b { font-size: 12px; }
+      table.nb-folha-pdf { border-collapse: collapse; width: 100%; font-size: 10.5px; }
+      .nb-folha-pdf th, .nb-folha-pdf td { border: 1px solid #C9CCD8; padding: 3px 5px; text-align: right; white-space: nowrap; }
+      .nb-folha-pdf th { background: #F1F2F8; text-align: center; font-size: 9.5px; }
+      .nb-folha-pdf th.en, .nb-folha-pdf th.sa { text-transform: none; }
+      .nb-folha-pdf th.g-en { background: #DBEAFE; color: #1D4ED8; } .nb-folha-pdf th.g-sa { background: #D1FAE5; color: #047857; }
+      .nb-folha-pdf th.en { color: #2563EB; border-bottom: 2.5px solid #3B82F6; } .nb-folha-pdf th.sa { color: #059669; border-bottom: 2.5px solid #059669; }
+      .nb-folha-pdf td.dia { text-align: left; font-weight: 700; text-transform: uppercase; font-size: 9.5px; letter-spacing: .04em; color: #333; background: #FAFAFD; }
+      .nb-folha-pdf td.dia small { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: #777; font-size: 9.5px; }
+      .nb-folha-pdf td.c { text-align: center; } .nb-folha-pdf td.oc { text-align: left; white-space: normal; min-width: 140px; }
+      .nb-folha-pdf tr.novo-dia td { border-top: 2px solid #8A8FA8; }
+      .nb-folha-pdf td.carga { font-weight: 700; } .nb-folha-pdf td.carga.alta, .nb-folha-pdf td.fora { color: #C62828; font-weight: 700; }
+      .nb-folha-pdf tbody tr:nth-child(even) td:not(.dia) { background: #FCFCFE; }`);
 }
 
 function nbAbrirSemanaDe(codigo, data) {
@@ -1037,12 +1121,15 @@ function lpAcoes(d) {
         <td><strong>${esc(a.zona || '—')}</strong><div class="lp-sub">${esc(a.local)}</div></td>
         <td><div class="lp-problema">${esc(a.problema)}</div><div class="lp-sub">→ ${esc(a.acao)}</div>
           ${a.reincidencia > 1 ? `<div class="lp-sub" style="color:var(--alerta)">reincidente: ${a.reincidencia}× neste local</div>` : ''}
-          ${a.evidencia ? `<div class="lp-sub">evidência: ${esc(a.evidencia)}</div>` : ''}</td>
+          ${a.evidencia ? `<div class="lp-sub">evidência: ${esc(a.evidencia)}</div>` : ''}
+          ${a.aberta && a.depende ? `<div class="lp-sub"><b>Depende de:</b> ${esc(a.depende)}</div>` : ''}
+          ${ultimoComentario(a.comentarios)}</td>
         <td><span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span></td>
         <td>${esc(a.responsavel || '—')}</td>
         <td>${pnDataLonga(a.prazo)}<div class="lp-sub">${a.aberta ? lpPrazoTexto(a) : (a.fechamento ? 'fechada em ' + pnDataLonga(a.fechamento) : '')}</div></td>
         <td>${lpEtiqueta(a)}${a.diasAberta !== null ? `<div class="lp-sub">${a.diasAberta} dia(s)</div>` : ''}</td>
-        <td style="white-space:nowrap">${d.permissoes.gerir ? `${a.aberta ? `<button class="icone-botao" onclick="lpFormConcluir(${jsArg(a.id)})">Concluir</button>` : ''}
+        <td style="white-space:nowrap">${d.permissoes.gerir || (a.comentarios || []).length ? `<button class="icone-botao" onclick="abrirComentarios('LP_ACOES', ${jsArg(a.id)}, ${d.permissoes.gerir && a.status !== 'Cancelada' ? 'true' : 'false'})">Comentários${(a.comentarios || []).length ? ' (' + a.comentarios.length + ')' : ''}</button>` : ''}
+          ${d.permissoes.gerir ? `${a.aberta ? `<button class="icone-botao" onclick="lpFormConcluir(${jsArg(a.id)})">Concluir</button>` : ''}
           <button class="icone-botao" onclick="lpFormAcao(${jsArg(a.id)})">Editar</button>` : ''}</td>
       </tr>`).join('') || '<tr><td colspan="8" class="vazio">Nenhuma ação com esses filtros.</td></tr>'}
     </tbody></table></div>

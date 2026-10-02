@@ -36,6 +36,20 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
+## Pedido de 02/10 (assiduidade 403, relatório dos nobreaks, comentários nas ações)
+
+- **Assiduidade — "NetworkError: falha na conexão devido a HTTP 403":** a lista de colaboradores era uma segunda chamada ao Google, e é ela que o Google barra em alguns computadores (várias contas abertas, ou tela aberta pela navegação de reserva). Agora a lista vem junto com a própria tela. Se o Google barrar a ficha, ela abre recarregando a página (botão **Abrir a ficha**).
+- **Relatório dos nobreaks com o layout da folha de lançamento:**
+  - **PDF:** uma folha por nobreak e por semana, com o cabeçalho do equipamento (nobreak, local, modelo, potência, tensão, semana) e a grade da folha: os 7 dias com as 3 leituras, ENTRADA em azul, SAÍDA em verde, carga, ocorrências e alertas em vermelho. Leitura não lançada sai em branco, como no papel.
+  - **Excel:** uma aba **Resumo** e uma aba por folha (nobreak e semana), no mesmo layout.
+- **Comentários nas ações** (Plano de Ação do Calendário e ações da Limpeza):
+  - O botão **Comentários** abre o histórico da ação e o campo para registrar o que avançou, a situação e o que ela ainda espera para concluir (**Depende de**).
+  - Situações do Plano de Ação: Em andamento, Aguardando ou Concluída. Situações da Limpeza: Aberta, Em andamento ou Concluída.
+  - Comentar como "Concluída" conclui a ação.
+  - O cartão mostra a situação, o "Depende de" e o último comentário.
+  - No Plano de Ação comentam os responsáveis e a gestão. Na Limpeza, quem gere a Limpeza.
+- O esquema subiu para 8.6. A tabela COMENTARIOS e as colunas novas são criadas sozinhas.
+
 ## Pedido de 01/10 (calendário, assiduidade, quadro, TI, limpeza, menu)
 
 - **Plano de Ação:** os coordenadores veem a tela, e cada um vê **só as ações em que é responsável**. Gerência e admin continuam vendo todas. Uma ação pode ter **mais de um responsável** (ação conjunta): todos são avisados por e-mail, e qualquer um deles pode concluir.
@@ -162,8 +176,8 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (27 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (37 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (28 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (39 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

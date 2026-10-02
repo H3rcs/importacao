@@ -2085,6 +2085,15 @@ async function rhColaboradoresTela(d) {
       '<div class="cartao"><div class="vazio">Seu nível de acesso vê apenas os números agregados.</div></div>';
     return;
   }
+  // A lista ja veio com a tela (sem segunda chamada ao Google).
+  if (d.colab && d.colab.competencia === d.competencia) {
+    COLAB_CACHE = d.colab;
+    desenharColaboradores(d);
+    if (d.ficha) { FICHA = { matricula: d.ficha.matricula, de: (d.ficha.periodo || {}).de || '', ate: (d.ficha.periodo || {}).ate || '' };
+      abrirJanela('', montarFicha(d.ficha), '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+      const t = el('janela-titulo'); if (t) t.textContent = ''; d.ficha = null; }
+    return;
+  }
   alvo.innerHTML = rhKpis(d) + '<div class="vazio">Carregando colaboradores…</div>';
   try {
     /*
@@ -2603,13 +2612,31 @@ function corCategoria(cat) {
 let FICHA = { matricula: '', de: '', ate: '' };
 async function fichaColaborador(matricula, de, ate) {
   FICHA = { matricula: matricula, de: de || '', ate: ate || '' };
+  if (CANAL_BARRADO && URL_APP) return fichaPelaPagina();   // ainda dentro do clique
   abrirJanela('Ficha do colaborador', '<div class="vazio">Carregando…</div>', '');
   try {
     const f = await executarAcaoSrv('fichaColaborador', { matricula: matricula, de: FICHA.de, ate: FICHA.ate });
     if (FICHA.matricula !== matricula) return;
     abrirJanela('', montarFicha(f), '<button class="botao" onclick="fecharJanela()">Fechar</button>');
     const t = el('janela-titulo'); if (t) t.textContent = '';
-  } catch (e) { avisar(e.message || e, true); }
+  } catch (e) {
+    // Google barrando a chamada (HTTP 403): a ficha vem pela navegacao de pagina.
+    if (canalBloqueado(e)) {
+      CANAL_BARRADO = true;
+      abrirJanela('Ficha do colaborador', `<p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google.
+        A ficha abre recarregando a página.</p>`, `<button class="botao" onclick="fichaPelaPagina()">Abrir a ficha</button>`);
+      return;
+    }
+    avisar(e.message || e, true);
+  }
+}
+function fichaPelaPagina() {
+  fecharJanela();
+  const comp = (DADOS && DADOS.competencia) || '';
+  if (!navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: 'assiduidade',
+      p: JSON.stringify({ competencia: comp, ficha: FICHA.matricula, de: FICHA.de, ate: FICHA.ate }) })) {
+    avisar('Não consegui abrir a ficha: o endereço do sistema não está configurado.', true);
+  }
 }
 function fichaPeriodo(de, ate) { fichaColaborador(FICHA.matricula, de, ate); }
 function fichaAtalho(meses) {
@@ -3765,18 +3792,66 @@ function cartaoAcao(a, p) {
         ${aviso}
       </div>
       ${a.origem ? `<div class="acao-origem">Origem: ${esc(a.origem)}</div>` : ''}
+      ${a.situacao === 'PENDENTE' && (a.andamento || a.depende) ? `<div class="acao-andamento">
+        ${a.andamento ? `<span class="pill-andamento">${esc(a.andamento)}</span>` : ''}
+        ${a.depende ? `<span><b>Depende de:</b> ${esc(a.depende)}</span>` : ''}</div>` : ''}
+      ${ultimoComentario(a.comentarios)}
       ${a.situacao === 'CONCLUIDA' ? `
         <div class="acao-conclusao">
           Concluída em ${esc((a.concluidoEm || '').slice(0, 16).replace('T', ' '))}
           ${a.observacao ? ` — ${esc(a.observacao)}` : ''}
         </div>` : ''}
       <div class="acao-botoes">
+        ${(minha || p.gerir) && a.situacao !== 'CANCELADA' || (a.comentarios || []).length
+          ? `<button class="botao secundario" onclick="abrirComentarios('ACOES', ${jsArg(a.id)}, ${(minha || p.gerir) && a.situacao !== 'CANCELADA' ? 'true' : 'false'})">Comentários${(a.comentarios || []).length ? ' (' + a.comentarios.length + ')' : ''}</button>` : ''}
         ${podeConcluir ? `<button class="botao" onclick="formConcluirAcao(${jsArg(a.id)})">Marcar como concluída</button>` : ''}
         ${p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir('reabrirAcao',{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
         ${p.gerir ? `<button class="botao-texto" onclick="formAcao(${jsArg(a.id)})">Editar</button>` : ''}
         ${p.gerir && a.situacao !== 'CANCELADA' ? `<button class="botao-texto" onclick="formCancelarAcao(${jsArg(a.id)})">Cancelar</button>` : ''}
       </div>
     </div>`;
+}
+
+/* ---------- COMENTARIOS DAS ACOES (Plano de Acao e Limpeza) ---------- */
+function ultimoComentario(lista) {
+  const c = (lista || [])[(lista || []).length - 1];
+  if (!c) return '';
+  return `<div class="coment-ultimo"><b>${esc(c.nome)}</b> · ${esc((c.em || '').slice(0, 16))}: ${esc(c.texto)}</div>`;
+}
+
+/*
+ * Historico + novo comentario. origem: 'ACOES' (Plano de Acao) ou
+ * 'LP_ACOES' (Limpeza). Quem avancou registra o que fez, em que situacao a
+ * acao ficou e o que ela ainda espera para concluir.
+ */
+function abrirComentarios(origem, id, podeComentar) {
+  const limpeza = origem === 'LP_ACOES';
+  const a = limpeza ? (DADOS.acoes || []).find((x) => x.id === id) : (DADOS.lista || []).find((x) => x.id === id);
+  if (!a) return;
+  const titulo = limpeza ? a.problema : a.acao;
+  const situacoes = limpeza ? ['Aberta', 'Em andamento', 'Concluída'] : ['Em andamento', 'Aguardando', 'Concluída'];
+  const atual = limpeza ? a.status : (a.andamento || 'Em andamento');
+  const hist = (a.comentarios || []).map((c) => `
+    <div class="coment-item">
+      <div class="coment-cab"><b>${esc(c.nome)}</b><span>${esc((c.em || '').slice(0, 16))}</span>
+        ${c.situacao ? `<span class="pill-andamento">${esc(c.situacao)}</span>` : ''}</div>
+      <div class="coment-texto">${esc(c.texto)}</div>
+      ${c.depende ? `<div class="coment-depende">Depende de: ${esc(c.depende)}</div>` : ''}
+    </div>`).join('');
+  abrirJanela('Comentários — ' + titulo, `
+    <div class="coment-historico">${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
+    ${podeComentar ? `
+      <div class="campo"><label>O que avançou</label>
+        <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta"></textarea></div>
+      <div class="campo-duplo">
+        <div class="campo"><label>Situação da ação</label><select id="cm-sit">
+          ${situacoes.map((x) => `<option ${x === atual ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+        <div class="campo"><label>Depende de (o que falta para concluir)</label>
+          <input id="cm-dep" value="${esc(a.depende || '')}" placeholder="Ex.: chegada do material, liberação do SESMT"></div>
+      </div>` : ''}`, `
+    <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
+    ${podeComentar ? `<button class="botao" onclick="agir(${jsArg(limpeza ? 'comentarAcaoLimpeza' : 'comentarAcao')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
+  const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
 function filtrarAcoes(mudanca) {

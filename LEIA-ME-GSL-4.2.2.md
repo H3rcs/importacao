@@ -48,7 +48,13 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - Comentar como "Concluída" conclui a ação.
   - O cartão mostra a situação, o "Depende de" e o último comentário.
   - No Plano de Ação comentam os responsáveis e a gestão. Na Limpeza, quem gere a Limpeza.
-- O esquema subiu para 8.6. A tabela COMENTARIOS e as colunas novas são criadas sozinhas.
+- **Identificação de quem comentou:** cada registro do histórico guarda o **e-mail** da pessoa logada (vem da sessão de e-mail e PIN, não de um campo que dê para digitar), o **nome** e a **função/turno** do cadastro (Pessoas e acessos), e a **data e hora**. O administrador que comenta enquanto simula um perfil fica registrado com o próprio nome ("simulando COORDENADOR" na função). Nenhum registro pode ser editado ou apagado pela tela.
+- **Histórico completo até a conclusão:** além dos comentários, também entram no histórico, com quem fez:
+  - no Plano de Ação: **Marcar como concluída**, **Reabrir** e **Cancelar** (com o motivo);
+  - na Limpeza: **Concluir** e a mudança de situação pela edição.
+
+  O topo do histórico mostra quem criou a ação e quando.
+- O esquema subiu para 8.7. A tabela COMENTARIOS e as colunas novas (AUTOR_PAPEL, TIPO) são criadas sozinhas.
 
 ## Pedido de 01/10 (calendário, assiduidade, quadro, TI, limpeza, menu)
 
@@ -176,7 +182,7 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (28 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (30 casos)
 node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (39 cenários)
 ```
 

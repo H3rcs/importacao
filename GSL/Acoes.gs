@@ -85,11 +85,33 @@ function ehDonoDaAcao_(acao, email) {
 
 function listarAcoes() {
   const coment = comentariosPorAcao_('ACOES');
+  const pessoas = pessoasPorEmail_();
   return listar('ACOES').map(function (r) {
     const a = hidratarAcao(r);
     a.comentarios = coment[a.id] || [];
+    a.criadoPorNome = nomeDoEmail_(pessoas, a.criadoPor);
     return a;
   });
+}
+
+/* { email: {nome, papel} } de quem tem cadastro em ACESSOS. */
+function pessoasPorEmail_() {
+  const m = {};
+  try {
+    listar('ACESSOS').forEach(function (l) {
+      const e = String(l.EMAIL || '').toLowerCase().trim();
+      if (!e) return;
+      const turno = String(l.TURNO || '').toUpperCase().trim();
+      m[e] = { nome: String(l.NOME || '').trim(),
+               papel: [String(l.PAPEL || '').trim(), turno ? 'turno ' + turno : ''].filter(Boolean).join(' · ') };
+    });
+  } catch (e) { /* sem a tabela: fica so o e-mail */ }
+  return m;
+}
+function nomeDoEmail_(pessoas, email) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) return '';
+  return (pessoas[e] && pessoas[e].nome) || nomeDaPessoa(e, '');
 }
 
 /* ------------------------------------------------------------------ */
@@ -107,8 +129,12 @@ function comentariosPorAcao_(origem) {
     if (String(c.ORIGEM || '') !== origem) return;
     const id = String(c.ACAO_ID || '');
     (mapa[id] = mapa[id] || []).push({
-      id: String(c.ID || ''), em: String(c.CRIADO_EM || ''), autor: String(c.AUTOR || ''),
-      nome: String(c.AUTOR_NOME || '') || String(c.AUTOR || '').split('@')[0],
+      id: String(c.ID || ''), em: String(c.CRIADO_EM || ''),
+      // Quem comentou: e-mail da SESSAO (nunca vem da tela), nome e funcao do cadastro.
+      autor: String(c.AUTOR || c.CRIADO_POR || ''),
+      nome: String(c.AUTOR_NOME || '') || nomeDaPessoa(String(c.AUTOR || c.CRIADO_POR || ''), ''),
+      papel: String(c.AUTOR_PAPEL || ''),
+      tipo: String(c.TIPO || 'COMENTARIO').toUpperCase(),
       texto: String(c.TEXTO || ''), situacao: String(c.SITUACAO || ''), depende: String(c.DEPENDE || '')
     });
   });
@@ -123,11 +149,29 @@ function ordemCriado_(t) {
   return m ? m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00') + (m[6] || '00') : String(t || '');
 }
 
-function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende) {
+/*
+ * Quem esta comentando — sempre a pessoa da SESSAO (e-mail + PIN), nunca
+ * um nome que venha da tela. Nome e funcao vem do cadastro (ACESSOS): o
+ * administrador simulando outro perfil fica registrado com o nome dele.
+ */
+function autorDoComentario_(usuario) {
+  const email = String(usuario.email || '').toLowerCase().trim();
+  const r = registroDeAcesso_(email);
+  const nome = (r && String(r.NOME || '').trim()) || nomeDaPessoa(email, usuario.simulado ? '' : usuario.nome);
+  const turno = r ? String(r.TURNO || '').toUpperCase().trim() : '';
+  let papel = r ? [String(r.PAPEL || '').trim(), turno ? 'turno ' + turno : ''].filter(Boolean).join(' · ')
+                : String((usuario.simulado ? '' : usuario.papel) || (String(usuario.perfil || '').toUpperCase() === 'ADMIN' ? 'Administrador' : ''));
+  if (usuario.simulado) papel = [papel || 'Administrador', 'simulando ' + usuario.perfil].join(' · ');
+  return { email: email, nome: nome, papel: papel };
+}
+
+/* tipo: COMENTARIO · CONCLUSAO · REABERTURA · CANCELAMENTO · STATUS */
+function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende, tipo) {
+  const autor = autorDoComentario_(usuario);
   inserir('COMENTARIOS', {
     ORIGEM: origem, ACAO_ID: idAcao, TEXTO: texto, SITUACAO: situacao || '', DEPENDE: depende || '',
-    AUTOR: usuario.email, AUTOR_NOME: usuario.nome || ''
-  }, usuario.email);
+    AUTOR: autor.email, AUTOR_NOME: autor.nome, AUTOR_PAPEL: autor.papel, TIPO: tipo || 'COMENTARIO'
+  }, autor.email);
 }
 
 /*
@@ -152,7 +196,8 @@ function acaoComentarAcao(usuario, params) {
     }
     const atual = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
     if (atual === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
-    gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende);
+    gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende,
+      situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA ? 'CONCLUSAO' : 'COMENTARIO');
     const campos = {};
     if (situacao && situacao !== 'Concluída') campos.ANDAMENTO = situacao;
     if (situacao !== 'Concluída') campos.DEPENDE = situacao === 'Em andamento' && !depende ? '' : depende;
@@ -391,12 +436,16 @@ function acaoConcluirAcao(usuario, params) {
     }
     if (situacao === ACOES_SITUACAO.CONCLUIDA) return { recado: 'Esta ação já estava concluída.' };
 
+    const obs = String(params.observacao || '').trim();
     atualizar('ACOES', id, {
       SITUACAO: ACOES_SITUACAO.CONCLUIDA,
       CONCLUIDO_EM: agoraTexto(),
       CONCLUIDO_POR: usuario.email,
-      OBSERVACAO: String(params.observacao || '').trim()
+      OBSERVACAO: obs,
+      ANDAMENTO: 'Concluída', DEPENDE: ''
     }, usuario.email);
+    // A conclusao entra no historico, com quem concluiu.
+    gravarComentario_(usuario, 'ACOES', id, obs || 'Ação concluída.', 'Concluída', '', 'CONCLUSAO');
 
     return { recado: 'Ação concluída.' };
   });
@@ -410,8 +459,9 @@ function acaoReabrirAcao(usuario, params) {
 
   atualizar('ACOES', id, {
     SITUACAO: ACOES_SITUACAO.PENDENTE,
-    CONCLUIDO_EM: '', CONCLUIDO_POR: ''
+    CONCLUIDO_EM: '', CONCLUIDO_POR: '', ANDAMENTO: 'Em andamento'
   }, usuario.email);
+  gravarComentario_(usuario, 'ACOES', id, String(params.motivo || '').trim() || 'Ação reaberta.', 'Em andamento', '', 'REABERTURA');
 
   return { recado: 'Ação reaberta.' };
 }
@@ -422,10 +472,12 @@ function acaoCancelarAcao(usuario, params) {
   const id = String(params.id || '').trim();
   if (!obter('ACOES', id)) throw new Error('Ação não encontrada.');
 
+  const motivo = String(params.motivo || '').trim();
   atualizar('ACOES', id, {
     SITUACAO: ACOES_SITUACAO.CANCELADA,
-    OBSERVACAO: String(params.motivo || '').trim()
+    OBSERVACAO: motivo, DEPENDE: ''
   }, usuario.email);
+  gravarComentario_(usuario, 'ACOES', id, motivo ? 'Cancelada: ' + motivo : 'Ação cancelada.', 'Cancelada', '', 'CANCELAMENTO');
 
   return { recado: 'Ação cancelada.' };
 }

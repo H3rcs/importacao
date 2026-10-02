@@ -55,6 +55,7 @@ function somarDias_(iso, dias) {
 
 function acoesLimpeza_(hojeIso) {
   const coment = comentariosPorAcao_('LP_ACOES');
+  const pessoas = pessoasPorEmail_();
   const lista = listar('LP_ACOES').map(function (a) {
     const status = statusLimpeza_(a.STATUS);
     const data = isoDe_(a.DATA), prazo = isoDe_(a.PRAZO), fechamento = isoDe_(a.FECHAMENTO);
@@ -68,6 +69,7 @@ function acoesLimpeza_(hojeIso) {
       prazo: prazo, status: status, fechamento: fechamento,
       evidencia: String(a.EVIDENCIA || '').trim(), custo: num_(a.CUSTO),
       depende: String(a.DEPENDE || '').trim(), comentarios: coment[String(a.ID || '')] || [],
+      criadoEm: String(a.CRIADO_EM || ''), criadoPorNome: nomeDoEmail_(pessoas, a.CRIADO_POR),
       aberta: aberta,
       atrasada: aberta && !!prazo && prazo < hojeIso,
       diasAberta: data ? (fechamento ? diasEntre_(data, fechamento) : (aberta ? diasEntre_(data, hojeIso) : null)) : null,
@@ -448,15 +450,22 @@ function acaoSalvarAcaoLimpeza(usuario, params) {
      * virava "hoje" — dias em aberto e "concluidas no mes" mudavam sozinhos.
      * O fechamento so nasce quando a acao PASSA a concluida.
      */
+    const antes = obter('LP_ACOES', params.id);
+    if (!antes) throw new Error('Ação não encontrada.');
+    const statusAntes = statusLimpeza_(antes.STATUS);
     if (campos.STATUS === 'Concluída') {
-      const antes = obter('LP_ACOES', params.id);
-      if (!antes) throw new Error('Ação não encontrada.');
       const informado = isoDe_(params.fechamento);
       const jaFechada = statusLimpeza_(antes.STATUS) === 'Concluída' && isoDe_(antes.FECHAMENTO);
       if (informado) campos.FECHAMENTO = informado;
       else if (!jaFechada) campos.FECHAMENTO = paraISO(hoje());
     }
-    return atualizar('LP_ACOES', params.id, campos, usuario.email);
+    const r = atualizar('LP_ACOES', params.id, campos, usuario.email);
+    // Mudou a situacao pela edicao: entra no historico, com quem mudou.
+    if (statusAntes !== campos.STATUS) {
+      gravarComentario_(usuario, 'LP_ACOES', String(params.id), 'Situação alterada de ' + statusAntes + ' para ' + campos.STATUS + ' (edição da ação).',
+        campos.STATUS, '', campos.STATUS === 'Concluída' ? 'CONCLUSAO' : (campos.STATUS === 'Cancelada' ? 'CANCELAMENTO' : 'STATUS'));
+    }
+    return r;
   });
 }
 
@@ -473,7 +482,13 @@ function acaoConcluirAcaoLimpeza(usuario, params) {
     if (status === 'Cancelada') throw new Error('Esta ação foi cancelada. Para concluir, edite e reabra antes.');
     if (status === 'Concluída') throw new Error('Esta ação já foi concluída' +
       (isoDe_(a.FECHAMENTO) ? ' em ' + formatarData(paraData(isoDe_(a.FECHAMENTO))) : '') + '.');
-    return atualizar('LP_ACOES', params.id, campos, usuario.email);
+    campos.DEPENDE = '';
+    const r = atualizar('LP_ACOES', params.id, campos, usuario.email);
+    // A conclusao entra no historico, com quem concluiu.
+    gravarComentario_(usuario, 'LP_ACOES', String(params.id),
+      'Concluída em ' + formatarData(paraData(campos.FECHAMENTO)) + (campos.EVIDENCIA ? ' · evidência: ' + campos.EVIDENCIA : ''),
+      'Concluída', '', 'CONCLUSAO');
+    return r;
   });
 }
 
@@ -503,7 +518,8 @@ function acaoComentarAcaoLimpeza(usuario, params) {
       } else if (atual === 'Concluída') campos.FECHAMENTO = '';
     }
     campos.DEPENDE = (novo || atual) === 'Concluída' ? '' : depende;
-    gravarComentario_(usuario, 'LP_ACOES', String(params.id), texto, novo || atual, campos.DEPENDE);
+    gravarComentario_(usuario, 'LP_ACOES', String(params.id), texto, novo || atual, campos.DEPENDE,
+      campos.STATUS === 'Concluída' ? 'CONCLUSAO' : 'COMENTARIO');
     atualizar('LP_ACOES', params.id, campos, usuario.email);
     return { ok: true, recado: campos.STATUS === 'Concluída' ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.' };
   });

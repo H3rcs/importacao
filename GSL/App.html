@@ -3816,8 +3816,10 @@ function cartaoAcao(a, p) {
 function ultimoComentario(lista) {
   const c = (lista || [])[(lista || []).length - 1];
   if (!c) return '';
-  return `<div class="coment-ultimo"><b>${esc(c.nome)}</b> · ${esc((c.em || '').slice(0, 16))}: ${esc(c.texto)}</div>`;
+  return `<div class="coment-ultimo"><b>${esc(c.nome)}</b>${c.papel ? ' <span class="coment-papel">(' + esc(c.papel) + ')</span>' : ''}
+    · ${esc((c.em || '').slice(0, 16))}${COMENT_TIPO[c.tipo] ? ' · ' + COMENT_TIPO[c.tipo] : ''}: ${esc(c.texto)}</div>`;
 }
+const COMENT_TIPO = { CONCLUSAO: 'concluiu a ação', REABERTURA: 'reabriu a ação', CANCELAMENTO: 'cancelou a ação', STATUS: 'mudou a situação' };
 
 /*
  * Historico + novo comentario. origem: 'ACOES' (Plano de Acao) ou
@@ -3831,15 +3833,23 @@ function abrirComentarios(origem, id, podeComentar) {
   const titulo = limpeza ? a.problema : a.acao;
   const situacoes = limpeza ? ['Aberta', 'Em andamento', 'Concluída'] : ['Em andamento', 'Aguardando', 'Concluída'];
   const atual = limpeza ? a.status : (a.andamento || 'Em andamento');
+  // Cada registro mostra QUEM fez (nome, funcao e e-mail da pessoa que estava
+  // logada — vem da sessao, nao de um campo da tela) e QUANDO.
   const hist = (a.comentarios || []).map((c) => `
-    <div class="coment-item">
-      <div class="coment-cab"><b>${esc(c.nome)}</b><span>${esc((c.em || '').slice(0, 16))}</span>
+    <div class="coment-item ${c.tipo && c.tipo !== 'COMENTARIO' ? 'coment-evento' : ''}">
+      <div class="coment-cab">
+        <span class="coment-autor"><b>${esc(c.nome)}</b>${c.papel ? `<span class="coment-papel">${esc(c.papel)}</span>` : ''}
+          <span class="coment-email">${esc(c.autor)}</span></span>
+        <span class="coment-quando">${esc((c.em || '').slice(0, 16))}</span>
+        ${COMENT_TIPO[c.tipo] ? `<span class="coment-tipo">${COMENT_TIPO[c.tipo]}</span>` : ''}
         ${c.situacao ? `<span class="pill-andamento">${esc(c.situacao)}</span>` : ''}</div>
       <div class="coment-texto">${esc(c.texto)}</div>
       ${c.depende ? `<div class="coment-depende">Depende de: ${esc(c.depende)}</div>` : ''}
     </div>`).join('');
+  const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}</div>` : '';
   abrirJanela('Comentários — ' + titulo, `
-    <div class="coment-historico">${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
+    <div class="coment-historico">${criada}${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
+    ${podeComentar ? `<p class="dica" style="margin:-6px 0 10px">O comentário fica registrado com o seu nome, a sua função, o seu e-mail e a data e hora — e não pode ser apagado.</p>` : ''}
     ${podeComentar ? `
       <div class="campo"><label>O que avançou</label>
         <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta"></textarea></div>

@@ -535,6 +535,48 @@ caso('comentarios: historico no Plano de Acao (andamento, depende de, concluir) 
   afirmar(la.status === 'Concluída' && la.fechamento && la.comentarios.length === 2 && !la.depende, 'limpeza concluida');
 });
 
+caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadastro, funcao) — inclusive concluir, reabrir e cancelar', () => {
+  const m = mundo();
+  const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  const maria = entrar(m, COORD, '1234');
+  let a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
+  acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Comprei as lâmpadas', situacao: 'Em andamento', autor: 'falsificado@x.com', nome: 'Outro' });
+  acao(m, maria, 'concluirAcao', { id: a.id, observacao: '14 lâmpadas trocadas' });
+  acao(m, adm, 'reabrirAcao', { id: a.id });
+  acao(m, adm, 'cancelarAcao', { id: a.id, motivo: 'Obra da diretoria vai trocar tudo' });
+  a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
+  const h = a.comentarios;
+  afirmar(h.length === 4, 'quatro registros: ' + h.map((c) => c.tipo).join(','));
+  afirmar(h[0].autor === COORD && h[0].nome === 'Maria Souza' && /Coordenadora · turno A/.test(h[0].papel) && h[0].tipo === 'COMENTARIO', 'comentario da Maria: ' + JSON.stringify(h[0]));
+  afirmar(h[1].tipo === 'CONCLUSAO' && h[1].autor === COORD && h[1].texto === '14 lâmpadas trocadas', 'conclusao: ' + JSON.stringify(h[1]));
+  afirmar(h[2].tipo === 'REABERTURA' && h[2].autor === DONO, 'reabertura: ' + JSON.stringify(h[2]));
+  afirmar(h[3].tipo === 'CANCELAMENTO' && /Obra da diretoria/.test(h[3].texto), 'cancelamento: ' + JSON.stringify(h[3]));
+  afirmar(h.every((c) => /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/.test(c.em)), 'data e hora em todos');
+  afirmar(a.criadoPorNome && a.criadoEm, 'quem criou: ' + a.criadoPorNome + ' ' + a.criadoEm);
+  // administrador simulando um coordenador fica registrado com o nome dele, nao "Simulando ..."
+  acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] });
+  const outra = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.acao === 'Outra');
+  const r = chamar(m, DONO, 'simularPerfil', 'COORDENADOR', 'A', { t: adm.t, f: adm.f });
+  afirmar(r.ok, 'simulou: ' + JSON.stringify(r.erro || ''));
+  acao(m, adm, 'comentarAcao', { id: outra.id, texto: 'Teste em simulação' });
+  chamar(m, DONO, 'encerrarSimulacao', { t: adm.t, f: adm.f });
+  const c = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === outra.id).comentarios[0];
+  afirmar(c && c.autor === DONO && !/Simulando/.test(c.nome) && /simulando COORDENADOR/.test(c.papel), 'simulacao: ' + JSON.stringify(c));
+});
+
+caso('historico da limpeza: concluir pelo botao e mudar a situacao na edicao tambem ficam registrados com o autor', () => {
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  acao(m, s, 'salvarAcaoLimpeza', { data: '2026-09-01', problema: 'Lixeira quebrada', acao: 'Trocar', status: 'Aberta', turno: 'A' });
+  let la = tela(m, s, 'limpeza').acoes.find((x) => x.problema === 'Lixeira quebrada');
+  acao(m, s, 'salvarAcaoLimpeza', { id: la.id, data: '2026-09-01', problema: 'Lixeira quebrada', acao: 'Trocar', status: 'Em andamento', turno: 'A' });
+  acao(m, s, 'concluirAcaoLimpeza', { id: la.id, fechamento: '2026-09-05', evidencia: 'foto no Drive' });
+  la = tela(m, s, 'limpeza').acoes.find((x) => x.id === la.id);
+  afirmar(la.comentarios.length === 2 && la.comentarios[0].tipo === 'STATUS' && la.comentarios[1].tipo === 'CONCLUSAO', 'tipos: ' + la.comentarios.map((c) => c.tipo).join(','));
+  afirmar(la.comentarios.every((c) => c.autor === GERENTE && c.nome === 'João Lima'), 'autor: ' + JSON.stringify(la.comentarios));
+  afirmar(/foto no Drive/.test(la.comentarios[1].texto) && la.criadoPorNome === 'João Lima', 'conclusao e criador');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

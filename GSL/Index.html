@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23111785%22/%3E%3Crect%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%2301973A%22/%3E%3Crect%20x%3D%2232%22%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%23FFEE03%22/%3E%3Ctext%20x%3D%2232%22%20y%3D%2242%22%20font-family%3D%22Archivo%2CArial%2Csans-serif%22%20font-size%3D%2240%22%20font-weight%3D%22800%22%20fill%3D%22%23fff%22%20text-anchor%3D%22middle%22%3EB%3C/text%3E%3C/svg%3E">
+  <!-- Fontes SEM bloquear a pagina (4.2.2). Antes vinham por @import dentro
+       do Estilo: se fonts.googleapis.com demorasse ou estivesse bloqueado
+       (proxy do servidor em nuvem), nenhum script rodava e a pagina ficava
+       parada em "Abrindo o sistema". Sem as fontes, vale a do sistema. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap">
+  <?!= include('Estilo'); ?>
+  <?!= include('PaineisEstilo'); ?>
+  <?!= include('Marca'); ?>
+</head>
+<body>
+
+  <!-- O ceu. Claro: aurora, ondas, cristais e bolhas.
+       Escuro: espaco, duas camadas de estrelas, nebulosas e poeira subindo.
+       Cada camada tem classe propria — nth-of-type conta por TAG, e como
+       sao todas <div> ele nunca casava. -->
+  <div class="ceu" aria-hidden="true">
+    <div class="aurora"></div>
+    <div class="aurora-onda topo-ceu"></div>
+    <div class="aurora-onda base-ceu"></div>
+    <div class="cristal c1"></div>
+    <div class="cristal c2"></div>
+    <div class="cristal c3"></div>
+    <div class="bolha b1"></div><div class="bolha b2"></div><div class="bolha b3"></div>
+    <div class="bolha b4"></div><div class="bolha b5"></div><div class="bolha b6"></div>
+
+    <div class="espaco"></div>
+    <div class="estrelas"></div>
+    <div class="estrelas-brilho"></div>
+    <div class="nebulosa azul"></div>
+    <div class="nebulosa verde"></div>
+    <div class="nebulosa amarela"></div>
+    <div class="particula p1"></div><div class="particula p2"></div><div class="particula p3"></div>
+    <div class="particula p4"></div><div class="particula p5"></div><div class="particula p6"></div>
+    <div class="particula p7"></div><div class="particula p8"></div><div class="particula p9"></div>
+    <div class="particula p10"></div><div class="particula p11"></div><div class="particula p12"></div>
+  </div>
+
+  <div id="carregando" class="tela-espera">
+    <div class="logo-icone grande" role="img" aria-label="Bartofil"></div>
+    <p>Abrindo o sistema…</p>
+  </div>
+
+  <div id="falha" class="tela-espera oculto">
+    <div class="marca-espera falha">!</div>
+    <h1>Não foi possível abrir</h1>
+    <p id="falha-texto"></p>
+    <button class="botao" onclick="recarregarApp()">Tentar de novo</button>
+  </div>
+
+  <!-- ENTRADA (4.2): a cada abertura a pessoa diz quem e — e-mail e PIN.
+       Nada fica guardado no navegador depois que a aba fecha. -->
+  <div id="entrar" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Entrar no GSL</h1>
+    <p>Digite o seu e-mail da Bartofil e o seu PIN.</p>
+    <form id="form-entrar" class="login-caixa entrar-caixa" method="post" target="_top"
+          autocomplete="off" onsubmit="return entrarNoSistema(event)">
+      <label class="entrar-rotulo" for="entrar-email">E-mail</label>
+      <input id="entrar-email" name="email" type="email" inputmode="email" autocomplete="off"
+             autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome@bartofil.com.br"
+             oninput="esquecerPrimeiroAcesso()">
+      <label class="entrar-rotulo" for="entrar-pin">PIN</label>
+      <input id="entrar-pin" name="pin" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
+             autocomplete="off" placeholder="4 a 6 números">
+      <div id="entrar-confirma" class="entrar-confirma oculto">
+        <div id="entrar-codigo-caixa" class="oculto">
+          <label class="entrar-rotulo" for="entrar-codigo">Código que chegou no seu e-mail</label>
+          <input id="entrar-codigo" type="text" inputmode="numeric" maxlength="6"
+                 autocomplete="one-time-code" placeholder="6 números">
+        </div>
+        <label class="entrar-rotulo" for="entrar-pin2">Repita o PIN (primeiro acesso)</label>
+        <input id="entrar-pin2" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
+               autocomplete="off" placeholder="o mesmo PIN">
+      </div>
+      <input type="hidden" name="filial" id="entrar-filial">
+      <input type="hidden" name="bilhete" id="entrar-bilhete">
+      <p id="entrar-msg" class="entrar-msg" role="status" aria-live="polite"></p>
+      <button id="entrar-botao" class="botao" type="submit">Entrar</button>
+      <p class="dica entrar-dica">Primeiro acesso: digite um PIN novo — o sistema manda um código para o seu
+        e-mail e pede para repetir o PIN, que passa a ser o seu. Esqueceu? Peça ao administrador para zerar o seu PIN.</p>
+    </form>
+  </div>
+
+  <!-- Quem abriu nao entra: conta nao cadastrada, desativada, sem nivel
+       ou sem filial. Nao ha formulario nem fila: o administrador cadastra
+       em Pessoas e acessos e a pessoa so recarrega. -->
+  <div id="sem-acesso" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1 id="sem-acesso-titulo">Acesso não liberado</h1>
+    <p id="sem-acesso-texto"></p>
+    <div id="sem-acesso-cartao" class="cartao-conta oculto">
+      <span class="conta-rotulo">Conectado como</span>
+      <strong id="sem-acesso-conta"></strong>
+      <span class="selo-verificado">&#128274; conta usada na entrada</span>
+    </div>
+    <div class="login-caixa">
+      <button class="botao" onclick="recarregarApp()">Já fui liberado — tentar de novo</button>
+      <button class="botao-texto" onclick="sair()">Entrar com outro e-mail</button>
+    </div>
+  </div>
+
+  <!-- Mais de uma filial liberada: a pessoa escolhe para onde vai. -->
+  <div id="escolher-filial" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Para qual filial você quer ir?</h1>
+    <p><span id="escolher-filial-ola"></span> Cada filial tem os seus próprios painéis e dados.</p>
+    <div id="grade-filiais" class="grade-modulos grade-filiais"></div>
+  </div>
+
+  <!-- Primeira execucao: o sistema monta a propria estrutura -->
+  <div id="instalacao" class="tela-espera oculto">
+    <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
+    <h1>Instalar o sistema</h1>
+    <p>
+      O GSL vai criar no seu Drive a pasta <strong>GSL Bartofil</strong>, com a planilha de banco
+      de dados e a pasta de anexos. Ninguém precisa abrir esses arquivos: tudo passa a ser feito
+      por aqui. Você entra como administrador.
+    </p>
+    <p id="instalacao-conta" class="dica"></p>
+    <div class="login-caixa">
+      <input id="instalacao-email" type="email" inputmode="email" placeholder="seu-email-de-admin@exemplo.com">
+      <button id="botao-instalar" class="botao" onclick="instalarSistema()">Criar banco de dados</button>
+    </div>
+  </div>
+
+  <div id="aplicacao" class="oculto">
+    <aside class="lateral">
+      <div class="marca">
+        <div class="marca-linha">
+          <div class="logo-icone" role="img" aria-label="Bartofil"></div>
+          <div>
+            <div class="marca-sigla">GSL</div>
+            <div class="marca-nome">Bartofil Distribuidora</div>
+          </div>
+        </div>
+        <div class="marca-espectro" aria-hidden="true"><span></span><span></span></div>
+      </div>
+      <div id="filial-atual" class="filial-atual"></div>
+      <nav id="menu" class="menu"></nav>
+      <div class="rodape-lateral">
+        <div id="usuario-nome" class="usuario-nome"></div>
+        <div id="usuario-papel" class="usuario-papel"></div>
+        <div id="usuario-conta" class="usuario-conta"></div>
+        <button class="botao-texto" onclick="recarregarDados()">Atualizar dados</button>
+        <button class="botao-texto" onclick="formTrocarPin()">Trocar PIN</button>
+        <button class="botao-texto" onclick="sair()">Sair</button>
+      </div>
+    </aside>
+
+    <main class="conteudo">
+      <header class="topo">
+        <div>
+          <h1 id="titulo-pagina">Início</h1>
+          <p id="subtitulo-pagina" class="subtitulo"></p>
+        </div>
+        <div class="acoes-topo">
+          <div id="acoes-topo" class="acoes-topo"></div>
+          <!-- O modo leve precisa estar aqui, e nao so na Configuracao:
+               quem sente a lentidao e o coordenador, e o perfil dele nao
+               tem acesso a tela de Configuracao. -->
+          <button id="modo-leve-alternar" class="tema-alternar leve" onclick="alternarModoLeve()"
+                  title="Modo leve — desliga o fundo animado"
+                  aria-label="Ligar ou desligar o modo leve">⚡</button>
+          <button id="tema-alternar" class="tema-alternar" onclick="alternarTema()"
+                  title="Alternar tema" aria-label="Alternar tema claro e escuro">☾</button>
+        </div>
+      </header>
+
+      <div id="aviso-simulacao" class="faixa-aviso oculto">
+        Você esta vendo o sistema como outro nível de acesso.
+        <button class="botao-texto" onclick="pararSimulacao()">Voltar ao meu perfil</button>
+      </div>
+
+      <section id="pagina" class="pagina"></section>
+    </main>
+
+    <!-- Reportar erro de dentro do sistema. Fica em TODA tela porque o
+         erro nao avisa em qual delas vai acontecer. O relato ja leva a
+         tela, o usuario, a hora e o navegador — ninguem precisa
+         explicar isso. -->
+    <button class="botao-feedback" onclick="formFeedback()"
+            title="Reportar um problema no sistema">
+      <span aria-hidden="true">&#9888;</span> Reportar erro
+    </button>
+  </div>
+
+  <!-- Janela de cadastro/edicao -->
+  <div id="janela" class="fundo-janela oculto" onclick="if(event.target===this) fecharJanela()">
+    <div class="janela">
+      <div class="janela-topo">
+        <h2 id="janela-titulo"></h2>
+        <button class="fechar" onclick="fecharJanela()">&times;</button>
+      </div>
+      <div id="janela-corpo" class="janela-corpo"></div>
+      <div id="janela-rodape" class="janela-rodape"></div>
+    </div>
+  </div>
+
+  <div id="recado" class="recado oculto"></div>
+
+  <script>
+    /* GUARDA DA ABERTURA (4.2.2). Se o App nao chegar a rodar (erro de
+       sintaxe, arquivo faltando no projeto), a pagina diz o motivo em vez
+       de ficar parada para sempre em "Abrindo o sistema". */
+    (function () {
+      function mostrar(msg) {
+        if (typeof window.iniciar === 'function') return;
+        var c = document.getElementById('carregando');
+        var f = document.getElementById('falha');
+        var t = document.getElementById('falha-texto');
+        if (!f || !t) return;
+        if (c) c.classList.add('oculto');
+        f.classList.remove('oculto');
+        t.textContent = 'O sistema não carregou: ' + msg +
+          '. Avise o administrador e mande esta mensagem para ele.';
+      }
+      var primeiroErro = '';
+      window.addEventListener('error', function (ev) {
+        if (!primeiroErro) primeiroErro = ((ev && ev.message) || 'erro desconhecido') +
+          (ev && ev.lineno ? ' (linha ' + ev.lineno + ')' : '');
+        mostrar(primeiroErro);
+      });
+      document.addEventListener('DOMContentLoaded', function () {
+        mostrar(primeiroErro || 'o código da página não foi executado');
+      });
+
+      /* RECARREGAR (4.2.2). Dentro da moldura do Google, location.reload()
+         recarrega so a moldura, que volta em branco. O certo e levar a
+         janela de cima para o endereco do app — o navegador deixa quando
+         e resposta a um clique. Fica aqui (e nao no App) para o botao
+         "Tentar de novo" funcionar mesmo se o App nao carregar. */
+      window.recarregarApp = function () {
+        var url = (window.CARGA_INICIAL && window.CARGA_INICIAL.urlApp) || '';
+        if (url) {
+          try { window.top.location.href = url; return; } catch (e) { /* sem permissao: recarrega a moldura */ }
+        }
+        location.reload();
+      };
+    })();
+  </script>
+  <script>
+    /* Resposta do servidor entregue junto com a pagina — zero ida e volta. */
+    var CARGA_INICIAL = <?!= inicial ?>;
+  </script>
+  <?!= include('App'); ?>
+  <?!= include('Paineis'); ?>
+  <?!= include('Aprendiz'); ?>
+</body>
+</html>

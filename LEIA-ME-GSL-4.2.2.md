@@ -36,6 +36,44 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
+## Pedido de 09/10 (Jovem Aprendiz: o Portal RH Aprendiz dentro do GSL)
+
+O "Portal RH Aprendiz" virou um módulo do GSL: card **Jovem Aprendiz** no menu, tela **Portal RH Aprendiz**. A cara e as contas são as do programa antigo:
+- barra azul com a lista de aprendizes (🟢 Concluído, 🔵 Pendente, ⚪ Não realizada);
+- aba **Relatório e Avaliações**: fim de contrato e férias, média geral, setores vivenciados, linha do tempo dos setores, média por setor, radar das competências, detalhamento por avaliação e o feedback de cada avaliador;
+- aba **Cronograma Geral dos Setores**, com a busca por nome.
+
+**A mudança pedida:** no Cronograma Geral, os cartões vêm **em ordem de fim de contrato**: o contrato que vence primeiro aparece primeiro. Quem não tem a data no cronograma vai para o fim.
+
+**O que mudou por ter entrado no GSL:**
+- O cronograma geral agora é lido da aba **Cronograma** da planilha. No programa antigo ele estava escrito à mão dentro da página. Mudou na planilha, muda na tela.
+- Ano com 2 dígitos (15/03/27) aparece com 4 (15/03/2027).
+- Os gráficos são desenhados pelo próprio GSL, sem a biblioteca Chart.js da internet. Os números são os mesmos.
+
+**Ligar a planilha (uma vez em cada filial):** abra o módulo. Sem planilha, a tela mostra o campo para colar o link da **Imersão Corporativa (respostas)** e o botão **Ligar planilha**. Depois, o botão **Trocar planilha** fica no alto da tela. O link também aparece em **Configuração › Sistema › Outros parâmetros** (`APRENDIZ_PLANILHA`). A planilha precisa estar compartilhada (leitura basta) com a conta dona do GSL, a que publicou o sistema. A leitura fica guardada por 5 minutos; **Atualizar dados** lê de novo na hora.
+
+**Corrigir na planilha:** na aba Cronograma, as células **F14, F23, F32, F41 e F50** estão com "Periodo de Ferias: 08/02/24 a 09/02/28". A página antiga mostrava 08/02/2028 porque a lista estava escrita à mão nela. Troque o `24` por `28` nessas cinco células.
+
+**O formulário semanal continua na planilha.** O script que atualiza o formulário toda semana (a parte do FormApp do `Código.txt`) fica no projeto da própria planilha, como já está. Ele não entrou no GSL porque pediria uma autorização nova (Formulários), e o GSL ficaria parado até alguém aceitar.
+
+**Quem vê:** gerente e administrador, por padrão. Para liberar para outra pessoa: **Pessoas e acessos**, na pessoa, módulo **Jovem Aprendiz: Ver**. Só quem configura o sistema (permissão Programar) liga ou troca a planilha. O painel já vem ligado na filial principal; nas outras, ligue em **Filiais e painéis**. O esquema sobe para **8.9** sozinho.
+
+**Onde fica cada coisa (manutenção):**
+
+| O que mudar | Onde |
+|---|---|
+| Regras: status, médias, setores, contrato e férias, ordem do cronograma | `GSL/Aprendiz.gs` |
+| Nome das abas e colunas da planilha (se o formulário ganhar ou perder pergunta) | `APZ_CONFIG`, no começo do `GSL/Aprendiz.gs` |
+| A tela: textos, cores, gráficos, cartões do cronograma | `GSL/Aprendiz.html` |
+| Qual planilha | botão **Trocar planilha**, ou o parâmetro `APRENDIZ_PLANILHA` |
+| Card do menu, nome da tela e quem vê por padrão | `GSL/Permissoes.gs` (`MODULOS`, `TELAS`) e `GSL/Instalacao.gs` (telas do perfil GERENTE) |
+| Quem pode ligar/trocar a planilha e atualizar | `GSL/Codigo.gs`, lista `ACOES` (`salvarFonteAprendiz`, `atualizarAprendiz`) |
+| O painel na filial | `GSL/Filiais.gs` (`PAINEIS`) |
+| A ligação da tela no sistema | `GSL/App.html` (`TELAS_PINTA`, `ICONES`) e `GSL/Index.html` (`include('Aprendiz')`) |
+| Testes | `testes/paineis.js`, `testes/seguranca.js` e `testes/e2e.js` (casos "jovem aprendiz"); planilha de teste com nomes inventados em `testes/dados-aprendiz.js` |
+
+**Arquivos desta entrega:** `Aprendiz.gs` e `Aprendiz.html` (novos), `Codigo.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`, `App.html` e `Index.html`. Para criar os novos no Apps Script: **+ › Script** com o nome `Aprendiz` e **+ › HTML** com o nome `Aprendiz`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão).
+
 ## Pedido de 09/10 (Limpeza: estoque igual ao do TI, Plano de Ação igual ao do Calendário, fotos)
 
 A tela **Limpeza CD** agora tem cinco abas: **Gestão**, **Plano de Ação**, **Estoque**, **Movimentações** e **Inventário**.
@@ -176,7 +214,7 @@ A tela **Limpeza CD** agora tem cinco abas: **Gestão**, **Plano de Ação**, **
 
 1. Abra o projeto do GSL no Apps Script da empresa.
 2. **Apague** os arquivos `Conversas.gs` e `Login.gs`, se existirem. Se preferir não apagar, cole por cima do `Conversas.gs` o arquivo vazio desta versão.
-3. Substitua o conteúdo de **todos** os arquivos pelos da pasta `GSL/`, com os mesmos nomes. São 26 arquivos `.gs` e `.html` (contando o `Conversas.gs` vazio) mais o `appsscript.json`. No editor, os `.html` aparecem como "HTML", sem a extensão no nome.
+3. Substitua o conteúdo de **todos** os arquivos pelos da pasta `GSL/`, com os mesmos nomes. São 28 arquivos `.gs` e `.html` (contando o `Conversas.gs` vazio) mais o `appsscript.json`. No editor, os `.html` aparecem como "HTML", sem a extensão no nome.
 4. Salve. Em **Implantar › Gerenciar implantações**, edite (lápis) a implantação que já existe e escolha **Versão: Nova versão**. Assim o endereço continua o mesmo. Confira:
    - Executar como: **Eu**
    - Quem pode acessar: **Qualquer pessoa em Bartofil**
@@ -197,8 +235,8 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN (30 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis (39 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz (36 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz (40 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

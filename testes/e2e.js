@@ -799,6 +799,98 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('jovem aprendiz: card no menu, liga a planilha pela tela, relatorio do aprendiz e cronograma por fim de contrato', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    // a "Imersao Corporativa (respostas)" no Drive do dono (nomes ficticios)
+    const abas = require('./dados-aprendiz.js')(s.mundo.DataDoScript, new Date());
+    const E = require('./dados-aprendiz.js').esperado;
+    const pl = s.mundo.novaPlanilha('Imersão Corporativa (respostas)');
+    const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+    Object.keys(abas).forEach((nome, i) => {
+      const a = i === 0 ? pl.abas[0] : new Aba(pl, nome, 1000, 26);
+      if (i === 0) a.nome = nome; else pl.abas.push(a);
+      abas[nome].forEach((linha, l) => { a.dados[l] = linha.slice(); });
+    });
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    // o card do modulo no menu
+    await f.evaluate(() => abrirModulos());
+    const card = await f.evaluate(() => Array.from(document.querySelectorAll('.grade-modulos .holocard')).map((b) => b.innerText.replace(/\s+/g, ' ')).find((t) => /Jovem Aprendiz/.test(t)) || '');
+    afirmar(/Abrir portal/i.test(card), 'card do Jovem Aprendiz no menu: ' + card);
+    await f.click('.grade-modulos .holocard:has-text("Jovem Aprendiz")');
+    // sem planilha: pede o link e liga pela tela
+    await f.waitForSelector('#apz-link', { timeout: 15000 });
+    await f.fill('#apz-link', 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit#gid=0');
+    await f.click('#pagina button:has-text("Ligar planilha")');
+    await f.waitForSelector('#apz-sel', { timeout: 20000 });
+    const opcoes = await f.evaluate(() => Array.from(document.querySelectorAll('#apz-sel option')).slice(1).map((o) => o.textContent.trim()));
+    afirmar(opcoes.length === 5 && /ANA BEATRIZ TESTE \(Concluído\)/.test(opcoes[0]) && /Não realizada/.test(opcoes[4]), 'aprendizes: ' + opcoes.join(' | '));
+    afirmar(/Selecione um aprendiz/.test(await texto(aba, 'apz-conteudo')), 'comeca pedindo para escolher');
+    // relatorio da Ana
+    await f.selectOption('#apz-sel', { index: 1 });
+    await f.waitForSelector('[data-kpi="media"]', { timeout: 10000 });
+    const kpi = await f.evaluate(() => [document.querySelector('[data-kpi="media"]').textContent, document.querySelector('[data-kpi="setores"]').textContent]);
+    afirmar(kpi[0] === '3,7 / 5' && kpi[1] === '8 / 8', 'KPIs: ' + kpi.join(' | '));
+    const pilulas = await f.evaluate(() => document.querySelector('.apz-pilulas').innerText.replace(/\s+/g, ' '));
+    afirmar(/15\/03\/2027/.test(pilulas) && /01\/12\/2026 a 30\/12\/2026/.test(pilulas), 'contrato e ferias: ' + pilulas);
+    const etapas = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-etapa')).map((e) => e.className.replace('apz-etapa', '').trim()));
+    afirmar(etapas.length === 8 && etapas.every((c) => c === 'concluido'), 'linha do tempo: ' + etapas.join());
+    const graficos = await f.evaluate(() => Array.from(document.querySelectorAll('#apz-conteudo svg.apz-grafico')).map((g) => g.getAttribute('aria-label') + ':' + g.querySelectorAll('path, polygon').length));
+    afirmar(graficos.length === 3 && /Média por setor concluído:9/.test(graficos[0]), 'graficos: ' + graficos.join(' | '));
+    afirmar(await f.evaluate(() => document.querySelectorAll('.apz-feedback').length) === 9, 'nove avaliacoes no feedback');
+    // detalhamento: trocar a avaliacao troca as barras
+    const notas = async () => f.evaluate(() => Array.from(document.querySelectorAll('#apz-competencias text[font-weight="600"]')).map((t) => t.textContent).join(' '));
+    afirmar(await notas() === '5 5 4 5 4', 'notas da avaliacao mais recente (LOJA), na ordem atencao/interesse/proatividade/aprendizado/disciplina: ' + await notas());
+    await f.selectOption('#apz-sel-setor', '1');
+    afirmar(await notas() === '4 4 4 4 4', 'notas do FLOWRACK - B: ' + await notas());
+    // Bruno: um setor feito, um em andamento, um pendente
+    const bruno = await f.evaluate(() => DADOS.lista.find((x) => x.nomeOriginal === 'BRUNO CARLOS TESTE').chave);
+    await f.selectOption('#apz-sel', bruno);
+    const etapasB = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-etapa')).map((e) => e.className.replace('apz-etapa', '').trim()));
+    afirmar(etapasB.join() === E.bruno.linha.join(), 'linha do tempo do Bruno: ' + etapasB.join());
+    if (process.env.FOTO_APRENDIZ) {
+      // a pagina rola dentro da moldura do Apps Script: janela alta para caber a tela toda
+      const foto = async (nome, w, h) => { await aba.page.setViewportSize({ width: w, height: h }); await aba.page.waitForTimeout(400);
+        await aba.page.screenshot({ path: process.env.FOTO_APRENDIZ + '-' + nome + '.png' }); };
+      await f.selectOption('#apz-sel', { index: 1 });
+      await foto('relatorio', 1280, 3000);
+      await foto('relatorio-celular', 390, 5200);
+      await f.evaluate(() => alternarTema());
+      await foto('relatorio-escuro', 1280, 3000);
+      await f.evaluate(() => alternarTema());
+      await aba.page.setViewportSize({ width: 1280, height: 720 });
+    }
+    // cronograma geral: quem vence primeiro aparece primeiro; o seletor some
+    await f.click('.apz-aba[data-aba="cronograma"]');
+    await f.waitForSelector('#apz-crono-grade', { timeout: 10000 });
+    afirmar(await f.evaluate(() => getComputedStyle(document.getElementById('apz-sel')).visibility === 'hidden'), 'seletor some no cronograma (como no portal: invisivel, o cabecalho nao pula)');
+    const ordem = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-crono-cartao h5')).map((h) => h.textContent.replace(/^\S+\s/, '').trim()));
+    afirmar(ordem.join('|') === E.ordemCronograma.join('|'), 'ordem do cronograma: ' + ordem.join(' | '));
+    const tagsB = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-crono-cartao')[0].querySelectorAll('.apz-tag')).map((t) => t.textContent));
+    afirmar(tagsB.join('|') === 'Concluído|Em Andamento|A Fazer', 'setores do Bruno hoje: ' + tagsB.join('|'));
+    if (process.env.FOTO_APRENDIZ) {
+      await aba.page.setViewportSize({ width: 1280, height: 1500 }); await aba.page.waitForTimeout(400);
+      await aba.page.screenshot({ path: process.env.FOTO_APRENDIZ + '-cronograma.png' });
+      await aba.page.setViewportSize({ width: 390, height: 2400 }); await aba.page.waitForTimeout(400);
+      await aba.page.screenshot({ path: process.env.FOTO_APRENDIZ + '-cronograma-celular.png' });
+      await aba.page.setViewportSize({ width: 1280, height: 720 });
+    }
+    await f.fill('#apz-busca', 'daniela');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.apz-crono-cartao').length) === 1, 'busca sem acento/maiuscula acha a Daniela');
+    afirmar(await f.evaluate(() => document.activeElement && document.activeElement.id === 'apz-busca'), 'a caixa de busca continua com o foco');
+    await f.fill('#apz-busca', 'ninguem');
+    afirmar(/Nenhum jovem encontrado/.test(await texto(aba, 'apz-crono-grade')), 'busca sem resultado');
+    // atualizar dados le de novo e continua na mesma aba
+    await f.click('#acoes-topo button:has-text("Atualizar dados")');
+    await f.waitForFunction(() => !document.querySelector('#acoes-topo button[disabled]'), null, { timeout: 15000 });
+    await f.waitForSelector('#apz-crono-grade', { timeout: 15000 });
+    afirmar(await f.evaluate(() => APZ.aba) === 'cronograma', 'continua no cronograma depois de atualizar');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('estoque de TI: estoque, minimo, ideal, alerta e entrada rapida; "Trocar PIN" troca o PIN pela tela', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);

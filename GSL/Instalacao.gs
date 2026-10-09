@@ -291,7 +291,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.8';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes)
+const VERSAO_ESQUEMA = '8.9';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -348,6 +348,8 @@ function garantirEsquema() {
   // "Nao usar nesta filial" escolhido pelo administrador fica como esta.
   const versaoAntes = Number(prop(chaveVersao, '') || 0);
   if (principal && versaoAntes < 8.1 && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
+  // 8.9: o Jovem Aprendiz entra ligado na principal (uma vez; depois vale o que o administrador escolher).
+  if (principal && versaoAntes < 8.9 && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
@@ -427,6 +429,7 @@ const PARAMETROS_NOVOS = [
   ['APRESENTACAO_B', 'Link do Google Apresentacoes do turno B'],
   ['APRESENTACAO_C', 'Link do Google Apresentacoes do turno C'],
   ['QUADRO_PLANILHA', 'Link da planilha do Quadro do CD (abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS)'],
+  ['APRENDIZ_PLANILHA', 'Link da planilha do Jovem Aprendiz — Imersão Corporativa (abas "Respostas ao formulário 1" e "Cronograma")'],
   ['NOBREAK_TENSAO_TOLERANCIA', 'Tolerancia da tensao em relacao a nominal, em % (acima disso a leitura fica em alerta)', '10'],
   ['NOBREAK_CARGA_ALERTA', 'Carga de saida (%) a partir da qual o nobreak fica em alerta', '80'],
   ['NOBREAK_LEITURAS_DIA', 'Quantas leituras por dia cada nobreak deve ter', '3']
@@ -595,7 +598,7 @@ function perfisPadrao() {
       telas: TELAS.map(function (t) { return t.id; }), podes: CAPACIDADES },
     { PERFIL: 'GERENTE', DESCRICAO: 'Gerência — valida as entregas', ESCOPO: 'TODOS',
       telas: ['inicio', 'calendario', 'acoes', 'assiduidade', 'apresentacao', 'config', 'acessos', 'relatos',
-              'nobreaks', 'limpeza', 'quadro', 'estoque'],
+              'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'],
       podes: ['VER_INDIVIDUAL', 'EDITAR', 'EXCLUIR', 'ANEXAR', 'VALIDAR', 'PROGRAMAR',
               'GERIR_ACESSOS', 'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA'] },
     /*

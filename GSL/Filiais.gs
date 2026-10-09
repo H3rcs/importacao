@@ -25,7 +25,8 @@ const PAINEIS = [
   { id: 'nobreaks',     nome: 'Nobreaks',          frase: 'Leituras de entrada e saída de cada nobreak.' },
   { id: 'limpeza',      nome: 'Limpeza CD',        frase: 'Ações das vistorias e custo dos produtos.' },
   { id: 'quadro',       nome: 'Quadro do CD',      frase: 'Efetivo por função e turno, admissões e desligamentos.' },
-  { id: 'estoque',      nome: 'Estoque de TI',     frase: 'Itens de informática: entradas, saídas, saldo e inventário.' }
+  { id: 'estoque',      nome: 'Estoque de TI',     frase: 'Itens de informática: entradas, saídas, saldo e inventário.' },
+  { id: 'aprendiz',     nome: 'Jovem Aprendiz',    frase: 'Avaliações da imersão corporativa e cronograma de rotação.' }
 ];
 
 const PAINEL_ATIVO = 'ATIVO';
@@ -566,7 +567,8 @@ function lerConfiguracaoParaCopia_(codigoOrigem) {
       SETORES: ler('SETORES'),
       PARAMETROS: ler('PARAMETROS').filter(function (p) {
         return String(p.CHAVE || '').toUpperCase().indexOf('APRESENTACAO_') !== 0 &&
-               String(p.CHAVE || '').toUpperCase() !== 'QUADRO_PLANILHA';
+               String(p.CHAVE || '').toUpperCase() !== 'QUADRO_PLANILHA' &&
+               String(p.CHAVE || '').toUpperCase() !== 'APRENDIZ_PLANILHA';
       }),
       DE_PARA: ler('DE_PARA'),
       LP_ZONAS: ler('LP_ZONAS'),

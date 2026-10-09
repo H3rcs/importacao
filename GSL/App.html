@@ -607,6 +607,7 @@ function conferirVersao(r) {
   const faltam = [].concat(app.foraDaVersao || []);
   if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
   if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== BUILD_APP) faltam.push('Paineis.html');
+  if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== BUILD_APP) faltam.push('Aprendiz.html (e a linha dele no Index.html)');
   let faixa = el('aviso-versao');
   if (!faltam.length) { if (faixa) faixa.remove(); return; }
   if (!faixa) {
@@ -824,7 +825,7 @@ let moduloAtual = null;
 
 const ICONES = {
   calendario: '\u{1F4C5}', pessoas: '\u{1F465}', tela: '\u{1F4FD}', engrenagem: '\u2699',
-  bateria: '\u{1F50B}', limpeza: '\u{1F9F9}', grafico: '\u{1F4CA}', computador: '\u{1F5A5}'
+  bateria: '\u{1F50B}', limpeza: '\u{1F9F9}', grafico: '\u{1F4CA}', computador: '\u{1F5A5}', aprendiz: '\u{1F393}'
 };
 
 function montarMenu(telas) {
@@ -1058,7 +1059,7 @@ const TELAS_PINTA = {
   apresentacao: 'pintarApresentacao',
   acoes: 'pintarAcoes', relatos: 'pintarRelatos',
   nobreaks: 'pintarNobreaks', limpeza: 'pintarLimpeza', quadro: 'pintarQuadro', filiais: 'pintarFiliais',
-  estoque: 'pintarEstoque'
+  estoque: 'pintarEstoque', aprendiz: 'pintarAprendiz'
 };
 
 /*

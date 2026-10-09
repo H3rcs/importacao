@@ -33,7 +33,9 @@ function arquivosForaDaVersao_() {
     'Limpeza.gs': typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA,
     'Instalacao.gs': typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO,
     'Filiais.gs': typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS,
-    'Emails.gs': typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS
+    'Emails.gs': typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS,
+    'Aprendiz.gs': typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ,
+    'Permissoes.gs': typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES
   };
   return Object.keys(carimbos).filter(function (k) { return carimbos[k] !== APP.build; });
 }
@@ -552,6 +554,10 @@ const ACOES = {
   historicoItemLimpeza:{ capacidade: null,             funcao: 'acaoHistoricoItemLimpeza', modulo: 'limpeza' },
   salvarZona:          { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarZona', modulo: 'limpeza' },
   importarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarLimpeza', modulo: 'limpeza' },
+
+  // jovem aprendiz (Portal RH Aprendiz — Aprendiz.gs)
+  salvarFonteAprendiz: { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteAprendiz', modulo: ['aprendiz', 'config'] },
+  atualizarAprendiz:   { capacidade: null,             funcao: 'acaoAtualizarAprendiz', modulo: 'aprendiz' },
 
   // quadro do CD
   salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },

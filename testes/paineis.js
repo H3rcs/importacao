@@ -696,6 +696,106 @@ caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadast
   afirmar(c && c.autor === DONO && !/Simulando/.test(c.nome) && /simulando COORDENADOR/.test(c.papel), 'simulacao: ' + JSON.stringify(c));
 });
 
+/* ------------------------------------------------------------------ */
+/* JOVEM APRENDIZ (Portal RH Aprendiz)                                 */
+/* ------------------------------------------------------------------ */
+const planilhaAprendiz = require('./dados-aprendiz.js');
+
+function ligarAprendiz(m, s) {
+  const link = planilhaAntiga(m, 'Imersão Corporativa (respostas)', planilhaAprendiz(m.DataDoScript, new Date()));
+  acao(m, s, 'salvarFonteAprendiz', { link });
+  return link;
+}
+
+caso('jovem aprendiz: le a planilha e monta o relatorio igual ao portal (status, medias, setores, linha do tempo, feedback)', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  let d = tela(m, s, 'aprendiz');
+  afirmar(!d.configurado && d.podeConfigurar, 'sem planilha: pede o link');
+  ligarAprendiz(m, s);
+  d = tela(m, s, 'aprendiz');
+  const E = planilhaAprendiz.esperado;
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  afirmar(JSON.stringify(d.lista.map((x) => [x.nomeOriginal, x.status])) === JSON.stringify(E.lista), 'lista: ' + JSON.stringify(d.lista.map((x) => [x.nomeOriginal, x.status])));
+  const ana = d.paineis[d.lista[0].chave];
+  afirmar(ana.mediaGeral === E.ana.mediaGeral && JSON.stringify(ana.mediasPilares) === JSON.stringify(E.ana.mediasPilares),
+    'medias da Ana: ' + ana.mediaGeral + ' ' + JSON.stringify(ana.mediasPilares));
+  afirmar(ana.vivenciados === 8 && ana.totais === 8 && ana.progresso === 100, 'setores da Ana: ' + ana.vivenciados + '/' + ana.totais);
+  afirmar(ana.fimContrato === E.ana.fimContrato && ana.periodoFerias === E.ana.periodoFerias, 'contrato/ferias com ano de 4 digitos: ' + ana.fimContrato + ' | ' + ana.periodoFerias);
+  const receb = ana.linhaDoTempo.find((x) => x.setor === 'Recebimento');
+  afirmar(receb.status === 'concluido' && receb.media === E.ana.recebimento, 'Recebimento (turnos A e B juntos): ' + JSON.stringify(receb));
+  afirmar(ana.avaliacoes.length === 9 && ana.avaliacoes[0].setor === 'LOJA' && ana.avaliacoes[0].data.length === 10, 'mais recente primeiro: ' + ana.avaliacoes[0].setor);
+  afirmar(JSON.stringify(ana.avaliacoes[0].pontosMelhorar) === JSON.stringify(['Precisa ser mais ágil!']), 'sem linha vazia no feedback: ' + JSON.stringify(ana.avaliacoes[0].pontosMelhorar));
+  afirmar(JSON.stringify(ana.avaliacoes.find((a) => a.setor === 'FLOWRACK - B').pontosPositivos) === JSON.stringify(['Cuidadosa', 'Calma']), 'uma linha por ponto');
+  const bruno = d.paineis[d.lista.find((x) => x.nomeOriginal === 'BRUNO CARLOS TESTE').chave];
+  afirmar(bruno.vivenciados === E.bruno.vivenciados && bruno.totais === E.bruno.totais &&
+    JSON.stringify(bruno.linhaDoTempo.map((x) => x.status)) === JSON.stringify(E.bruno.linha), 'Bruno: ' + JSON.stringify(bruno.linhaDoTempo));
+  afirmar(bruno.linhaDoTempo[0].media === E.bruno.devolucao && bruno.avaliacoes[0].mediaSetor === E.bruno.semFormula,
+    'linha nova sem a formula da media: ' + bruno.avaliacoes[0].mediaSetor + ' / devolucao ' + bruno.linhaDoTempo[0].media);
+  afirmar(JSON.stringify(bruno.avaliacoes[0].pontosPositivos) === JSON.stringify(['Sem registros.']), 'sem texto: Sem registros.');
+  const elias = d.paineis[d.lista.find((x) => x.nomeOriginal === 'ELIAS FORA DO CRONOGRAMA').chave];
+  afirmar(elias.fimContrato === 'Não informado' && elias.totais === 2 && elias.linhaDoTempo.every((x) => x.status === 'concluido'), 'so nas respostas: ' + JSON.stringify(elias.linhaDoTempo));
+  afirmar(d.fonte && d.fonte.nome === 'Imersão Corporativa (respostas)' && d.fonte.abaRespostas === 'Respostas ao formulário 1', 'fonte: ' + JSON.stringify(d.fonte));
+});
+
+caso('jovem aprendiz: cronograma geral vem da aba Cronograma, em ordem de fim de contrato (sem data no fim)', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  ligarAprendiz(m, s);
+  const d = tela(m, s, 'aprendiz');
+  afirmar(JSON.stringify(d.cronograma.map((c) => c.nome)) === JSON.stringify(planilhaAprendiz.esperado.ordemCronograma), 'ordem: ' + d.cronograma.map((c) => c.nome + ' ' + c.final_contrato).join(' | '));
+  const bruno = d.cronograma[0];
+  afirmar(bruno.final_contrato === '20/11/2026' && bruno.cronograma.length === 3 && /^\d{4}-\d{2}-\d{2}$/.test(bruno.cronograma[0].inicio), 'Bruno: ' + JSON.stringify(bruno));
+  const hoje = d.hoje;
+  const andamento = bruno.cronograma.filter((x) => hoje >= x.inicio && hoje <= x.final).map((x) => x.setor);
+  afirmar(andamento.join() === 'Inventario', 'setor em andamento hoje: ' + andamento.join());
+  afirmar(d.cronograma[3].final_contrato === '' && d.cronograma[3].cronograma.length === 2, 'sem contrato vai para o fim: ' + JSON.stringify(d.cronograma[3]));
+});
+
+caso('jovem aprendiz: modulo no menu — gerente ve, coordenador so com o modulo liberado; link errado e recusado; so quem configura liga', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const ger = entrar(m, GERENTE, '5555');
+  const rg = JSON.parse(chamar(m, GERENTE, 'retomarSessao', { t: ger.t, f: ger.f }).valor);
+  afirmar(rg.modulos.some((x) => x.id === 'aprendiz' && x.telas.join() === 'aprendiz'), 'gerente ve o modulo: ' + rg.modulos.map((x) => x.id).join());
+  let maria = entrar(m, COORD, '1234');
+  let rc = JSON.parse(chamar(m, COORD, 'retomarSessao', { t: maria.t, f: maria.f }).valor);
+  afirmar(!rc.telas.some((t) => t.id === 'aprendiz'), 'coordenador nao ve por padrao');
+  const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'aprendiz', modo: 'VER' });
+  maria = entrar(m, COORD, '1234');
+  rc = JSON.parse(chamar(m, COORD, 'retomarSessao', { t: maria.t, f: maria.f }).valor);
+  afirmar(rc.telas.some((t) => t.id === 'aprendiz'), 'liberado por pessoa (Ver)');
+  afirmar(erroDe(() => acao(m, maria, 'salvarFonteAprendiz', { link: 'https://docs.google.com/spreadsheets/d/abcdefghijklmnopqrstuvwxyz/edit' })), 'quem so ve nao liga planilha');
+  afirmar(/não parece de uma planilha/.test(erroDe(() => acao(m, adm, 'salvarFonteAprendiz', { link: 'qualquer coisa' }))), 'link invalido');
+  const semAbas = planilhaAntiga(m, 'Outra planilha', { 'Plan1': [['a', 'b']] });
+  afirmar(/abas esperadas/.test(erroDe(() => acao(m, adm, 'salvarFonteAprendiz', { link: semAbas }))), 'planilha sem as abas');
+  ligarAprendiz(m, adm);
+  const dm = tela(m, maria, 'aprendiz');
+  afirmar(dm.configurado && !dm.podeConfigurar && dm.lista.length === 5, 'coordenador ve o portal, sem trocar a planilha');
+  afirmar(/relido/.test(acao(m, maria, 'atualizarAprendiz', {}).recado), 'atualizar le de novo');
+});
+
+caso('jovem aprendiz: a atualizacao (8.9) liga o painel na principal e libera o gerente nos niveis que ja existiam', () => {
+  const m = mundo(); let c = ctx(m);
+  // banco como a 8.8 deixou: painel sem o aprendiz e a coluna TELA_APRENDIZ ainda nao existe
+  const pr = c.listar('FILIAIS').find((f) => c.marcado(f.PRINCIPAL));
+  const paineis = JSON.parse(pr.PAINEIS); delete paineis.aprendiz;
+  c.atualizar('FILIAIS', pr.ID, { PAINEIS: JSON.stringify(paineis) }, DONO);
+  c = ctx(m);
+  const aba = m.planilhas.get(c.prop('ID_BANCO')).abas.find((a) => a.nome === 'PERFIS');
+  const col = aba.dados[0].indexOf('TELA_APRENDIZ');
+  afirmar(col !== -1, 'coluna criada na instalacao');
+  aba.dados.forEach((l) => l.splice(col, 1));
+  c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.8');
+  m.cache.clear();
+  c = ctx(m); c.garantirEsquema();
+  c = ctx(m);
+  const pr2 = c.listar('FILIAIS').find((f) => c.marcado(f.PRINCIPAL));
+  afirmar(JSON.parse(pr2.PAINEIS).aprendiz === 'ATIVO', 'painel ligado: ' + pr2.PAINEIS);
+  const ger = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
+  const coo = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'COORDENADOR');
+  afirmar(c.marcado(ger.TELA_APRENDIZ) && !c.marcado(coo.TELA_APRENDIZ), 'gerente sim, coordenador nao: ' + ger.TELA_APRENDIZ + ' / ' + coo.TELA_APRENDIZ);
+  afirmar(c.listar('PARAMETROS').some((p) => p.CHAVE === 'APRENDIZ_PLANILHA'), 'parametro criado');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

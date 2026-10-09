@@ -22,6 +22,8 @@
  * as telas do modulo em que a pessoa entrou. Um modulo sem nenhuma tela
  * liberada simplesmente nao aparece.
  */
+const BUILD_PERMISSOES = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+
 const MODULOS = [
   { id: 'calendario',   nome: 'Calendário',
     frase: 'Atividades do mês, entregas, validações e o andamento por turno.',
@@ -44,6 +46,10 @@ const MODULOS = [
   { id: 'estoque',      nome: 'Estoque de TI',
     frase: 'Itens de informática: saldo, entradas, saídas, inventário e onde cada item está.',
     acao: 'Abrir estoque', icone: 'computador', cor: 'roxo' },
+  /* Jovem Aprendiz (4.2.2): o Portal RH Aprendiz — tudo em Aprendiz.gs e Aprendiz.html. */
+  { id: 'aprendiz',     nome: 'Jovem Aprendiz',
+    frase: 'Imersão corporativa: avaliações de cada setor, médias por competência e o cronograma de rotação.',
+    acao: 'Abrir portal', icone: 'aprendiz', cor: 'azul' },
   { id: 'config',       nome: 'Configuração',
     frase: 'Pessoas, acessos, rotinas do calendário e fontes do RH.',
     acao: 'Configurar', icone: 'engrenagem', cor: 'roxo' }
@@ -66,6 +72,7 @@ const TELAS = [
   { id: 'limpeza',     nome: 'Limpeza CD',   cor: 'verde',   modulo: 'limpeza',     funcao: 'dadosLimpeza' },
   { id: 'quadro',      nome: 'Quadro do CD', cor: 'amarelo', modulo: 'quadro',      funcao: 'dadosQuadro' },
   { id: 'estoque',     nome: 'Estoque de TI', cor: 'azul',   modulo: 'estoque',     funcao: 'dadosEstoque' },
+  { id: 'aprendiz',    nome: 'Portal RH Aprendiz', cor: 'azul', modulo: 'aprendiz',  funcao: 'dadosAprendiz' },
   { id: 'config',      nome: 'Configuração', cor: 'branco',  modulo: 'config',      funcao: 'dadosConfig', exige: 'PROGRAMAR' },
   { id: 'acessos',     nome: 'Pessoas e acessos', cor: 'branco', modulo: 'config',  funcao: 'dadosPessoas', exige: 'GERIR_ACESSOS' },
   { id: 'filiais',     nome: 'Filiais e painéis', cor: 'branco', modulo: 'config',  funcao: 'dadosFiliais', exige: 'GERIR_FILIAIS' },
@@ -105,7 +112,7 @@ const CAPACIDADES = ['VER_INDIVIDUAL', 'ENTREGAR', 'VALIDAR', 'PROGRAMAR',
  * Capacidades que "editar" liga (e "ver" desliga) em cada modulo:
  */
 const MODULOS_AJUSTAVEIS = {
-  calendario: [], assiduidade: [], apresentacao: [], quadro: [],
+  calendario: [], assiduidade: [], apresentacao: [], quadro: [], aprendiz: [],
   nobreaks: ['LANCAR_NOBREAK'],
   limpeza: ['GERIR_LIMPEZA'],
   estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE']

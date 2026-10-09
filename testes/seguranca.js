@@ -25,13 +25,28 @@ const ok = (cond, msg) => { console.log((cond ? '  ok   ' : '  FALHA ') + msg); 
 run(DONO, 'instalar', DONO);
 const e = JSON.parse(run(DONO, 'entrar', DONO, '4321', '4321', '', '').valor);
 const ctx = { t: e.token, f: e.filial.codigo };
+// Jovem Aprendiz ligado a uma planilha: o cache da tela guarda as avaliacoes de todos os aprendizes
+const LINK_APZ = (function () {
+  const abas = require('./dados-aprendiz.js')(m.DataDoScript, new Date());
+  const p = m.novaPlanilha('Imersão Corporativa (respostas)');
+  const Aba = Object.getPrototypeOf(p.abas[0]).constructor;
+  Object.keys(abas).forEach((nome, i) => {
+    const aba = i === 0 ? p.abas[0] : new Aba(p, nome, 1000, 26);
+    if (i === 0) aba.nome = nome; else p.abas.push(aba);
+    abas[nome].forEach((linha, l) => { aba.dados[l] = linha.slice(); });
+  });
+  return 'https://docs.google.com/spreadsheets/d/' + p.id + '/edit';
+})();
+run(DONO, 'executarAcao', ctx, 'salvarFonteAprendiz', { link: LINK_APZ });
 e.telas.forEach((t) => run(DONO, 'carregarTela', ctx, t.id, {}));      // caches quentes, como no dia a dia
 // um primeiro acesso em andamento (codigo guardado no cache)
 run(ATACANTE, 'entrar', DONO.replace('dono', 'outro'), '1111', '', '', '');
 
 // "usuario" montado no console, com todas as capacidades — so a porta pode barrar.
-const FALSO = { email: ATACANTE, perfil: 'ADMIN', permissoes: { escopo: 'TODOS', telas: ['limpeza', 'acoes', 'estoque'],
-  podes: ['GERIR_LIMPEZA', 'GERIR_ACOES', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'] } };
+const FALSO = { email: ATACANTE, perfil: 'ADMIN', permissoes: { escopo: 'TODOS', telas: ['limpeza', 'acoes', 'estoque', 'aprendiz'],
+  podes: ['GERIR_LIMPEZA', 'GERIR_ACOES', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE', 'PROGRAMAR'] } };
+const apz = JSON.parse(run(DONO, 'carregarTela', ctx, 'aprendiz', {}).valor).dados;
+ok(apz && apz.lista && apz.lista.length === 5, 'preparo: Jovem Aprendiz ligado e com o cache quente (' + (apz && apz.lista ? apz.lista.length : 0) + ' aprendizes)');
 console.log('Chamadas diretas de uma conta sem cadastro (' + PASTA + '):');
 const bloqueadas = [
   ['prop', 'SEGREDO_PIN'], ['comCache', 'acessos'], ['comCache', 'pincod_email_dono_bartofil_com_br'],
@@ -45,7 +60,10 @@ const bloqueadas = [
   ['acaoFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['acaoFotoAcaoLimpeza', FALSO, { id: 'x', arquivo: 'y' }],
   ['acaoSalvarItemLimpeza', FALSO, { nome: 'x' }], ['acaoMovimentarLimpeza', FALSO, { tipo: 'ENTRADA', item: 'LP-0001', quantidade: 1 }],
   ['acaoSalvarAcaoLimpeza', FALSO, { acao: 'x', prazo: '2026-12-01', turno: 'A', responsavel: 'x' }],
-  ['acaoRemoverFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['removerAnexo', FALSO, 'ACOES', 'x', 'y']
+  ['acaoRemoverFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['removerAnexo', FALSO, 'ACOES', 'x', 'y'],
+  // 4.2.2: Jovem Aprendiz — avaliacoes dos aprendizes e a troca da planilha
+  ['dadosAprendiz', FALSO], ['acaoSalvarFonteAprendiz', FALSO, { link: LINK_APZ }], ['acaoAtualizarAprendiz', FALSO],
+  ['lerPlanilhaAprendiz_', LINK_APZ.split('/')[5]], ['idPlanilhaAprendiz_']
 ];
 bloqueadas.forEach(([fn, ...a]) => {
   const r = run(ATACANTE, fn, ...a);

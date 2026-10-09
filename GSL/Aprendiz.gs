@@ -32,7 +32,7 @@
  * autorizar o sistema de novo, e ate la o GSL inteiro ficaria parado.
  */
 
-const BUILD_APRENDIZ = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_APRENDIZ = '2026.10.09b';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const APZ_CONFIG = {
   ABA_RESPOSTAS: 'Respostas ao formulário 1',
@@ -181,7 +181,7 @@ function apzIso_(v, tz) {
   const s = String(v == null ? '' : v).trim();
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
-  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const br = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/);
   if (br) return (br[3].length === 2 ? '20' + br[3] : br[3]) + '-' + ('0' + br[2]).slice(-2) + '-' + ('0' + br[1]).slice(-2);
   return '';
 }
@@ -203,10 +203,18 @@ function apzFerias_(celula) {
   return apzAno4_(s.replace(/periodo de ferias:\s*/i, '').replace(/período de férias:\s*/i, '').trim());
 }
 
-/* "dd/mm/aaaa" -> "aaaa-mm-dd" para ordenar ('' se nao for data). */
+/*
+ * Data do texto -> "aaaa-mm-dd" para ordenar ('' se nao tiver data).
+ * Aceita 10/01/2028, 10/01/28, 10-01-2028, 10.01.2028 e 2028-01-10:
+ * contrato digitado de outro jeito nao pode cair no fim da lista.
+ */
 function apzIsoDoTexto_(texto) {
-  const m = String(texto || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  return m ? m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2) : '';
+  const s = String(texto || '');
+  const iso = s.match(/(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/);
+  if (iso) return iso[1] + '-' + ('0' + iso[2]).slice(-2) + '-' + ('0' + iso[3]).slice(-2);
+  const m = s.match(/(?<!\d)(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})(?!\d)/);
+  if (!m) return '';
+  return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
 }
 
 function apzUm_(n) { return Number((Number(n) || 0).toFixed(1)); }
@@ -319,9 +327,16 @@ function painelDoAprendiz_(item, bloco, linhas, tz) {
       aprendizado: Number(row[C.APRENDIZADO]) || 0
     };
     Object.keys(soma).forEach(function (x) { soma[x] += notas[x]; });
-    // "Media por setor" (coluna M). Linha nova do Formulario sem a formula: a media das cinco notas.
+    // "Media por setor" (coluna M, formula =MEDIA(F:J)). O Formulario acrescenta a linha nova SEM a
+    // formula; o portal antigo mostrava 0 ate alguem puxar a formula. Aqui faz a mesma conta dela.
     let media = row[C.MEDIA] !== undefined && row[C.MEDIA] !== '' && row[C.MEDIA] !== null ? Number(row[C.MEDIA]) : NaN;
-    if (isNaN(media)) media = (notas.atencao + notas.disciplina + notas.interesse + notas.proatividade + notas.aprendizado) / 5;
+    if (isNaN(media)) {
+      const validas = [C.ATENCAO, C.DISCIPLINA, C.INTERESSE, C.PROATIVIDADE, C.APRENDIZADO]
+        .map(function (c) { return row[c]; })
+        .filter(function (v) { return v !== '' && v !== null && v !== undefined && !isNaN(Number(v)); })
+        .map(Number);
+      media = validas.length ? validas.reduce(function (a, b) { return a + b; }, 0) / validas.length : 0;
+    }
     let data = '-';
     if (row[C.DATA] && typeof row[C.DATA].getTime === 'function') data = Utilities.formatDate(row[C.DATA], tz, 'dd/MM/yyyy');
     else if (row[C.DATA]) data = String(row[C.DATA]).split(' ')[0];
@@ -331,7 +346,8 @@ function painelDoAprendiz_(item, bloco, linhas, tz) {
     };
     avaliacoes.push({
       setor: row[C.SETOR] ? String(row[C.SETOR]).trim() : 'Setor ' + (n + 1),
-      chaveSetor: apzSetor_(row[C.SETOR] ? String(row[C.SETOR]) : ''),
+      // Setor em branco: a chave e o proprio rotulo ("Setor 2" -> "2"), como no portal — cada um conta.
+      chaveSetor: apzSetor_(row[C.SETOR] ? String(row[C.SETOR]).trim() : 'Setor ' + (n + 1)),
       avaliador: row[C.AVALIADOR] ? String(row[C.AVALIADOR]).trim() : 'N/A',
       data: data,
       mediaSetor: apzUm_(media),
@@ -347,18 +363,24 @@ function painelDoAprendiz_(item, bloco, linhas, tz) {
   const medias = [m('atencao'), m('interesse'), m('proatividade'), m('aprendizado'), m('disciplina')];
   const mediaGeral = total ? medias.reduce(function (s, x) { return s + x; }, 0) / 5 : 0;
 
-  // Media de cada setor (os dois turnos juntos) e o status no cronograma.
-  const porSetor = {};
-  avaliacoes.forEach(function (a) {
-    const p = porSetor[a.chaveSetor] = porSetor[a.chaveSetor] || { soma: 0, qtd: 0 };
-    p.soma += Number(a.mediaSetor) || 0; p.qtd++;
+  // Media de cada setor (os dois turnos juntos) e o status no cronograma. Como no portal: da avaliacao
+  // mais recente para a mais antiga, guardando a ordem em que cada setor apareceu (a soma nessa ordem
+  // da o mesmo arredondamento, e quem nao esta no cronograma ve os setores nessa ordem).
+  const porSetor = {}, ordemSetores = [];
+  avaliacoes.slice().reverse().forEach(function (a) {
+    if (!Object.prototype.hasOwnProperty.call(porSetor, a.chaveSetor)) {
+      porSetor[a.chaveSetor] = { soma: 0, qtd: 0 };
+      ordemSetores.push(a.chaveSetor);
+    }
+    porSetor[a.chaveSetor].soma += Number(a.mediaSetor) || 0;
+    porSetor[a.chaveSetor].qtd++;
   });
-  const vivenciados = Object.keys(porSetor).length;
-  const setoresDaLinha = cronogramaSetores.length ? cronogramaSetores : Object.keys(porSetor);
+  const vivenciados = ordemSetores.length;
+  const setoresDaLinha = cronogramaSetores.length ? cronogramaSetores : ordemSetores;
   let achouAtual = false;
   const linhaDoTempo = setoresDaLinha.map(function (nome) {
     const k = apzSetor_(nome);
-    if (porSetor[k]) return { setor: nome, status: 'concluido', media: apzUm_(porSetor[k].soma / porSetor[k].qtd) };
+    if (Object.prototype.hasOwnProperty.call(porSetor, k)) return { setor: nome, status: 'concluido', media: apzUm_(porSetor[k].soma / porSetor[k].qtd) };
     if (!achouAtual) { achouAtual = true; return { setor: nome, status: 'fazendo', media: null }; }
     return { setor: nome, status: 'pendente', media: null };
   });

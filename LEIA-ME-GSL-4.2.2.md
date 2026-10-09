@@ -48,7 +48,9 @@ O "Portal RH Aprendiz" virou um módulo do GSL: card **Jovem Aprendiz** no menu,
 **O que mudou por ter entrado no GSL:**
 - O cronograma geral agora é lido da aba **Cronograma** da planilha. No programa antigo ele estava escrito à mão dentro da página. Mudou na planilha, muda na tela.
 - Ano com 2 dígitos (15/03/27) aparece com 4 (15/03/2027).
-- Os gráficos são desenhados pelo próprio GSL, sem a biblioteca Chart.js da internet. Os números são os mesmos.
+- Os gráficos são desenhados pelo próprio GSL, sem a biblioteca Chart.js da internet. Os números são os mesmos; o gráfico de competências usa uma cor só.
+- **Avaliação nova sem a fórmula da média.** O Formulário acrescenta a linha nova sem a fórmula da coluna M ("Média por setor"). O portal antigo mostrava **0** até alguém puxar a fórmula para baixo; o GSL já faz a mesma conta da fórmula (a média das notas).
+- Linha em branco dentro de "Pontos positivos" ou "Pontos a melhorar" não vira um tópico vazio.
 
 **Ligar a planilha (uma vez em cada filial):** abra o módulo. Sem planilha, a tela mostra o campo para colar o link da **Imersão Corporativa (respostas)** e o botão **Ligar planilha**. Depois, o botão **Trocar planilha** fica no alto da tela. O link também aparece em **Configuração › Sistema › Outros parâmetros** (`APRENDIZ_PLANILHA`). A planilha precisa estar compartilhada (leitura basta) com a conta dona do GSL, a que publicou o sistema. A leitura fica guardada por 5 minutos; **Atualizar dados** lê de novo na hora.
 
@@ -72,7 +74,7 @@ O "Portal RH Aprendiz" virou um módulo do GSL: card **Jovem Aprendiz** no menu,
 | A ligação da tela no sistema | `GSL/App.html` (`TELAS_PINTA`, `ICONES`) e `GSL/Index.html` (`include('Aprendiz')`) |
 | Testes | `testes/paineis.js`, `testes/seguranca.js` e `testes/e2e.js` (casos "jovem aprendiz"); planilha de teste com nomes inventados em `testes/dados-aprendiz.js` |
 
-**Arquivos desta entrega:** `Aprendiz.gs` e `Aprendiz.html` (novos), `Codigo.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`, `App.html` e `Index.html`. Para criar os novos no Apps Script: **+ › Script** com o nome `Aprendiz` e **+ › HTML** com o nome `Aprendiz`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão).
+**Arquivos desta entrega:** `Aprendiz.gs` e `Aprendiz.html` (novos), `Codigo.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`, `App.html` e `Index.html`. Para criar os novos no Apps Script: **+ › Script** com o nome `Aprendiz` e **+ › HTML** com o nome `Aprendiz`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo (deste pacote ou do pacote da Limpeza), a faixa amarela no topo diz qual.
 
 ## Pedido de 09/10 (Limpeza: estoque igual ao do TI, Plano de Ação igual ao do Calendário, fotos)
 
@@ -235,7 +237,7 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz (36 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz (38 casos)
 node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz (40 cenários)
 ```
 

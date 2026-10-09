@@ -344,16 +344,29 @@ caso('fotos: tipo errado, grande demais e mais de 5 de uma vez sao recusados; fa
   afirmar(novas.length === 2 && novas.every((x) => x.lixo), 'fotos na lixeira: ' + JSON.stringify(novas.map((x) => [x.nome, x.lixo])));
 });
 
-caso('versao: os arquivos desta entrega trazem o mesmo carimbo (nada "fora da versao")', () => {
+caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esquecido ou da entrega anterior aparece na faixa', () => {
   const c = ctx(new Mundo({ dono: DONO }));
   afirmar(c.arquivosForaDaVersao_().length === 0, 'fora da versao: ' + c.arquivosForaDaVersao_().join());
-  const fs = require('fs');
+  const fs = require('fs'), os = require('os');
   const ler = (n) => fs.readFileSync(path.join(PASTA, n), 'utf8');
   const build = ler('Codigo.gs').match(/build: '([^']+)'/)[1];
-  afirmar(ler('App.html').match(/BUILD_APP = '([^']+)'/)[1] === build && ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === build, 'telas no carimbo ' + build);
+  const app = ler('App.html');
+  afirmar(app.match(/BUILD_APP = '([^']+)'/)[1] === build, 'App.html no carimbo ' + build);
+  afirmar(ler('Aprendiz.html').match(/BUILD_APRENDIZ_TELA = '([^']+)'/)[1] === build, 'Aprendiz.html no carimbo ' + build);
+  const esperaPaineis = app.match(/BUILD_PAINEIS !== '([^']+)'/)[1];
+  afirmar(ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === esperaPaineis, 'Paineis.html no carimbo que o App.html espera (' + esperaPaineis + ')');
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const r = JSON.parse(chamar(m, DONO, 'retomarSessao', { t: s.t, f: s.f }).valor);
   afirmar(r.app && r.app.build === build && Array.isArray(r.app.foraDaVersao) && !r.app.foraDaVersao.length, 'sessao: ' + JSON.stringify(r.app));
+  // implantacao pela metade: Filiais.gs da entrega anterior (carimbo velho) e Aprendiz.gs esquecido
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-versao-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.writeFileSync(path.join(tmp, 'Filiais.gs'), ler('Filiais.gs').replace(/BUILD_FILIAIS = '[^']+'/, "BUILD_FILIAIS = '2026.10.09'"));
+    fs.unlinkSync(path.join(tmp, 'Aprendiz.gs'));
+    const fora = novaExecucao(new Mundo({ dono: DONO }), tmp, { contaGoogle: DONO }, OP).arquivosForaDaVersao_();
+    afirmar(fora.join() === 'Filiais.gs,Aprendiz.gs', 'a faixa diz quais faltam: ' + fora.join());
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 /* ------------------------------------------------------------------ */
@@ -734,6 +747,7 @@ caso('jovem aprendiz: le a planilha e monta o relatorio igual ao portal (status,
   afirmar(JSON.stringify(bruno.avaliacoes[0].pontosPositivos) === JSON.stringify(['Sem registros.']), 'sem texto: Sem registros.');
   const elias = d.paineis[d.lista.find((x) => x.nomeOriginal === 'ELIAS FORA DO CRONOGRAMA').chave];
   afirmar(elias.fimContrato === 'Não informado' && elias.totais === 2 && elias.linhaDoTempo.every((x) => x.status === 'concluido'), 'so nas respostas: ' + JSON.stringify(elias.linhaDoTempo));
+  afirmar(elias.linhaDoTempo.map((x) => x.setor).join() === 'INVENTARIO,LOJA', 'fora do cronograma: setores da avaliacao mais recente para a mais antiga, como no portal: ' + elias.linhaDoTempo.map((x) => x.setor).join());
   afirmar(d.fonte && d.fonte.nome === 'Imersão Corporativa (respostas)' && d.fonte.abaRespostas === 'Respostas ao formulário 1', 'fonte: ' + JSON.stringify(d.fonte));
 });
 
@@ -748,6 +762,56 @@ caso('jovem aprendiz: cronograma geral vem da aba Cronograma, em ordem de fim de
   const andamento = bruno.cronograma.filter((x) => hoje >= x.inicio && hoje <= x.final).map((x) => x.setor);
   afirmar(andamento.join() === 'Inventario', 'setor em andamento hoje: ' + andamento.join());
   afirmar(d.cronograma[3].final_contrato === '' && d.cronograma[3].cronograma.length === 2, 'sem contrato vai para o fim: ' + JSON.stringify(d.cronograma[3]));
+});
+
+caso('jovem aprendiz: setor em branco conta como setor proprio; media do setor somada como no portal; contrato com traco ou ponto entra na ordem', () => {
+  const m = mundo(); const c = ctx(m); const D = m.DataDoScript;
+  const cab = ['Carimbo', 'Email', 'AVALIADOR', 'SETOR', 'NOME', 'AT', 'DI', 'IN', 'PR', 'AP', 'POS', 'MEL', 'MEDIA'];
+  const lin = (dia, setor, nome, media, notas) => [new D(2026, 8, dia, 9, 0, 0), 'a@b', 'Avaliador', setor, nome].concat(notas || [3, 3, 3, 3, 3], ['ok', 'ok', media]);
+  const resp = [cab,
+    lin(1, 'LOJA', 'Pessoa Um', 3), lin(2, '', 'Pessoa Um', 4), lin(3, '', 'Pessoa Um', 5),
+    // quatro avaliacoes do mesmo setor: a soma na ordem do portal (mais recente primeiro) arredonda para 1.4
+    lin(4, 'RECEBIMENTO - A', 'Pessoa Dois', 1), lin(5, 'RECEBIMENTO - B', 'Pessoa Dois', 1),
+    lin(6, 'RECEBIMENTO - A', 'Pessoa Dois', 1.2), lin(7, 'RECEBIMENTO - B', 'Pessoa Dois', 2.6),
+    // linha nova do Formulario sem a formula da media e com uma nota em branco: a conta do =MEDIA(F:J)
+    lin(8, 'LOJA', 'Pessoa Tres', '', [4, '', 5, 3, 4])];
+  const crono = [['Nome', 'Setor', 'Inicio', 'Final', '', 'Nome', 'Setor', 'Inicio', 'Final', '']];
+  const bloco = (nome, contrato) => { const b = Array.from({ length: 8 }, () => ['', '', '', '', '', '', '', '', '', '']); b[0][0] = nome; b[1][0] = contrato; b[0][1] = 'Loja'; return b; };
+  crono.push(...bloco('Contrato Traco', 'Final de contrato: 03-11-2026'), ...bloco('Contrato Barra', 'Final de contrato: 10/01/2027'),
+             ...bloco('Contrato Ponto', 'Final de contrato: 30.10.26'), ...bloco('Sem Contrato', ''));
+  const d = JSON.parse(JSON.stringify(c.montarAprendiz_(resp, crono, 'America/Bahia')));
+  const um = d.paineis[d.lista.find((x) => x.nomeOriginal === 'Pessoa Um').chave];
+  afirmar(um.vivenciados === 3 && um.linhaDoTempo.map((x) => x.setor).join() === '3,2,LOJA', 'setor em branco: ' + um.vivenciados + ' ' + um.linhaDoTempo.map((x) => x.setor).join());
+  const dois = d.paineis[d.lista.find((x) => x.nomeOriginal === 'Pessoa Dois').chave];
+  afirmar(dois.linhaDoTempo[0].media === 1.4, 'media do Recebimento (1 + 1 + 1.2 + 2.6, da mais recente): ' + dois.linhaDoTempo[0].media);
+  const tres = d.paineis[d.lista.find((x) => x.nomeOriginal === 'Pessoa Tres').chave];
+  afirmar(tres.avaliacoes[0].mediaSetor === 4, 'sem a formula: media das notas preenchidas (4, 5, 3, 4): ' + tres.avaliacoes[0].mediaSetor);
+  afirmar(d.cronograma.map((x) => x.nome).join() === 'Contrato Ponto,Contrato Traco,Contrato Barra,Sem Contrato', 'ordem: ' + d.cronograma.map((x) => x.nome + ' ' + x.final_contrato).join(' | '));
+});
+
+caso('jovem aprendiz: "Atualizar dados" da barra lateral rele a planilha; parametro repetido vale o que tem valor; versao 8.10 vem depois da 8.9', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = ligarAprendiz(m, s);
+  let d = tela(m, s, 'aprendiz');
+  afirmar(d.lista.find((x) => x.nomeOriginal === 'CAIO DIAS TESTE').status === 'Não realizada', 'antes da avaliacao nova');
+  // chega uma resposta do Formulario para o Caio (a copia do servidor e de 5 minutos)
+  const aba = m.planilhas.get(link.split('/')[5]).abas.find((a) => a.nome === 'Respostas ao formulário 1');
+  const D = m.DataDoScript, h = new Date();
+  aba.dados.splice(14, 0, [new D(h.getFullYear(), h.getMonth(), h.getDate(), 8, 0, 0), 'x@bartofil.com.br', 'Avaliador Onze', 'DEVOLUÇÃO', 'CAIO DIAS TESTE', 4, 4, 4, 4, 4, 'Bom', 'Nada', 4]);
+  d = tela(m, s, 'aprendiz');
+  afirmar(d.lista.find((x) => x.nomeOriginal === 'CAIO DIAS TESTE').status === 'Não realizada', 'dentro dos 5 minutos: a copia guardada');
+  acao(m, s, 'atualizarDados', {});
+  d = tela(m, s, 'aprendiz');
+  afirmar(d.lista.find((x) => x.nomeOriginal === 'CAIO DIAS TESTE').status === 'Pendente', 'depois do "Atualizar dados" da barra lateral: ' + d.lista.map((x) => x.nomeOriginal + ' ' + x.status).join(' | '));
+  // duas aberturas juntas criaram a chave duas vezes: vale a linha que tem o link
+  const c = ctx(m);
+  const linhas = c.listar('PARAMETROS').filter((p) => p.CHAVE === 'APRENDIZ_PLANILHA');
+  c.atualizar('PARAMETROS', linhas[0].ID, { VALOR: '' }, DONO);
+  c.inserir('PARAMETROS', { CHAVE: 'APRENDIZ_PLANILHA', VALOR: link, DESCRICAO: 'repetida' }, DONO);
+  m.cache.clear();
+  afirmar(ctx(m).idPlanilhaAprendiz_() === link.split('/')[5], 'parametro repetido: vale o que tem valor');
+  const v = ctx(m).numeroDaVersao_;
+  afirmar(v('8.10') > v('8.9') && v('8.9') > v('8.1') && v('8.1') > v('8.0') && v('8.0') > v('7.9') && v('') === 0, 'versoes parte por parte');
 });
 
 caso('jovem aprendiz: modulo no menu — gerente ve, coordenador so com o modulo liberado; link errado e recusado; so quem configura liga', () => {

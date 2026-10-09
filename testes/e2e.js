@@ -832,7 +832,10 @@ async function rodar() {
     await f.selectOption('#apz-sel', { index: 1 });
     await f.waitForSelector('[data-kpi="media"]', { timeout: 10000 });
     const kpi = await f.evaluate(() => [document.querySelector('[data-kpi="media"]').textContent, document.querySelector('[data-kpi="setores"]').textContent]);
-    afirmar(kpi[0] === '3,7 / 5' && kpi[1] === '8 / 8', 'KPIs: ' + kpi.join(' | '));
+    afirmar(kpi[0] === '3.7 / 5' && kpi[1] === '8 / 8', 'KPIs (numero como no portal: 3.7): ' + kpi.join(' | '));
+    const cores = await f.evaluate(() => Array.from(document.querySelectorAll('#apz-sel option')).slice(1).map((o) => o.className + ':' + getComputedStyle(o).color));
+    afirmar(/apz-opt-concluido:rgb\(25, 135, 84\)/.test(cores[0]) && /apz-opt-pendente:rgb\(13, 110, 253\)/.test(cores[1]) && /apz-opt-nao:rgb\(108, 117, 125\)/.test(cores[4]),
+      'cor de cada aprendiz na lista, como no portal: ' + cores.join(' | '));
     const pilulas = await f.evaluate(() => document.querySelector('.apz-pilulas').innerText.replace(/\s+/g, ' '));
     afirmar(/15\/03\/2027/.test(pilulas) && /01\/12\/2026 a 30\/12\/2026/.test(pilulas), 'contrato e ferias: ' + pilulas);
     const etapas = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-etapa')).map((e) => e.className.replace('apz-etapa', '').trim()));
@@ -845,6 +848,16 @@ async function rodar() {
     afirmar(await notas() === '5 5 4 5 4', 'notas da avaliacao mais recente (LOJA), na ordem atencao/interesse/proatividade/aprendizado/disciplina: ' + await notas());
     await f.selectOption('#apz-sel-setor', '1');
     afirmar(await notas() === '4 4 4 4 4', 'notas do FLOWRACK - B: ' + await notas());
+    // chega uma avaliacao nova da Ana (vira a primeira da lista): o detalhamento continua no FLOWRACK - B
+    const abaResp = pl.abas.find((a) => a.nome === 'Respostas ao formulário 1');
+    const hj = new Date();
+    abaResp.dados.splice(14, 0, [new s.mundo.DataDoScript(hj.getFullYear(), hj.getMonth(), hj.getDate(), 8, 0, 0), 'x@bartofil.com.br', 'Avaliador Onze',
+      'LOJA', 'ANA BEATRIZ TESTE', 2, 2, 2, 2, 2, 'Nova', 'Nova', 2]);
+    await f.click('#acoes-topo button:has-text("Atualizar dados")');
+    await f.waitForFunction(() => DADOS && DADOS.paineis && Object.values(DADOS.paineis).some((p) => p.avaliacoes.length === 10), null, { timeout: 15000 });
+    await f.waitForSelector('#apz-sel-setor', { timeout: 10000 });
+    const escolhida = await f.evaluate(() => { const s = document.getElementById('apz-sel-setor'); return s.options[s.selectedIndex].textContent; });
+    afirmar(/^FLOWRACK - B/.test(escolhida) && await notas() === '4 4 4 4 4', 'a avaliacao escolhida continua a mesma: ' + escolhida + ' / ' + await notas());
     // Bruno: um setor feito, um em andamento, um pendente
     const bruno = await f.evaluate(() => DADOS.lista.find((x) => x.nomeOriginal === 'BRUNO CARLOS TESTE').chave);
     await f.selectOption('#apz-sel', bruno);
@@ -877,9 +890,16 @@ async function rodar() {
       await aba.page.screenshot({ path: process.env.FOTO_APRENDIZ + '-cronograma-celular.png' });
       await aba.page.setViewportSize({ width: 1280, height: 720 });
     }
-    await f.fill('#apz-busca', 'daniela');
+    await f.click('#apz-busca');
+    await aba.page.keyboard.type('dan');
+    // a revalidacao de fundo trouxe dado novo e redesenhou a tela no meio da digitacao: foco e cursor continuam
+    await f.evaluate(() => pintar('aprendiz', { ok: true, dados: JSON.parse(JSON.stringify(DADOS)) }, true));
+    await aba.page.keyboard.type('iela');
+    afirmar(await f.evaluate(() => document.activeElement && document.activeElement.id === 'apz-busca' && document.activeElement.value === 'daniela'),
+      'busca continua com o foco e o texto inteiro depois da repintura: ' + await f.evaluate(() => (document.activeElement || {}).id + ' ' + (el('apz-busca') || {}).value));
     afirmar(await f.evaluate(() => document.querySelectorAll('.apz-crono-cartao').length) === 1, 'busca sem acento/maiuscula acha a Daniela');
-    afirmar(await f.evaluate(() => document.activeElement && document.activeElement.id === 'apz-busca'), 'a caixa de busca continua com o foco');
+    afirmar(await f.evaluate(() => mesmaResposta({ ok: true, dados: { a: 1, atualizado: 'x' } }, { ok: true, dados: { a: 1, atualizado: 'y' } }) &&
+      !mesmaResposta({ ok: true, dados: { a: 1, atualizado: 'x' } }, { ok: true, dados: { a: 2, atualizado: 'x' } })), 'so a hora da leitura mudou: nao redesenha');
     await f.fill('#apz-busca', 'ninguem');
     afirmar(/Nenhum jovem encontrado/.test(await texto(aba, 'apz-crono-grade')), 'busca sem resultado');
     // atualizar dados le de novo e continua na mesma aba
@@ -887,6 +907,18 @@ async function rodar() {
     await f.waitForFunction(() => !document.querySelector('#acoes-topo button[disabled]'), null, { timeout: 15000 });
     await f.waitForSelector('#apz-crono-grade', { timeout: 15000 });
     afirmar(await f.evaluate(() => APZ.aba) === 'cronograma', 'continua no cronograma depois de atualizar');
+    // celular estreito com 16 avaliacoes: o numero em cima da coluna so aparece quando cabe; rotulos raleados
+    const estreito = await f.evaluate(() => {
+      const itens = Array.from({ length: 16 }, (_, i) => ({ rotulo: 'CARREGAMENTO - A', valor: 3.6 }));
+      const svg = new DOMParser().parseFromString(apzGraficoColunas(itens, 278), 'image/svg+xml');
+      return [svg.querySelectorAll('text[font-weight="600"]').length, svg.querySelectorAll('text[transform]').length];
+    });
+    afirmar(estreito[0] === 0 && estreito[1] === 8, 'grafico em tela estreita (valores, rotulos): ' + estreito.join());
+    // Sair: nada do portal fica na pagina para a proxima pessoa do computador compartilhado
+    await f.evaluate(() => sair());
+    await esperarTela(aba, ['entrar']);
+    const resto = await f.evaluate(() => [DADOS === null, document.getElementById('pagina').innerHTML === '', APZ.chave === '' && APZ.busca === '' && APZ.aba === 'relatorio']);
+    afirmar(resto.every(Boolean), 'depois de sair (dados, tela, escolhas): ' + resto.join());
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

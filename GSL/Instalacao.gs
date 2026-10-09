@@ -5,7 +5,7 @@
  * mesmos status, mesmo ciclo de entrega e validacao.
  */
 
-const BUILD_INSTALACAO = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_INSTALACAO = '2026.10.09b';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COLUNAS_CONTROLE = ['ID', 'CRIADO_EM', 'CRIADO_POR', 'ATUALIZADO_EM', 'ATUALIZADO_POR', 'EXCLUIDO'];
 
 const ESQUEMA = {
@@ -291,7 +291,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.9';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz
+const VERSAO_ESQUEMA = '8.9';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz (a proxima e 8.10: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -346,23 +346,29 @@ function garantirEsquema() {
   // se voce tirar depois, esta migracao nao roda de novo).
   // So na atualizacao que CHEGA a 8.1 (quando o painel nasceu): nas seguintes,
   // "Nao usar nesta filial" escolhido pelo administrador fica como esta.
-  const versaoAntes = Number(prop(chaveVersao, '') || 0);
-  if (principal && versaoAntes < 8.1 && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
+  const versaoAntes = numeroDaVersao_(prop(chaveVersao, ''));
+  if (principal && versaoAntes < numeroDaVersao_('8.1') && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
   // 8.9: o Jovem Aprendiz entra ligado na principal (uma vez; depois vale o que o administrador escolher).
-  if (principal && versaoAntes < 8.9 && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
+  if (principal && versaoAntes < numeroDaVersao_('8.9') && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
   (function () {
-    const existentes = {};
-    listar('PARAMETROS').forEach(function (p) { existentes[String(p.CHAVE).toUpperCase()] = true; });
-    const faltantes = PARAMETROS_NOVOS
-      .filter(function (p) { return !existentes[p[0]]; })
-      .map(function (p) { return { CHAVE: p[0], VALOR: p[2] || '', DESCRICAO: p[1] }; });
-    if (faltantes.length) {
-      inserirVarios('PARAMETROS', faltantes, 'sistema');   // era um inserir por chave
-      mexeu = true;
-    }
+    const faltando = function () {
+      const existentes = {};
+      listar('PARAMETROS').forEach(function (p) { existentes[String(p.CHAVE).toUpperCase().trim()] = true; });
+      return PARAMETROS_NOVOS.filter(function (p) { return !existentes[p[0]]; });
+    };
+    if (!faltando().length) return;
+    // Duas aberturas juntas logo depois da atualizacao: confere de novo DENTRO da trava, senao as
+    // duas criam a mesma chave (e o campo repetido na Configuracao nao vale nada).
+    comTrava(function () {
+      const faltantes = faltando().map(function (p) { return { CHAVE: p[0], VALOR: p[2] || '', DESCRICAO: p[1] }; });
+      if (faltantes.length) {
+        inserirVarios('PARAMETROS', faltantes, 'sistema');   // era um inserir por chave
+        mexeu = true;
+      }
+    });
   })();
   if (!listar('SETORES').length) { semearSetores(); mexeu = true; }
   if (!listar('LP_ZONAS').length) { semearZonasLimpeza(); mexeu = true; }
@@ -872,10 +878,18 @@ function semearNobreaks() {
 
 /** Le um parametro da tabela PARAMETROS (nao das propriedades do script). */
 function parametro(chave, padrao) {
+  // Chave repetida (banco antigo, duas aberturas juntas): vale a primeira que tem valor.
   const achado = listar('PARAMETROS').filter(function (p) {
-    return String(p.CHAVE || '').toUpperCase().trim() === String(chave).toUpperCase();
+    return String(p.CHAVE || '').toUpperCase().trim() === String(chave).toUpperCase() &&
+      p.VALOR !== undefined && p.VALOR !== null && String(p.VALOR) !== '';
   })[0];
-  return achado && String(achado.VALOR) !== '' ? achado.VALOR : padrao;
+  return achado ? achado.VALOR : padrao;
+}
+
+/* "8.9" -> 8009 e "8.10" -> 8010: a versao do esquema comparada parte por parte (8.10 vem depois de 8.9). */
+function numeroDaVersao_(v) {
+  const partes = String(v || '0').split('.');
+  return (parseInt(partes[0], 10) || 0) * 1000 + (parseInt(partes[1], 10) || 0);
 }
 
 /*

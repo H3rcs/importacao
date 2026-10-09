@@ -382,10 +382,21 @@ async function entrarNoSistema(ev) {
   return false;
 }
 
+/*
+ * O que a pessoa estava vendo sai da pagina junto com ela (computador
+ * compartilhado do CD): os dados da tela, a tela desenhada por baixo da
+ * entrada e as escolhas guardadas nos modulos (Jovem Aprendiz).
+ */
+function apagarTelaDaPessoa() {
+  DADOS = null;
+  const pg = el('pagina'); if (pg) pg.innerHTML = '';
+  if (typeof apzZerar === 'function') apzZerar();
+}
+
 /* Sessao vencida no meio do uso. */
 function sessaoTerminou() {
   if (!TOKEN && el('entrar') && !el('entrar').classList.contains('oculto')) return;
-  TOKEN = ''; gravarSessao(''); SESSAO = null;
+  TOKEN = ''; gravarSessao(''); SESSAO = null; apagarTelaDaPessoa();
   try { fecharJanela(); } catch (e) {}
   mostrarEntrada({ erroEntrada: 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.' });
 }
@@ -550,6 +561,8 @@ function montarSessao(r) {
     return mostrarFalha('O servidor não devolveu a sua sessão (usuário, telas e permissões). ' +
       'Recarregue a página; se continuar, use o botão Reportar erro.');
   }
+  const quemEra = SESSAO && SESSAO.usuario ? SESSAO.usuario.email : '';
+  if (quemEra !== r.usuario.email) apagarTelaDaPessoa();       // outra pessoa: nada da anterior fica
   SESSAO = r;
   if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
   FILIAL = (r.filial && r.filial.codigo) || '';
@@ -601,12 +614,13 @@ function montarSessao(r) {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.10.09';
+const BUILD_APP = '2026.10.09b';
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
   if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
-  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== BUILD_APP) faltam.push('Paineis.html');
+  // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
+  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.09') faltam.push('Paineis.html');
   if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== BUILD_APP) faltam.push('Aprendiz.html (e a linha dele no Index.html)');
   let faixa = el('aviso-versao');
   if (!faltam.length) { if (faixa) faixa.remove(); return; }
@@ -741,7 +755,7 @@ async function pararSimulacao() {
  */
 function sair() {
   const t = TOKEN;
-  TOKEN = ''; gravarSessao(''); SESSAO = null; esquecerTelas();
+  TOKEN = ''; gravarSessao(''); SESSAO = null; esquecerTelas(); apagarTelaDaPessoa();
   // Canal barrado: o sairDoSistema pelo google.script.run tambem seria
   // barrado e a sessao continuaria valida no servidor. Sair e um clique,
   // entao a pagina pode navegar: a saida vai por POST.
@@ -1047,8 +1061,22 @@ async function revalidar(idTela, params, chave) {
     CACHE_TELAS[chave] = { resposta: r, quando: Date.now() };
     // Se o usuario ja saiu desta tela, atualiza so o cache.
     if (paginaAtual !== idTela || chaveTela(paginaAtual, paramsAtual) !== chave) return;
-    if (!antes || JSON.stringify(antes.resposta) !== JSON.stringify(r)) pintar(idTela, r, true);
+    if (!antes || !mesmaResposta(antes.resposta, r)) pintar(idTela, r, true);
   } catch (e) { /* revalidacao e silenciosa: a tela em uso continua valida */ }
+}
+
+/*
+ * A hora da leitura das planilhas de fora (dados.atualizado, no Quadro e no
+ * Jovem Aprendiz) muda a cada releitura sem o conteudo mudar. So ela nao e
+ * motivo para redesenhar a tela por baixo de quem esta digitando na busca.
+ */
+function mesmaResposta(a, b) {
+  const semHora = (r) => {
+    if (!r || !r.dados || typeof r.dados !== 'object' || !('atualizado' in r.dados)) return JSON.stringify(r);
+    const d = Object.assign({}, r.dados); delete d.atualizado;
+    return JSON.stringify(Object.assign({}, r, { dados: d }));
+  };
+  return semHora(a) === semHora(b);
 }
 
 /* Resolvido na hora do uso, nao na leitura do arquivo. Uma tela sem pintor

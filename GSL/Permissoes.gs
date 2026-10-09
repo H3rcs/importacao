@@ -22,7 +22,7 @@
  * as telas do modulo em que a pessoa entrou. Um modulo sem nenhuma tela
  * liberada simplesmente nao aparece.
  */
-const BUILD_PERMISSOES = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_PERMISSOES = '2026.10.09b';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const MODULOS = [
   { id: 'calendario',   nome: 'Calendário',

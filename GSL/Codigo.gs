@@ -19,25 +19,33 @@ const APP = {
    * mesmo carimbo (BUILD_<ARQUIVO>). Ao entrar, a tela confere: arquivo com
    * carimbo diferente (ou sem carimbo) = implantacao pela metade — um
    * arquivo colado no Apps Script e outro nao. Foi o que deu o "Ação
-   * desconhecida: comentarAcao". Entrega nova: troque o carimbo aqui e
-   * nos arquivos alterados, e acerte a lista em arquivosForaDaVersao_.
+   * desconhecida: comentarAcao". Entrega nova: troque o carimbo aqui, no
+   * BUILD_APP do App.html e nos arquivos alterados, e acerte a tabela de
+   * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
+   * mudou por ultimo).
    */
-  build: '2026.10.09'
+  build: '2026.10.09b'
 };
 
-/* Arquivos .gs desta entrega cujo carimbo nao bate com o do Codigo.gs. */
+/*
+ * Arquivos .gs com carimbo diferente do esperado (implantacao pela metade).
+ * Cada arquivo tem o carimbo da ultima entrega em que mudou:
+ *   2026.10.09  = Limpeza (estoque do TI, Plano de Acao, fotos)
+ *   2026.10.09b = Jovem Aprendiz
+ */
 function arquivosForaDaVersao_() {
+  const LIMPEZA = '2026.10.09';
   const carimbos = {
-    'Acoes.gs': typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES,
-    'Estoque.gs': typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE,
-    'Limpeza.gs': typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA,
-    'Instalacao.gs': typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO,
-    'Filiais.gs': typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS,
-    'Emails.gs': typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS,
-    'Aprendiz.gs': typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ,
-    'Permissoes.gs': typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES
+    'Acoes.gs':      [LIMPEZA,   typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Estoque.gs':    [LIMPEZA,   typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
+    'Limpeza.gs':    [LIMPEZA,   typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
+    'Emails.gs':     [LIMPEZA,   typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
+    'Instalacao.gs': [APP.build, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
+    'Filiais.gs':    [APP.build, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
+    'Aprendiz.gs':   [APP.build, typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
+    'Permissoes.gs': [APP.build, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES]
   };
-  return Object.keys(carimbos).filter(function (k) { return carimbos[k] !== APP.build; });
+  return Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
 }
 
 /*
@@ -747,6 +755,10 @@ function acaoAtualizarDados() {
   // COMPETENCIA de agosto e prazo em setembro; e aqui que ela se acerta.
   let corrigidas = 0;
   try { corrigidas = (corrigirCompetencias('atualizar dados') || {}).corrigidas || 0; } catch (e) {}
+  // As copias das planilhas de fora (Quadro do CD e Jovem Aprendiz) ficam 5 minutos guardadas e nao
+  // passam pelo limparCache: "Atualizar dados" tem que reler as da filial aberta tambem.
+  try { const q = idPlanilhaQuadro_(); if (q) CacheService.getScriptCache().remove(chaveNoEspaco('quadro|' + q)); } catch (e) {}
+  try { const a = idPlanilhaAprendiz_(); if (a) CacheService.getScriptCache().remove(chaveNoEspaco('aprendiz|' + a)); } catch (e) {}
   limparCache();
   return { ok: true, recado: corrigidas
     ? 'Dados atualizados — ' + corrigidas + ' atividade(s) tiveram o mês corrigido pela data do prazo.'

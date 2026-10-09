@@ -28,6 +28,10 @@
 .apz-topo h4 { margin: 0; font-size: 1.3rem; font-weight: 700; display: flex; align-items: center; gap: 10px; color: #fff; }
 .apz-topo select { min-width: 360px; max-width: 100%; width: auto; font-weight: 600; background: #fff; color: #212529; border: 0; }
 .apz-topo select.apz-escondido { visibility: hidden; }
+.apz-topo select option { background: #fff; }
+.apz-topo select option.apz-opt-concluido { color: #198754; font-weight: 600; }
+.apz-topo select option.apz-opt-pendente { color: #0d6efd; font-weight: 600; }
+.apz-topo select option.apz-opt-nao { color: #6c757d; font-weight: 400; }
 .apz-abas {
   display: flex; gap: 10px; padding: 0 1.5rem; background: var(--apz-aba);
   border-bottom: 2px solid var(--apz-aba-borda); border-radius: 0 0 14px 14px; flex-wrap: wrap;
@@ -147,18 +151,32 @@
    Relatorio e Avaliacoes / Cronograma Geral dos Setores. Os graficos sao
    do proprio GSL (SVG), sem biblioteca de fora.
    ===================================================================== */
-const BUILD_APRENDIZ_TELA = '2026.10.09';   /* carimbo da entrega (ver conferirVersao no App.html) */
-const APZ = { aba: 'relatorio', chave: '', avaliacao: 0, busca: '' };
+const BUILD_APRENDIZ_TELA = '2026.10.09b';   /* carimbo da entrega (ver conferirVersao no App.html) */
+const APZ = { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' };
+/* Saiu a pessoa (computador compartilhado): o portal volta ao comeco. Chamado pelo App.html. */
+function apzZerar() { Object.assign(APZ, { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' }); }
 const APZ_SELO = { 'Concluído': '\u{1F7E2}', 'Pendente': '\u{1F535}', 'Não realizada': '⚪' };
+const APZ_OPT = { 'Concluído': 'concluido', 'Pendente': 'pendente', 'Não realizada': 'nao' };
 const APZ_PILARES = ['Atenção', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
 const APZ_PILARES_LONGO = ['Atenção Concentrada', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
 
-/* 3 -> "3"; 3.4 -> "3,4" */
-const apzNum = (n) => (Number(n) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+/* 3 -> "3"; 3.4 -> "3.4" — como o portal mostrava (o numero ja vem com uma casa do servidor). */
+const apzNum = (n) => String(Number(n) || 0);
 const apzData = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
 
 function pintarAprendiz(r) {
   const d = r.dados;
+  // Repintura com a pessoa digitando na busca (chegou avaliacao nova): o foco e o cursor continuam la.
+  const ativo = document.activeElement;
+  const foco = ativo && ativo.id === 'apz-busca' ? [ativo.selectionStart, ativo.selectionEnd] : null;
+  apzPintarTela(d);
+  if (foco) {
+    const caixa = el('apz-busca');
+    if (caixa) { caixa.focus(); try { caixa.setSelectionRange(foco[0], foco[1]); } catch (e) {} }
+  }
+}
+
+function apzPintarTela(d) {
   el('acoes-topo').innerHTML = '';
   if (!d.configurado) {
     el('subtitulo-pagina').textContent = 'Imersão corporativa: avaliações por setor e cronograma de rotação';
@@ -184,7 +202,7 @@ function pintarAprendiz(r) {
       <h4><span aria-hidden="true">\u{1F393}</span>Bartofil | Portal RH Aprendiz</h4>
       <select id="apz-sel" class="${APZ.aba === 'cronograma' ? 'apz-escondido' : ''}" onchange="apzSelecionar(this.value)" aria-label="Jovem aprendiz">
         <option value="">Selecione um Jovem Aprendiz...</option>
-        ${(d.lista || []).map((x) => `<option value="${esc(x.chave)}" ${x.chave === APZ.chave ? 'selected' : ''}>${APZ_SELO[x.status] || ''} ${esc(x.nomeOriginal)} (${esc(x.status)})</option>`).join('')}
+        ${(d.lista || []).map((x) => `<option value="${esc(x.chave)}" class="apz-opt-${APZ_OPT[x.status] || 'nao'}" ${x.chave === APZ.chave ? 'selected' : ''}>${APZ_SELO[x.status] || ''} ${esc(x.nomeOriginal)} (${esc(x.status)})</option>`).join('')}
       </select>
     </div>
     <div class="apz-abas">
@@ -209,8 +227,17 @@ function apzAba(qual) {
 
 function apzSelecionar(chave) {
   APZ.chave = chave || '';
-  APZ.avaliacao = 0;
+  APZ.avaliacao = 0; APZ.avaliacaoId = '';
   apzDesenhar();
+}
+
+/* Identidade de uma avaliacao (setor, data e avaliador): avaliacao nova entra na frente e muda as posicoes. */
+const apzIdAvaliacao = (a) => a ? a.setor + '|' + a.data + '|' + a.avaliador : '';
+function apzEscolherAvaliacao(i) {
+  const p = ((DADOS && DADOS.paineis) || {})[APZ.chave];
+  APZ.avaliacao = Number(i) || 0;
+  APZ.avaliacaoId = p ? apzIdAvaliacao(p.avaliacoes[APZ.avaliacao]) : '';
+  apzPintarCompetencias();
 }
 
 function apzDesenhar() {
@@ -243,7 +270,10 @@ function apzRelatorio(d) {
           <div class="apz-etapa-nome">${esc(s.setor)}</div><div class="apz-etapa-nota">${t[1]}</div></div>`;
       }).join('')
     : '<p class="apz-sub" style="font-size:.85rem">Nenhum setor cadastrado no cronograma para este aprendiz.</p>';
-  if (APZ.avaliacao >= p.avaliacoes.length) APZ.avaliacao = 0;
+  // A avaliacao escolhida e procurada pela identidade; se saiu da planilha, volta para a mais recente.
+  const escolhida = APZ.avaliacaoId ? p.avaliacoes.findIndex((a) => apzIdAvaliacao(a) === APZ.avaliacaoId) : -1;
+  APZ.avaliacao = escolhida >= 0 ? escolhida : 0;
+  if (escolhida < 0) APZ.avaliacaoId = '';
 
   return `
     <div class="apz-cab">
@@ -275,7 +305,7 @@ function apzRelatorio(d) {
     </div>
     <div class="apz-card">
       <div class="apz-card-cab"><h5>\u{1F39A}️ Detalhamento de Competências por Setor Especial</h5>
-        ${p.avaliacoes.length ? `<select id="apz-sel-setor" onchange="APZ.avaliacao=Number(this.value);apzPintarCompetencias()" aria-label="Avaliação">
+        ${p.avaliacoes.length ? `<select id="apz-sel-setor" onchange="apzEscolherAvaliacao(this.value)" aria-label="Avaliação">
           ${p.avaliacoes.map((a, i) => `<option value="${i}" ${i === APZ.avaliacao ? 'selected' : ''}>${esc(a.setor)} (${esc(a.data)} - ${esc(a.avaliador)})</option>`).join('')}</select>`
           : '<select disabled><option>Sem setores avaliados</option></select>'}</div>
       <div id="apz-competencias"></div>
@@ -355,6 +385,10 @@ function apzGraficoColunas(itens, W) {
   const gira = Math.max.apply(null, larguras) > fatia - 6;
   const mB = gira ? Math.min(110, Math.ceil(Math.max.apply(null, larguras) * 0.71) + 20) : 28;
   const rotulos = itens.map((it) => gira ? apzCaber(it.rotulo, fonte, (mB - 20) / 0.71) : apzCaber(it.rotulo, fonte, fatia - 4));
+  // Muitas avaliacoes numa tela estreita: o numero em cima da coluna so quando cabe na fatia, e o
+  // rotulo inclinado de k em k (o nome inteiro continua no balao de cada coluna).
+  const mostraValor = Math.max.apply(null, itens.map((it) => apzMedir(apzNum(it.valor), fonte, 600))) + 2 <= fatia;
+  const passo = gira ? Math.max(1, Math.ceil((fonte + 2) / (fatia * 0.71))) : 1;
   const y = (v) => mT + (A - mT - mB) * (1 - Math.max(0, Math.min(5, v)) / 5);
   const base = A - mB + 15;
   return `<svg class="apz-grafico" width="${W}" height="${A}" viewBox="0 0 ${W} ${A}" role="img" aria-label="Média por setor concluído">
@@ -365,9 +399,9 @@ function apzGraficoColunas(itens, W) {
       return `<g><title>${esc(it.dica || it.rotulo)}: média ${apzNum(it.valor)}</title>
         <rect x="${cx - fatia / 2}" y="${mT}" width="${fatia}" height="${A - mT - mB}" fill="transparent"/>
         ${alt > 0 ? `<path d="${apzColuna(cx - barra / 2, topo, barra, alt)}" fill="var(--apz-serie)"/>` : ''}
-        <text x="${cx}" y="${topo - 6}" text-anchor="middle" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNum(it.valor)}</text>
-        <text x="${cx}" y="${base}" font-size="${fonte}" fill="var(--apz-tinta-media)" ${gira
-          ? `text-anchor="end" transform="rotate(-45 ${cx + 4} ${base - 4})"` : 'text-anchor="middle"'}>${esc(rotulos[i])}</text></g>`;
+        ${mostraValor ? `<text x="${cx}" y="${topo - 6}" text-anchor="middle" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNum(it.valor)}</text>` : ''}
+        ${i % passo === 0 ? `<text x="${cx}" y="${base}" font-size="${fonte}" fill="var(--apz-tinta-media)" ${gira
+          ? `text-anchor="end" transform="rotate(-45 ${cx + 4} ${base - 4})"` : 'text-anchor="middle"'}>${esc(rotulos[i])}</text>` : ''}</g>`;
     }).join('')}
   </svg>`;
 }

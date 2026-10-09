@@ -307,6 +307,8 @@ caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga
   afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, pedro, 'fotoAcao', { id: a.id, arquivo: a.fotos[0].id }))), 'quem nao enxerga a acao nao ve a foto');
   afirmar(/não é desta ação/.test(erroDe(() => acao(m, maria, 'fotoAcao', { id: a.id, arquivo: outra.fotos[0].id }))), 'foto de outra acao');
   afirmar(/não é desta ação/.test(erroDe(() => acao(m, maria, 'fotoAcao', { id: a.id, arquivo: 'qualquer-id-do-drive' }))), 'arquivo qualquer');
+  const pelaPortaGenerica = chamar(m, 'pedro@bartofil.com.br', 'obterAnexo', { t: pedro.t, f: pedro.f }, a.fotos[0].id);
+  afirmar(!pelaPortaGenerica.ok && /Plano de Ação/.test(pelaPortaGenerica.erro.message), 'obterAnexo nao entrega foto de acao: ' + JSON.stringify(pelaPortaGenerica.erro || pelaPortaGenerica.valor).slice(0, 120));
   afirmar(erroDe(() => acao(m, maria, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id })), 'responsavel nao remove');
   afirmar(/não é anexo deste registro/.test(erroDe(() => acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: fc.id }))), 'foto de comentario fica');
   acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id });

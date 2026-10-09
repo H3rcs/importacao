@@ -267,8 +267,6 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
       exigirResponsavelOuGestor_(plano, usuario, registro, 'Só os responsáveis pela ação (ou a gestão) podem comentar nela.');
       const atual = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
       if (atual === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
-      gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende,
-        situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA ? 'CONCLUSAO' : 'COMENTARIO', gravadas);
       const campos = {};
       if (situacao && situacao !== 'Concluída') campos.ANDAMENTO = situacao;
       if (situacao !== 'Concluída') campos.DEPENDE = situacao === 'Em andamento' && !depende ? '' : depende;
@@ -276,7 +274,10 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
         campos.SITUACAO = ACOES_SITUACAO.CONCLUIDA; campos.CONCLUIDO_EM = agoraTexto(); campos.CONCLUIDO_POR = usuario.email;
         campos.OBSERVACAO = texto; campos.ANDAMENTO = 'Concluída'; campos.DEPENDE = '';
       }
+      // A acao primeiro, o historico depois: se a acao nao gravar, nada fica apontando para fotos jogadas fora.
       if (Object.keys(campos).length) atualizar('ACOES', id, campos, usuario.email);
+      gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende,
+        situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA ? 'CONCLUSAO' : 'COMENTARIO', gravadas);
       return { recado: (situacao === 'Concluída' ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.') +
         (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') };
     });

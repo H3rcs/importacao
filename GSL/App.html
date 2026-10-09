@@ -3965,7 +3965,7 @@ function abrirComentarios(id, podeComentar) {
       </div>
       ${fotosCampoHtml('cm', 'Foto (opcional) — do que foi feito, do antes e depois')}` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    ${podeComentar ? `<button class="botao" onclick="agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
+    ${podeComentar ? `<button class="botao" onclick="fotosProntas('cm') && agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
   const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
@@ -4043,6 +4043,7 @@ function formAcao(id) {
 }
 
 function salvarAcao(id) {
+  if (!fotosProntas('ac')) return;
   const a = id ? planoAcaoPorId(id) : null;
   const params = {
     acao: val('ac-acao'),
@@ -4084,7 +4085,7 @@ function formConcluirAcao(id) {
       <textarea id="cc-obs" rows="3" placeholder="Ex.: 14 lâmpadas trocadas, conferido com o Márcio em 24/09"></textarea></div>
     ${fotosCampoHtml('cc', 'Foto de como ficou (opcional)')}`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-    <button class="botao" onclick="agir(${planoAcao('concluir')},{id:${jsArg(id)},observacao:val('cc-obs'),fotos:fotosParaEnviar('cc')},'Ação concluída').catch(()=>{})">Concluir</button>`);
+    <button class="botao" onclick="fotosProntas('cc') && agir(${planoAcao('concluir')},{id:${jsArg(id)},observacao:val('cc-obs'),fotos:fotosParaEnviar('cc')},'Ação concluída').catch(()=>{})">Concluir</button>`);
 }
 
 function formCancelarAcao(id) {
@@ -4102,10 +4103,17 @@ function formCancelarAcao(id) {
    anexos do GSL. Para ver, a foto passa pelo servidor, que confere se a
    pessoa enxerga aquela ação. */
 const FOTOS_PENDENTES = {};          // por formulário: 'ac' (ação), 'cm' (comentário), 'cc' (conclusão)
+const FOTOS_PREPARANDO = {};         // formulário com foto ainda sendo reduzida
 const FOTO_LADO_MAX = 1600;
 const fotosPorVez = () => (planoD().fotos && planoD().fotos.porVez) || 5;
 
-function fotosLimpar(chave) { FOTOS_PENDENTES[chave] = []; }
+function fotosLimpar(chave) { FOTOS_PENDENTES[chave] = []; FOTOS_PREPARANDO[chave] = 0; }
+/* Foto ainda sendo reduzida: nao envia pela metade — avisa e a janela fica aberta. */
+function fotosProntas(chave) {
+  if (!FOTOS_PREPARANDO[chave]) return true;
+  avisar('Espere as fotos terminarem de ser preparadas e clique de novo.', true);
+  return false;
+}
 function fotosParaEnviar(chave) {
   return (FOTOS_PENDENTES[chave] || []).map((f) => ({ nome: f.nome, tipo: f.tipo, dados: f.dados }));
 }
@@ -4124,6 +4132,8 @@ async function fotosEscolhidas(input, chave) {
   const arquivos = [...(input.files || [])];
   input.value = '';
   const situacao = el(chave + '-fotos-situacao');
+  FOTOS_PREPARANDO[chave] = (FOTOS_PREPARANDO[chave] || 0) + 1;
+  try {
   for (const arquivo of arquivos) {
     if (lista.length >= fotosPorVez()) { avisar('No máximo ' + fotosPorVez() + ' fotos de cada vez.', true); break; }
     if (String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(arquivo.name || '')) {
@@ -4133,6 +4143,7 @@ async function fotosEscolhidas(input, chave) {
     try { lista.push(await comprimirFoto(arquivo)); }
     catch (e) { avisar(e.message || String(e), true); }
   }
+  } finally { FOTOS_PREPARANDO[chave] = Math.max(0, (FOTOS_PREPARANDO[chave] || 1) - 1); }
   if (situacao) situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : 'até ' + fotosPorVez() + ' por vez';
   fotosPintarPrevias(chave);
 }
@@ -4236,6 +4247,7 @@ async function visorMostrar() {
   const V = VISOR; if (!V) return;
   const f = V.fotos[V.i];
   const pedido = ++V.pedido;
+  V.url = '';
   el('visor-legenda').textContent = (f.nome || 'foto') + (V.fotos.length > 1 ? ' · ' + (V.i + 1) + ' de ' + V.fotos.length : '');
   el('visor-rodape').innerHTML = `
     ${V.podeRemover ? `<button class="botao-texto perigo" onclick="visorRemover()">Remover esta foto</button>` : ''}
@@ -4259,12 +4271,13 @@ async function visorMostrar() {
   alvo.innerHTML = /^data:image\/(heic|heif)/i.test(url)
     ? '<div class="vazio">Este navegador não mostra fotos HEIC (iPhone). Use <b>Baixar</b> para abrir no computador.</div>'
     : `<img src="${url}" alt="${esc(f.nome || 'foto')}">`;
+  V.url = url;          // o Baixar usa a foto que esta na tela (o cache pode ja ter soltado ela)
   const b = el('visor-baixar'); if (b) b.disabled = false;
 }
 
 function visorBaixar() {
   if (!VISOR) return;
-  const f = VISOR.fotos[VISOR.i], url = FOTO_CACHE.get(f.id);
+  const f = VISOR.fotos[VISOR.i], url = VISOR.url || FOTO_CACHE.get(f.id);
   if (!url) return;
   const a = document.createElement('a');
   a.href = url; a.download = f.nome || 'foto.jpg';
@@ -4275,8 +4288,22 @@ async function visorRemover() {
   const V = VISOR; if (!V || !V.podeRemover) return;
   const f = V.fotos[V.i];
   if (!confirm('Remover a foto "' + (f.nome || 'foto') + '" desta ação? Ela vai para a lixeira do Drive.')) return;
-  visorFechar();
-  try { await agir(V.acaoRemover, { id: V.idAcao, arquivo: f.id }, 'Foto removida'); } catch (e) { /* agir ja avisou */ }
+  /*
+   * Direto no servidor, sem o agir(): o agir fecha a janela de baixo — e a
+   * "Editar ação" aberta perdia o que ainda nao tinha sido salvo.
+   */
+  try { await executarAcaoSrv(V.acaoRemover, { id: V.idAcao, arquivo: f.id }); }
+  catch (e) { avisar(e.message || String(e), true); return; }
+  const a = planoAcaoPorId(V.idAcao);
+  if (a) a.fotos = (a.fotos || []).filter((x) => x.id !== f.id);
+  FOTO_CACHE.delete(f.id);
+  esquecerTela(paginaAtual); envelhecerTelas();
+  avisar('Foto removida');
+  V.fotos = V.fotos.filter((x) => x.id !== f.id);
+  if (!V.fotos.length) visorFechar();
+  else { V.i = Math.min(V.i, V.fotos.length - 1); el('visor-fotos').classList.toggle('uma', V.fotos.length < 2); visorMostrar(); }
+  // Sem janela aberta por baixo, a tela volta do servidor ja sem a foto.
+  if (el('janela').classList.contains('oculto')) abrir(paginaAtual, paramsAtual);
 }
 
 /* ================= RELATOS DE ERRO =================

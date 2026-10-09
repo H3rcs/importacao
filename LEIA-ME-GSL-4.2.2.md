@@ -36,6 +36,21 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
+## Pedido de 09/10 (Limpeza: estoque igual ao do TI, Plano de Ação igual ao do Calendário, fotos)
+
+A tela **Limpeza CD** agora tem cinco abas: **Gestão**, **Plano de Ação**, **Estoque**, **Movimentações** e **Inventário**.
+
+- **Estoque:** é o mesmo controle do Estoque de TI, usando o mesmo código. Tem catálogo (código automático LP-0001…), **estoque mínimo** com alerta, **estoque ideal**, **+ Entrada** e **− Saída** em cada linha (quantidade, data, setor/zona e quem recebeu), estorno, inventário, histórico e exportar Excel/PDF. Os produtos da limpeza ficam separados dos itens de TI (tabelas próprias: `LP_EST_ITENS` e `LP_EST_MOVIMENTOS`).
+- **Plano de Ação:** é o mesmo modelo do Plano de Ação do Calendário: responsáveis (um ou mais), prazo, turno, origem, **comentários** com a etapa (Em andamento / Aguardando / Concluída) e o "depende de", histórico com quem fez cada registro, concluir, reabrir e cancelar, e-mail para o responsável (com link para a Limpeza). Na limpeza há também zona, local, criticidade e "aberta em". São **dois planos separados**: uma ação da limpeza não aparece nem pode ser mexida pelo plano do Calendário, e vice-versa.
+- **Quem pode:** quem tem a permissão de gerir a limpeza (gerente, supervisor de limpeza) cria e edita. O responsável pela ação comenta e conclui as suas. Só pode ser responsável quem tem acesso ao módulo Limpeza.
+- **Fotos:** dá para anexar foto na **ação** (ao criar ou editar), no **comentário** e na **conclusão** (até 5 por vez). A foto é reduzida no navegador e guardada no Google Drive como os outros anexos do GSL, em `Anexos/ACOES/<id da ação>/`. O selo 📷 abre o visor por cima da janela (o comentário que você está escrevendo não se perde). Só quem enxerga a ação vê as fotos dela. A gestão pode remover uma foto da ação pelo visor; as fotos dos comentários ficam, como o histórico.
+- **Ações antigas da limpeza:** passam sozinhas para o novo Plano de Ação na primeira abertura depois da atualização, com os comentários. O que foi encontrado vira o título e a ação definida vira "o que precisa ser feito". Responsável antigo (só o nome) continua aparecendo; ao editar, marque a pessoa que acompanha.
+- **Saiu da tela:** compras por lote, "acabou/reabastecer", produtos com diluição e embalagens. **Nada foi apagado**: as tabelas antigas continuam na planilha.
+- **Importar planilha antiga:** traz zonas, não conformidades (para o Plano de Ação) e nomes de produtos (para o estoque, com saldo zero).
+- **Aviso de versão misturada:** se algum arquivo não for colado no Apps Script, aparece uma faixa amarela no topo dizendo qual. Foi o que causou o "Ação desconhecida: comentarAcao". O esquema sobe para **8.8** sozinho.
+
+**Arquivos desta entrega:** `Acoes.gs`, `Codigo.gs`, `Emails.gs`, `Estoque.gs`, `Filiais.gs`, `Instalacao.gs`, `Limpeza.gs`, `App.html`, `Estilo.html` e `Paineis.html`. Cole **todos** e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão).
+
 ## Pedido de 02/10 (assiduidade 403, relatório dos nobreaks, comentários nas ações)
 
 - **Assiduidade — "NetworkError: falha na conexão devido a HTTP 403":** a lista de colaboradores era uma segunda chamada ao Google, e é ela que o Google barra em alguns computadores (várias contas abertas, ou tela aberta pela navegação de reserva). Agora a lista vem junto com a própria tela. Se o Google barrar a ficha, ela abre recarregando a página (botão **Abrir a ficha**).

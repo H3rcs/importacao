@@ -122,19 +122,33 @@ function migrarAcoesDaLimpeza_() {
   let antigas;
   try { antigas = listar('LP_ACOES'); } catch (e) { return 0; }
   if (!antigas.length) return 0;
-  const ja = {};
-  listar('ACOES', true).forEach(function (r) { ja[String(r.ID)] = true; });
-  const novas = antigas.filter(function (a) { return a.ID && !ja[String(a.ID)]; });
-  if (!novas.length) return 0;
-  inserirVarios('ACOES', novas.map(acaoDaTabelaAntiga_), 'migracao');
-  // Quem registrou e quando continuam os de antes (o inserir carimba "agora").
-  atualizarVarios('ACOES', novas.map(function (a) {
-    const c = { CRIADO_EM: String(a.CRIADO_EM || ''), CRIADO_POR: String(a.CRIADO_POR || '') };
-    const outros = acaoDaTabelaAntiga_(a);
-    if (outros.SITUACAO === ACOES_SITUACAO.CONCLUIDA && !outros.CONCLUIDO_EM) c.CONCLUIDO_EM = String(a.ATUALIZADO_EM || '');
-    return { id: String(a.ID), campos: c };
-  }).filter(function (m) { return m.campos.CRIADO_EM; }), 'migracao');
-  return novas.length;
+  /*
+   * Ler o que ja passou e gravar na MESMA trava: duas pessoas abrindo o
+   * sistema juntas logo depois da atualizacao passavam as duas pela
+   * conferencia e gravavam cada acao duas vezes, com o mesmo ID.
+   */
+  return comTrava(function () {
+    const ja = {};
+    listar('ACOES', true).forEach(function (r) { ja[String(r.ID)] = true; });
+    const novas = antigas.filter(function (a) { return a.ID && !ja[String(a.ID)]; });
+    if (!novas.length) return 0;
+    inserirVarios('ACOES', novas.map(acaoDaTabelaAntiga_), 'migracao');
+    // Quem registrou e quando continuam os de antes (o inserir carimba "agora").
+    atualizarVarios('ACOES', novas.map(function (a) {
+      const c = { CRIADO_EM: carimboTexto_(a.CRIADO_EM), CRIADO_POR: String(a.CRIADO_POR || '') };
+      const outros = acaoDaTabelaAntiga_(a);
+      if (outros.SITUACAO === ACOES_SITUACAO.CONCLUIDA && !outros.CONCLUIDO_EM) c.CONCLUIDO_EM = carimboTexto_(a.ATUALIZADO_EM);
+      return { id: String(a.ID), campos: c };
+    }).filter(function (m) { return m.campos.CRIADO_EM; }), 'migracao');
+    return novas.length;
+  });
+}
+
+/* Carimbo sempre no formato do sistema ('dd/MM/yyyy HH:mm:ss'), mesmo quando a celula antiga virou Date. */
+function carimboTexto_(v) {
+  const p = partesDoCarimbo_(v);
+  if (!p) return String(v == null ? '' : v).trim();
+  return dd_(p.d) + '/' + dd_(p.m) + '/' + p.a + ' ' + dd_(p.h) + ':' + dd_(p.mi) + ':' + dd_(p.s);
 }
 
 /** Grava a lista de zonas inteira (a janela de zonas edita todas de uma vez). */

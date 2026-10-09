@@ -830,7 +830,27 @@ function obterAnexo(ctx, idArquivo) {
   // So arquivo que mora dentro da pasta do GSL. Antes, qualquer ID do Drive
   // do dono (que e quem executa o script) saia por aqui.
   if (!arquivoDoGsl_(idArquivo)) throw new Error('Este arquivo não é um anexo do GSL.');
+  // Foto de acao (Anexos/ACOES/<id>) so sai pela porta do plano, que confere quem enxerga a acao.
+  if (fotoDeAcao_(idArquivo)) throw new Error('Esta foto abre pelo Plano de Ação.');
   return baixarAnexo(idArquivo);
+}
+
+/* true se o arquivo mora em Anexos/ACOES/<id da acao>/. */
+function fotoDeAcao_(idArquivo) {
+  const anexos = String(prop('ID_PASTA_ANEXOS', ''));
+  try {
+    const pais = DriveApp.getFileById(String(idArquivo)).getParents();
+    while (pais.hasNext()) {
+      const avos = pais.next().getParents();
+      while (avos.hasNext()) {
+        const tabela = avos.next();
+        if (tabela.getName() !== 'ACOES') continue;
+        const raiz = tabela.getParents();
+        while (raiz.hasNext()) if (raiz.next().getId() === anexos) return true;
+      }
+    }
+  } catch (e) { /* sem acesso ao arquivo: o resto da conferencia decide */ }
+  return false;
 }
 
 

@@ -2142,4 +2142,58 @@ input.travado {
 .coment-criada { font-size: 12px; color: var(--tinta-media); padding: 2px 2px 6px; border-bottom: 1px dashed var(--linha); }
 .coment-texto { white-space: pre-wrap; line-height: 1.55; }
 .coment-depende { margin-top: 4px; font-size: 12.5px; color: #B45309; font-weight: 600; }
+
+/* --- Fotos nas acoes e nos comentarios (4.2.2) --- */
+.acao-selos { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.selo-foto {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--azul-vivo);
+  background: var(--azul-tenue); padding: 2px 9px; border-radius: 999px;
+}
+.selo-foto:hover { filter: brightness(.95); text-decoration: underline; }
+.coment-item .selo-foto { margin-top: 6px; }
+/* O botao de escolher foto e um <label> (abre o seletor de arquivo); sem isto, pegava o estilo de rotulo do campo. */
+.campo label.fotos-escolher {
+  display: inline-flex; align-items: center; gap: 6px; width: auto; cursor: pointer; margin: 0 8px 0 0;
+  font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: normal; color: inherit;
+}
+.fotos-previas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.foto-previa { position: relative; width: 72px; height: 72px; border-radius: 8px; overflow: hidden; border: 1px solid var(--linha); background: var(--vidro-alto); }
+.foto-previa img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.foto-sem-previa { display: flex; align-items: center; justify-content: center; height: 100%; padding: 4px; font-size: 10px; text-align: center; word-break: break-all; color: var(--tinta-media); }
+.foto-previa button {
+  position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: 0;
+  background: rgba(0, 0, 0, .65); color: #fff; font-size: 14px; line-height: 20px; padding: 0; cursor: pointer;
+}
+.visor-fotos {
+  position: fixed; inset: 0; z-index: 55; padding: 14px;
+  background: rgba(4, 5, 26, .86); display: flex; align-items: center; justify-content: center;
+}
+/* Fundo escuro e solido: a foto e o que importa, sem a tela aparecendo por tras. */
+.visor-caixa {
+  background: #12141f; color: #E7E8F0; border: 1px solid rgba(255, 255, 255, .12); border-radius: 16px;
+  width: 100%; max-width: 980px; max-height: 94vh; display: flex; flex-direction: column; box-shadow: var(--sombra-alta);
+}
+.visor-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid rgba(255, 255, 255, .1); font-size: 13px; color: #C9CBDA; }
+.visor-topo .fechar { color: #C9CBDA; }
+.visor-palco { display: flex; align-items: center; gap: 6px; padding: 10px; min-height: 240px; flex: 1; overflow: hidden; }
+.visor-imagem { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+.visor-imagem img { max-width: 100%; max-height: calc(94vh - 150px); object-fit: contain; border-radius: 8px; background: #fff; }
+.visor-imagem .vazio { color: #C9CBDA; }
+.visor-seta { border: 0; background: none; color: #C9CBDA; font-size: 38px; line-height: 1; cursor: pointer; padding: 0 6px; }
+.visor-seta:hover { color: #fff; }
+.visor-fotos.uma .visor-seta { visibility: hidden; }
+.visor-rodape { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid rgba(255, 255, 255, .1); }
+.visor-rodape .botao-texto.perigo { color: #FF8A8A; margin-right: auto; }
+@media (max-width: 640px) { .visor-seta { font-size: 30px; } .visor-palco { padding: 6px 2px; } }
+
+/* O .botao-texto nasceu para a barra lateral escura (texto branco): nas areas
+   claras (paginas e janelas) ele ficava quase invisivel — o "Editar" e o
+   "Cancelar" dos cartoes do Plano de Acao, por exemplo. */
+.pagina .botao-texto, .janela .botao-texto { color: var(--azul-vivo); font-size: 13px; font-weight: 600; }
+.pagina .botao-texto:hover, .janela .botao-texto:hover { color: var(--azul); text-decoration: underline; }
+.pagina .botao-texto.perigo, .janela .botao-texto.perigo { color: var(--alerta); }
+[data-tema="escuro"] .pagina .botao-texto, [data-tema="escuro"] .janela .botao-texto { color: #9DB4FF; }
+[data-tema="escuro"] .pagina .botao-texto.perigo, [data-tema="escuro"] .janela .botao-texto.perigo { color: #FF8A8A; }
+.cartao-titulo .botao-texto { text-transform: none; letter-spacing: normal; font-family: inherit; }
 </style>

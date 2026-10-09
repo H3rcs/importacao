@@ -576,6 +576,7 @@ function montarSessao(r) {
   }
 
   const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
+  conferirVersao(r);
   soMostrar('aplicacao');
   // Tela que ja veio pronta no HTML (navegacao de reserva): abre direto.
   if (r.telaEmbutida && r.telaEmbutida.resposta) {
@@ -591,6 +592,35 @@ function montarSessao(r) {
   }
   abrirModulos();
   if (r.avisoTela) avisar(r.avisoTela, true);
+}
+
+/*
+ * VERSAO MISTURADA (4.2.2). Cada arquivo alterado numa entrega traz o
+ * mesmo carimbo (APP.build no Codigo.gs, BUILD_APP aqui, BUILD_PAINEIS no
+ * Paineis.html, BUILD_<ARQUIVO> nos .gs). Carimbo diferente = alguem colou
+ * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
+ * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
+ */
+const BUILD_APP = '2026.10.09';
+function conferirVersao(r) {
+  const app = (r && r.app) || {};
+  const faltam = [].concat(app.foraDaVersao || []);
+  if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
+  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== BUILD_APP) faltam.push('Paineis.html');
+  let faixa = el('aviso-versao');
+  if (!faltam.length) { if (faixa) faixa.remove(); return; }
+  if (!faixa) {
+    faixa = document.createElement('div');
+    faixa.id = 'aviso-versao';
+    faixa.className = 'faixa-aviso';
+    const pagina = el('pagina');
+    if (pagina && pagina.parentNode) pagina.parentNode.insertBefore(faixa, pagina);
+    else document.body.prepend(faixa);
+  }
+  faixa.innerHTML = `<b>Atualização incompleta do GSL.</b> Estes arquivos não estão na mesma versão das telas:
+    ${faltam.map(esc).join(', ')}. ${r.admin
+      ? 'Cole esses arquivos no Apps Script e crie uma <b>Nova versão</b> da implantação (Implantar › Gerenciar implantações).'
+      : 'Algumas funções podem dar erro — avise o administrador do sistema.'}`;
 }
 
 /*
@@ -1122,7 +1152,12 @@ async function agir(acao, params, recado) {
     await abrir(paginaAtual, paramsAtual);
     return r;
   } catch (e) {
-    const msg = e.message || String(e);
+    let msg = e.message || String(e);
+    // "Acao desconhecida" e implantacao pela metade (Codigo.gs antigo com telas novas).
+    // O Codigo.gs antigo nao explica isso — entao a tela explica.
+    if (/A[cç][aã]o desconhecida/i.test(msg) && !/Nova vers/i.test(msg)) {
+      msg += ' — o Codigo.gs publicado no Apps Script está numa versão anterior às telas. Cole todos os arquivos desta versão e crie uma "Nova versão" da implantação.';
+    }
     // Erro de permissao de e-mail nao vira um aviso que some em 7s: vira uma
     // janela com o passo a passo e o botao que leva direto para autorizar.
     // O canal barrado (varias contas Google: "PERMISSION_DENIED") vem antes:
@@ -3690,21 +3725,68 @@ function barra(rotulo, texto, maximo, numero, cor) {
 
    Quem cria é o gerente. O coordenador vê as do turno dele e conclui as
    que são dele — não há validação, foi o combinado: concluiu, acabou.
+
+   DOIS PLANOS, O MESMO DESENHO (4.2.2). O Plano de Ação da Limpeza CD é
+   este mesmo, desenhado pelas mesmas funções: PLANO diz qual está na tela
+   (de onde vem o dado e que ação do servidor chamar). Os nomes das ações
+   vão "assados" no HTML de cada botão — uma janela aberta continua
+   falando com o plano em que foi aberta.
    ================================================= */
 
+const PLANO_CAL = {
+  id: 'CALENDARIO',
+  dados: () => DADOS,
+  acoes: { salvar: 'salvarAcao', concluir: 'concluirAcao', comentar: 'comentarAcao', reabrir: 'reabrirAcao',
+           cancelar: 'cancelarAcao', excluir: 'excluirAcao', foto: 'fotoAcao', removerFoto: 'removerFotoAcao' },
+  // No Calendário o filtro vai ao servidor (a tela pode abrir já filtrada).
+  local: null,
+  filtrar: (m) => filtrarAcoes(m),
+  extras: null
+};
+let PLANO = PLANO_CAL;
+const planoD = () => PLANO.dados() || {};
+const planoAcaoPorId = (id) => (planoD().lista || []).find((x) => x.id === id) || null;
+const planoAcao = (nome) => jsArg(PLANO.acoes[nome]);      // nome da ação, pronto para o onclick
+const ANDAMENTOS_ACAO = ['Em andamento', 'Aguardando', 'Concluída'];
+
 function pintarAcoes(r) {
-  const d = r.dados, p = d.permissoes, f = d.filtro;
+  PLANO = PLANO_CAL;
+  const d = r.dados, p = d.permissoes;
   const c = d.contagens;
 
   el('subtitulo-pagina').textContent =
     `${c.abertas} em aberto · ${c.atrasadas} atrasada(s) · ${c.minhas} sua(s)`;
   el('acoes-topo').innerHTML = p.gerir
     ? `<button class="botao" onclick="formAcao()">+ Nova ação</button>` : '';
+  el('pagina').innerHTML = planoHtml(d);
+}
 
+/* Filtro feito na tela (Limpeza): o servidor manda todas as ações que a pessoa enxerga. */
+function planoFiltrarLista(lista, f) {
+  const busca = String(f.busca || '').toLowerCase().trim();
+  return (lista || []).filter((a) => {
+    if (f.turno && String(a.turno).toUpperCase() !== String(f.turno).toUpperCase()) return false;
+    if (f.situacao === 'ABERTAS' && a.situacao !== 'PENDENTE') return false;
+    if (f.situacao === 'CONCLUIDAS' && a.situacao !== 'CONCLUIDA') return false;
+    if (f.situacao === 'ATRASADAS' && a.status !== 'Atrasada') return false;
+    if (f.zona && a.zona !== f.zona) return false;
+    if (f.crit && a.criticidade !== f.crit) return false;
+    if (busca && [a.acao, a.descricao, a.responsavel, a.origem, a.zona, a.local].join(' ').toLowerCase().indexOf(busca) === -1) return false;
+    return true;
+  });
+}
+function planoFiltrar(mudanca) { PLANO.filtrar(mudanca); }
+
+/* O plano inteiro: números, filtros, cartões e o ranking por turno. */
+function planoHtml(d) {
+  const p = d.permissoes, c = d.contagens;
+  const f = PLANO.local || d.filtro || {};
+  const lista = PLANO.local ? planoFiltrarLista(d.lista, f) : (d.lista || []);
+  const ex = PLANO.extras ? PLANO.extras() : null;
   const situacoes = [['ABERTAS', 'Em aberto'], ['ATRASADAS', 'Atrasadas'],
                      ['CONCLUIDAS', 'Concluídas'], ['TODAS', 'Todas']];
 
-  el('pagina').innerHTML = `
+  return `
     <div class="grade grade-kpi" style="margin-bottom:16px">
       ${kpi(c.abertas, 'Em aberto', 'azul')}
       ${kpi(c.atrasadas, 'Atrasadas', 'vermelho')}
@@ -3718,30 +3800,36 @@ function pintarAcoes(r) {
           <span class="tira-rotulo">Situação</span>
           ${situacoes.map(([id, nome]) => `
             <button class="pastilha-turno ${f.situacao === id ? 'ativa' : ''}"
-                    onclick="filtrarAcoes({situacao:${jsArg(id)}})">${nome}</button>`).join('')}
+                    onclick="planoFiltrar({situacao:${jsArg(id)}})">${nome}</button>`).join('')}
         </div>
         <div class="tira-turnos" style="margin:0">
           <span class="tira-rotulo">Turno</span>
-          ${[''].concat(d.turnos).map((t) => `
+          ${[''].concat(d.turnos || []).map((t) => `
             <button class="pastilha-turno ${String(f.turno || '').toUpperCase() === String(t).toUpperCase() ? 'ativa' : ''}"
-                    onclick="filtrarAcoes({turno:${jsArg(t)}})">${t === '' ? 'Todos' : t === 'Todos' ? 'Geral (CD)' : esc(t)}</button>`).join('')}
+                    onclick="planoFiltrar({turno:${jsArg(t)}})">${t === '' ? 'Todos' : t === 'Todos' ? 'Geral (CD)' : esc(t)}</button>`).join('')}
         </div>
+        ${ex ? `<div class="tira-turnos" style="margin:0">
+          <select style="width:auto;max-width:260px;flex:0 0 auto" onchange="planoFiltrar({zona:this.value})"><option value="">Todas as zonas</option>
+            ${(ex.zonas || []).map((z) => `<option value="${esc(z.zona)}" ${f.zona === z.zona ? 'selected' : ''}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select>
+          <select style="width:auto;flex:0 0 auto" onchange="planoFiltrar({crit:this.value})"><option value="">Toda criticidade</option>
+            ${(ex.criticidades || []).map((x) => `<option ${f.crit === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        </div>` : ''}
         <div class="busca-caixa">
           <span class="busca-lupa" aria-hidden="true">&#128269;</span>
-          <input id="busca-acao" placeholder="Buscar ação, responsável ou origem"
-                 value="${esc(f.busca)}"
-                 onkeydown="if(event.key==='Enter')filtrarAcoes({busca:this.value})">
+          <input id="busca-acao" placeholder="Buscar ação, responsável${ex ? ', local' : ''} ou origem"
+                 value="${esc(f.busca || '')}"
+                 onkeydown="if(event.key==='Enter')planoFiltrar({busca:this.value})">
         </div>
       </div>
     </div>
 
     <div class="cartao" style="margin-bottom:14px">
-      <div class="cartao-titulo">${d.lista.length} ação(ões)</div>
-      ${d.lista.length ? d.lista.map((a) => cartaoAcao(a, p)).join('')
+      <div class="cartao-titulo">${lista.length} ação(ões)</div>
+      ${lista.length ? lista.map((a) => cartaoAcao(a, p)).join('')
         : '<div class="vazio">Nenhuma ação com estes filtros.</div>'}
     </div>
 
-    ${d.ranking.length ? `
+    ${(d.ranking || []).length ? `
     <div class="cartao">
       <div class="cartao-titulo">Ranking de ações por turno — para as auditorias</div>
       <p class="dica" style="margin:-4px 0 12px">Quantas ações cada turno recebeu e quantas
@@ -3766,10 +3854,23 @@ function pintarAcoes(r) {
     </div>` : ''}`;
 }
 
+/* "faltam 3 dias", "vence hoje", "atrasada 2 dias" — da ação ainda aberta. */
+function planoPrazoTexto(a) {
+  if (a.situacao !== 'PENDENTE' || a.dias === null || a.dias === undefined) return '';
+  if (a.dias < 0) return 'atrasada ' + (-a.dias) + ' dia(s)';
+  if (a.dias === 0) return 'vence hoje';
+  return 'faltam ' + a.dias + ' dia(s)';
+}
+
+const seloFotos = (n, onclick) => n
+  ? `<button class="selo-foto" onclick="${onclick}" title="Ver as fotos">&#128247; ${n} foto${n > 1 ? 's' : ''}</button>` : '';
+
 /* Uma ação. O prazo vem antes da descrição: é o que decide a urgência. */
 function cartaoAcao(a, p) {
   const minha = (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1;
   const podeConcluir = a.situacao === 'PENDENTE' && (minha || p.gerir);
+  const podeComentar = (minha || p.gerir) && a.situacao !== 'CANCELADA';
+  const onde = [a.zona, a.local].filter(Boolean).join(' · ');
 
   let aviso = '';
   if (a.situacao === 'PENDENTE' && a.dias !== null) {
@@ -3782,16 +3883,19 @@ function cartaoAcao(a, p) {
     <div class="cartao-acao ${classeStatus(a.status)}">
       <div class="acao-topo">
         <div class="acao-titulo">${esc(a.acao)}</div>
-        ${etiqueta(a.status)}
+        <span class="acao-selos">${a.criticidade && a.plano === 'LIMPEZA' ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}
+          ${etiqueta(a.status)}</span>
       </div>
       ${a.descricao ? `<div class="acao-descricao">${esc(a.descricao)}</div>` : ''}
       <div class="acao-meta">
         <span><b>${(a.responsaveisEmails || []).length > 1 ? 'Responsáveis' : 'Responsável'}:</b> ${esc(a.responsavel || '—')}${minha ? ' <span class="marca-voce">você</span>' : ''}</span>
         <span><b>Entregar até:</b> ${esc(a.prazo || '—')}</span>
         ${a.turno ? `<span><b>Turno:</b> ${esc(a.turno)}</span>` : ''}
+        ${onde ? `<span><b>Local:</b> ${esc(onde)}</span>` : ''}
         ${aviso}
+        ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
       </div>
-      ${a.origem ? `<div class="acao-origem">Origem: ${esc(a.origem)}</div>` : ''}
+      ${a.origem || (a.plano === 'LIMPEZA' && a.abertaEm) ? `<div class="acao-origem">${a.origem ? 'Origem: ' + esc(a.origem) : ''}${a.plano === 'LIMPEZA' && a.abertaEm ? (a.origem ? ' · ' : '') + 'aberta em ' + pnDataLonga(a.abertaEm) : ''}</div>` : ''}
       ${a.situacao === 'PENDENTE' && (a.andamento || a.depende) ? `<div class="acao-andamento">
         ${a.andamento ? `<span class="pill-andamento">${esc(a.andamento)}</span>` : ''}
         ${a.depende ? `<span><b>Depende de:</b> ${esc(a.depende)}</span>` : ''}</div>` : ''}
@@ -3802,37 +3906,34 @@ function cartaoAcao(a, p) {
           ${a.observacao ? ` — ${esc(a.observacao)}` : ''}
         </div>` : ''}
       <div class="acao-botoes">
-        ${(minha || p.gerir) && a.situacao !== 'CANCELADA' || (a.comentarios || []).length
-          ? `<button class="botao secundario" onclick="abrirComentarios('ACOES', ${jsArg(a.id)}, ${(minha || p.gerir) && a.situacao !== 'CANCELADA' ? 'true' : 'false'})">Comentários${(a.comentarios || []).length ? ' (' + a.comentarios.length + ')' : ''}</button>` : ''}
+        ${podeComentar || (a.comentarios || []).length
+          ? `<button class="botao secundario" onclick="abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})">Comentários${(a.comentarios || []).length ? ' (' + a.comentarios.length + ')' : ''}</button>` : ''}
         ${podeConcluir ? `<button class="botao" onclick="formConcluirAcao(${jsArg(a.id)})">Marcar como concluída</button>` : ''}
-        ${p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir('reabrirAcao',{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
+        ${p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir(${planoAcao('reabrir')},{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
         ${p.gerir ? `<button class="botao-texto" onclick="formAcao(${jsArg(a.id)})">Editar</button>` : ''}
         ${p.gerir && a.situacao !== 'CANCELADA' ? `<button class="botao-texto" onclick="formCancelarAcao(${jsArg(a.id)})">Cancelar</button>` : ''}
       </div>
     </div>`;
 }
 
-/* ---------- COMENTARIOS DAS ACOES (Plano de Acao e Limpeza) ---------- */
+/* ---------- COMENTARIOS DAS ACOES (os dois planos) ---------- */
 function ultimoComentario(lista) {
   const c = (lista || [])[(lista || []).length - 1];
   if (!c) return '';
   return `<div class="coment-ultimo"><b>${esc(c.nome)}</b>${c.papel ? ' <span class="coment-papel">(' + esc(c.papel) + ')</span>' : ''}
-    · ${esc((c.em || '').slice(0, 16))}${COMENT_TIPO[c.tipo] ? ' · ' + COMENT_TIPO[c.tipo] : ''}: ${esc(c.texto)}</div>`;
+    · ${esc((c.em || '').slice(0, 16))}${COMENT_TIPO[c.tipo] ? ' · ' + COMENT_TIPO[c.tipo] : ''}: ${esc(c.texto)}${(c.fotos || []).length ? ' &#128247;' : ''}</div>`;
 }
 const COMENT_TIPO = { CONCLUSAO: 'concluiu a ação', REABERTURA: 'reabriu a ação', CANCELAMENTO: 'cancelou a ação', STATUS: 'mudou a situação' };
 
 /*
- * Historico + novo comentario. origem: 'ACOES' (Plano de Acao) ou
- * 'LP_ACOES' (Limpeza). Quem avancou registra o que fez, em que situacao a
- * acao ficou e o que ela ainda espera para concluir.
+ * Historico + novo comentario. Quem avancou registra o que fez, em que
+ * situacao a acao ficou, o que ela ainda espera para concluir — e pode
+ * anexar foto.
  */
-function abrirComentarios(origem, id, podeComentar) {
-  const limpeza = origem === 'LP_ACOES';
-  const a = limpeza ? (DADOS.acoes || []).find((x) => x.id === id) : (DADOS.lista || []).find((x) => x.id === id);
+function abrirComentarios(id, podeComentar) {
+  const a = planoAcaoPorId(id);
   if (!a) return;
-  const titulo = limpeza ? a.problema : a.acao;
-  const situacoes = limpeza ? ['Aberta', 'Em andamento', 'Concluída'] : ['Em andamento', 'Aguardando', 'Concluída'];
-  const atual = limpeza ? a.status : (a.andamento || 'Em andamento');
+  const atual = a.andamento || 'Em andamento';
   // Cada registro mostra QUEM fez (nome, funcao e e-mail da pessoa que estava
   // logada — vem da sessao, nao de um campo da tela) e QUANDO.
   const hist = (a.comentarios || []).map((c) => `
@@ -3845,9 +3946,12 @@ function abrirComentarios(origem, id, podeComentar) {
         ${c.situacao ? `<span class="pill-andamento">${esc(c.situacao)}</span>` : ''}</div>
       <div class="coment-texto">${esc(c.texto)}</div>
       ${c.depende ? `<div class="coment-depende">Depende de: ${esc(c.depende)}</div>` : ''}
+      ${seloFotos((c.fotos || []).length, 'verFotosDoComentario(' + jsArg(a.id) + ',' + jsArg(c.id) + ')')}
     </div>`).join('');
-  const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}</div>` : '';
-  abrirJanela('Comentários — ' + titulo, `
+  const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}
+    ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>` : '';
+  fotosLimpar('cm');
+  abrirJanela('Comentários — ' + a.acao, `
     <div class="coment-historico">${criada}${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
     ${podeComentar ? `<p class="dica" style="margin:-6px 0 10px">O comentário fica registrado com o seu nome, a sua função, o seu e-mail e a data e hora — e não pode ser apagado.</p>` : ''}
     ${podeComentar ? `
@@ -3855,12 +3959,13 @@ function abrirComentarios(origem, id, podeComentar) {
         <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta"></textarea></div>
       <div class="campo-duplo">
         <div class="campo"><label>Situação da ação</label><select id="cm-sit">
-          ${situacoes.map((x) => `<option ${x === atual ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+          ${ANDAMENTOS_ACAO.map((x) => `<option ${x === atual ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
         <div class="campo"><label>Depende de (o que falta para concluir)</label>
           <input id="cm-dep" value="${esc(a.depende || '')}" placeholder="Ex.: chegada do material, liberação do SESMT"></div>
-      </div>` : ''}`, `
+      </div>
+      ${fotosCampoHtml('cm', 'Foto (opcional) — do que foi feito, do antes e depois')}` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    ${podeComentar ? `<button class="botao" onclick="agir(${jsArg(limpeza ? 'comentarAcaoLimpeza' : 'comentarAcao')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
+    ${podeComentar ? `<button class="botao" onclick="agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
   const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
@@ -3875,22 +3980,43 @@ function filtrarAcoes(mudanca) {
 
 /* Cadastro. Os campos estão na ordem em que o gerente fala na reunião. */
 function formAcao(id) {
-  const d = DADOS;
-  const a = id ? (d.lista || []).find((x) => x.id === id) : null;
+  const d = planoD();
+  const a = id ? planoAcaoPorId(id) : null;
+  const ex = PLANO.extras ? PLANO.extras() : null;
+  // Responsavel que ja estava na acao e saiu da lista (perdeu o acesso): continua marcado.
+  const pessoas = (d.pessoas || []).slice();
+  ((a && a.responsaveisEmails) || []).forEach((e) => {
+    if (!pessoas.some((p) => p.email === e)) pessoas.push({ email: e, nome: e, turno: '', papel: 'sem acesso a esta tela' });
+  });
+  // Acao que veio da tabela antiga da limpeza: o responsavel era so um nome, sem e-mail.
+  const antigo = a && !(a.responsaveisEmails || []).length && a.responsavel ? a.responsavel : '';
+  fotosLimpar('ac');
 
   abrirJanela(a ? 'Editar ação' : 'Nova ação', `
     <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
       O responsável recebe um e-mail com a ação e o prazo assim que você salvar.
     </p>
     <div class="campo"><label>Ação</label>
-      <input id="ac-acao" value="${a ? esc(a.acao) : ''}" placeholder="Ex.: Iluminação do Flow"></div>
+      <input id="ac-acao" value="${a ? esc(a.acao) : ''}" placeholder="${ex ? 'Ex.: Banheiro da central sem papel toalha' : 'Ex.: Iluminação do Flow'}"></div>
     <div class="campo"><label>O que precisa ser feito</label>
       <textarea id="ac-descricao" rows="3"
-        placeholder="Ex.: Verificar e acompanhar a iluminação para garantir que todas as lâmpadas foram trocadas">${a ? esc(a.descricao) : ''}</textarea></div>
+        placeholder="${ex ? 'Ex.: Repor o papel toalha e conferir o dispenser nas rondas' : 'Ex.: Verificar e acompanhar a iluminação para garantir que todas as lâmpadas foram trocadas'}">${a ? esc(a.descricao) : ''}</textarea></div>
+    ${ex ? `<div class="campo-duplo">
+      <div class="campo"><label>Zona</label><select id="ac-zona"><option value="">—</option>
+        ${a && a.zona && !(ex.zonas || []).some((z) => z.zona === a.zona) ? `<option value="${esc(a.zona)}" selected>${esc(a.zona)}</option>` : ''}
+        ${(ex.zonas || []).filter((z) => z.ativo || (a && a.zona === z.zona)).map((z) => `<option value="${esc(z.zona)}" ${a && a.zona === z.zona ? 'selected' : ''}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select></div>
+      <div class="campo"><label>Local exato</label><input id="ac-local" value="${esc(a ? a.local : '')}" placeholder="Ex.: Banheiro da central"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Criticidade</label><select id="ac-crit">
+        ${(ex.criticidades || []).map((x) => `<option ${(a ? a.criticidade || 'Média' : 'Média') === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Aberta em</label><input type="date" id="ac-aberta" value="${esc(a ? a.abertaEm : (d.hoje || (DADOS && DADOS.hoje) || ''))}"></div>
+    </div>` : ''}
     <div class="campo"><label>Responsáveis (marque um ou mais — ação conjunta)</label>
+      ${antigo ? `<p class="dica" style="margin:0 0 8px">Registrado antes como <b>${esc(antigo)}</b>, sem e-mail. Marque quem acompanha esta ação para ela aparecer para a pessoa (ou deixe como está).</p>` : ''}
       <input placeholder="Procurar pessoa…" oninput="const t=this.value.toLowerCase();document.querySelectorAll('.ac-pessoa').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(t)===-1?'none':''})">
       <div class="ac-pessoas">
-        ${(d.pessoas || []).map((pe) => `
+        ${pessoas.map((pe) => `
           <label class="marcador ac-pessoa"><input type="checkbox" class="ac-resp" value="${esc(pe.email)}"
             ${a && (a.responsaveisEmails || [a.responsavelEmail]).indexOf(pe.email) !== -1 ? 'checked' : ''}>
             ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}${pe.papel ? ' · ' + esc(pe.papel) : ''}</label>`).join('')}
@@ -3900,29 +4026,45 @@ function formAcao(id) {
         <input type="date" id="ac-prazo" value="${a ? esc(a.prazoISO) : ''}"></div>
       <div class="campo"><label>Turno</label>
         <select id="ac-turno">
-          ${(d.turnos || []).map((t) => `<option ${a && a.turno === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          ${(d.turnos || []).map((t) => `<option ${(a ? a.turno : 'Todos') === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
         </select></div>
     </div>
     <div class="campo"><label>Origem (opcional)</label>
-      <input id="ac-origem" value="${a ? esc(a.origem) : ''}"
-             placeholder="Ex.: Reunião turno A — 05/09"></div>`, `
+      <input id="ac-origem" value="${a ? esc(a.origem) : ''}" ${ex ? 'list="ac-origens"' : ''}
+             placeholder="${ex ? 'Ex.: Vistoria setorial' : 'Ex.: Reunião turno A — 05/09'}">
+      ${ex ? `<datalist id="ac-origens">${(ex.origens || []).map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}</div>
+    ${a && (a.fotos || []).length ? `<div class="campo"><label>Fotos da ação</label>
+      ${seloFotos(a.fotos.length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
+      <span class="dica">Abra para ver${d.permissoes && d.permissoes.gerir ? ' ou remover alguma' : ''}.</span></div>` : ''}
+    ${fotosCampoHtml('ac', a ? 'Acrescentar fotos (opcional)' : 'Fotos (opcional) — do que foi encontrado')}`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     ${a ? `<button class="botao-texto perigo" onclick="excluirAcao(${jsArg(a.id)})">Excluir</button>` : ''}
     <button class="botao" onclick="salvarAcao(${a ? jsArg(a.id) : 'null'})">${a ? 'Salvar' : 'Criar ação'}</button>`);
 }
 
 function salvarAcao(id) {
+  const a = id ? planoAcaoPorId(id) : null;
   const params = {
     acao: val('ac-acao'),
     descricao: val('ac-descricao'),
     responsaveisEmails: [...document.querySelectorAll('.ac-resp')].filter((c) => c.checked).map((c) => c.value),
     prazo: val('ac-prazo'),
     turno: val('ac-turno'),
-    origem: val('ac-origem')
+    origem: val('ac-origem'),
+    fotos: fotosParaEnviar('ac')
   };
+  if (PLANO.extras) {
+    params.zona = val('ac-zona'); params.local = val('ac-local');
+    params.criticidade = val('ac-crit'); params.abertaEm = val('ac-aberta');
+  }
   if (id) params.id = id;
-  if (!params.responsaveisEmails.length) return avisar('Marque pelo menos um responsável.', true);
-  agir('salvarAcao', params, id ? 'Ação atualizada' : (params.responsaveisEmails.length > 1 ? 'Ação criada — responsáveis avisados' : 'Ação criada — responsável avisado'));
+  const antigo = a && !(a.responsaveisEmails || []).length ? a.responsavel : '';
+  if (!params.responsaveisEmails.length) {
+    if (!antigo) return avisar('Marque pelo menos um responsável.', true);
+    params.responsavel = antigo;
+  }
+  agir(PLANO.acoes.salvar, params, id ? 'Ação atualizada' : (params.responsaveisEmails.length > 1 ? 'Ação criada — responsáveis avisados' : 'Ação criada — responsável avisado'))
+    .catch(() => {});
 }
 
 function excluirAcao(id) {
@@ -3930,17 +4072,19 @@ function excluirAcao(id) {
     <p style="line-height:1.7">Isso apaga a ação do plano. Se ela apenas deixou de fazer
        sentido, prefira <b>Cancelar</b> — assim ela some das contagens mas fica no histórico.</p>`, `
     <button class="botao secundario" onclick="formAcao(${jsArg(id)})">Voltar</button>
-    <button class="botao perigo" onclick="agir('excluirAcao',{id:${jsArg(id)}},'Ação excluída')">Excluir mesmo assim</button>`);
+    <button class="botao perigo" onclick="agir(${planoAcao('excluir')},{id:${jsArg(id)}},'Ação excluída').catch(()=>{})">Excluir mesmo assim</button>`);
 }
 
 function formConcluirAcao(id) {
-  const a = (DADOS.lista || []).find((x) => x.id === id) || {};
+  const a = planoAcaoPorId(id) || {};
+  fotosLimpar('cc');
   abrirJanela('Concluir ação', `
     <div class="campo"><label>Ação</label><input value="${esc(a.acao || '')}" readonly></div>
     <div class="campo"><label>O que foi feito (opcional)</label>
-      <textarea id="cc-obs" rows="3" placeholder="Ex.: 14 lâmpadas trocadas, conferido com o Márcio em 24/09"></textarea></div>`, `
+      <textarea id="cc-obs" rows="3" placeholder="Ex.: 14 lâmpadas trocadas, conferido com o Márcio em 24/09"></textarea></div>
+    ${fotosCampoHtml('cc', 'Foto de como ficou (opcional)')}`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-    <button class="botao" onclick="agir('concluirAcao',{id:${jsArg(id)},observacao:val('cc-obs')},'Ação concluída')">Concluir</button>`);
+    <button class="botao" onclick="agir(${planoAcao('concluir')},{id:${jsArg(id)},observacao:val('cc-obs'),fotos:fotosParaEnviar('cc')},'Ação concluída').catch(()=>{})">Concluir</button>`);
 }
 
 function formCancelarAcao(id) {
@@ -3948,7 +4092,191 @@ function formCancelarAcao(id) {
     <div class="campo"><label>Motivo</label>
       <textarea id="ca-motivo" rows="3" placeholder="Por que esta ação não vai mais acontecer"></textarea></div>`, `
     <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
-    <button class="botao" onclick="agir('cancelarAcao',{id:${jsArg(id)},motivo:val('ca-motivo')},'Ação cancelada')">Cancelar ação</button>`);
+    <button class="botao" onclick="agir(${planoAcao('cancelar')},{id:${jsArg(id)},motivo:val('ca-motivo')},'Ação cancelada').catch(()=>{})">Cancelar ação</button>`);
+}
+
+/* ---------- FOTOS NA AÇÃO E NO COMENTÁRIO (4.2.2) ----------
+   A foto é reduzida aqui no navegador (lado maior 1600 px, JPEG) antes de
+   subir: a do celular tem 4-8 MB e vira ~300 KB, sem perder o que importa.
+   Fica no Drive, na pasta da ação (Anexos/ACOES/<id>), como os outros
+   anexos do GSL. Para ver, a foto passa pelo servidor, que confere se a
+   pessoa enxerga aquela ação. */
+const FOTOS_PENDENTES = {};          // por formulário: 'ac' (ação), 'cm' (comentário), 'cc' (conclusão)
+const FOTO_LADO_MAX = 1600;
+const fotosPorVez = () => (planoD().fotos && planoD().fotos.porVez) || 5;
+
+function fotosLimpar(chave) { FOTOS_PENDENTES[chave] = []; }
+function fotosParaEnviar(chave) {
+  return (FOTOS_PENDENTES[chave] || []).map((f) => ({ nome: f.nome, tipo: f.tipo, dados: f.dados }));
+}
+
+function fotosCampoHtml(chave, rotulo) {
+  return `<div class="campo"><label>${esc(rotulo)}</label>
+    <label class="botao secundario fotos-escolher">&#128247; Escolher ou tirar foto
+      <input type="file" id="${chave}-fotos" accept="image/\*" multiple style="display:none"
+             onchange="fotosEscolhidas(this, ${jsArg(chave)})"></label>
+    <span class="dica" id="${chave}-fotos-situacao">até ${fotosPorVez()} por vez</span>
+    <div class="fotos-previas" id="${chave}-previas"></div></div>`;
+}
+
+async function fotosEscolhidas(input, chave) {
+  const lista = FOTOS_PENDENTES[chave] = FOTOS_PENDENTES[chave] || [];
+  const arquivos = [...(input.files || [])];
+  input.value = '';
+  const situacao = el(chave + '-fotos-situacao');
+  for (const arquivo of arquivos) {
+    if (lista.length >= fotosPorVez()) { avisar('No máximo ' + fotosPorVez() + ' fotos de cada vez.', true); break; }
+    if (String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(arquivo.name || '')) {
+      avisar('"' + arquivo.name + '" não é uma foto.', true); continue;
+    }
+    if (situacao) situacao.textContent = 'Preparando ' + arquivo.name + '…';
+    try { lista.push(await comprimirFoto(arquivo)); }
+    catch (e) { avisar(e.message || String(e), true); }
+  }
+  if (situacao) situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : 'até ' + fotosPorVez() + ' por vez';
+  fotosPintarPrevias(chave);
+}
+
+function fotosPintarPrevias(chave) {
+  const alvo = el(chave + '-previas'); if (!alvo) return;
+  alvo.innerHTML = (FOTOS_PENDENTES[chave] || []).map((f, i) => `
+    <span class="foto-previa">${f.previa ? `<img src="${f.previa}" alt="">` : `<span class="foto-sem-previa">${esc(f.nome)}</span>`}
+      <button type="button" title="Tirar esta foto" onclick="fotosTirar(${jsArg(chave)}, ${i})">&times;</button></span>`).join('');
+}
+function fotosTirar(chave, i) {
+  (FOTOS_PENDENTES[chave] || []).splice(i, 1);
+  fotosPintarPrevias(chave);
+  const s = el(chave + '-fotos-situacao');
+  if (s) s.textContent = (FOTOS_PENDENTES[chave] || []).length ? FOTOS_PENDENTES[chave].length + ' foto(s) prontas para enviar' : 'até ' + fotosPorVez() + ' por vez';
+}
+
+/* Reduz para JPEG. Formato que o navegador não abre (HEIC no Chrome): vai como veio, se couber. */
+async function comprimirFoto(arquivo) {
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = await new Promise((ok, erro) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => erro(new Error('formato'));
+      i.src = url;
+    });
+    const k = Math.min(1, FOTO_LADO_MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);     // PNG transparente nao fica preto
+    g.drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.82);
+    return { nome: String(arquivo.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg', tipo: 'image/jpeg',
+             dados: dataUrl.split(',')[1], previa: dataUrl };
+  } catch (e) {
+    if (arquivo.size > 10 * 1024 * 1024) throw new Error('A foto "' + arquivo.name + '" passa de 10 MB e o navegador não consegue reduzi-la.');
+    const dados = await lerBase64(arquivo);
+    return { nome: arquivo.name || 'foto', tipo: (arquivo.type || 'image/heic').toLowerCase(), dados: dados, previa: '' };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/*
+ * VISOR — abre por cima de qualquer janela: o comentário que está sendo
+ * escrito não se perde quando a pessoa para para ver uma foto.
+ */
+let VISOR = null;
+const FOTO_CACHE = new Map();        // id do arquivo -> data URL (as últimas vistas)
+
+function verFotosDaAcao(idAcao) {
+  const a = planoAcaoPorId(idAcao); if (!a) return;
+  verFotos(idAcao, a.fotos || [], !!(planoD().permissoes || {}).gerir);
+}
+function verFotosDoComentario(idAcao, idComentario) {
+  const a = planoAcaoPorId(idAcao); if (!a) return;
+  const c = (a.comentarios || []).find((x) => x.id === idComentario);
+  if (c) verFotos(idAcao, c.fotos || [], false);
+}
+
+function verFotos(idAcao, fotos, podeRemover) {
+  if (!fotos.length) return;
+  VISOR = { idAcao: idAcao, fotos: fotos.slice(), i: 0, podeRemover: podeRemover, pedido: 0,
+            acaoFoto: PLANO.acoes.foto, acaoRemover: PLANO.acoes.removerFoto };
+  let v = el('visor-fotos');
+  if (!v) {
+    v = document.createElement('div');
+    v.id = 'visor-fotos';
+    v.className = 'visor-fotos';
+    v.innerHTML = `<div class="visor-caixa">
+        <div class="visor-topo"><span id="visor-legenda"></span>
+          <button class="fechar" onclick="visorFechar()" aria-label="Fechar">&times;</button></div>
+        <div class="visor-palco"><button class="visor-seta" onclick="visorAndar(-1)" aria-label="Anterior">&#8249;</button>
+          <div id="visor-imagem" class="visor-imagem"></div>
+          <button class="visor-seta" onclick="visorAndar(1)" aria-label="Próxima">&#8250;</button></div>
+        <div class="visor-rodape" id="visor-rodape"></div></div>`;
+    v.addEventListener('click', (e) => { if (e.target === v) visorFechar(); });
+    document.body.appendChild(v);
+  }
+  v.classList.remove('oculto');
+  v.classList.toggle('uma', VISOR.fotos.length < 2);
+  visorMostrar();
+}
+function visorFechar() { const v = el('visor-fotos'); if (v) v.classList.add('oculto'); VISOR = null; }
+function visorAndar(passo) {
+  if (!VISOR) return;
+  VISOR.i = (VISOR.i + passo + VISOR.fotos.length) % VISOR.fotos.length;
+  visorMostrar();
+}
+document.addEventListener('keydown', (e) => {
+  if (!VISOR) return;
+  if (e.key === 'Escape') { e.stopPropagation(); visorFechar(); }
+  else if (e.key === 'ArrowRight') visorAndar(1);
+  else if (e.key === 'ArrowLeft') visorAndar(-1);
+});
+
+async function visorMostrar() {
+  const V = VISOR; if (!V) return;
+  const f = V.fotos[V.i];
+  const pedido = ++V.pedido;
+  el('visor-legenda').textContent = (f.nome || 'foto') + (V.fotos.length > 1 ? ' · ' + (V.i + 1) + ' de ' + V.fotos.length : '');
+  el('visor-rodape').innerHTML = `
+    ${V.podeRemover ? `<button class="botao-texto perigo" onclick="visorRemover()">Remover esta foto</button>` : ''}
+    <button class="botao secundario" id="visor-baixar" disabled onclick="visorBaixar()">Baixar</button>
+    <button class="botao" onclick="visorFechar()">Fechar</button>`;
+  const alvo = el('visor-imagem');
+  let url = FOTO_CACHE.get(f.id);
+  if (!url) {
+    alvo.innerHTML = '<div class="vazio">Carregando a foto…</div>';
+    try {
+      const r = await executarAcaoSrv(V.acaoFoto, { id: V.idAcao, arquivo: f.id });
+      url = 'data:' + (r.tipo || 'image/jpeg') + ';base64,' + r.dados;
+      FOTO_CACHE.set(f.id, url);
+      if (FOTO_CACHE.size > 24) FOTO_CACHE.delete(FOTO_CACHE.keys().next().value);
+    } catch (e) {
+      if (VISOR === V && V.pedido === pedido) alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+      return;
+    }
+  }
+  if (VISOR !== V || V.pedido !== pedido) return;      // trocou de foto ou fechou no meio
+  alvo.innerHTML = /^data:image\/(heic|heif)/i.test(url)
+    ? '<div class="vazio">Este navegador não mostra fotos HEIC (iPhone). Use <b>Baixar</b> para abrir no computador.</div>'
+    : `<img src="${url}" alt="${esc(f.nome || 'foto')}">`;
+  const b = el('visor-baixar'); if (b) b.disabled = false;
+}
+
+function visorBaixar() {
+  if (!VISOR) return;
+  const f = VISOR.fotos[VISOR.i], url = FOTO_CACHE.get(f.id);
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url; a.download = f.nome || 'foto.jpg';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function visorRemover() {
+  const V = VISOR; if (!V || !V.podeRemover) return;
+  const f = V.fotos[V.i];
+  if (!confirm('Remover a foto "' + (f.nome || 'foto') + '" desta ação? Ela vai para a lixeira do Drive.')) return;
+  visorFechar();
+  try { await agir(V.acaoRemover, { id: V.idAcao, arquivo: f.id }, 'Foto removida'); } catch (e) { /* agir ja avisou */ }
 }
 
 /* ================= RELATOS DE ERRO =================

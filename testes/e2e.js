@@ -717,41 +717,84 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
-  await cenario('limpeza: aba acesa, compra em lote pela tela, "Acabou" e "Concluida em" na acao', async () => {
+  await cenario('limpeza: abas novas; estoque igual ao de TI; Plano de Acao com foto na acao e no comentario (visor abre a foto)', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321', true);
     await esperarTela(aba, ['aplicacao']);
     const f = await frame(aba);
     await f.evaluate(() => { esquecerTelas(); abrir('limpeza'); });
-    await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 3, null, { timeout: 15000 });
-    await f.click('#pagina .abas .aba >> text=Compras e consumo');
-    const acesa = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina .abas .aba.ativa')).map((b) => b.textContent.trim()));
-    afirmar(acesa.length === 1 && acesa[0] === 'Compras e consumo', 'aba acesa: ' + acesa.join(','));
-    // compra em lote pela tela
-    await f.click('text=Registrar compra (lote)');
-    await f.waitForSelector('#ll-linhas tr', { timeout: 10000 });
-    const linhas = f.locator('#ll-linhas tr');
-    await linhas.nth(0).locator('.ll-prod').fill('Detergente neutro 5L');
-    await linhas.nth(0).locator('.ll-qtd').fill('2');
-    await linhas.nth(0).locator('.ll-preco').fill('45,90');
-    await linhas.nth(1).locator('.ll-prod').fill('Pano de chão');
-    await f.click('.janela .botao >> text=Registrar compra');
-    await f.waitForFunction(() => (DADOS.itens || []).length === 2, null, { timeout: 15000 });
-    // acabou
-    await f.click('#conteudo-lp button:has-text("Acabou") >> nth=0');
-    await f.click('.janela .botao >> text=Registrar que acabou');
-    await f.waitForFunction(() => (DADOS.itens || []).some((i) => i.situacao === 'AGUARDANDO'), null, { timeout: 15000 });
-    afirmar(/Reabastecer/.test(await f.evaluate(() => document.getElementById('conteudo-lp').textContent)), 'botao Reabastecer aparece');
-    // Nova acao: "Concluida em" aparece quando a situacao e Concluida
-    const visivel = await f.evaluate(() => {
-      lpFormAcao('');
-      const antes = !document.getElementById('la-fech-caixa').classList.contains('oculto');
-      const sel = document.getElementById('la-status');
-      sel.value = 'Concluída'; sel.dispatchEvent(new Event('change'));
-      return [antes, !document.getElementById('la-fech-caixa').classList.contains('oculto')];
+    await f.waitForFunction(() => document.querySelectorAll('#pagina .abas .aba').length >= 5, null, { timeout: 15000 });
+    const abas = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina .abas .aba')).map((b) => b.textContent.trim()));
+    afirmar(abas.join('|') === 'Gestão|Plano de Ação|Estoque|Movimentações|Inventário', 'abas: ' + abas.join('|'));
+    // ESTOQUE — o mesmo do TI
+    await f.click('#pagina .abas .aba[data-aba="estoque"]');
+    await f.click('#acoes-topo >> text=Novo produto');
+    await f.fill('#ei-nome', 'Detergente neutro 5L'); await f.fill('#ei-min', '2'); await f.fill('#ei-ideal', '6'); await f.fill('#ei-saldo', '1');
+    await f.click('.janela .botao >> text=Salvar');
+    await f.waitForFunction(() => ((DADOS.estoque || {}).itens || []).some((i) => i.codigo === 'LP-0001' && i.saldo === 1), null, { timeout: 15000 });
+    await f.waitForFunction(() => /Estoque ideal/.test(document.getElementById('conteudo-lp').textContent), null, { timeout: 15000 });
+    const cab = await f.evaluate(() => Array.from(document.querySelectorAll('#conteudo-lp thead th')).map((t) => t.textContent.trim()));
+    ['Produto de limpeza', 'Estoque', 'Estoque mínimo', 'Estoque ideal'].forEach((c) => afirmar(cab.indexOf(c) !== -1, 'coluna ' + c + ': ' + cab.join('|')));
+    afirmar(/Detergente neutro 5L/.test(await f.evaluate(() => (document.querySelector('.est-alerta') || {}).textContent || '')), 'alerta do minimo');
+    await f.click('.est-mais');
+    await f.fill('#er-qtd', '4');
+    await f.press('#er-qtd', 'Enter');
+    await f.waitForFunction(() => { const i = ((DADOS.estoque || {}).itens || []).find((x) => x.codigo === 'LP-0001'); return i && i.saldo === 5; }, null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => ABA_LP) === 'estoque', 'continua na aba Estoque depois de gravar');
+    // PLANO DE ACAO — o mesmo do calendario, com foto
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    await f.click('#pagina .abas .aba[data-aba="plano"]');
+    await f.click('#acoes-topo >> text=Nova ação');
+    await f.fill('#ac-acao', 'Banheiro da central sem papel');
+    await f.fill('#ac-descricao', 'Repor o papel toalha');
+    await f.selectOption('#ac-zona', 'Z7');
+    await f.fill('#ac-local', 'Banheiro da central');
+    await f.selectOption('#ac-crit', 'Alta');
+    await f.check('.ac-resp[value="' + DONO + '"]');
+    await f.fill('#ac-prazo', '2026-12-01');
+    await f.setInputFiles('#ac-fotos', { name: 'banheiro.png', mimeType: 'image/png', buffer: png });
+    await f.waitForFunction(() => (FOTOS_PENDENTES.ac || []).length === 1 && document.querySelectorAll('#ac-previas img').length === 1, null, { timeout: 15000 });
+    await f.click('.janela .botao >> text=Criar ação');
+    await f.waitForFunction(() => ((DADOS.plano || {}).lista || []).some((a) => a.acao === 'Banheiro da central sem papel' && a.fotos.length === 1), null, { timeout: 20000 });
+    const card = await f.evaluate(() => document.querySelector('#conteudo-lp .cartao-acao').textContent.replace(/\s+/g, ' '));
+    afirmar(/Z7 · Banheiro da central/.test(card) && /Alta/.test(card) && /1 foto/.test(card), 'cartao: ' + card.slice(0, 300));
+    if (process.env.FOTO_LIMPEZA) await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-plano.png', fullPage: true });
+    // o visor abre a foto (veio do Drive pelo servidor)
+    await f.click('#conteudo-lp .cartao-acao .selo-foto');
+    await f.waitForFunction(() => { const i = document.querySelector('#visor-imagem img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 15000 });
+    if (process.env.FOTO_LIMPEZA) await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-visor.png' });
+    await f.click('#visor-fotos .visor-rodape >> text=Fechar');
+    // comentario com foto, concluindo
+    await f.click('#conteudo-lp .cartao-acao button:has-text("Comentários")');
+    await f.fill('#cm-texto', 'Papel reposto e dispenser conferido');
+    await f.selectOption('#cm-sit', 'Concluída');
+    await f.setInputFiles('#cm-fotos', { name: 'depois.png', mimeType: 'image/png', buffer: png });
+    await f.waitForFunction(() => (FOTOS_PENDENTES.cm || []).length === 1, null, { timeout: 15000 });
+    await f.click('.janela .botao >> text=Registrar comentário');
+    await f.waitForFunction(() => ((DADOS.plano || {}).lista || []).some((a) => a.situacao === 'CONCLUIDA' && a.comentarios.length === 1 && a.comentarios[0].fotos.length === 1), null, { timeout: 20000 });
+    // no Drive: Anexos/ACOES/<id da acao>/, as duas fotos juntas
+    const a = await f.evaluate(() => DADOS.plano.lista.find((x) => x.acao === 'Banheiro da central sem papel'));
+    const pastas = [a.fotos[0].id, a.comentarios[0].fotos[0].id].map((id) => {
+      const arq = s.mundo.arquivos.get(id); const p = s.mundo.pastas.get([...arq.pais][0]);
+      return s.mundo.pastas.get([...p.pais][0]).nome + '/' + p.nome;
     });
-    afirmar(!visivel[0] && visivel[1], 'campo Concluida em (antes, depois): ' + visivel);
+    afirmar(pastas[0] === 'ACOES/' + a.id && pastas[1] === pastas[0], 'pastas: ' + pastas.join(' | '));
+    // a foto do comentario abre pelo historico
+    await f.evaluate(() => { PLANO.local.situacao = 'TODAS'; pintarAbaLP(DADOS); });
+    await f.click('#conteudo-lp .cartao-acao button:has-text("Comentários")');
+    await f.click('.coment-item .selo-foto');
+    await f.waitForFunction(() => { const i = document.querySelector('#visor-imagem img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => !document.getElementById('janela').classList.contains('oculto')), 'a janela de comentarios continua aberta por baixo do visor');
+    await aba.page.keyboard.press('Escape');
+    afirmar(await f.evaluate(() => document.getElementById('visor-fotos').classList.contains('oculto')), 'Esc fecha o visor');
+    if (process.env.FOTO_LIMPEZA) {
+      await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-comentarios.png' });
+      await f.evaluate(() => { fecharJanela(); trocarAbaLP('gestao'); });
+      await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-gestao.png', fullPage: true });
+      await f.evaluate(() => trocarAbaLP('estoque'));
+      await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-estoque.png', fullPage: true });
+    }
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

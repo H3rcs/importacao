@@ -5,6 +5,7 @@
  * mesmos status, mesmo ciclo de entrega e validacao.
  */
 
+const BUILD_INSTALACAO = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COLUNAS_CONTROLE = ['ID', 'CRIADO_EM', 'CRIADO_POR', 'ATUALIZADO_EM', 'ATUALIZADO_POR', 'EXCLUIDO'];
 
 const ESQUEMA = {
@@ -79,8 +80,11 @@ const ESQUEMA = {
                     'OCORRENCIA', 'LIDO_POR'],
 
   /*
-   * LIMPEZA — a versao enxuta: acoes (principalmente as que saem das
-   * vistorias) e custo dos produtos. So entra o que saiu NAO conforme.
+   * LIMPEZA. Desde a 4.2.2 as acoes vivem no Plano de Acao (tabela ACOES,
+   * PLANO = LIMPEZA) e os produtos no estoque da limpeza (LP_EST_*). As
+   * tabelas LP_ACOES, LP_PRODUTOS, LP_COMPRAS, LP_EMBALAGENS, LP_LOTES e
+   * LP_ITENS ficam no banco com o que ja foi registrado, mas a tela nao as
+   * usa mais (LP_ACOES passa sozinha para ACOES na migracao).
    */
   LP_ZONAS:      ['ZONA', 'DESCRICAO', 'ATIVO'],
   LP_ACOES:      ['DATA', 'TURNO', 'ORIGEM', 'ZONA', 'LOCAL', 'PROBLEMA', 'CRITICIDADE',
@@ -107,23 +111,32 @@ const ESQUEMA = {
                    'LOCAL', 'OBSERVACAO', 'ATIVO', 'ESTOQUE_IDEAL'],
   EST_MOVIMENTOS: ['DATA', 'TIPO', 'ITEM', 'QUANTIDADE', 'DESTINO', 'SOLICITANTE', 'DOCUMENTO',
                    'SERIE', 'OBSERVACAO', 'REGISTRADO_POR'],
+  // ESTOQUE DA LIMPEZA (4.2.2) — o mesmo modelo do estoque de TI, tabelas proprias.
+  LP_EST_ITENS:      ['CODIGO', 'NOME', 'CATEGORIA', 'MARCA', 'MODELO', 'UNIDADE', 'ESTOQUE_MINIMO',
+                      'LOCAL', 'OBSERVACAO', 'ATIVO', 'ESTOQUE_IDEAL'],
+  LP_EST_MOVIMENTOS: ['DATA', 'TIPO', 'ITEM', 'QUANTIDADE', 'DESTINO', 'SOLICITANTE', 'DOCUMENTO',
+                      'SERIE', 'OBSERVACAO', 'REGISTRADO_POR'],
 
   /*
    * PLANO DE ACAO — as acoes definidas nas reunioes de turno.
    * Solta de proposito: ORIGEM e texto livre ("Reuniao turno A - 05/09"),
    * nao uma chave para uma tabela de reunioes que nao existe.
    * SITUACAO: PENDENTE · CONCLUIDA · CANCELADA. Sem validacao.
+   * PLANO (4.2.2): vazio/CALENDARIO = o do Calendario; LIMPEZA = o da Limpeza CD
+   * (que usa tambem ZONA, LOCAL, CRITICIDADE e ABERTA_EM).
+   * ANEXOS: lista JSON das fotos da acao (no Drive, em Anexos/ACOES/<ID>/).
    */
   ACOES:      ['ACAO', 'DESCRICAO', 'RESPONSAVEL', 'RESPONSAVEL_EMAIL', 'TURNO',
                'ORIGEM', 'PRAZO', 'SITUACAO', 'CONCLUIDO_EM', 'CONCLUIDO_POR', 'OBSERVACAO',
-               'ANDAMENTO', 'DEPENDE'],
+               'ANDAMENTO', 'DEPENDE', 'PLANO', 'ZONA', 'LOCAL', 'CRITICIDADE', 'ABERTA_EM', 'ANEXOS'],
   /*
-   * HISTORICO DE COMENTARIOS das acoes (4.2.2) — do Plano de Acao (ORIGEM
-   * ACOES) e da Limpeza (ORIGEM LP_ACOES). Cada comentario guarda o que
-   * avancou, a situacao em que a acao ficou e o que ela espera para concluir.
+   * HISTORICO DE COMENTARIOS das acoes (4.2.2) — dos dois planos (ORIGEM
+   * ACOES; LP_ACOES nos que vieram da tabela antiga da limpeza). Cada
+   * comentario guarda o que avancou, a situacao em que a acao ficou, o que
+   * ela espera para concluir e as fotos (ANEXOS, lista JSON).
    */
   COMENTARIOS: ['ORIGEM', 'ACAO_ID', 'TEXTO', 'SITUACAO', 'DEPENDE', 'AUTOR', 'AUTOR_NOME',
-                'AUTOR_PAPEL', 'TIPO'],
+                'AUTOR_PAPEL', 'TIPO', 'ANEXOS'],
 
   /*
    * CONVERSA — uma linha por mensagem.
@@ -278,7 +291,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.7';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes
+const VERSAO_ESQUEMA = '8.8';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -386,9 +399,21 @@ function garantirEsquema() {
     if (r && r.corrigidas) mexeu = true;
   } catch (e) { registrarLog('sistema', 'ERRO', 'COMPETENCIA', '', String(e)); }
 
+  /*
+   * 5.2 · Limpeza (4.2.2): as acoes da tabela antiga (LP_ACOES) passam para
+   * o Plano de Acao da Limpeza (ACOES, PLANO = LIMPEZA), com o mesmo ID —
+   * os comentarios continuam ligados. Nada e apagado da tabela antiga, e o
+   * que ja passou nao passa de novo.
+   */
+  // Se falhar (trava ocupada, por exemplo), a versao nao e marcada: tenta de novo na proxima abertura.
+  let migracaoPendente = false;
+  try {
+    if (migrarAcoesDaLimpeza_()) mexeu = true;
+  } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'LP_ACOES', '', String(e)); }
+
   // 6 · o ADMIN nunca pode perder acesso quando uma tela nova aparece
   if (mexeu) { if (principal) liberarTudoParaAdmin(); limparCache(); }
-  PropertiesService.getScriptProperties().setProperty(chaveVersao, VERSAO_ESQUEMA);
+  if (!migracaoPendente) PropertiesService.getScriptProperties().setProperty(chaveVersao, VERSAO_ESQUEMA);
   esquecerProps();
   return mexeu;
 }

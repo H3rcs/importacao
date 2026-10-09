@@ -29,6 +29,9 @@ e.telas.forEach((t) => run(DONO, 'carregarTela', ctx, t.id, {}));      // caches
 // um primeiro acesso em andamento (codigo guardado no cache)
 run(ATACANTE, 'entrar', DONO.replace('dono', 'outro'), '1111', '', '', '');
 
+// "usuario" montado no console, com todas as capacidades — so a porta pode barrar.
+const FALSO = { email: ATACANTE, perfil: 'ADMIN', permissoes: { escopo: 'TODOS', telas: ['limpeza', 'acoes', 'estoque'],
+  podes: ['GERIR_LIMPEZA', 'GERIR_ACOES', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'] } };
 console.log('Chamadas diretas de uma conta sem cadastro (' + PASTA + '):');
 const bloqueadas = [
   ['prop', 'SEGREDO_PIN'], ['comCache', 'acessos'], ['comCache', 'pincod_email_dono_bartofil_com_br'],
@@ -36,7 +39,13 @@ const bloqueadas = [
   ['lerTextoCache', 'geracao'], ['listarFiliais'], ['carregarPerfis'], ['idBancoMestre'],
   ['limparCache'], ['avancarGeracao'], ['inserir', 'ACESSOS', { EMAIL: 'x@bartofil.com.br', PERFIL: 'ADMIN' }, 'x'],
   ['atualizarVarios', 'ACESSOS', [{ id: 'x', campos: { PERFIL: 'ADMIN' } }], 'x'],
-  ['atualizarCompetenciaAberta'], ['gerarMesSeNecessario'], ['testarEmail'], ['garantirEsquema'], ['corrigirFuso']
+  ['atualizarCompetenciaAberta'], ['gerarMesSeNecessario'], ['testarEmail'], ['garantirEsquema'], ['corrigirFuso'],
+  // 4.2.2: Plano de Acao da Limpeza, estoque da limpeza e fotos — "usuario" inventado no console
+  ['listarAcoes', 'LIMPEZA'], ['pessoasParaAcao', null], ['dadosLimpeza', FALSO, {}], ['dadosAcoes', FALSO, {}],
+  ['acaoFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['acaoFotoAcaoLimpeza', FALSO, { id: 'x', arquivo: 'y' }],
+  ['acaoSalvarItemLimpeza', FALSO, { nome: 'x' }], ['acaoMovimentarLimpeza', FALSO, { tipo: 'ENTRADA', item: 'LP-0001', quantidade: 1 }],
+  ['acaoSalvarAcaoLimpeza', FALSO, { acao: 'x', prazo: '2026-12-01', turno: 'A', responsavel: 'x' }],
+  ['acaoRemoverFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['removerAnexo', FALSO, 'ACOES', 'x', 'y']
 ];
 bloqueadas.forEach(([fn, ...a]) => {
   const r = run(ATACANTE, fn, ...a);

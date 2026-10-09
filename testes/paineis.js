@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * TESTES DOS PAINEIS (NOBREAKS, LIMPEZA, ESTOQUE), FILIAIS E CONFIGURACAO.
+ * TESTES DOS PAINEIS (NOBREAKS, LIMPEZA, ESTOQUE), PLANO DE ACAO, FOTOS, FILIAIS E CONFIGURACAO.
  *
  *   node testes/paineis.js [pasta-do-GSL]
  *
@@ -137,68 +137,221 @@ caso('nobreak: planilha antiga com o mesmo codigo duas vezes importa inteira (ca
 /* LIMPEZA                                                             */
 /* ------------------------------------------------------------------ */
 
-caso('limpeza: embalagem "5.000" ml e cinco litros (o custo do mes nao sai 1000x maior)', () => {
+const SUP = 'sup.limpeza@bartofil.com.br';
+/* PNG de 1x1: bytes de imagem de verdade para as fotos. */
+const PNG_1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const foto = (n, tipo) => ({ nome: 'foto' + n + '.jpg', tipo: tipo || 'image/jpeg', dados: PNG_1x1 });
+
+caso('limpeza: estoque igual ao de TI (LP-0001, minimo e ideal, saida com destino, estorno, inventario, historico) e separado do de TI', () => {
   const m = mundo(); const s = entrar(m, GERENTE, '5555');
-  acao(m, s, 'salvarProduto', { produto: 'Detergente Teste', tipo: 'Concentrado', embalagemMl: '5.000', preco: '45,90', diluicao: '10', solucaoL: '5', aplicacoesDia: '2' });
-  const p = tela(m, s, 'limpeza').produtos.find((x) => x.produto === 'Detergente Teste');
-  afirmar(p.embalagemMl === 5000 && p.preco === 45.9, 'embalagem ' + p.embalagemMl + ' preco ' + p.preco);
+  acao(m, s, 'salvarItemLimpeza', { nome: 'Detergente neutro 5L', unidade: 'galão', minimo: '2', ideal: '6', saldoInicial: '3' });
+  let d = tela(m, s, 'limpeza').estoque;
+  const det = d.itens.find((i) => i.nome === 'Detergente neutro 5L');
+  afirmar(det && det.codigo === 'LP-0001' && det.saldo === 3 && det.situacao === 'OK' && det.unidade === 'galão', 'cadastro: ' + JSON.stringify(det));
+  afirmar(d.permissoes.cadastrar && d.permissoes.movimentar && d.prefixo === 'LP', 'gerente gere o estoque da limpeza: ' + JSON.stringify(d.permissoes));
+  const e0 = erroDe(() => acao(m, s, 'movimentarLimpeza', { tipo: 'SAIDA', item: 'LP-0001', quantidade: '1' }));
+  afirmar(/Informe para onde foi/.test(e0), 'saida sem destino: ' + e0);
+  acao(m, s, 'movimentarLimpeza', { tipo: 'SAIDA', item: 'LP-0001', quantidade: '1', destino: 'Z7 — Sanitários', solicitante: 'Equipe turno A' });
+  d = tela(m, s, 'limpeza').estoque;
+  const depois = d.itens.find((i) => i.codigo === 'LP-0001');
+  afirmar(depois.saldo === 2 && depois.situacao === 'REPOR' && depois.faltaIdeal === 4, 'apos a saida: ' + JSON.stringify(depois));
+  afirmar(/Saldo insuficiente/.test(erroDe(() => acao(m, s, 'movimentarLimpeza', { tipo: 'SAIDA', item: 'LP-0001', quantidade: '5', destino: 'Z1' }))), 'saldo insuficiente');
+  const saida = d.movimentos.find((x) => x.tipo === 'SAIDA');
+  acao(m, s, 'estornarLimpeza', { id: saida.id, motivo: 'lançado errado' });
+  d = tela(m, s, 'limpeza').estoque;
+  afirmar(d.itens.find((i) => i.codigo === 'LP-0001').saldo === 3 && d.movimentos.find((x) => x.id === saida.id).estornado, 'estorno');
+  acao(m, s, 'inventarioLimpeza', { contagens: [{ codigo: 'LP-0001', contado: '5', saldoVisto: 3 }] });
+  const h = acao(m, s, 'historicoItemLimpeza', { codigo: 'LP-0001' });
+  afirmar(h.saldo === 5 && h.total === 4, 'historico: saldo ' + h.saldo + ' lancamentos ' + h.total);
+  // o estoque de TI nao ve nem mexe no da limpeza
+  const adm = entrar(m, DONO, '4321');
+  afirmar(!tela(m, adm, 'estoque').itens.some((i) => i.codigo === 'LP-0001'), 'fora do estoque de TI');
+  afirmar(/Escolha um item do cadastro/.test(erroDe(() => acao(m, adm, 'movimentarEstoque', { tipo: 'ENTRADA', item: 'LP-0001', quantidade: '1' }))), 'porta do TI');
+  acao(m, adm, 'salvarItemEstoque', { nome: 'Mouse USB' });
+  afirmar(tela(m, adm, 'estoque').itens.find((i) => i.nome === 'Mouse USB').codigo === 'TI-0001', 'o TI continua com TI-0001');
 });
 
-caso('limpeza: renomear o produto leva as embalagens junto; nome repetido na edicao e recusado', () => {
-  const m = mundo(); const s = entrar(m, GERENTE, '5555');
-  acao(m, s, 'salvarProduto', { produto: 'Detergente Neutro', tipo: 'Concentrado', embalagemMl: '5000', preco: '45,90', diluicao: '10', solucaoL: '5', aplicacoesDia: '2' });
-  acao(m, s, 'salvarProduto', { produto: 'Alcool 70', tipo: 'Pronto uso', embalagemMl: '1000', preco: '9,90' });
-  acao(m, s, 'salvarEmbalagem', { produto: 'detergente neutro', abertura: '2026-09-20' });
-  let d = tela(m, s, 'limpeza');
-  const prod = d.produtos.find((x) => x.produto === 'Detergente Neutro');
-  acao(m, s, 'salvarProduto', { id: prod.id, produto: 'Detergente Neutro 5L', tipo: 'Concentrado', embalagemMl: '5000', preco: '45,90', diluicao: '10', solucaoL: '5', aplicacoesDia: '2' });
-  d = tela(m, s, 'limpeza');
-  const emb = d.embalagens.filter((e) => /detergente/i.test(e.produto));
-  afirmar(emb.length === 1 && emb[0].produto === 'Detergente Neutro 5L' && emb[0].previstoDias > 0, 'embalagem: ' + JSON.stringify(emb));
-  const alcool = d.produtos.find((x) => x.produto === 'Alcool 70');
-  const erro = erroDe(() => acao(m, s, 'salvarProduto', { id: alcool.id, produto: 'detergente neutro 5l', tipo: 'Pronto uso' }));
-  afirmar(/já está cadastrado/.test(erro), 'repetido recusado: ' + erro);
-});
-
-caso('limpeza: acao registrada ja concluida fecha na data dela; conclusao antes da acao e recusada', () => {
-  const m = mundo(); const s = entrar(m, GERENTE, '5555');
-  acao(m, s, 'salvarAcaoLimpeza', { data: '2026-08-15', problema: 'Piso sujo', acao: 'Lavar', status: 'Concluída', turno: 'A' });
-  let a = tela(m, s, 'limpeza').acoes.find((x) => x.problema === 'Piso sujo');
-  afirmar(a.fechamento === '2026-08-15' && a.diasAberta === 0, 'fechamento ' + a.fechamento + ' dias ' + a.diasAberta);
-  acao(m, s, 'salvarAcaoLimpeza', { data: '2026-08-20', problema: 'Lixo', acao: 'Recolher', status: 'Aberta', turno: 'B' });
-  a = tela(m, s, 'limpeza').acoes.find((x) => x.problema === 'Lixo');
-  const erro = erroDe(() => acao(m, s, 'concluirAcaoLimpeza', { id: a.id, fechamento: '2026-08-10' }));
-  afirmar(/anterior à data da ação/.test(erro), 'recusado: ' + erro);
-  acao(m, s, 'concluirAcaoLimpeza', { id: a.id, fechamento: '2026-08-21', custo: '1.500' });
-  a = tela(m, s, 'limpeza').acoes.find((x) => x.problema === 'Lixo');
-  afirmar(a.fechamento === '2026-08-21' && a.custo === 1500, 'concluida: ' + a.fechamento + ' custo ' + a.custo);
-});
-
-caso('limpeza: importacao guarda compras, embalagens e nao conformidades repetidas no mesmo dia; reimportar nao duplica', () => {
+caso('limpeza: importacao traz nao conformidades para o Plano de Acao e produtos para o estoque; reimportar nao duplica', () => {
   const m = mundo(); const s = entrar(m, GERENTE, '5555');
   const D = (a, b, c) => new m.DataDoScript(a, b, c);
   const link = planilhaAntiga(m, '04_Planilha_Gestao_Limpeza', {
-    'CADASTROS': [['ZONA', 'DESCRIÇÃO'], ['Z1', 'Armazenagem']],
+    'CADASTROS': [['ZONA', 'DESCRIÇÃO'], ['Z11', 'Pátio novo']],
     'NÃO CONFORMIDADES': [['REGISTRO DE NÃO CONFORMIDADES'], null,
       ['DATA', 'TURNO', 'ORIGEM', 'ZONA', 'LOCAL', 'O QUE FOI ENCONTRADO', 'CRITICIDADE', 'AÇÃO DEFINIDA', 'RESPONSÁVEL', 'PRAZO', 'STATUS', 'FECHAMENTO', 'EVIDÊNCIA'],
-      [D(2026, 8, 5), 'A', 'Vistoria setorial', 'Z1', 'Banheiro masculino', 'Sem papel', 'Alta', 'Repor', 'Supervisor', D(2026, 8, 5), 'Concluída', D(2026, 8, 5), ''],
+      [D(2026, 8, 5), 'A', 'Vistoria setorial', 'Z1', 'Banheiro masculino', 'Sem papel', 'Alta', 'Repor', 'Supervisor', D(2026, 8, 5), 'Concluída', D(2026, 8, 5), 'CH-0151'],
       [D(2026, 8, 5), 'C', 'Vistoria setorial', 'Z1', 'Banheiro masculino', 'Sem papel', 'Alta', 'Repor', 'Supervisor', D(2026, 8, 6), 'Aberta', '', '']],
     'PRODUTOS': [['PRODUTO', 'TIPO', 'EMBALAGEM (ML)', 'PREÇO (R$)', 'DILUIÇÃO (ML/L)', 'SOLUÇÃO POR APLICAÇÃO (L)', 'APLICAÇÕES POR DIA', 'ONDE USA'],
-      ['Detergente Neutro', 'Concentrado', 5000, 45.9, 10, 5, 2, 'Pisos']],
-    'COMPRAS': [['DATA', 'PRODUTO', 'QUANTIDADE', 'PREÇO UNIT.', 'FORNECEDOR', 'NF', 'OBSERVAÇÃO'],
-      [D(2026, 8, 10), 'Detergente Neutro', 2, 45.9, 'Forn A', '', 'pedido manhã'],
-      [D(2026, 8, 10), 'Detergente Neutro', 3, 45.9, 'Forn B', '', 'pedido tarde']],
-    'RENDIMENTO': [['PRODUTO', 'DATA DA COMPRA', 'NF', 'PREÇO PAGO', 'DATA DE ABERTURA', 'DEVERIA RENDER ATÉ', 'DATA REAL DE TÉRMINO', 'CAUSA PROVÁVEL'],
-      ['Detergente Neutro', D(2026, 8, 10), '', 45.9, D(2026, 8, 12), '', D(2026, 9, 1), 'turno A'],
-      ['Detergente Neutro', D(2026, 8, 10), '', 45.9, D(2026, 8, 12), '', '', 'turno B']]
+      ['Detergente Neutro', 'Concentrado', 5000, 45.9, 10, 5, 2, 'Pisos'],
+      ['Leia antes: esta aba calcula o custo por aplicação a partir da embalagem e da diluição', '', '', '', '', '', '', '']]
   });
   acao(m, s, 'importarLimpeza', { link });
-  const conta = () => { const d = tela(m, s, 'limpeza'); return [d.acoes.filter((a) => a.problema === 'Sem papel').length, d.compras.length, d.embalagens.length]; };
-  const primeira = conta();
-  afirmar(primeira.join() === '2,2,2', 'primeira importacao (acoes, compras, embalagens): ' + primeira);
+  const conta = () => { const d = tela(m, s, 'limpeza'); return [d.plano.lista.filter((a) => a.acao === 'Sem papel').length, d.estoque.itens.length, d.zonas.filter((z) => z.zona === 'Z11').length]; };
+  afirmar(conta().join() === '2,1,1', 'primeira importacao (acoes, produtos, zona nova): ' + conta());
   acao(m, s, 'importarLimpeza', { link });
-  afirmar(conta().join() === '2,2,2', 'reimportar: ' + conta());
-  afirmar(tela(m, s, 'limpeza').acoes.some((a) => a.problema === 'Sem papel' && a.status === 'Aberta'), 'a acao aberta do turno C existe');
+  afirmar(conta().join() === '2,1,1', 'reimportar: ' + conta());
+  const d = tela(m, s, 'limpeza');
+  const aberta = d.plano.lista.find((a) => a.acao === 'Sem papel' && a.situacao === 'PENDENTE');
+  afirmar(aberta && aberta.turno === 'C' && aberta.zona === 'Z1' && aberta.local === 'Banheiro masculino' && aberta.criticidade === 'Alta' &&
+    aberta.descricao === 'Repor' && aberta.abertaEm === '2026-09-05' && aberta.plano === 'LIMPEZA', 'aberta: ' + JSON.stringify(aberta).slice(0, 300));
+  const feita = d.plano.lista.find((a) => a.acao === 'Sem papel' && a.situacao === 'CONCLUIDA');
+  afirmar(feita && /CH-0151/.test(feita.observacao) && feita.concluidoEm === '05/09/2026', 'concluida: ' + JSON.stringify(feita).slice(0, 300));
+  const p = d.estoque.itens[0];
+  afirmar(p.nome === 'Detergente Neutro' && p.codigo === 'LP-0001' && p.saldo === 0 && p.local === 'Pisos', 'produto: ' + JSON.stringify(p));
+  afirmar(!tela(m, s, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.acao === 'Sem papel'), 'fora do plano do calendario');
+});
+
+caso('limpeza: acoes da tabela antiga (LP_ACOES) passam para o Plano de Acao na atualizacao, com o mesmo ID e os comentarios; nao duplica', () => {
+  const m = mundo(); let c = ctx(m);
+  const ids = c.inserirVarios('LP_ACOES', [
+    { DATA: '2026-09-01', TURNO: 'A', ORIGEM: 'Vistoria setorial', ZONA: 'Z2', LOCAL: 'Doca 4', PROBLEMA: 'Piso com óleo', CRITICIDADE: 'Alta',
+      ACAO: 'Lavar com desengraxante', RESPONSAVEL: 'Equipe do turno', PRAZO: '2026-09-03', STATUS: 'Em andamento', FECHAMENTO: '', EVIDENCIA: '', CUSTO: '', DEPENDE: 'desengraxante chegar' },
+    { DATA: '2026-08-10', TURNO: '', ORIGEM: 'Reclamação', ZONA: '', LOCAL: 'Refeitório', PROBLEMA: 'Lixeira quebrada', CRITICIDADE: 'Baixa',
+      ACAO: 'Trocar', RESPONSAVEL: 'Compras', PRAZO: '2026-08-20', STATUS: 'Concluída', FECHAMENTO: '2026-08-15', EVIDENCIA: 'CH-0151', CUSTO: '89.9', DEPENDE: '' }
+  ], 'antigo@bartofil.com.br');
+  c = ctx(m); c.inserir('COMENTARIOS', { ORIGEM: 'LP_ACOES', ACAO_ID: ids[0], TEXTO: 'Pedido o desengraxante', SITUACAO: 'Em andamento',
+    DEPENDE: 'desengraxante chegar', AUTOR: GERENTE, AUTOR_NOME: 'João Lima', AUTOR_PAPEL: 'Gerente', TIPO: 'COMENTARIO' }, GERENTE);
+  // a atualizacao de versao roda a migracao sozinha
+  c = ctx(m); c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.7');
+  c = ctx(m); c.garantirEsquema();
+  c = ctx(m); afirmar(c.migrarAcoesDaLimpeza_() === 0, 'rodar de novo nao passa nada');
+  const s = entrar(m, GERENTE, '5555');
+  const d = tela(m, s, 'limpeza').plano;
+  const oleo = d.lista.find((a) => a.id === ids[0]);
+  afirmar(oleo && oleo.acao === 'Piso com óleo' && oleo.descricao === 'Lavar com desengraxante' && oleo.situacao === 'PENDENTE' &&
+    oleo.andamento === 'Em andamento' && oleo.depende === 'desengraxante chegar' && oleo.zona === 'Z2' && oleo.local === 'Doca 4' &&
+    oleo.criticidade === 'Alta' && oleo.abertaEm === '2026-09-01' && oleo.turno === 'A' && oleo.responsavel === 'Equipe do turno', 'em andamento: ' + JSON.stringify(oleo).slice(0, 500));
+  afirmar(oleo.comentarios.length === 1 && oleo.comentarios[0].texto === 'Pedido o desengraxante' && oleo.comentarios[0].nome === 'João Lima', 'comentario antigo continua ligado');
+  const lix = d.lista.find((a) => a.id === ids[1]);
+  afirmar(lix && lix.situacao === 'CONCLUIDA' && lix.concluidoEm === '15/08/2026' && /CH-0151/.test(lix.observacao) && /89,9/.test(lix.observacao) &&
+    lix.turno === 'Todos' && lix.criadoPor === 'antigo@bartofil.com.br', 'concluida: ' + JSON.stringify(lix).slice(0, 400));
+  afirmar(!tela(m, s, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.id === ids[0]), 'fora do plano do calendario');
+  // excluida depois da migracao nao volta
+  acao(m, s, 'excluirAcaoLimpeza', { id: ids[1] });
+  c = ctx(m); afirmar(c.migrarAcoesDaLimpeza_() === 0, 'excluida nao volta');
+  // responsavel antigo (so o nome): a gestao comenta e edita sem marcar ninguem — o nome e a data de abertura ficam
+  acao(m, s, 'comentarAcaoLimpeza', { id: ids[0], texto: 'Chegou o desengraxante', situacao: 'Em andamento' });
+  acao(m, s, 'salvarAcaoLimpeza', { id: ids[0], acao: 'Piso com óleo', descricao: 'Lavar', prazo: '2026-09-10', turno: 'A', responsavel: 'Equipe do turno', zona: 'Z2', local: 'Doca 4', criticidade: 'Alta' });
+  const oleo2 = tela(m, s, 'limpeza').plano.lista.find((a) => a.id === ids[0]);
+  afirmar(oleo2.responsavel === 'Equipe do turno' && oleo2.abertaEm === '2026-09-01' && oleo2.comentarios.length === 2 && oleo2.prazoISO === '2026-09-10', 'editada: ' + JSON.stringify(oleo2).slice(0, 300));
+});
+
+caso('limpeza: responsavel precisa enxergar a Limpeza; quem tem o modulo so em "Ver" ve e conclui so as suas', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const pessoas = tela(m, adm, 'limpeza').plano.pessoas;
+  afirmar(!pessoas.some((p) => p.email === COORD) && pessoas.some((p) => p.email === GERENTE), 'lista: ' + pessoas.map((p) => p.email).join());
+  const e = erroDe(() => acao(m, adm, 'salvarAcaoLimpeza', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }));
+  afirmar(/Sem acesso ao Plano de Ação da Limpeza/.test(e), 'recusado: ' + e);
+  const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'limpeza', modo: 'VER' });
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], zona: 'Z7', criticidade: 'Alta' });
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+  const maria = entrar(m, COORD, '1234');
+  const dm = tela(m, maria, 'limpeza');
+  afirmar(dm.plano.lista.length === 1 && dm.plano.lista[0].acao === 'Da Maria' && !dm.plano.permissoes.gerir, 'maria ve so a dela: ' + dm.plano.lista.map((a) => a.acao).join());
+  afirmar(!dm.estoque.permissoes.cadastrar && !dm.estoque.permissoes.movimentar, 'estoque so para ver');
+  const doGerente = tela(m, adm, 'limpeza').plano.lista.find((a) => a.acao === 'Do gerente');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, maria, 'comentarAcaoLimpeza', { id: doGerente.id, texto: 'oi' }))), 'nao comenta a do gerente');
+  acao(m, maria, 'comentarAcaoLimpeza', { id: dm.plano.lista[0].id, texto: 'Feito', situacao: 'Concluída' });
+  afirmar(tela(m, maria, 'limpeza').plano.lista[0].situacao === 'CONCLUIDA', 'concluiu a dela');
+  afirmar(erroDe(() => acao(m, maria, 'salvarItemLimpeza', { nome: 'X' })), 'em Ver nao cadastra no estoque');
+  afirmar(erroDe(() => acao(m, maria, 'salvarAcaoLimpeza', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] })), 'em Ver nao cria acao');
+});
+
+caso('planos separados: a acao de um plano nao abre pela porta do outro, e cada tela so lista as suas', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarUsuario', { email: SUP, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
+  acao(m, adm, 'salvarAcao', { acao: 'Do calendario', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1)] });
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da limpeza', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], fotos: [foto(2)] });
+  const cal = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista;
+  const lim = tela(m, adm, 'limpeza').plano.lista;
+  afirmar(cal.length === 1 && cal[0].acao === 'Do calendario' && lim.length === 1 && lim[0].acao === 'Da limpeza', 'listas: ' + cal.map((a) => a.acao) + ' / ' + lim.map((a) => a.acao));
+  const sup = entrar(m, SUP, '2222');
+  ['concluirAcaoLimpeza', 'comentarAcaoLimpeza', 'cancelarAcaoLimpeza', 'excluirAcaoLimpeza', 'reabrirAcaoLimpeza', 'fotoAcaoLimpeza', 'removerFotoAcaoLimpeza'].forEach((n) => {
+    const e = erroDe(() => acao(m, sup, n, { id: cal[0].id, texto: 'x', arquivo: cal[0].fotos[0].id }));
+    afirmar(/Ação não encontrada/.test(e), 'supervisor › ' + n + ': ' + e);
+  });
+  const e1 = erroDe(() => acao(m, sup, 'salvarAcaoLimpeza', { id: cal[0].id, acao: 'Sequestrada', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP] }));
+  afirmar(/Ação não encontrada/.test(e1), 'editar pela porta da limpeza: ' + e1);
+  const ger = entrar(m, GERENTE, '5555');
+  ['salvarAcao', 'concluirAcao', 'comentarAcao', 'cancelarAcao', 'excluirAcao', 'reabrirAcao', 'fotoAcao', 'removerFotoAcao'].forEach((n) => {
+    const e = erroDe(() => acao(m, ger, n, { id: lim[0].id, acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE], texto: 'x', arquivo: lim[0].fotos[0].id }));
+    afirmar(/Ação não encontrada/.test(e), 'gerente › ' + n + ': ' + e);
+  });
+  const c2 = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista[0], l2 = tela(m, adm, 'limpeza').plano.lista[0];
+  afirmar(c2.acao === 'Do calendario' && c2.situacao === 'PENDENTE' && !c2.comentarios.length && c2.fotos.length === 1, 'calendario intacto');
+  afirmar(l2.acao === 'Da limpeza' && l2.situacao === 'PENDENTE' && !l2.comentarios.length && l2.fotos.length === 1, 'limpeza intacta');
+});
+
+caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga a acao ve; foto de outra acao nao passa; a gestao remove', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarUsuario', { email: 'pedro@bartofil.com.br', nome: 'Pedro', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coord' });
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1), foto(2)] });
+  afirmar(/2 foto/.test(r.recado), 'recado: ' + r.recado);
+  acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'B', responsaveisEmails: ['pedro@bartofil.com.br'], fotos: [foto(9)] });
+  const lista = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista;
+  const a = lista.find((x) => x.id === r.id), outra = lista.find((x) => x.acao === 'Outra');
+  afirmar(a.fotos.length === 2 && a.fotos[0].nome === 'foto1.jpg' && !('url' in a.fotos[0]), 'fotos na acao: ' + JSON.stringify(a.fotos));
+  const arq = m.arquivos.get(a.fotos[0].id);
+  const pasta = m.pastas.get([...arq.pais][0]);
+  const pastaTabela = m.pastas.get([...pasta.pais][0]);
+  afirmar(pasta.nome === a.id && pastaTabela.nome === 'ACOES' && !arq.lixo, 'pasta: ' + pastaTabela.nome + '/' + pasta.nome);
+  const maria = entrar(m, COORD, '1234');
+  acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Lâmpadas trocadas', situacao: 'Em andamento', fotos: [foto(3)] });
+  const am = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
+  const fc = am.comentarios[0].fotos[0];
+  afirmar(fc && fc.nome === 'foto3.jpg' && [...m.arquivos.get(fc.id).pais][0] === pasta.id, 'foto do comentario na pasta da acao');
+  const v = acao(m, maria, 'fotoAcao', { id: a.id, arquivo: a.fotos[1].id });
+  afirmar(v.dados === PNG_1x1 && /^image\//.test(v.tipo), 'responsavel ve: ' + JSON.stringify(v).slice(0, 80));
+  afirmar(acao(m, maria, 'fotoAcao', { id: a.id, arquivo: fc.id }).dados === PNG_1x1, 've a do comentario');
+  const pedro = entrar(m, 'pedro@bartofil.com.br', '2222');
+  afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, pedro, 'fotoAcao', { id: a.id, arquivo: a.fotos[0].id }))), 'quem nao enxerga a acao nao ve a foto');
+  afirmar(/não é desta ação/.test(erroDe(() => acao(m, maria, 'fotoAcao', { id: a.id, arquivo: outra.fotos[0].id }))), 'foto de outra acao');
+  afirmar(/não é desta ação/.test(erroDe(() => acao(m, maria, 'fotoAcao', { id: a.id, arquivo: 'qualquer-id-do-drive' }))), 'arquivo qualquer');
+  afirmar(erroDe(() => acao(m, maria, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id })), 'responsavel nao remove');
+  afirmar(/não é anexo deste registro/.test(erroDe(() => acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: fc.id }))), 'foto de comentario fica');
+  acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id });
+  let depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
+  afirmar(depois.fotos.length === 1 && depois.fotos[0].id === a.fotos[1].id && m.arquivos.get(a.fotos[0].id).lixo, 'removida e na lixeira');
+  acao(m, adm, 'salvarAcao', { id: a.id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(4)] });
+  depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
+  afirmar(depois.fotos.length === 2, 'editar acrescenta: ' + depois.fotos.length);
+  acao(m, maria, 'concluirAcao', { id: a.id, observacao: 'feito', fotos: [foto(5)] });
+  const fim = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id).comentarios.slice(-1)[0];
+  afirmar(fim.tipo === 'CONCLUSAO' && fim.fotos.length === 1, 'foto na conclusao: ' + JSON.stringify(fim).slice(0, 200));
+});
+
+caso('fotos: tipo errado, grande demais e mais de 5 de uma vez sao recusados; falha ao gravar nao deixa foto orfa no Drive', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const base = () => ({ acao: 'Teste', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  const antes = m.arquivos.size;
+  afirmar(/não é uma foto/.test(erroDe(() => acao(m, adm, 'salvarAcao', Object.assign(base(), { fotos: [foto(1, 'application/pdf')] })))), 'pdf recusado');
+  afirmar(/no máximo 5/.test(erroDe(() => acao(m, adm, 'salvarAcao', Object.assign(base(), { fotos: [1, 2, 3, 4, 5, 6].map((n) => foto(n)) })))), 'seis recusadas');
+  const grande = { nome: 'g.jpg', tipo: 'image/jpeg', dados: 'A'.repeat(14 * 1024 * 1024) };
+  afirmar(/passa de 10 MB/.test(erroDe(() => acao(m, adm, 'salvarAcao', Object.assign(base(), { fotos: [grande] })))), 'grande recusada');
+  const r = acao(m, adm, 'salvarAcao', base());
+  acao(m, adm, 'cancelarAcao', { id: r.id, motivo: 'x' });
+  afirmar(/cancelada/.test(erroDe(() => acao(m, adm, 'comentarAcao', { id: r.id, texto: 'oi', fotos: [foto(1)] }))), 'cancelada recusa comentario');
+  afirmar(m.arquivos.size === antes, 'nada subiu para o Drive: ' + (m.arquivos.size - antes));
+  // a planilha falha depois que as fotos subiram: as fotos vao para a lixeira
+  const c = ctx(m);
+  const admin = { email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') };
+  c.inserir = () => { throw new Error('planilha fora do ar'); };
+  const e = erroDe(() => c.acaoSalvarAcao(admin, Object.assign(base(), { fotos: [foto(1), foto(2)] })));
+  afirmar(/planilha fora do ar/.test(e), 'erro: ' + e);
+  const novas = [...m.arquivos.values()].filter((x) => /^foto[12]\.jpg$/.test(x.nome));
+  afirmar(novas.length === 2 && novas.every((x) => x.lixo), 'fotos na lixeira: ' + JSON.stringify(novas.map((x) => [x.nome, x.lixo])));
+});
+
+caso('versao: os arquivos desta entrega trazem o mesmo carimbo (nada "fora da versao")', () => {
+  const c = ctx(new Mundo({ dono: DONO }));
+  afirmar(c.arquivosForaDaVersao_().length === 0, 'fora da versao: ' + c.arquivosForaDaVersao_().join());
+  const fs = require('fs');
+  const ler = (n) => fs.readFileSync(path.join(PASTA, n), 'utf8');
+  const build = ler('Codigo.gs').match(/build: '([^']+)'/)[1];
+  afirmar(ler('App.html').match(/BUILD_APP = '([^']+)'/)[1] === build && ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === build, 'telas no carimbo ' + build);
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const r = JSON.parse(chamar(m, DONO, 'retomarSessao', { t: s.t, f: s.f }).valor);
+  afirmar(r.app && r.app.build === build && Array.isArray(r.app.foraDaVersao) && !r.app.foraDaVersao.length, 'sessao: ' + JSON.stringify(r.app));
 });
 
 /* ------------------------------------------------------------------ */
@@ -436,44 +589,20 @@ caso('quadro do CD: le os admitidos da aba CADMITIDOS sem data (Produtiva / Cola
   afirmar(d.des.length === 1 && d.apoio.length === 2, 'desligados ' + d.des.length + ' apoio ' + d.apoio.length);
 });
 
-caso('limpeza por lote: compra com varios produtos, "acabou" mede a duracao, reabastecimento individual e por lote', () => {
-  const m = mundo(); const s = entrar(m, GERENTE, '5555');
-  acao(m, s, 'salvarLoteLimpeza', { tipo: 'LOTE', data: '2026-08-01', fornecedor: 'Forn A', nf: '123', itens: [
-    { produto: 'Detergente neutro 5L', quantidade: '2', unidade: 'galão', precoUnit: '45,90' },
-    { produto: 'Álcool 70', quantidade: '6', unidade: 'litro', precoUnit: '9,90' }] });
-  let d = tela(m, s, 'limpeza');
-  afirmar(d.lotes.length === 1 && d.lotes[0].total === 151.2 && d.itens.filter((i) => i.situacao === 'EM_USO').length === 2, 'lote: ' + JSON.stringify(d.lotes[0]));
-  const det = d.itens.find((i) => /Detergente/.test(i.produto));
-  const e0 = erroDe(() => acao(m, s, 'acabouItemLimpeza', { id: det.id, data: '2026-07-01' }));
-  afirmar(/anterior à compra/.test(e0), 'acabou antes da compra: ' + e0);
-  acao(m, s, 'acabouItemLimpeza', { id: det.id, data: '2026-08-21' });
-  d = tela(m, s, 'limpeza');
-  const det2 = d.itens.find((i) => i.id === det.id);
-  afirmar(det2.situacao === 'AGUARDANDO' && det2.dias === 20 && d.kpis.aguardandoReposicao === 1, 'acabou: ' + JSON.stringify(det2));
-  // reabastecimento individual
-  acao(m, s, 'reabastecerLimpeza', { id: det.id, data: '2026-08-22', quantidade: '1', precoUnit: '47' });
-  d = tela(m, s, 'limpeza');
-  afirmar(d.itens.find((i) => i.id === det.id).situacao === 'REPOSTO' && d.lotes.length === 2 && d.lotes[0].tipo === 'INDIVIDUAL', 'reposto individual');
-  const c = d.consumo.find((x) => /Detergente/.test(x.produto));
-  afirmar(c.duracaoMedia === 20 && c.custoDia === 4.59 && c.compras === 2, 'consumo: ' + JSON.stringify(c));
-  // o alcool acaba e volta num lote novo: reabastecimento anotado sozinho
-  const alc = d.itens.find((i) => /lcool/.test(i.produto));
-  acao(m, s, 'acabouItemLimpeza', { id: alc.id, data: '2026-09-01' });
-  acao(m, s, 'salvarLoteLimpeza', { tipo: 'LOTE', data: '2026-09-02', itens: [{ produto: 'álcool 70', quantidade: '6', unidade: 'litro', precoUnit: '10' }, { produto: 'Pano', quantidade: '10' }] });
-  d = tela(m, s, 'limpeza');
-  afirmar(d.itens.find((i) => i.id === alc.id).situacao === 'REPOSTO' && d.kpis.aguardandoReposicao === 0, 'reposto pelo lote');
-  // compra com produto ja acabado nao pode ser excluida
-  const e1 = erroDe(() => acao(m, s, 'excluirLoteLimpeza', { id: d.lotes.find((l) => l.data === '2026-08-01').id }));
-  afirmar(/já tem produto marcado como acabado/.test(e1), 'excluir: ' + e1);
-});
-
-caso('perfil SUPERVISOR existe e cuida so da Limpeza', () => {
+caso('perfil SUPERVISOR cuida so da Limpeza: plano e estoque da limpeza; nada do calendario nem do estoque de TI', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
-  acao(m, s, 'salvarUsuario', { email: 'sup.limpeza@bartofil.com.br', nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
-  const sup = entrar(m, 'sup.limpeza@bartofil.com.br', '2222');
-  const r = JSON.parse(chamar(m, 'sup.limpeza@bartofil.com.br', 'retomarSessao', { t: sup.t, f: sup.f }).valor);
+  acao(m, s, 'salvarUsuario', { email: SUP, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
+  const sup = entrar(m, SUP, '2222');
+  const r = JSON.parse(chamar(m, SUP, 'retomarSessao', { t: sup.t, f: sup.f }).valor);
   afirmar(r.telas.map((t) => t.id).join() === 'limpeza', 'telas: ' + r.telas.map((t) => t.id).join());
-  acao(m, sup, 'salvarLoteLimpeza', { tipo: 'INDIVIDUAL', itens: [{ produto: 'Saco de lixo 100L', quantidade: '5' }] });
+  acao(m, sup, 'salvarItemLimpeza', { nome: 'Saco de lixo 100L', unidade: 'pct', saldoInicial: '5' });
+  acao(m, sup, 'salvarAcaoLimpeza', { acao: 'Lixeira da doca cheia', prazo: '2026-12-01', turno: 'B', responsaveisEmails: [SUP], zona: 'Z3', criticidade: 'Média' });
+  const d = tela(m, sup, 'limpeza');
+  afirmar(d.estoque.itens.length === 1 && d.plano.lista.length === 1 && d.plano.permissoes.gerir && d.plano.lista[0].zona === 'Z3', 'dados da limpeza');
+  afirmar(erroDe(() => acao(m, sup, 'salvarAcao', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP] })), 'nao cria acao do calendario');
+  afirmar(erroDe(() => acao(m, sup, 'salvarItemEstoque', { nome: 'Mouse' })), 'nao mexe no estoque de TI');
+  const mail = m.emails.find((e) => /Nova ação da limpeza: Lixeira/.test(e.subject));
+  afirmar(mail && /tela=limpeza/.test(mail.html || mail.htmlBody || mail.body || '') && /Z3/.test(mail.html || mail.htmlBody || mail.body || ''), 'e-mail com o local e o link para a Limpeza');
 });
 
 caso('estoque de TI: minimo 1, ideal 1, estoque 1 nao pede reposicao', () => {
@@ -524,15 +653,15 @@ caso('comentarios: historico no Plano de Acao (andamento, depende de, concluir) 
   acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Trocadas as 14 lâmpadas', situacao: 'Concluída' });
   a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
   afirmar(a.situacao === 'CONCLUIDA' && a.comentarios.length === 2 && a.comentarios[1].texto === 'Trocadas as 14 lâmpadas' && !a.depende, 'concluida pelo comentario');
-  // Limpeza
-  acao(m, adm, 'salvarAcaoLimpeza', { data: '2026-09-01', problema: 'Piso quebrado', acao: 'Trocar piso', status: 'Aberta', turno: 'A' });
-  let la = tela(m, adm, 'limpeza').acoes.find((x) => x.problema === 'Piso quebrado');
-  acao(m, adm, 'comentarAcaoLimpeza', { id: la.id, texto: 'Orçamento pedido', situacao: 'Em andamento', depende: 'aprovação da gerência' });
-  la = tela(m, adm, 'limpeza').acoes.find((x) => x.id === la.id);
-  afirmar(la.status === 'Em andamento' && la.depende === 'aprovação da gerência' && la.comentarios.length === 1, 'limpeza: ' + JSON.stringify(la).slice(0, 300));
+  // Limpeza: o mesmo modelo
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Piso quebrado', descricao: 'Trocar piso', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO], zona: 'Z2' });
+  let la = tela(m, adm, 'limpeza').plano.lista.find((x) => x.acao === 'Piso quebrado');
+  acao(m, adm, 'comentarAcaoLimpeza', { id: la.id, texto: 'Orçamento pedido', situacao: 'Aguardando', depende: 'aprovação da gerência' });
+  la = tela(m, adm, 'limpeza').plano.lista.find((x) => x.id === la.id);
+  afirmar(la.andamento === 'Aguardando' && la.depende === 'aprovação da gerência' && la.comentarios.length === 1, 'limpeza: ' + JSON.stringify(la).slice(0, 300));
   acao(m, adm, 'comentarAcaoLimpeza', { id: la.id, texto: 'Piso trocado', situacao: 'Concluída' });
-  la = tela(m, adm, 'limpeza').acoes.find((x) => x.id === la.id);
-  afirmar(la.status === 'Concluída' && la.fechamento && la.comentarios.length === 2 && !la.depende, 'limpeza concluida');
+  la = tela(m, adm, 'limpeza').plano.lista.find((x) => x.id === la.id);
+  afirmar(la.situacao === 'CONCLUIDA' && la.concluidoEm && la.comentarios.length === 2 && la.comentarios[1].tipo === 'CONCLUSAO' && !la.depende, 'limpeza concluida');
 });
 
 caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadastro, funcao) — inclusive concluir, reabrir e cancelar', () => {
@@ -563,18 +692,6 @@ caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadast
   chamar(m, DONO, 'encerrarSimulacao', { t: adm.t, f: adm.f });
   const c = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === outra.id).comentarios[0];
   afirmar(c && c.autor === DONO && !/Simulando/.test(c.nome) && /simulando COORDENADOR/.test(c.papel), 'simulacao: ' + JSON.stringify(c));
-});
-
-caso('historico da limpeza: concluir pelo botao e mudar a situacao na edicao tambem ficam registrados com o autor', () => {
-  const m = mundo(); const s = entrar(m, GERENTE, '5555');
-  acao(m, s, 'salvarAcaoLimpeza', { data: '2026-09-01', problema: 'Lixeira quebrada', acao: 'Trocar', status: 'Aberta', turno: 'A' });
-  let la = tela(m, s, 'limpeza').acoes.find((x) => x.problema === 'Lixeira quebrada');
-  acao(m, s, 'salvarAcaoLimpeza', { id: la.id, data: '2026-09-01', problema: 'Lixeira quebrada', acao: 'Trocar', status: 'Em andamento', turno: 'A' });
-  acao(m, s, 'concluirAcaoLimpeza', { id: la.id, fechamento: '2026-09-05', evidencia: 'foto no Drive' });
-  la = tela(m, s, 'limpeza').acoes.find((x) => x.id === la.id);
-  afirmar(la.comentarios.length === 2 && la.comentarios[0].tipo === 'STATUS' && la.comentarios[1].tipo === 'CONCLUSAO', 'tipos: ' + la.comentarios.map((c) => c.tipo).join(','));
-  afirmar(la.comentarios.every((c) => c.autor === GERENTE && c.nome === 'João Lima'), 'autor: ' + JSON.stringify(la.comentarios));
-  afirmar(/foto no Drive/.test(la.comentarios[1].texto) && la.criadoPorNome === 'João Lima', 'conclusao e criador');
 });
 
 const falhas = resultados.filter((x) => !x).length;

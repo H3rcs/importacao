@@ -13,8 +13,30 @@
 
 const APP = {
   nome: 'GSL Bartofil',
-  versao: '4.2.2'
+  versao: '4.2.2',
+  /*
+   * CARIMBO DA ENTREGA. Os arquivos que mudaram nesta entrega trazem o
+   * mesmo carimbo (BUILD_<ARQUIVO>). Ao entrar, a tela confere: arquivo com
+   * carimbo diferente (ou sem carimbo) = implantacao pela metade — um
+   * arquivo colado no Apps Script e outro nao. Foi o que deu o "Ação
+   * desconhecida: comentarAcao". Entrega nova: troque o carimbo aqui e
+   * nos arquivos alterados, e acerte a lista em arquivosForaDaVersao_.
+   */
+  build: '2026.10.09'
 };
+
+/* Arquivos .gs desta entrega cujo carimbo nao bate com o do Codigo.gs. */
+function arquivosForaDaVersao_() {
+  const carimbos = {
+    'Acoes.gs': typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES,
+    'Estoque.gs': typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE,
+    'Limpeza.gs': typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA,
+    'Instalacao.gs': typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO,
+    'Filiais.gs': typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS,
+    'Emails.gs': typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS
+  };
+  return Object.keys(carimbos).filter(function (k) { return carimbos[k] !== APP.build; });
+}
 
 /*
  * ENTRADA DO SISTEMA — e-mail e PIN (4.2).
@@ -318,7 +340,7 @@ function montarSessaoNaFilial_(usuario, codigo) {
     ok: true,
     instalado: true,
     entrada: 'APP',
-    app: APP,
+    app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_() }),
     usuario: {
       nome: usuario.nome, email: usuario.email, papel: usuario.papel || '', perfil: usuario.perfil,
       turno: usuario.turno, escopo: descreverEscopo(usuario), podes: usuario.permissoes.podes
@@ -429,6 +451,9 @@ const ACOES = {
   reabrirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoReabrirAcao', modulo: 'calendario' },
   cancelarAcao:        { capacidade: 'GERIR_ACOES',   funcao: 'acaoCancelarAcao', modulo: 'calendario' },
   excluirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoExcluirAcao', modulo: 'calendario' },
+  // Fotos (4.2.2): ver confere se a pessoa enxerga a acao; tirar e da gestao.
+  fotoAcao:            { capacidade: null,            funcao: 'acaoFotoAcao', modulo: 'calendario' },
+  removerFotoAcao:     { capacidade: 'GERIR_ACOES',   funcao: 'acaoRemoverFotoAcao', modulo: 'calendario' },
 
   // Conversas saiu na 4.2 (projeto para depois). As mensagens antigas
   // continuam na aba MENSAGENS; so nao ha mais tela nem acao para elas.
@@ -504,24 +529,29 @@ const ACOES = {
   excluirNobreak:      { capacidade: 'PROGRAMAR',      funcao: 'acaoExcluirNobreak', modulo: 'nobreaks' },
   importarNobreaks:    { capacidade: 'PROGRAMAR',      funcao: 'acaoImportarNobreaks', modulo: 'nobreaks' },
 
-  // limpeza
+  /*
+   * LIMPEZA (4.2.2) — o Plano de Acao no mesmo modelo do Calendario e o
+   * estoque no mesmo modelo do de TI. Concluir, comentar e ver foto tem
+   * capacidade null pelo mesmo motivo do Plano de Acao: o RESPONSAVEL pela
+   * acao conclui a dele, e a propria funcao confere isso.
+   */
   salvarAcaoLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarAcaoLimpeza', modulo: 'limpeza' },
-  concluirAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoConcluirAcaoLimpeza', modulo: 'limpeza' },
+  concluirAcaoLimpeza: { capacidade: null,             funcao: 'acaoConcluirAcaoLimpeza', modulo: 'limpeza' },
+  comentarAcaoLimpeza: { capacidade: null,             funcao: 'acaoComentarAcaoLimpeza', modulo: 'limpeza' },
+  reabrirAcaoLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoReabrirAcaoLimpeza', modulo: 'limpeza' },
+  cancelarAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoCancelarAcaoLimpeza', modulo: 'limpeza' },
   excluirAcaoLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirAcaoLimpeza', modulo: 'limpeza' },
-  salvarProduto:       { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarProduto', modulo: 'limpeza' },
-  excluirProduto:      { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirProduto', modulo: 'limpeza' },
-  salvarCompra:        { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarCompra', modulo: 'limpeza' },
-  excluirCompra:       { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirCompra', modulo: 'limpeza' },
-  salvarEmbalagem:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarEmbalagem', modulo: 'limpeza' },
-  excluirEmbalagem:    { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirEmbalagem', modulo: 'limpeza' },
+  fotoAcaoLimpeza:     { capacidade: null,             funcao: 'acaoFotoAcaoLimpeza', modulo: 'limpeza' },
+  removerFotoAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA', funcao: 'acaoRemoverFotoAcaoLimpeza', modulo: 'limpeza' },
+  salvarItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarItemLimpeza', modulo: 'limpeza' },
+  excluirItemLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirItemLimpeza', modulo: 'limpeza' },
+  importarItensLimpeza:{ capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarItensLimpeza', modulo: 'limpeza' },
+  movimentarLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoMovimentarLimpeza', modulo: 'limpeza' },
+  estornarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoEstornarLimpeza', modulo: 'limpeza' },
+  inventarioLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoInventarioLimpeza', modulo: 'limpeza' },
+  historicoItemLimpeza:{ capacidade: null,             funcao: 'acaoHistoricoItemLimpeza', modulo: 'limpeza' },
   salvarZona:          { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarZona', modulo: 'limpeza' },
   importarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarLimpeza', modulo: 'limpeza' },
-  salvarLoteLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarLoteLimpeza', modulo: 'limpeza' },
-  comentarAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoComentarAcaoLimpeza', modulo: 'limpeza' },
-  excluirLoteLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirLoteLimpeza', modulo: 'limpeza' },
-  acabouItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoAcabouItemLimpeza', modulo: 'limpeza' },
-  voltarItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoVoltarItemLimpeza', modulo: 'limpeza' },
-  reabastecerLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoReabastecerLimpeza', modulo: 'limpeza' },
 
   // quadro do CD
   salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },
@@ -550,7 +580,7 @@ const VALIDADE_TELA = 180;
  * do mesmo nivel e turno dividiam o mesmo payload (e cada ADMIN recebia o
  * que o aquecimento do cache montou para o dono).
  */
-const TELAS_PESSOAIS = { acoes: true, acessos: true };
+const TELAS_PESSOAIS = { acoes: true, acessos: true, limpeza: true };
 
 function chaveDeTela(idTela, usuario, params) {
   const e = escopoDe(usuario);
@@ -670,7 +700,9 @@ function executarAcao(ctx, nomeAcao, params) {
   const usuario = usuarioAtual();
   entrarNaFilial(usuario, codigoFilial);
   const acao = ACOES[nomeAcao];
-  if (!acao) throw new Error('Ação desconhecida: ' + nomeAcao);
+  // Quase sempre e implantacao pela metade: a tela nova chama uma acao que o Codigo.gs antigo nao tem.
+  if (!acao) throw new Error('Ação desconhecida: ' + nomeAcao + '. O Codigo.gs publicado está numa versão anterior às telas — ' +
+    'cole todos os arquivos desta versão no Apps Script e crie uma "Nova versão" da implantação.');
   if (acao.capacidade) exigirCapacidade(usuario, acao.capacidade);
   exigirModuloDaAcao_(usuario, acao);
 

@@ -37,6 +37,7 @@ const ESTADOS_PAINEL = [PAINEL_ATIVO, PAINEL_OCULTO, PAINEL_DESATIVADO];
  * Tabelas que vivem SEMPRE no banco mestre, qualquer que seja a filial.
  * Todo o resto e dado da filial.
  */
+const BUILD_FILIAIS = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
 const TABELAS_GLOBAIS = { ACESSOS: 1, PERFIS: 1, FILIAIS: 1, LOG: 1, SESSOES: 1, EQUIPE: 1, FEEDBACK: 1 };
 
 /* Chaves de cache que nao dependem da filial. */
@@ -355,8 +356,9 @@ function dadosFiliais(usuario) {
  * Criar = nova planilha de banco na pasta do GSL, com todas as tabelas de
  * dados, e os paineis escolhidos. Se `copiarDe` vier preenchido, a
  * configuracao daquela filial (rotinas, setores, parametros, DE-PARA,
- * zonas e produtos da limpeza) e copiada — os DADOS nao: cada filial
- * comeca a sua historia do zero.
+ * zonas e o catalogo de produtos do estoque da limpeza) e copiada — os
+ * DADOS nao: cada filial comeca a sua historia do zero (o saldo nasce das
+ * entradas de cada uma).
  */
 function acaoSalvarFilial(usuario, params) {
   exigirCapacidade(usuario, 'GERIR_FILIAIS');
@@ -568,7 +570,7 @@ function lerConfiguracaoParaCopia_(codigoOrigem) {
       }),
       DE_PARA: ler('DE_PARA'),
       LP_ZONAS: ler('LP_ZONAS'),
-      LP_PRODUTOS: ler('LP_PRODUTOS')
+      LP_EST_ITENS: ler('LP_EST_ITENS')
     };
   } finally {
     definirFilial(antes);
@@ -591,5 +593,5 @@ function semearFilialNova_(copia, quem) {
   if (faltam.length) inserirVarios('PARAMETROS', faltam, quem);
   usar('DE_PARA', semearDePara);
   usar('LP_ZONAS', semearZonasLimpeza);
-  usar('LP_PRODUTOS', null);
+  usar('LP_EST_ITENS', null);
 }

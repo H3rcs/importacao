@@ -16,6 +16,7 @@
  *   AJUSTE     correcao de inventario (guarda a diferenca)     (+/-)
  */
 
+const BUILD_ESTOQUE = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
 const EST_TIPOS = ['ENTRADA', 'SAIDA', 'DEVOLUCAO', 'BAIXA', 'AJUSTE'];
 const EST_SINAL = { ENTRADA: 1, DEVOLUCAO: 1, SAIDA: -1, BAIXA: -1, AJUSTE: 1 };
 const EST_NOMES_TIPO = { ENTRADA: 'Entrada', SAIDA: 'Saída', DEVOLUCAO: 'Devolução', BAIXA: 'Baixa', AJUSTE: 'Ajuste de inventário' };
@@ -23,6 +24,29 @@ const EST_CATEGORIAS = ['Computadores e notebooks', 'Monitores', 'Periféricos',
   'Armazenamento', 'Impressão e toner', 'Energia e nobreak', 'Telefonia e coletores', 'Peças e componentes',
   'Acessórios', 'Outros'];
 const EST_UNIDADES = ['un', 'cx', 'pct', 'm', 'rolo', 'kit', 'par'];
+const LP_EST_CATEGORIAS = ['Químicos e detergentes', 'Desinfetantes e sanitizantes', 'Papel e descartáveis',
+  'Sacos de lixo', 'Panos, esponjas e fibras', 'Utensílios (vassoura, rodo, balde)', 'EPI',
+  'Dispensers e acessórios', 'Outros'];
+const LP_EST_UNIDADES = ['un', 'galão', 'L', 'cx', 'fardo', 'pct', 'rolo', 'par', 'kg'];
+
+/*
+ * DOIS ESTOQUES, O MESMO CODIGO (4.2.2).
+ *
+ * A Limpeza CD passou a controlar os produtos dela exatamente como a TI
+ * controla os itens de informatica: catalogo, saldo calculado pelas
+ * movimentacoes, minimo e ideal, entrada, saida, estorno, inventario e
+ * historico. Nao e uma copia do codigo — e este mesmo codigo, apontado
+ * para outras tabelas (LP_EST_ITENS e LP_EST_MOVIMENTOS) e com as
+ * capacidades da limpeza. Corrigiu aqui, corrigiu nos dois.
+ */
+const ESTOQUES = {
+  TI: { chave: 'TI', nome: 'Estoque de TI', itens: 'EST_ITENS', movs: 'EST_MOVIMENTOS', prefixo: 'TI',
+        capCadastrar: 'GERIR_ESTOQUE', capMovimentar: 'MOVIMENTAR_ESTOQUE',
+        categorias: EST_CATEGORIAS, unidades: EST_UNIDADES, exemplo: 'Mouse USB' },
+  LP: { chave: 'LP', nome: 'Estoque da limpeza', itens: 'LP_EST_ITENS', movs: 'LP_EST_MOVIMENTOS', prefixo: 'LP',
+        capCadastrar: 'GERIR_LIMPEZA', capMovimentar: 'GERIR_LIMPEZA',
+        categorias: LP_EST_CATEGORIAS, unidades: LP_EST_UNIDADES, exemplo: 'Detergente neutro 5L' }
+};
 /*
  * Quanto de movimentacao viaja com a tela. Eram 400 dias: com uso normal
  * o payload passava de 900 KB. O historico COMPLETO de um item vem sob
@@ -54,8 +78,9 @@ function idEstornado_(observacao) {
   return m ? m[1] : '';
 }
 
-function itensEstoque_() {
-  return listar('EST_ITENS').map(function (i) {
+function itensEstoque_(cfg) {
+  cfg = cfg || ESTOQUES.TI;
+  return listar(cfg.itens).map(function (i) {
     return {
       id: i.ID,
       codigo: String(i.CODIGO || '').toUpperCase().trim(),
@@ -73,8 +98,9 @@ function itensEstoque_() {
   }).filter(function (i) { return i.codigo || i.nome; });
 }
 
-function movimentosEstoque_() {
-  return listar('EST_MOVIMENTOS').map(function (m) {
+function movimentosEstoque_(cfg) {
+  cfg = cfg || ESTOQUES.TI;
+  return listar(cfg.movs).map(function (m) {
     const tipo = String(m.TIPO || '').toUpperCase().trim();
     const qtd = estNum_(m.QUANTIDADE);
     return {
@@ -96,17 +122,19 @@ function movimentosEstoque_() {
 }
 
 /** Saldo de cada item, somando todas as movimentacoes. */
-function saldosEstoque_(movs) {
+function saldosEstoque_(movs, cfg) {
   const s = {};
-  (movs || movimentosEstoque_()).forEach(function (m) { s[m.item] = (s[m.item] || 0) + m.efeito; });
+  (movs || movimentosEstoque_(cfg)).forEach(function (m) { s[m.item] = (s[m.item] || 0) + m.efeito; });
   Object.keys(s).forEach(function (k) { s[k] = estArred_(s[k]); });
   return s;
 }
 
-function dadosEstoque(usuario, params) {
+function dadosEstoque(usuario, params) { return dadosDoEstoque_(ESTOQUES.TI, usuario, params); }
+
+function dadosDoEstoque_(cfg, usuario, params) {
   const hojeIso = paraISO(hoje());
-  const itens = itensEstoque_();
-  const movs = movimentosEstoque_();
+  const itens = itensEstoque_(cfg);
+  const movs = movimentosEstoque_(cfg);
   const saldo = saldosEstoque_(movs);
   const ultimaSaida = {}, ultimaEntrada = {};
   movs.forEach(function (m) {
@@ -144,7 +172,7 @@ function dadosEstoque(usuario, params) {
   recentes.forEach(function (m) { m.estornado = !!estornados[m.id]; });
 
   const categorias = {};
-  EST_CATEGORIAS.forEach(function (c) { categorias[c] = true; });
+  cfg.categorias.forEach(function (c) { categorias[c] = true; });
   itens.forEach(function (i) { categorias[i.categoria] = true; });
   const destinos = {};
   const solicitantes = {};
@@ -162,13 +190,14 @@ function dadosEstoque(usuario, params) {
     listas: {
       tipos: EST_TIPOS.map(function (t) { return { id: t, nome: EST_NOMES_TIPO[t] }; }),
       categorias: Object.keys(categorias).sort(),
-      unidades: EST_UNIDADES,
+      unidades: cfg.unidades,
       solicitantes: Object.keys(solicitantes).sort(),
       destinos: Object.keys(destinos).sort()
     },
+    prefixo: cfg.prefixo,
     permissoes: {
-      cadastrar: podeFazer(usuario, 'GERIR_ESTOQUE'),
-      movimentar: podeFazer(usuario, 'MOVIMENTAR_ESTOQUE')
+      cadastrar: podeFazer(usuario, cfg.capCadastrar),
+      movimentar: podeFazer(usuario, cfg.capMovimentar)
     }
   };
 }
@@ -193,24 +222,29 @@ function camposItem_(p) {
   };
 }
 
-/* Codigo automatico: TI-0001, TI-0002... quando a pessoa nao informa. */
-function proximoCodigoEstoque_(itens) {
+/* Codigo automatico: TI-0001, TI-0002... (LP-0001 na limpeza) quando a pessoa nao informa. */
+function proximoCodigoEstoque_(itens, prefixo) {
+  prefixo = prefixo || 'TI';
+  const padrao = new RegExp('^' + prefixo + '-(\\d+)$');
   let maior = 0;
   itens.forEach(function (i) {
-    const m = String(i.codigo).match(/^TI-(\d+)$/);
+    const m = String(i.codigo).match(padrao);
     if (m) maior = Math.max(maior, Number(m[1]));
   });
-  return 'TI-' + String(maior + 1).padStart(4, '0');
+  return prefixo + '-' + String(maior + 1).padStart(4, '0');
 }
 
-function acaoSalvarItemEstoque(usuario, params) {
+function acaoSalvarItemEstoque(usuario, params) { return salvarItemEstoque_(ESTOQUES.TI, usuario, params); }
+
+function salvarItemEstoque_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capCadastrar);
   const campos = camposItem_(params);
-  if (!campos.NOME) throw new Error('Informe o nome do item (ex.: Mouse USB).');
+  if (!campos.NOME) throw new Error('Informe o nome do item (ex.: ' + cfg.exemplo + ').');
   if (campos.ESTOQUE_IDEAL !== '' && campos.ESTOQUE_MINIMO !== '' && campos.ESTOQUE_IDEAL < campos.ESTOQUE_MINIMO) {
     throw new Error('O estoque ideal (' + campos.ESTOQUE_IDEAL + ') não pode ser menor que o mínimo (' + campos.ESTOQUE_MINIMO + ').');
   }
   if (String(params.codigo || '').trim() && !campos.CODIGO) {
-    throw new Error('Código inválido: use só letras, números, ponto, hífen ou sublinhado (ex.: TI-0001).');
+    throw new Error('Código inválido: use só letras, números, ponto, hífen ou sublinhado (ex.: ' + cfg.prefixo + '-0001).');
   }
 
   /*
@@ -219,28 +253,28 @@ function acaoSalvarItemEstoque(usuario, params) {
    * — e o saldo, que e somado por codigo, passava a ser dos dois.
    */
   return comTrava(function () {
-    const itens = itensEstoque_();
+    const itens = itensEstoque_(cfg);
     const antes = params.id ? itens.filter(function (i) { return i.id === params.id; })[0] : null;
     if (params.id && !antes) throw new Error('Item não encontrado.');
-    if (!campos.CODIGO) campos.CODIGO = (antes && antes.codigo) || proximoCodigoEstoque_(itens);
+    if (!campos.CODIGO) campos.CODIGO = (antes && antes.codigo) || proximoCodigoEstoque_(itens, cfg.prefixo);
     const repetido = itens.filter(function (i) { return i.codigo === campos.CODIGO && i.id !== params.id; })[0];
     if (repetido) throw new Error('Já existe um item com o código ' + campos.CODIGO + ' (' + repetido.nome + ').');
 
     if (antes) {
-      const r = atualizar('EST_ITENS', params.id, campos, usuario.email);
+      const r = atualizar(cfg.itens, params.id, campos, usuario.email);
       // Codigo trocado: o historico acompanha — na mesma trava, para nao sobrar movimento orfao.
       if (antes.codigo && antes.codigo !== campos.CODIGO) {
-        const mud = listar('EST_MOVIMENTOS').filter(function (m) { return String(m.ITEM || '').toUpperCase().trim() === antes.codigo; })
+        const mud = listar(cfg.movs).filter(function (m) { return String(m.ITEM || '').toUpperCase().trim() === antes.codigo; })
           .map(function (m) { return { id: m.ID, campos: { ITEM: campos.CODIGO } }; });
-        if (mud.length) atualizarVarios('EST_MOVIMENTOS', mud, usuario.email);
+        if (mud.length) atualizarVarios(cfg.movs, mud, usuario.email);
       }
       return r;
     }
-    const id = inserir('EST_ITENS', campos, usuario.email);
+    const id = inserir(cfg.itens, campos, usuario.email);
     // Saldo inicial opcional: vira uma ENTRADA, para o numero ter origem.
     const inicial = num_(params.saldoInicial);
     if (inicial && inicial > 0) {
-      inserir('EST_MOVIMENTOS', { DATA: paraISO(hoje()), TIPO: 'ENTRADA', ITEM: campos.CODIGO, QUANTIDADE: inicial,
+      inserir(cfg.movs, { DATA: paraISO(hoje()), TIPO: 'ENTRADA', ITEM: campos.CODIGO, QUANTIDADE: inicial,
         DESTINO: '', SOLICITANTE: '', DOCUMENTO: '', SERIE: '', OBSERVACAO: 'Saldo inicial do cadastro',
         REGISTRADO_POR: usuario.email }, usuario.email);
     }
@@ -248,16 +282,22 @@ function acaoSalvarItemEstoque(usuario, params) {
   });
 }
 
-function acaoExcluirItemEstoque(usuario, params) {
-  const item = itensEstoque_().filter(function (i) { return i.id === params.id; })[0];
-  if (!item) throw new Error('Item não encontrado.');
-  const temHistorico = movimentosEstoque_().some(function (m) { return m.item === item.codigo; });
-  if (temHistorico) {
-    // Com historico nao apaga: desativa. O historico continua consultavel.
-    atualizar('EST_ITENS', params.id, { ATIVO: 'NAO' }, usuario.email);
-    return { ok: true, recado: 'O item tem movimentações, então foi desativado em vez de apagado.' };
-  }
-  return excluir('EST_ITENS', params.id, usuario.email);
+function acaoExcluirItemEstoque(usuario, params) { return excluirItemEstoque_(ESTOQUES.TI, usuario, params); }
+
+function excluirItemEstoque_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capCadastrar);
+  // Conferir e apagar na mesma trava: uma entrada no meio nao deixa movimento orfao.
+  return comTrava(function () {
+    const item = itensEstoque_(cfg).filter(function (i) { return i.id === params.id; })[0];
+    if (!item) throw new Error('Item não encontrado.');
+    const temHistorico = movimentosEstoque_(cfg).some(function (m) { return m.item === item.codigo; });
+    if (temHistorico) {
+      // Com historico nao apaga: desativa. O historico continua consultavel.
+      atualizar(cfg.itens, params.id, { ATIVO: 'NAO' }, usuario.email);
+      return { ok: true, recado: 'O item tem movimentações, então foi desativado em vez de apagado.' };
+    }
+    return excluir(cfg.itens, params.id, usuario.email);
+  });
 }
 
 /*
@@ -267,17 +307,20 @@ function acaoExcluirItemEstoque(usuario, params) {
  *   nome | categoria | marca | modelo | unidade | minimo | local | saldo inicial | codigo | ideal
  * So o nome e obrigatorio. Linha de cabecalho e ignorada.
  */
-function acaoImportarItensEstoque(usuario, params) {
+function acaoImportarItensEstoque(usuario, params) { return importarItensEstoque_(ESTOQUES.TI, usuario, params); }
+
+function importarItensEstoque_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capCadastrar);
   const texto = String(params.texto || '');
   if (!texto.trim()) throw new Error('Cole as linhas da planilha.');
-  // Lista lida, codigos gerados e gravacao na mesma trava (ver acaoSalvarItemEstoque).
+  // Lista lida, codigos gerados e gravacao na mesma trava (ver salvarItemEstoque_).
   return comTrava(function () {
-    const itens = itensEstoque_();
+    const itens = itensEstoque_(cfg);
     const porCodigo = {}, porNome = {};
     itens.forEach(function (i) { porCodigo[i.codigo] = i; porNome[i.nome.toLowerCase()] = i; });
 
     const novos = [], entradas = [], ignoradas = [];
-    let proximo = Number((proximoCodigoEstoque_(itens).match(/\d+/) || ['1'])[0]);
+    let proximo = Number((proximoCodigoEstoque_(itens, cfg.prefixo).match(/\d+$/) || ['1'])[0]);
     texto.split(/\r?\n/).forEach(function (linha, n) {
       if (!linha.trim()) return;
       const c = linha.split(linha.indexOf('\t') !== -1 ? '\t' : ';').map(function (x) { return String(x).trim(); });
@@ -286,7 +329,7 @@ function acaoImportarItensEstoque(usuario, params) {
       if (porNome[nome.toLowerCase()]) { ignoradas.push(nome + ' (já existe)'); return; }
       let codigo = codigoLimpo_(c[8]);
       if (c[8] && !codigo) { ignoradas.push(nome + ' (código inválido)'); return; }
-      if (!codigo) { codigo = 'TI-' + String(proximo).padStart(4, '0'); proximo++; }
+      if (!codigo) { codigo = cfg.prefixo + '-' + String(proximo).padStart(4, '0'); proximo++; }
       if (porCodigo[codigo]) { ignoradas.push(nome + ' (código ' + codigo + ' já existe)'); return; }
       const campos = camposItem_({ codigo: codigo, nome: nome, categoria: c[1], marca: c[2], modelo: c[3],
         unidade: c[4], minimo: c[5], local: c[6], ideal: c[9] });
@@ -298,8 +341,8 @@ function acaoImportarItensEstoque(usuario, params) {
         REGISTRADO_POR: usuario.email });
     });
     if (!novos.length) throw new Error('Nenhum item novo encontrado.' + (ignoradas.length ? ' Ignorados: ' + ignoradas.join(', ') : ''));
-    inserirVarios('EST_ITENS', novos, usuario.email);
-    if (entradas.length) inserirVarios('EST_MOVIMENTOS', entradas, usuario.email);
+    inserirVarios(cfg.itens, novos, usuario.email);
+    if (entradas.length) inserirVarios(cfg.movs, entradas, usuario.email);
     return { ok: true, recado: novos.length + ' item(ns) cadastrado(s)' + (entradas.length ? ', ' + entradas.length + ' com saldo inicial' : '') +
       (ignoradas.length ? '. Ignorados: ' + ignoradas.slice(0, 5).join(', ') + (ignoradas.length > 5 ? '…' : '') : '.') };
   });
@@ -309,10 +352,13 @@ function acaoImportarItensEstoque(usuario, params) {
 /* MOVIMENTACOES                                                       */
 /* ------------------------------------------------------------------ */
 
-function acaoMovimentarEstoque(usuario, params) {
+function acaoMovimentarEstoque(usuario, params) { return movimentarEstoque_(ESTOQUES.TI, usuario, params); }
+
+function movimentarEstoque_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capMovimentar);
   const tipo = String(params.tipo || '').toUpperCase().trim();
   if (EST_TIPOS.indexOf(tipo) === -1) throw new Error('Escolha o tipo da movimentação.');
-  if (tipo === 'AJUSTE') exigirCapacidade(usuario, 'GERIR_ESTOQUE');
+  if (tipo === 'AJUSTE') exigirCapacidade(usuario, cfg.capCadastrar);
   const codigo = String(params.item || '').toUpperCase().trim();
   let qtd = num_(params.quantidade);
   if (qtd === null || qtd === 0) throw new Error('Informe a quantidade.');
@@ -327,11 +373,11 @@ function acaoMovimentarEstoque(usuario, params) {
    * saldo ficava negativo.
    */
   return comTrava(function () {
-    const item = itensEstoque_().filter(function (i) { return i.codigo === codigo; })[0];
+    const item = itensEstoque_(cfg).filter(function (i) { return i.codigo === codigo; })[0];
     if (!item) throw new Error('Escolha um item do cadastro.');
     if (!item.ativo) throw new Error(item.nome + ' está inativo. Reative o item no cadastro antes de movimentar.');
 
-    const saldo = saldosEstoque_()[item.codigo] || 0;
+    const saldo = saldosEstoque_(null, cfg)[item.codigo] || 0;
     const efeito = (EST_SINAL[tipo] || 0) * qtd;
     if (estArred_(saldo + efeito) < 0) {
       throw new Error('Saldo insuficiente: ' + item.nome + ' tem ' + saldo + ' ' + item.unidade +
@@ -344,7 +390,7 @@ function acaoMovimentarEstoque(usuario, params) {
       DOCUMENTO: String(params.documento || '').trim(), SERIE: String(params.serie || '').trim(),
       OBSERVACAO: String(params.observacao || '').trim(), REGISTRADO_POR: usuario.email
     };
-    const id = inserir('EST_MOVIMENTOS', campos, usuario.email);
+    const id = inserir(cfg.movs, campos, usuario.email);
     return { ok: true, id: id, recado: EST_NOMES_TIPO[tipo] + ' registrada: ' + item.nome + ' — saldo agora ' + estArred_(saldo + efeito) + ' ' + item.unidade + '.' };
   });
 }
@@ -353,12 +399,14 @@ function acaoMovimentarEstoque(usuario, params) {
  * Estornar = lancar o movimento contrario, com referencia ao original.
  * Nada e apagado: o historico mostra o erro e a correcao.
  */
-function acaoEstornarMovimento(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ESTOQUE');
+function acaoEstornarMovimento(usuario, params) { return estornarMovimento_(ESTOQUES.TI, usuario, params); }
+
+function estornarMovimento_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capCadastrar);
   // "Ja foi estornado?" e o estorno na mesma trava: dois cliques ao mesmo tempo nao estornam duas vezes.
   // Item inativo pode ser estornado: o estorno corrige o historico, nao e uso do item.
   return comTrava(function () {
-    const movs = movimentosEstoque_();
+    const movs = movimentosEstoque_(cfg);
     const m = movs.filter(function (x) { return x.id === params.id; })[0];
     if (!m) throw new Error('Movimentação não encontrada.');
     if (/^ESTORNO/.test(m.observacao)) throw new Error('Este lançamento já é um estorno.');
@@ -366,7 +414,7 @@ function acaoEstornarMovimento(usuario, params) {
     if (jaEstornado) throw new Error('Este lançamento já foi estornado.');
     const saldo = saldosEstoque_(movs)[m.item] || 0;
     if (estArred_(saldo - m.efeito) < 0) throw new Error('O estorno deixaria o saldo negativo. Confira as movimentações posteriores.');
-    inserir('EST_MOVIMENTOS', {
+    inserir(cfg.movs, {
       DATA: paraISO(hoje()), TIPO: 'AJUSTE', ITEM: m.item, QUANTIDADE: -m.efeito,
       DESTINO: m.destino, SOLICITANTE: '', DOCUMENTO: m.documento, SERIE: m.serie,
       OBSERVACAO: 'ESTORNO de ' + m.id + ' (' + EST_NOMES_TIPO[m.tipo] + ' de ' + formatarData(paraData(m.data)) + ')' +
@@ -386,11 +434,14 @@ function acaoEstornarMovimento(usuario, params) {
  * contagem), a diferenca calculada apagaria aquele movimento: o item fica
  * de fora e o recado pede para conferir de novo.
  */
-function acaoInventarioEstoque(usuario, params) {
+function acaoInventarioEstoque(usuario, params) { return inventarioEstoque_(ESTOQUES.TI, usuario, params); }
+
+function inventarioEstoque_(cfg, usuario, params) {
+  exigirCapacidade(usuario, cfg.capCadastrar);
   return comTrava(function () {
-    const saldo = saldosEstoque_();
+    const saldo = saldosEstoque_(null, cfg);
     const itens = {};
-    itensEstoque_().forEach(function (i) { itens[i.codigo] = i; });
+    itensEstoque_(cfg).forEach(function (i) { itens[i.codigo] = i; });
     const ajustes = [], mudaram = [];
     (params.contagens || []).forEach(function (c) {
       const codigo = String(c.codigo || '').toUpperCase().trim();
@@ -411,7 +462,7 @@ function acaoInventarioEstoque(usuario, params) {
           (params.observacao ? ' — ' + String(params.observacao).trim() : ''),
         REGISTRADO_POR: usuario.email });
     });
-    if (ajustes.length) inserirVarios('EST_MOVIMENTOS', ajustes, usuario.email);
+    if (ajustes.length) inserirVarios(cfg.movs, ajustes, usuario.email);
     const recado = ajustes.length ? ajustes.length + ' item(ns) ajustado(s) pela contagem.' : 'A contagem bateu com o sistema. Nenhum ajuste.';
     return { ok: true, mudaram: mudaram, recado: recado + (mudaram.length
       ? ' Ficaram de fora porque foram movimentados depois que a tela abriu — confira e conte de novo: ' + mudaram.join(', ') + '.' : '') };
@@ -423,11 +474,13 @@ function acaoInventarioEstoque(usuario, params) {
  * saldoBase = o que havia antes do lancamento mais antigo devolvido; o
  * saldo corrido da janela parte dele e termina no saldo atual.
  */
-function acaoHistoricoItemEstoque(usuario, params) {
+function acaoHistoricoItemEstoque(usuario, params) { return historicoItemEstoque_(ESTOQUES.TI, usuario, params); }
+
+function historicoItemEstoque_(cfg, usuario, params) {
   const codigo = String(params.codigo || '').toUpperCase().trim();
   if (!codigo) throw new Error('Escolha o item.');
-  const item = itensEstoque_().filter(function (i) { return i.codigo === codigo; })[0];
-  const movs = movimentosEstoque_().filter(function (m) { return m.item === codigo; }).sort(ordemMovimentoDesc_);
+  const item = itensEstoque_(cfg).filter(function (i) { return i.codigo === codigo; })[0];
+  const movs = movimentosEstoque_(cfg).filter(function (m) { return m.item === codigo; }).sort(ordemMovimentoDesc_);
   const saldo = movs.reduce(function (s, m) { return s + m.efeito; }, 0);
   const lista = movs.slice(0, EST_HISTORICO_MAX);
   const naLista = lista.reduce(function (s, m) { return s + m.efeito; }, 0);
@@ -436,3 +489,16 @@ function acaoHistoricoItemEstoque(usuario, params) {
     saldo: estArred_(saldo), saldoBase: estArred_(saldo - naLista), total: movs.length, movimentos: lista
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* ESTOQUE DA LIMPEZA — as mesmas funcoes, nas tabelas da limpeza      */
+/* (a tela e a Limpeza CD; a capacidade e GERIR_LIMPEZA)               */
+/* ------------------------------------------------------------------ */
+
+function acaoSalvarItemLimpeza(usuario, params) { return salvarItemEstoque_(ESTOQUES.LP, usuario, params); }
+function acaoExcluirItemLimpeza(usuario, params) { return excluirItemEstoque_(ESTOQUES.LP, usuario, params); }
+function acaoImportarItensLimpeza(usuario, params) { return importarItensEstoque_(ESTOQUES.LP, usuario, params); }
+function acaoMovimentarLimpeza(usuario, params) { return movimentarEstoque_(ESTOQUES.LP, usuario, params); }
+function acaoEstornarLimpeza(usuario, params) { return estornarMovimento_(ESTOQUES.LP, usuario, params); }
+function acaoInventarioLimpeza(usuario, params) { return inventarioEstoque_(ESTOQUES.LP, usuario, params); }
+function acaoHistoricoItemLimpeza(usuario, params) { return historicoItemEstoque_(ESTOQUES.LP, usuario, params); }

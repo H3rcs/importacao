@@ -15,6 +15,7 @@
  * todo e-mail que o sistema manda. Agora e o amarelo da marca escurecido
  * ate ter contraste com texto branco.
  */
+const BUILD_EMAILS = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COR_AZUL = '#111785', COR_VERDE = '#01973A', COR_AMAR = '#FFEE03';
 const COR_ALERTA = '#8A6A00';        /* ambar escuro — sinal, nunca vermelho */
 const COR_ALERTA_FUNDO = '#FFF3CC';  /* fundo claro da caixa de motivo */
@@ -413,7 +414,8 @@ function rodapeLink(tela) {
   try { if (!ehFilialPrincipal()) partes.push('filial=' + encodeURIComponent(filialAtual().codigo)); } catch (e) {}
   if (tela) partes.push('tela=' + encodeURIComponent(tela));
   if (partes.length) url += '?' + partes.join('&');
-  const nomes = { calendario: 'Abrir o Calendário no GSL', acoes: 'Abrir o Plano de Ação no GSL' };
+  const nomes = { calendario: 'Abrir o Calendário no GSL', acoes: 'Abrir o Plano de Ação no GSL',
+                  limpeza: 'Abrir a Limpeza CD no GSL' };
   return '<p style="margin-top:18px"><a href="' + url +
     '" style="background:' + COR_AZUL + ';color:#fff;padding:9px 16px;text-decoration:none;' +
     'border-radius:6px;display:inline-block">' + (nomes[tela] || 'Abrir o GSL Bartofil') + '</a></p>';

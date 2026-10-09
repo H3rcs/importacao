@@ -858,6 +858,18 @@ async function rodar() {
     await f.waitForSelector('#apz-sel-setor', { timeout: 10000 });
     const escolhida = await f.evaluate(() => { const s = document.getElementById('apz-sel-setor'); return s.options[s.selectedIndex].textContent; });
     afirmar(/^FLOWRACK - B/.test(escolhida) && await notas() === '4 4 4 4 4', 'a avaliacao escolhida continua a mesma: ' + escolhida + ' / ' + await notas());
+    // duas respostas iguais (mesmo setor, dia e avaliador): a escolhida segue a mesma ao trocar de aba e voltar
+    abaResp.dados.splice(15, 0, abaResp.dados.find((l) => l[3] === 'FLOWRACK - B').slice(0, 5).concat([1, 1, 1, 1, 1, 'Reenvio', 'Reenvio', 1]));
+    abaResp.dados[15][0] = new s.mundo.DataDoScript(abaResp.dados[15][0].getTime() + 3600000);
+    await f.click('#acoes-topo button:has-text("Atualizar dados")');
+    await f.waitForFunction(() => DADOS && DADOS.paineis && Object.values(DADOS.paineis).some((p) => p.avaliacoes.length === 11), null, { timeout: 15000 });
+    await f.waitForSelector('#apz-sel-setor', { timeout: 10000 });
+    const iguais = await f.evaluate(() => Array.from(document.querySelectorAll('#apz-sel-setor option')).map((o, i) => [i, o.textContent]).filter((x) => /^FLOWRACK - B/.test(x[1])).map((x) => x[0]));
+    await f.selectOption('#apz-sel-setor', String(iguais[1]));
+    const antesDaAba = await notas();
+    await f.click('.apz-aba[data-aba="cronograma"]'); await f.click('.apz-aba[data-aba="relatorio"]');
+    const depoisDaAba = await f.evaluate(() => document.getElementById('apz-sel-setor').selectedIndex);
+    afirmar(iguais.length === 2 && depoisDaAba === iguais[1] && await notas() === antesDaAba, 'respostas iguais continuam distintas: ' + iguais.join() + ' -> ' + depoisDaAba + ' ' + await notas());
     // Bruno: um setor feito, um em andamento, um pendente
     const bruno = await f.evaluate(() => DADOS.lista.find((x) => x.nomeOriginal === 'BRUNO CARLOS TESTE').chave);
     await f.selectOption('#apz-sel', bruno);
@@ -914,11 +926,21 @@ async function rodar() {
       return [svg.querySelectorAll('text[font-weight="600"]').length, svg.querySelectorAll('text[transform]').length];
     });
     afirmar(estreito[0] === 0 && estreito[1] === 8, 'grafico em tela estreita (valores, rotulos): ' + estreito.join());
-    // Sair: nada do portal fica na pagina para a proxima pessoa do computador compartilhado
+    afirmar(await f.evaluate(() => apzNum(14 / 3) === '4.7' && apzNum(3) === '3' && apzNum('') === '0'), 'numero com no maximo uma casa');
+    // Sair com a tela ainda vindo do servidor (computador compartilhado): a resposta que chega depois
+    // e abandonada, e nada do que a pessoa viu fica na pagina (portal, ficha da assiduidade, janela).
+    await f.evaluate(() => { COLAB_CACHE = { lista: [{ nome: 'ALGUEM' }] }; FICHA = { matricula: '123', de: '', ate: '' }; apzTrocarFonte(); fecharJanela(); esquecerTelas(); });
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '2500', url: s.url }]);
+    await f.evaluate(() => { abrir('aprendiz'); });
+    await aba.page.waitForTimeout(400);
     await f.evaluate(() => sair());
     await esperarTela(aba, ['entrar']);
-    const resto = await f.evaluate(() => [DADOS === null, document.getElementById('pagina').innerHTML === '', APZ.chave === '' && APZ.busca === '' && APZ.aba === 'relatorio']);
-    afirmar(resto.every(Boolean), 'depois de sair (dados, tela, escolhas): ' + resto.join());
+    await aba.page.waitForTimeout(3500);                     // a resposta atrasada ja chegou
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '0', url: s.url }]);
+    const resto = await f.evaluate(() => ({ dados: DADOS === null, pagina: document.getElementById('pagina').innerHTML === '',
+      cache: Object.keys(CACHE_TELAS).length === 0, apz: APZ.chave === '' && APZ.busca === '' && APZ.aba === 'relatorio',
+      assiduidade: COLAB_CACHE === null && FICHA.matricula === '', janela: el('janela-corpo').innerHTML === '' && el('janela').classList.contains('oculto') }));
+    afirmar(Object.values(resto).every(Boolean), 'depois de sair, com a resposta atrasada ja chegada: ' + JSON.stringify(resto));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

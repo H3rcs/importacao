@@ -364,8 +364,13 @@ caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esque
     fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
     fs.writeFileSync(path.join(tmp, 'Filiais.gs'), ler('Filiais.gs').replace(/BUILD_FILIAIS = '[^']+'/, "BUILD_FILIAIS = '2026.10.09'"));
     fs.unlinkSync(path.join(tmp, 'Aprendiz.gs'));
-    const fora = novaExecucao(new Mundo({ dono: DONO }), tmp, { contaGoogle: DONO }, OP).arquivosForaDaVersao_();
+    fs.unlinkSync(path.join(tmp, 'Aprendiz.html'));
+    const c2 = novaExecucao(new Mundo({ dono: DONO }), tmp, { contaGoogle: DONO }, OP);
+    const fora = c2.arquivosForaDaVersao_();
     afirmar(fora.join() === 'Filiais.gs,Aprendiz.gs', 'a faixa diz quais faltam: ' + fora.join());
+    // a tela do modulo esquecida nao derruba a pagina (a faixa da tela avisa); as do nucleo continuam obrigatorias
+    afirmar(c2.include('Aprendiz') === '' && c2.include('App').length > 1000, 'include tolerante so para a tela do modulo');
+    afirmar(erroDe(() => c2.include('App2')) !== '', 'arquivo do nucleo que falta continua dando erro');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 

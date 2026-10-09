@@ -5,7 +5,7 @@
  * mesmos status, mesmo ciclo de entrega e validacao.
  */
 
-const BUILD_INSTALACAO = '2026.10.09b';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_INSTALACAO = '2026.10.09c';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COLUNAS_CONTROLE = ['ID', 'CRIADO_EM', 'CRIADO_POR', 'ATUALIZADO_EM', 'ATUALIZADO_POR', 'EXCLUIDO'];
 
 const ESQUEMA = {

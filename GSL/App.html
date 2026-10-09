@@ -78,8 +78,22 @@ const chamar = (f, ...a) => new Promise((ok, erro) => {
     erro(e);
   })[f](...a);
 });
+/*
+ * GERACAO DA SESSAO: sobe quando a pessoa sai (ou a sessao termina, ou
+ * entra outra no lugar). A resposta de um pedido feito ANTES disso e
+ * abandonada (a promessa nao se resolve): senao a tela de quem saiu
+ * voltava para a pagina, para o cache da proxima pessoa, ou abria uma
+ * janela por cima da entrada.
+ */
+let GERACAO_SESSAO = 0;
 const chamarJSON = async (f, ...a) => {
-  const bruto = await chamar(f, ...a);
+  const geracao = GERACAO_SESSAO;
+  let bruto;
+  try { bruto = await chamar(f, ...a); } catch (e) {
+    if (geracao !== GERACAO_SESSAO) return new Promise(() => {});
+    throw e;
+  }
+  if (geracao !== GERACAO_SESSAO) return new Promise(() => {});
   if (!bruto) throw new Error('O servidor não respondeu. Recarregue a página.');
   return typeof bruto === 'string' ? JSON.parse(bruto) : bruto;
 };
@@ -388,8 +402,17 @@ async function entrarNoSistema(ev) {
  * entrada e as escolhas guardadas nos modulos (Jovem Aprendiz).
  */
 function apagarTelaDaPessoa() {
+  GERACAO_SESSAO++;                 // o que ainda vem do servidor para quem saiu e abandonado
+  pedidosDoUsuario = 0;             // ...e esses pedidos nunca vao descontar da fila
   DADOS = null;
   const pg = el('pagina'); if (pg) pg.innerHTML = '';
+  // A janela fechada guardava a ficha inteira no HTML escondido; o visor, a ultima foto.
+  try { fecharJanela(); } catch (e) {}
+  ['janela-titulo', 'janela-corpo', 'janela-rodape', 'visor-imagem'].forEach((id) => { const x = el(id); if (x) x.innerHTML = ''; });
+  if (typeof visorFechar === 'function') visorFechar();
+  // O que as telas guardam fora do DADOS (assiduidade: a lista com as ausencias de todos).
+  COLAB_CACHE = null; periodoParams = null; FICHA = { matricula: '', de: '', ate: '' };
+  FOTO_CACHE.clear();
   if (typeof apzZerar === 'function') apzZerar();
 }
 
@@ -562,10 +585,13 @@ function montarSessao(r) {
       'Recarregue a página; se continuar, use o botão Reportar erro.');
   }
   const quemEra = SESSAO && SESSAO.usuario ? SESSAO.usuario.email : '';
-  if (quemEra !== r.usuario.email) apagarTelaDaPessoa();       // outra pessoa: nada da anterior fica
+  if (quemEra && quemEra !== r.usuario.email) apagarTelaDaPessoa();   // outra pessoa: nada da anterior fica
+  const filialEra = FILIAL;
   SESSAO = r;
   if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
   FILIAL = (r.filial && r.filial.codigo) || '';
+  // Outra filial: o portal do Jovem Aprendiz volta ao comeco (a busca e o aprendiz eram da outra).
+  if (filialEra && filialEra !== FILIAL && typeof apzZerar === 'function') apzZerar();
   if (FILIAL) gravarLocal(CHAVE_FILIAL, FILIAL);
   esquecerTelas();
   moduloAtual = null;
@@ -614,7 +640,7 @@ function montarSessao(r) {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.10.09b';
+const BUILD_APP = '2026.10.09c';
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
@@ -1890,7 +1916,9 @@ async function enviarEntrega(id) {
 async function baixar(idArquivo) {
   avisar('Preparando download…');
   try {
+    const geracao = GERACAO_SESSAO;
     const f = await chamar('obterAnexo', ctx(), idArquivo);
+    if (geracao !== GERACAO_SESSAO) return;            // a pessoa saiu enquanto o arquivo vinha
     const link = document.createElement('a');
     link.href = 'data:' + f.tipo + ';base64,' + f.dados;
     link.download = f.nome; link.click();

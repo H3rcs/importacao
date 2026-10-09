@@ -32,7 +32,7 @@
  * autorizar o sistema de novo, e ate la o GSL inteiro ficaria parado.
  */
 
-const BUILD_APRENDIZ = '2026.10.09b';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_APRENDIZ = '2026.10.09c';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const APZ_CONFIG = {
   ABA_RESPOSTAS: 'Respostas ao formulário 1',

@@ -151,7 +151,7 @@
    Relatorio e Avaliacoes / Cronograma Geral dos Setores. Os graficos sao
    do proprio GSL (SVG), sem biblioteca de fora.
    ===================================================================== */
-const BUILD_APRENDIZ_TELA = '2026.10.09b';   /* carimbo da entrega (ver conferirVersao no App.html) */
+const BUILD_APRENDIZ_TELA = '2026.10.09c';   /* carimbo da entrega (ver conferirVersao no App.html) */
 const APZ = { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' };
 /* Saiu a pessoa (computador compartilhado): o portal volta ao comeco. Chamado pelo App.html. */
 function apzZerar() { Object.assign(APZ, { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' }); }
@@ -160,8 +160,8 @@ const APZ_OPT = { 'Concluído': 'concluido', 'Pendente': 'pendente', 'Não reali
 const APZ_PILARES = ['Atenção', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
 const APZ_PILARES_LONGO = ['Atenção Concentrada', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
 
-/* 3 -> "3"; 3.4 -> "3.4" — como o portal mostrava (o numero ja vem com uma casa do servidor). */
-const apzNum = (n) => String(Number(n) || 0);
+/* 3 -> "3"; 3.4 -> "3.4" — como o portal mostrava; no maximo uma casa (nota corrigida a mao, 14/3 -> 4.7). */
+const apzNum = (n) => String(Number((Number(n) || 0).toFixed(1)));
 const apzData = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
 
 function pintarAprendiz(r) {
@@ -172,7 +172,7 @@ function pintarAprendiz(r) {
   apzPintarTela(d);
   if (foco) {
     const caixa = el('apz-busca');
-    if (caixa) { caixa.focus(); try { caixa.setSelectionRange(foco[0], foco[1]); } catch (e) {} }
+    if (caixa) { caixa.focus({ preventScroll: true }); try { caixa.setSelectionRange(foco[0], foco[1]); } catch (e) {} }
   }
 }
 
@@ -231,12 +231,22 @@ function apzSelecionar(chave) {
   apzDesenhar();
 }
 
-/* Identidade de uma avaliacao (setor, data e avaliador): avaliacao nova entra na frente e muda as posicoes. */
-const apzIdAvaliacao = (a) => a ? a.setor + '|' + a.data + '|' + a.avaliador : '';
+/*
+ * Identidade de uma avaliacao: setor, data e avaliador, mais quantas iguais sao MAIS ANTIGAS que ela
+ * (a lista vem da mais recente para a mais antiga e a resposta nova entra na frente: contando pelo
+ * fim, o numero de cada uma nao muda). Duas respostas iguais no mesmo dia continuam distintas.
+ */
+function apzIdAvaliacao(lista, i) {
+  const a = lista[i]; if (!a) return '';
+  const base = a.setor + '|' + a.data + '|' + a.avaliador;
+  let antes = 0;
+  for (let j = i + 1; j < lista.length; j++) if (lista[j].setor + '|' + lista[j].data + '|' + lista[j].avaliador === base) antes++;
+  return base + '#' + antes;
+}
 function apzEscolherAvaliacao(i) {
   const p = ((DADOS && DADOS.paineis) || {})[APZ.chave];
   APZ.avaliacao = Number(i) || 0;
-  APZ.avaliacaoId = p ? apzIdAvaliacao(p.avaliacoes[APZ.avaliacao]) : '';
+  APZ.avaliacaoId = p ? apzIdAvaliacao(p.avaliacoes, APZ.avaliacao) : '';
   apzPintarCompetencias();
 }
 
@@ -271,7 +281,7 @@ function apzRelatorio(d) {
       }).join('')
     : '<p class="apz-sub" style="font-size:.85rem">Nenhum setor cadastrado no cronograma para este aprendiz.</p>';
   // A avaliacao escolhida e procurada pela identidade; se saiu da planilha, volta para a mais recente.
-  const escolhida = APZ.avaliacaoId ? p.avaliacoes.findIndex((a) => apzIdAvaliacao(a) === APZ.avaliacaoId) : -1;
+  const escolhida = APZ.avaliacaoId ? p.avaliacoes.findIndex((a, i) => apzIdAvaliacao(p.avaliacoes, i) === APZ.avaliacaoId) : -1;
   APZ.avaliacao = escolhida >= 0 ? escolhida : 0;
   if (escolhida < 0) APZ.avaliacaoId = '';
 

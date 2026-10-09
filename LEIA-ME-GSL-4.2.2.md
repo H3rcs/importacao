@@ -74,7 +74,7 @@ O "Portal RH Aprendiz" virou um módulo do GSL: card **Jovem Aprendiz** no menu,
 | A ligação da tela no sistema | `GSL/App.html` (`TELAS_PINTA`, `ICONES`) e `GSL/Index.html` (`include('Aprendiz')`) |
 | Testes | `testes/paineis.js`, `testes/seguranca.js` e `testes/e2e.js` (casos "jovem aprendiz"); planilha de teste com nomes inventados em `testes/dados-aprendiz.js` |
 
-**Arquivos desta entrega:** `Aprendiz.gs` e `Aprendiz.html` (novos), `Codigo.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`, `App.html` e `Index.html`. Para criar os novos no Apps Script: **+ › Script** com o nome `Aprendiz` e **+ › HTML** com o nome `Aprendiz`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo (deste pacote ou do pacote da Limpeza), a faixa amarela no topo diz qual.
+**Arquivos desta entrega:** `Aprendiz.gs` e `Aprendiz.html` (novos), `Codigo.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`, `App.html` e `Index.html`. Para criar os novos no Apps Script: **+ › Script** com o nome `Aprendiz` e **+ › HTML** com o nome `Aprendiz`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo deste pacote, a faixa amarela no topo diz qual.
 
 ## Pedido de 09/10 (Limpeza: estoque igual ao do TI, Plano de Ação igual ao do Calendário, fotos)
 
@@ -87,7 +87,7 @@ A tela **Limpeza CD** agora tem cinco abas: **Gestão**, **Plano de Ação**, **
 - **Ações antigas da limpeza:** passam sozinhas para o novo Plano de Ação na primeira abertura depois da atualização, com os comentários. O que foi encontrado vira o título e a ação definida vira "o que precisa ser feito". Responsável antigo (só o nome) continua aparecendo; ao editar, marque a pessoa que acompanha.
 - **Saiu da tela:** compras por lote, "acabou/reabastecer", produtos com diluição e embalagens. **Nada foi apagado**: as tabelas antigas continuam na planilha.
 - **Importar planilha antiga:** traz zonas, não conformidades (para o Plano de Ação) e nomes de produtos (para o estoque, com saldo zero).
-- **Aviso de versão misturada:** se algum arquivo não for colado no Apps Script, aparece uma faixa amarela no topo dizendo qual. Foi o que causou o "Ação desconhecida: comentarAcao". O esquema sobe para **8.8** sozinho.
+- **Aviso de versão misturada:** se algum arquivo não for colado no Apps Script, aparece uma faixa amarela no topo dizendo qual (o `Estilo.html` fica de fora dessa conferência). Foi o que causou o "Ação desconhecida: comentarAcao". O esquema sobe para **8.8** sozinho.
 
 **Arquivos desta entrega:** `Acoes.gs`, `Codigo.gs`, `Emails.gs`, `Estoque.gs`, `Filiais.gs`, `Instalacao.gs`, `Limpeza.gs`, `App.html`, `Estilo.html` e `Paineis.html`. Cole **todos** e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão).
 

@@ -24,14 +24,14 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.09b'
+  build: '2026.10.09c'
 };
 
 /*
  * Arquivos .gs com carimbo diferente do esperado (implantacao pela metade).
  * Cada arquivo tem o carimbo da ultima entrega em que mudou:
  *   2026.10.09  = Limpeza (estoque do TI, Plano de Acao, fotos)
- *   2026.10.09b = Jovem Aprendiz
+ *   2026.10.09c = Jovem Aprendiz (o 09b foi o primeiro envio do mesmo pacote)
  */
 function arquivosForaDaVersao_() {
   const LIMPEZA = '2026.10.09';
@@ -420,8 +420,16 @@ function acaoDiagnosticoIdentidade(usuario) {
 }
 
 function include(nome) {
-  return HtmlService.createHtmlOutputFromFile(nome).getContent();
+  try {
+    return HtmlService.createHtmlOutputFromFile(nome).getContent();
+  } catch (e) {
+    // Tela de modulo esquecida (ou com outro nome) ao colar a entrega: o resto do GSL abre e a
+    // faixa "Atualização incompleta" diz qual arquivo falta. As telas do nucleo continuam obrigatorias.
+    if (INCLUDES_OPCIONAIS.indexOf(nome) !== -1) return '';
+    throw e;
+  }
 }
+const INCLUDES_OPCIONAIS = ['Aprendiz'];
 
 /**
  * Catalogo de acoes de escrita. Cada uma declara a capacidade exigida.

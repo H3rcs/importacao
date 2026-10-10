@@ -38,7 +38,7 @@ const ESTADOS_PAINEL = [PAINEL_ATIVO, PAINEL_OCULTO, PAINEL_DESATIVADO];
  * Tabelas que vivem SEMPRE no banco mestre, qualquer que seja a filial.
  * Todo o resto e dado da filial.
  */
-const BUILD_FILIAIS = '2026.10.09c';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_FILIAIS = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
 const TABELAS_GLOBAIS = { ACESSOS: 1, PERFIS: 1, FILIAIS: 1, LOG: 1, SESSOES: 1, EQUIPE: 1, FEEDBACK: 1 };
 
 /* Chaves de cache que nao dependem da filial. */
@@ -224,7 +224,7 @@ function pessoaNaFilial_(registroAcesso, filial) {
  */
 function pessoasDaFilial() {
   const f = filialAtual();
-  return listar('ACESSOS').filter(function (p) { return pessoaNaFilial_(p, f); });
+  return cadastrosDeAcesso_().filter(function (p) { return pessoaNaFilial_(p, f); });   // sem reler ACESSOS (nem o PIN)
 }
 
 /** Estado de um painel na filial em uso: ATIVO, OCULTO, DESATIVADO ou '' (nao foi para ela). */

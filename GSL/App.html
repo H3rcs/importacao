@@ -168,7 +168,13 @@ const chamarJSON = async (f, ...a) => {
   return typeof bruto === 'string' ? JSON.parse(bruto) : bruto;
 };
 
-const carregarTelaSrv = (id, params) => chamarJSON('carregarTela', ctx(), id, params || {});
+const carregarTelaSrv = (id, params) => {
+  const filial = FILIAL;
+  return chamarJSON('carregarTela', ctx(), id, params || {}).then((r) => {
+    if (filial === FILIAL) notarBolinhaDaTela(id, r);    // o "Em aberto" que acabou de chegar vira o numero da bolinha
+    return r;
+  });
+};
 /*
  * Com o canal barrado, fotos e arquivos (e as acoes chamadas direto, fora do
  * agir) nao tem caminho: em vez de uma chamada condenada de varios segundos,
@@ -595,6 +601,7 @@ function apagarTelaDaPessoa() {
   GERACAO_SESSAO++;                 // o que ainda vem do servidor para quem saiu e abandonado
   pedidosDoUsuario = 0;             // ...e esses pedidos nunca vao descontar da fila
   DADOS = null;
+  PENDENCIAS = null; PENDENCIAS_PEDIDO = '';      // as bolinhas eram de quem saiu (o pedido abandonado nunca termina)
   const pg = el('pagina'); if (pg) pg.innerHTML = '';
   // A janela fechada guardava a ficha inteira no HTML escondido; o visor, a ultima foto.
   try { fecharJanela(); } catch (e) {}
@@ -829,6 +836,8 @@ function montarSessao(r) {
   // Outra filial: o portal do Jovem Aprendiz volta ao comeco (a busca e o aprendiz eram da outra).
   if (filialEra && filialEra !== FILIAL && typeof apzZerar === 'function') apzZerar();
   if (FILIAL) gravarLocal(CHAVE_FILIAL, FILIAL);
+  // Bolinhas: a pagina da reserva ja traz; pelo canal normal vem depois do menu (atualizarPendencias).
+  PENDENCIAS = r.pendencias ? { filial: FILIAL, quando: Date.now(), modulos: r.pendencias } : null;
   esquecerTelas();
   moduloAtual = null;
   filtroAtivo = null; filtroTurno = null;   // filtro do calendario era da filial/pessoa anterior
@@ -880,7 +889,7 @@ function montarSessao(r) {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.10.09c';
+const BUILD_APP = '2026.10.10';
 function mostrarResultadoAcao(x) {
   if (!x) return;
   if (x.ok === false) {
@@ -893,13 +902,21 @@ function mostrarResultadoAcao(x) {
   else if (x.recadoBotao) avisar(x.recadoBotao);
 }
 
+/* O Estilo.html traz o carimbo numa variavel do CSS (--gsl-estilo). */
+function carimboDoEstilo() {
+  try { return getComputedStyle(document.documentElement).getPropertyValue('--gsl-estilo').replace(/["'\s]/g, ''); }
+  catch (e) { return ''; }
+}
+
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
   if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
   // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
   if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.09') faltam.push('Paineis.html');
-  if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== BUILD_APP) faltam.push('Aprendiz.html (e a linha dele no Index.html)');
+  if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.10.09c') faltam.push('Aprendiz.html (e a linha dele no Index.html)');
+  if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar')) faltam.push('Index.html');
+  if (carimboDoEstilo() !== '2026.10.10') faltam.push('Estilo.html');
   let faixa = el('aviso-versao');
   if (!faltam.length) { if (faixa) faixa.remove(); return; }
   if (!faixa) {
@@ -1197,10 +1214,11 @@ function abrirModulos() {
       <div class="modulos-titulo">Selecione um modulo para continuar</div>
       <div class="grade-modulos">
         ${mods.map((m) => `
-          <button class="holocard ${m.cor}${m.oculto ? ' painel-oculto' : ''}" onclick="entrarModulo(${jsArg(m.id)})">
+          <button class="holocard ${m.cor}${m.oculto ? ' painel-oculto' : ''}" data-modulo="${esc(m.id)}" onclick="entrarModulo(${jsArg(m.id)})">
             ${m.oculto ? '<span class="selo-oculto" title="Oculto: só o administrador vê este painel nesta filial">oculto</span>' : ''}
             <div class="holo-icone">${ICONES[m.icone] || '\u25C6'}</div>
             <div class="holo-titulo">${esc(m.nome)}</div>
+            <span class="holo-pendencia">${bolinhaHtml(m.id)}</span>
             <div class="holo-frase">${esc(m.frase)}</div>
             <div class="holo-rodape">
               <span class="holo-acao">${esc(m.acao)}</span>
@@ -1211,6 +1229,81 @@ function abrirModulos() {
           '<div class="vazio">Nenhum modulo liberado para o seu perfil.</div>'}
       </div>
     </div>`;
+  // O menu ja esta na tela; os numeros so vao ao servidor se estiverem velhos (por tras, sem segurar o clique).
+  if (!PENDENCIAS || PENDENCIAS.filial !== FILIAL || Date.now() - PENDENCIAS.quando > PENDENCIAS_IDADE) atualizarPendencias();
+}
+
+/* ------------------------------------------------------------------ */
+/* BOLINHAS DO MENU (10/10) — acoes em aberto de cada modulo           */
+/*                                                                     */
+/* O numero e o "Em aberto" do plano (o servidor conta pelo mesmo      */
+/* caminho da tela). Chega de tres jeitos: dentro da pagina da reserva */
+/* (POST), numa chamada por tras depois do menu na tela, e das proprias*/
+/* telas dos planos — ao chegar o Plano de Acao ou a Limpeza, a bolinha*/
+/* passa a ser o numero que a pessoa acabou de ver. Nunca e consultada */
+/* sozinha, por tempo: a sessao acaba em 1 h parada e uma consulta     */
+/* periodica manteria viva a aba esquecida aberta.                     */
+/* ------------------------------------------------------------------ */
+let PENDENCIAS = null;             // { filial, quando, modulos: { calendario: {abertas, atrasadas, minhas} } }
+let PENDENCIAS_PEDIDO = '';        // filial do pedido em voo ('' = nenhum)
+let PENDENCIAS_SEM_PORTA = false;  // servidor antigo (sem a acao 'pendencias'): para de pedir nesta pagina
+const PENDENCIAS_IDADE = 120000;   // mais velhas que isto: o menu pede de novo (por tras)
+const BOLINHA_DA_TELA = {          // tela do plano -> modulo da bolinha e onde estao os numeros dela
+  acoes: { modulo: 'calendario', contagens: (d) => d && d.contagens },
+  limpeza: { modulo: 'limpeza', contagens: (d) => d && d.plano && d.plano.contagens }
+};
+
+function notarBolinhaDaTela(idTela, r) {
+  const b = BOLINHA_DA_TELA[idTela];
+  const c = b && r && b.contagens(r.dados);
+  if (!c || typeof c.abertas !== 'number') return;
+  if (!PENDENCIAS || PENDENCIAS.filial !== FILIAL) PENDENCIAS = { filial: FILIAL, quando: 0, modulos: {} };
+  PENDENCIAS.modulos[b.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas || 0, minhas: c.minhas || 0 };
+  pintarBolinhas();
+}
+
+const contarTexto = (n, um, varios) => n + ' ' + (n === 1 ? um : varios);
+function textoPendencia(p) {
+  return contarTexto(p.abertas, 'ação em aberto', 'ações em aberto') +
+    (p.atrasadas ? ', ' + contarTexto(p.atrasadas, 'atrasada', 'atrasadas') : '');
+}
+
+/* A bolinha de um modulo (vazio quando nao ha numero, ou e zero). */
+function bolinhaHtml(idModulo) {
+  const p = PENDENCIAS && PENDENCIAS.filial === FILIAL ? PENDENCIAS.modulos[idModulo] : null;
+  if (!p || !(p.abertas > 0)) return '';
+  const dica = textoPendencia(p) + (p.minhas && p.minhas !== p.abertas ? ' · ' + contarTexto(p.minhas, 'sua', 'suas') : '');
+  return `<span class="holo-bolinha${p.atrasadas ? ' com-atraso' : ''}" aria-hidden="true" title="${esc(dica)}">${p.abertas > 99 ? '99+' : p.abertas}</span>` +
+    `<span class="so-leitor">, ${esc(textoPendencia(p))}</span>`;
+}
+
+/* Troca so as bolinhas, no lugar: redesenhar o menu repetiria a entrada dos cartoes. */
+function pintarBolinhas() {
+  if (paginaAtual !== 'modulos') return;
+  document.querySelectorAll('.holocard[data-modulo]').forEach((b) => {
+    const alvo = b.querySelector('.holo-pendencia');
+    const html = bolinhaHtml(b.dataset.modulo);
+    if (alvo && alvo.innerHTML !== html) alvo.innerHTML = html;
+  });
+}
+
+/* Por tras e calada: sem canal (reserva por POST) os numeros vem dentro da pagina, e erro aqui nao vira aviso. */
+async function atualizarPendencias() {
+  if (PENDENCIAS_PEDIDO === FILIAL || PENDENCIAS_SEM_PORTA || CANAL_BARRADO || !SESSAO ||
+      typeof google === 'undefined' || !google.script) return;
+  if (!(SESSAO.telas || []).some((t) => BOLINHA_DA_TELA[t.id])) return;   // nenhum plano no menu desta pessoa
+  const filial = FILIAL;
+  PENDENCIAS_PEDIDO = filial;
+  try {
+    if (!(await filaLivre(10))) return;
+    const r = await executarAcaoSrv('pendencias', {});
+    if (filial !== FILIAL || !SESSAO || !r || !r.pendencias) return;
+    PENDENCIAS = { filial: FILIAL, quando: Date.now(), modulos: r.pendencias };
+    pintarBolinhas();
+  } catch (e) {
+    // A bolinha e um extra: sem ela o menu funciona igual. Codigo.gs antigo nao conhece a acao: para de pedir.
+    if (/desconhecida/i.test(String((e && e.message) || e))) PENDENCIAS_SEM_PORTA = true;
+  } finally { if (PENDENCIAS_PEDIDO === filial) PENDENCIAS_PEDIDO = ''; }
 }
 
 function entrarModulo(id) {
@@ -1220,7 +1313,7 @@ function entrarModulo(id) {
   montarMenu(SESSAO.telas || []);
   abrir(m.telas[0]);
   // As demais telas DESTE modulo vao chegando por tras, sem atrapalhar.
-  setTimeout(() => prebuscarModulo(id), 2500);
+  setTimeout(() => prebuscarModulo(id), 300);       // espera a primeira tela (filaLivre) e ja segue
 }
 
 /*
@@ -1350,19 +1443,30 @@ async function abrir(idTela, params) {
  *   - so com a fila do usuario vazia, e cedendo a vez a cada item;
  *   - para na hora se a pessoa trocar de modulo.
  */
+let PREBUSCA_EM_CURSO = '';
 async function prebuscarModulo(idModulo) {
   if (CANAL_BARRADO) return;                       // canal barrado: nada de chamada de fundo condenada
-  const alvo = (SESSAO && SESSAO.telas || []).filter((t) => t.modulo === idModulo);
-  for (const t of alvo) {
-    if (moduloAtual !== idModulo) return;            // a pessoa saiu do modulo
-    const chave = chaveTela(t.id, {});
-    if (CACHE_TELAS[chave]) continue;
-    if (!(await filaLivre())) return;                // usuario ocupado: desiste
-    try {
-      CACHE_TELAS[chave] = { resposta: await carregarTelaSrv(t.id, {}), quando: Date.now() };
-    } catch (e) { /* tela sem permissao ou com erro: fica para o clique */ }
-    await esperar(400);                              // deixa a fila respirar
-  }
+  // Uma volta por modulo (e por sessao: a de quem saiu ficou abandonada, ver GERACAO_SESSAO).
+  const marca = GERACAO_SESSAO + '|' + idModulo;
+  if (PREBUSCA_EM_CURSO === marca) return;
+  PREBUSCA_EM_CURSO = marca;
+  try {
+    const alvo = (SESSAO && SESSAO.telas || []).filter((t) => t.modulo === idModulo);
+    for (const t of alvo) {
+      if (moduloAtual !== idModulo || CANAL_BARRADO || SAINDO_DA_PAGINA) return;   // a pessoa saiu do modulo
+      const chave = chaveTela(t.id, {});
+      if (CACHE_TELAS[chave]) continue;
+      if (!(await filaLivre())) return;              // usuario ocupado: desiste
+      // Conferido de novo DEPOIS da espera: a tela que a pessoa acabou de abrir chegou nesse meio tempo
+      // (antes ela era pedida duas vezes).
+      if (moduloAtual !== idModulo || CANAL_BARRADO || CACHE_TELAS[chave]) continue;
+      try {
+        const r = await carregarTelaSrv(t.id, {});
+        if (!CACHE_TELAS[chave]) CACHE_TELAS[chave] = { resposta: r, quando: Date.now() };
+      } catch (e) { /* tela sem permissao ou com erro: fica para o clique */ }
+      await esperar(400);                            // deixa a fila respirar
+    }
+  } finally { if (PREBUSCA_EM_CURSO === marca) PREBUSCA_EM_CURSO = ''; }
 }
 
 /** Busca de novo em segundo plano e so repinta se mudou de verdade. */
@@ -1489,18 +1593,39 @@ async function agir(acao, params, recado) {
 
   pedidosDoUsuario++;
   try {
-    const r = await executarAcaoSrv(acao, params);
+    /*
+     * 10/10 — UMA IDA SO: a acao e a tela atual ja atualizada voltam juntas
+     * (executarAcaoETela), e a lista nao pisca em "Carregando…". Codigo.gs
+     * antigo (sem essa porta): nada foi gravado, vai pelo caminho de antes.
+     */
+    const idTela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
+    const paramsTela = paramsAtual || {};
+    let r, tela = null;
+    if (SEM_ACAO_E_TELA) r = await executarAcaoSrv(acao, params);
+    else {
+      try {
+        const x = await chamarJSON('executarAcaoETela', ctx(), acao, params || {}, idTela, paramsTela);
+        r = x && x.r; tela = x && x.tela;
+      } catch (e) {
+        if (!/executarAcaoETela/.test(String((e && e.message) || e))) throw e;
+        SEM_ACAO_E_TELA = true;
+        r = await executarAcaoSrv(acao, params);
+      }
+    }
 
     /*
      * Invalida a tela atual (essa tem que voltar do servidor) e apenas
      * ENVELHECE as outras. Antes daqui saia um `esquecerTelas()` seguido
      * de uma prebusca de todas as telas: aprovar uma atividade custava
-     * oito idas ao servidor e ~15 s de fila. Agora custa duas.
+     * oito idas ao servidor e ~15 s de fila. Agora custa uma.
      */
     // Acoes globais (parametros, perfis) mudam TODAS as telas: nesses
     // casos o cache inteiro cai, senao outra tela mostra dado velho.
     if (r && r.invalidarTudo) esquecerTelas();
     else { esquecerTela(paginaAtual); envelhecerTelas(); }
+    // A tela que ja voltou com a gravacao entra fresca no cache: o abrir() abaixo pinta sem ir ao servidor.
+    if (tela && idTela) notarBolinhaDaTela(idTela, tela);
+    if (tela && idTela && paginaAtual === idTela) CACHE_TELAS[chaveTela(idTela, paramsTela)] = { resposta: tela, quando: Date.now() };
     fecharJanela();
 
     /*
@@ -1538,6 +1663,8 @@ async function agir(acao, params, recado) {
     if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
   }
 }
+
+let SEM_ACAO_E_TELA = false;     // Codigo.gs publicado sem executarAcaoETela (versao misturada)
 
 /* Apaga do cache do cliente so as entradas de uma tela. */
 function esquecerTela(idTela) {

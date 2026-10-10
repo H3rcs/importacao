@@ -57,19 +57,32 @@ const bloqueadas = [
   ['atualizarCompetenciaAberta'], ['gerarMesSeNecessario'], ['testarEmail'], ['garantirEsquema'], ['corrigirFuso'],
   // 4.2.2: Plano de Acao da Limpeza, estoque da limpeza e fotos — "usuario" inventado no console
   ['listarAcoes', 'LIMPEZA'], ['pessoasParaAcao', null], ['dadosLimpeza', FALSO, {}], ['dadosAcoes', FALSO, {}],
+  ['acaoPendencias', FALSO], ['pendenciasDoUsuario_', FALSO], ['comPendencias_', { ok: true, entrada: 'APP' }],
   ['acaoFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['acaoFotoAcaoLimpeza', FALSO, { id: 'x', arquivo: 'y' }],
   ['acaoSalvarItemLimpeza', FALSO, { nome: 'x' }], ['acaoMovimentarLimpeza', FALSO, { tipo: 'ENTRADA', item: 'LP-0001', quantidade: 1 }],
   ['acaoSalvarAcaoLimpeza', FALSO, { acao: 'x', prazo: '2026-12-01', turno: 'A', responsavel: 'x' }],
   ['acaoRemoverFotoAcao', FALSO, { id: 'x', arquivo: 'y' }], ['removerAnexo', FALSO, 'ACOES', 'x', 'y'],
   // 4.2.2: Jovem Aprendiz — avaliacoes dos aprendizes e a troca da planilha
   ['dadosAprendiz', FALSO], ['acaoSalvarFonteAprendiz', FALSO, { link: LINK_APZ }], ['acaoAtualizarAprendiz', FALSO],
-  ['lerPlanilhaAprendiz_', LINK_APZ.split('/')[5]], ['idPlanilhaAprendiz_']
+  ['lerPlanilhaAprendiz_', LINK_APZ.split('/')[5]], ['idPlanilhaAprendiz_'],
+  // 10/10: sessao duravel, gravar pela reserva, cache — tudo interno
+  ['acaoPelaPagina_', { t: 'x', acao: 'excluirAcao', ap: '{}' }], ['embutirTela_', {}, 'x', 'acoes', ''],
+  ['encerrarSessao_', 'f'.repeat(64)], ['podarSessoes_', true], ['publicarGeracoes_'], ['preLerCache_', 'x'],
+  ['cadastrosDeAcesso_'], ['lojaDeSessoes_'], ['chaveSessaoDuravel_', 'x']
 ];
 bloqueadas.forEach(([fn, ...a]) => {
   const r = run(ATACANTE, fn, ...a);
   ok(!r.ok && /Acesso negado|not found/i.test(r.erro.message), fn + '(' + a.map((x) => JSON.stringify(x)).join(', ').slice(0, 50) + ') bloqueada' +
     (r.ok ? ' — DEVOLVEU ' + JSON.stringify(r.valor).slice(0, 60) : ''));
 });
+
+console.log('\nPortas novas sem sessao (10/10):');
+const ea = run(ATACANTE, 'executarAcaoETela', { t: 'f'.repeat(64), f: ctx.f }, 'excluirAcao', { id: 'x' }, 'acoes', {});
+ok(!ea.ok && /\[SESSAO\]/.test(ea.erro.message), 'executarAcaoETela sem sessao: ' + (ea.ok ? 'DEVOLVEU ' + String(ea.valor).slice(0, 60) : ea.erro.message.slice(0, 50)));
+const ms = run(ATACANTE, 'manterSessao', { t: 'f'.repeat(64), f: ctx.f });
+ok(ms.ok && JSON.parse(ms.valor).ok === false && Object.keys(JSON.parse(ms.valor)).length === 1, 'manterSessao sem sessao so diz ok:false');
+const sc = run(ATACANTE, 'sondarCanal');
+ok(sc.ok && sc.valor === 'ok', 'sondarCanal so diz "ok"');
 
 console.log('\nQuem deve continuar passando:');
 const g = run('', 'atualizarCompetenciaAberta');                        // gatilho: sem usuario do outro lado

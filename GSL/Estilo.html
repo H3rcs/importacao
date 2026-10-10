@@ -17,6 +17,7 @@
 /* As fontes (Archivo e Inter) sao carregadas no Index.html, sem bloquear a pagina. */
 
 :root {
+  --gsl-estilo: '2026.10.10';   /* carimbo da entrega (conferirVersao no App.html) */
   /* Marca — iguais nos dois temas. NAO existe vermelho na marca. */
   --azul: #111785;
   --verde: #01973A;
@@ -1181,6 +1182,49 @@ td.celula-medidor { min-width: 110px; }
 .holo-marca {
   position: absolute; right: 14px; bottom: 10px; font-size: 78px;
   opacity: .04; pointer-events: none; line-height: 1;
+}
+
+/* ---------------------------------------------------------
+   BOLINHA DO MODULO (10/10) — acoes em aberto, presa ao canto
+   do icone (como o numero de mensagens no icone do celular).
+   Azul da marca; VERMELHO quando alguma esta atrasada — e ai
+   ganha o "!" ao lado: o atraso nao e dito so pela cor. Fica no
+   cartao (nao dentro do icone) para nao girar com ele no hover;
+   o cartao tem overflow:hidden, entao ela fica sobre o icone.
+   --------------------------------------------------------- */
+.holo-pendencia { display: block; height: 0; }
+.holo-bolinha {
+  --bolinha: #111785; --bolinha-aro: #fff; --bolinha-sombra: rgba(17, 23, 133, .5);
+  position: absolute; top: 14px; left: 74px; z-index: 2;
+  min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: 'Archivo', sans-serif; font-size: 12px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums; color: #fff; background: var(--bolinha);
+  box-shadow: 0 0 0 2px var(--bolinha-aro), 0 6px 14px -4px var(--bolinha-sombra);
+  animation: bolinha-entrar .45s var(--elastico) .35s backwards;
+}
+.holo-bolinha.com-atraso { --bolinha: #C62828; --bolinha-sombra: rgba(198, 40, 40, .5); }
+.holo-bolinha.com-atraso::after {
+  content: '!'; position: absolute; right: -6px; bottom: -6px;
+  width: 14px; height: 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 900; line-height: 1; color: #C62828; background: #fff;
+  box-shadow: 0 0 0 1.5px #C62828;
+}
+/* No escuro o aro e claro: o azul sobre o vidro escuro sozinho fica abaixo de 3:1. */
+[data-tema="escuro"] .holo-bolinha { --bolinha: #4F46E5; --bolinha-aro: rgba(248, 250, 252, .92); --bolinha-sombra: rgba(79, 70, 229, .5); }
+[data-tema="escuro"] .holo-bolinha.com-atraso { --bolinha: #C62828; --bolinha-sombra: rgba(198, 40, 40, .5); }
+@keyframes bolinha-entrar { from { opacity: 0; transform: scale(.2); } }
+@media (forced-colors: active) { .holo-bolinha { border: 1px solid CanvasText; } }
+@media (prefers-reduced-motion: reduce) { .holo-bolinha { animation: none; } }
+.modo-leve .holo-bolinha,
+.sem-entrada .holo-bolinha { animation: none !important; }
+.modo-leve .holo-bolinha { box-shadow: 0 0 0 2px var(--bolinha-aro); }
+
+/* Texto so para leitor de tela (a bolinha em si e aria-hidden). */
+.so-leitor {
+  position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
 }
 
 /* Voltar ao menu de modulos */

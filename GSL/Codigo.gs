@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.09c'
+  build: '2026.10.10'
 };
 
 /*
@@ -32,18 +32,22 @@ const APP = {
  * Cada arquivo tem o carimbo da ultima entrega em que mudou:
  *   2026.10.09  = Limpeza (estoque do TI, Plano de Acao, fotos)
  *   2026.10.09c = Jovem Aprendiz (o 09b foi o primeiro envio do mesmo pacote)
+ *   2026.10.10  = desempenho: sessao que nao cai, canal barrado sem espera,
+ *                 bolinha das acoes em aberto no menu
  */
 function arquivosForaDaVersao_() {
-  const LIMPEZA = '2026.10.09';
+  const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c';
   const carimbos = {
-    'Acoes.gs':      [LIMPEZA,   typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Acoes.gs':      [APP.build, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
     'Estoque.gs':    [LIMPEZA,   typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
     'Limpeza.gs':    [LIMPEZA,   typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
     'Emails.gs':     [LIMPEZA,   typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
-    'Instalacao.gs': [APP.build, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
+    'Instalacao.gs': [APRENDIZ,  typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
     'Filiais.gs':    [APP.build, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
-    'Aprendiz.gs':   [APP.build, typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
-    'Permissoes.gs': [APP.build, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES]
+    'Aprendiz.gs':   [APRENDIZ,  typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
+    'Permissoes.gs': [APRENDIZ,  typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
+    'Auth.gs':       [APP.build, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
+    'Banco.gs':      [APP.build, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO]
   };
   return Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
 }
@@ -127,7 +131,7 @@ function doPost_(p) {
   if (!String(p.email || '').trim() && p.t) {
     const nav = cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p });
     nav.viaPost = true;
-    return paginaComCarga_(nav);
+    return paginaComCarga_(comPendencias_(nav));
   }
   let carga;
   try {
@@ -147,7 +151,21 @@ function doPost_(p) {
               emailDigitado: String(p.email || '') };
   }
   carga.viaPost = true;
-  return paginaComCarga_(carga);
+  return paginaComCarga_(comPendencias_(carga));
+}
+
+/*
+ * Pagina que veio pela RESERVA (POST): a bolinha do menu ja vai dentro — com
+ * o canal barrado a pagina nao consegue pedir mais nada depois de aberta.
+ * Pelo canal normal a bolinha vem numa chamada separada, depois do menu na
+ * tela (acaoPendencias): a entrada nao espera por ela.
+ */
+function comPendencias_(carga) {
+  if (carga && carga.ok && carga.entrada === 'APP') {
+    try { carga.pendencias = pendenciasDoUsuario_(usuarioAtual()); }
+    catch (e) { /* sem bolinha, nunca sem pagina */ }
+  }
+  return carga;
 }
 
 const BILHETE_SEG = 6 * 3600;
@@ -288,7 +306,7 @@ function acaoPelaPagina_(p) {
   const nav = cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p });
   nav.viaPost = true;
   if (nav.entrada === 'APP') nav.resultadoAcao = Object.assign({ recadoBotao: String(p.recado || '').slice(0, 200) }, resultado);
-  return paginaComCarga_(nav);
+  return paginaComCarga_(comPendencias_(nav));
 }
 
 /*
@@ -639,12 +657,18 @@ const ACOES = {
   zerarPin:            { capacidade: 'GERIR_ACESSOS', funcao: 'acaoZerarPin' },
 
   // gerais
+  // Bolinha do menu (acoes em aberto por modulo): so leitura; a funcao so conta o que a pessoa enxerga.
+  pendencias:          { capacidade: null,            funcao: 'acaoPendencias' },
   atualizarDados:      { capacidade: null,            funcao: 'acaoAtualizarDados' },
   enviarDigesto:       { capacidade: 'PROGRAMAR',     funcao: 'acaoEnviarDigesto' }
 };
 
-/** Segundos que um payload de tela vale no servidor. */
-const VALIDADE_TELA = 180;
+/*
+ * Segundos que um payload de tela vale no servidor. 10/10: 10 min (era 3).
+ * Qualquer gravacao pelo sistema aposenta todas as telas na hora (a geracao
+ * esta na chave); o prazo so pesa para o que for digitado direto na planilha.
+ */
+const VALIDADE_TELA = 600;
 
 /*
  * A chave nao leva o e-mail de quem pediu — leva o que de fato muda o
@@ -740,37 +764,42 @@ function aquecerCache() {
   if (hora < 5 || hora > 21) return { ok: true, pulou: 'fora de horario' };
   if (!bancoInstalado()) return { ok: true, pulou: 'sem banco' };
 
-  const admin = String(prop('EMAIL_ADMIN', '')).toLowerCase();
-  if (!admin) return { ok: true, pulou: 'sem admin' };
-
-  // Aquece na pele de quem enxerga tudo: e o payload mais caro de montar
-  // e o mesmo que serve todo mundo de escopo TODOS.
-  const registro = buscarAcesso(admin);
-  if (!registro) return { ok: true, pulou: 'admin fora da tabela ACESSOS' };
-
-  const usuario = montarUsuario({
-    id: registro.ID, email: admin, nome: String(registro.NOME || 'admin'),
-    perfil: String(registro.PERFIL || '').toUpperCase().trim(),
-    turno: String(registro.TURNO || '').toUpperCase().trim(), filiais: '*', cadastrado: true
-  });
-
-  let prontas = 0;
+  /*
+   * 10/10 — O AQUECIMENTO QUE SERVE A TODOS. Antes ele montava as telas na
+   * pele do administrador: so o administrador aproveitava (a chave da tela
+   * leva o perfil). Agora, em cada filial ativa:
+   *   - a atualizacao do banco (garantirEsquema), para a primeira entrada
+   *     depois de uma versao nova nao pagar a migracao;
+   *   - as copias que todo pedido le (pessoas, perfis, filiais);
+   *   - as copias das tabelas que as telas leem (so relidas se venceram).
+   */
+  let tabelas = 0;
+  try { cadastrosDeAcesso_(); carregarPerfis(); listarFiliais(); } catch (e) {}
   emCadaFilial_(null, function () {
-    telasDe(usuario).forEach(function (t) {
-      try {
-        const chave = chaveDeTela(t.id, usuario, {});
-        if (lerTextoCache(chave)) return;
-        const executor = globalThis[(TELAS.filter(function (x) { return x.id === t.id; })[0] || {}).funcao];
-        if (typeof executor !== 'function') return;
-        gravarTextoCache(chave, JSON.stringify({
-          tela: t.id, titulo: t.nome, escopo: descreverEscopo(usuario),
-          podes: usuario.permissoes.podes, dados: executor(usuario, {})
-        }), VALIDADE_TELA);
-        prontas++;
-      } catch (e) { /* uma tela que falha nao pode derrubar o aquecimento */ }
+    try { garantirEsquema(); } catch (e) { /* a entrada tenta de novo */ }
+    TABELAS_AQUECIDAS.forEach(function (t) {
+      try { listar(t); tabelas++; } catch (e) { /* tabela que falha nao derruba o resto */ }
     });
   });
-  return { ok: true, prontas: prontas };
+  return { ok: true, tabelas: tabelas };
+}
+const TABELAS_AQUECIDAS = ['ATIVIDADES', 'SETORES', 'ROTINAS', 'PARAMETROS', 'COLABORADORES', 'ACOES', 'COMENTARIOS',
+  'NB_EQUIPAMENTOS', 'NB_LEITURAS', 'EST_ITENS', 'EST_MOVIMENTOS', 'LP_EST_ITENS', 'LP_EST_MOVIMENTOS', 'LP_ZONAS'];
+
+/*
+ * GRAVAR E JA DEVOLVER A TELA (10/10). Antes cada gravacao eram duas idas ao
+ * servidor em fila (a acao, depois a tela de novo) e a lista piscava em
+ * "Carregando…". Aqui sao as duas portas de sempre — executarAcao e
+ * carregarTela, cada uma com as suas conferencias — numa execucao so. A tela
+ * e montada depois de a trava publicar a gravacao, entao ja mostra o que mudou.
+ */
+function executarAcaoETela(ctx, nomeAcao, params, idTela, paramsTela) {
+  const r = JSON.parse(executarAcao(ctx, nomeAcao, params)) || {};
+  let tela = null;
+  if (!r.invalidarTudo && idTela && idTela !== 'modulos') {
+    try { esquecerUsuario(); tela = JSON.parse(carregarTela(ctx, idTela, paramsTela || {})); } catch (e) { tela = null; }
+  }
+  return JSON.stringify({ r: r, tela: tela });
 }
 
 function executarAcao(ctx, nomeAcao, params) {

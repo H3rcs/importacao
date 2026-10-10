@@ -24,6 +24,7 @@
  */
 
 var _usuarioDaVez = null;
+const BUILD_AUTH = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 /*
  * 4.2 — QUEM ENTRA E O E-MAIL DIGITADO, NAO A CONTA DO NAVEGADOR.
@@ -206,7 +207,19 @@ function diagnosticoIdentidade() {
 }
 
 function buscarAcesso(email) {
-  const cadastrados = comCache('acessos', function () {
+  const alvo = String(email || '').toLowerCase().trim();
+  const achados = cadastrosDeAcesso_().filter(function (a) { return a.EMAIL === alvo; });
+  return achados.length ? achados[0] : null;
+}
+
+/*
+ * As pessoas cadastradas SEM o resumo do PIN, da copia 'acessos' do cache —
+ * a mesma lista que decide quem entra. As telas que so precisam de nome,
+ * turno, perfil e filiais usam esta (10/10): antes cada uma relia a aba
+ * ACESSOS inteira da planilha.
+ */
+function cadastrosDeAcesso_() {
+  return comCache('acessos', function () {
     return listar('ACESSOS').map(function (l) {
       return {
         ID: l.ID,
@@ -216,9 +229,6 @@ function buscarAcesso(email) {
       };
     });
   });
-  const alvo = String(email || '').toLowerCase().trim();
-  const achados = cadastrados.filter(function (a) { return a.EMAIL === alvo; });
-  return achados.length ? achados[0] : null;
 }
 
 /* A LISTA DE PESSOAS — alimenta a tela "Pessoas e acessos". */
@@ -561,7 +571,8 @@ function emailDaSessao_(token) {
   if (_sessoesDaVez[t] !== undefined) return _sessoesDaVez[t];
   const cache = CacheService.getScriptCache();
   let s = null;
-  try { s = JSON.parse(cache.get('sess_' + t) || 'null'); } catch (e) { s = null; }
+  // Uma chamada so ao cache para a sessao, as pessoas, os perfis, as filiais e a geracao (preLerCache_).
+  try { preLerCache_(t); s = JSON.parse(lerChaveCache_(cache, 'sess_' + t) || 'null'); } catch (e) { s = null; }
   const doCache = !!s;
   if (!s) {
     // O cache perdeu (despejo) ou a sessao nunca existiu: a loja decide.
@@ -772,7 +783,7 @@ function entrar(email, pin, confirmacao, filial, codigo, tela) {
   try {
     const r = entrar_(email, pin, confirmacao, filial, codigo);
     // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (uma ida so).
-    if (r && r.ok && r.entrada === 'APP' && tela) embutirTela_(r, r.token, tela, '');
+    if (r && r.ok && r.entrada === 'APP' && tela && typeof embutirTela_ === 'function') embutirTela_(r, r.token, tela, '');
     return JSON.stringify(r);
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
@@ -910,7 +921,8 @@ function retomarSessao(ctx) {
     if (!emailDaSessao_(_tokenDaVez)) return JSON.stringify({ ok: true, instalado: true, entrada: 'ENTRAR' });
     const carga = montarEntrada_(filial);
     carga.token = _tokenDaVez;
-    if (carga.ok && carga.entrada === 'APP' && ctx && ctx.tela) embutirTela_(carga, _tokenDaVez, ctx.tela, ctx.p || '');
+    // typeof: Auth.gs novo com Codigo.gs antigo (colado pela metade) entra assim mesmo e a faixa de versao avisa
+    if (carga.ok && carga.entrada === 'APP' && ctx && ctx.tela && typeof embutirTela_ === 'function') embutirTela_(carga, _tokenDaVez, ctx.tela, ctx.p || '');
     return JSON.stringify(carga);
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });

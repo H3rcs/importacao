@@ -1391,6 +1391,57 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('bolinha do menu: acoes em aberto no cartao do modulo, pelo canal normal e pela reserva (HTTP 403)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = criarPin(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, COORD, '1234');
+    const c = { t: dono.token, f: dono.filial.codigo };
+    const ontem = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    [['Lâmpadas do flow', '2026-12-01'], ['Atrasada', ontem]].forEach(([acao, prazo]) =>
+      afirmar(s.chamar(DONO, 'executarAcao', c, 'salvarAcao', { acao, prazo, turno: 'A', responsaveisEmails: [COORD] }).ok, 'acao criada'));
+    // primeiro pela reserva (2 em aberto), depois pelo canal normal (que conclui uma)
+    for (const bloqueio of [true, false]) {
+      const desde = s.registro.length;
+      const aba = await abrirAba(s, GERAL, bloqueio ? { bloqueio403: true } : {});
+      await entrar(aba, COORD, '1234');
+      afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou');
+      const f = await frame(aba);
+      await f.waitForSelector('.holocard[data-modulo="calendario"] .holo-bolinha', { timeout: 15000 });
+      const b = await f.$eval('.holocard[data-modulo="calendario"]', (x) => ({ n: x.querySelector('.holo-bolinha').textContent,
+        atraso: x.querySelector('.holo-bolinha').classList.contains('com-atraso'), leitor: x.querySelector('.so-leitor').textContent }));
+      afirmar(b.n === '2' && b.atraso && /2 ações em aberto, 1 atrasada/.test(b.leitor), (bloqueio ? 'reserva' : 'canal') + ': ' + JSON.stringify(b));
+      afirmar(!(await f.$('.holocard[data-modulo="nobreaks"] .holo-bolinha')), 'modulo sem plano nao tem bolinha');
+      // os carimbos do Index.html e do Estilo.html conferem no navegador (sem faixa de versao misturada)
+      afirmar(!(await f.$('#aviso-versao')), 'faixa de versao: ' + await f.$eval('#aviso-versao', (x) => x.textContent).catch(() => ''));
+      if (bloqueio) afirmar(!s.registro.slice(desde).some((r) => r.tipo === 'run' && r.fn === 'executarAcao'), 'reserva: a bolinha nao tenta o canal barrado');
+      if (process.env.FOTO_BOLINHA && !bloqueio) {
+        await aba.page.waitForTimeout(1500);            // a entrada dos cartoes e da bolinha terminou
+        await aba.page.screenshot({ path: process.env.FOTO_BOLINHA + '-claro.png' });
+        await f.evaluate(() => alternarTema()); await aba.page.waitForTimeout(500);
+        await aba.page.screenshot({ path: process.env.FOTO_BOLINHA + '-escuro.png' });
+        await f.evaluate(() => alternarTema());
+      }
+      if (!bloqueio) {
+        // concluir no plano e voltar ao menu: a bolinha ja mostra 1 (veio com a tela), sem pedir de novo
+        await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+        await f.waitForSelector('.cartao-acao', { timeout: 15000 });
+        const id = await f.evaluate(() => DADOS.lista.find((a) => a.acao === 'Lâmpadas do flow').id);
+        await f.evaluate((i) => agir('concluirAcao', { id: i }), id);
+        await f.waitForFunction(() => DADOS && DADOS.contagens && DADOS.contagens.abertas === 1, null, { timeout: 15000 });
+        const antes = s.registro.length;
+        await f.evaluate(() => abrirModulos());
+        await f.waitForFunction(() => { const x = document.querySelector('.holocard[data-modulo="calendario"] .holo-bolinha'); return x && x.textContent === '1'; }, null, { timeout: 5000 });
+        afirmar(!s.registro.slice(antes).some((r) => r.tipo === 'run' && r.fn === 'executarAcao'), 'voltou ao menu sem pedir os numeros de novo');
+        // sair: as bolinhas eram de quem saiu
+        await f.evaluate(() => sair());
+        afirmar(await f.evaluate(() => PENDENCIAS === null), 'sair apaga os numeros');
+      }
+      afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+      await aba.contexto.close();
+    }
+    await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

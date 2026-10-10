@@ -18,6 +18,7 @@
  * Uma leitura so por execucao, guardada aqui.
  */
 var _props = null;
+const BUILD_BANCO = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 function prop(chave, padrao) {
   // 4.2.2: as propriedades guardam o SEGREDO_PIN e os IDs do banco. Sem esta
@@ -65,12 +66,16 @@ function lerTextoCache(chave) {
   exigirPorta_();           // o cache de telas guarda dados de todo mundo
   try {
     const cache = CacheService.getScriptCache();
-    const quantos = Number(cache.get(chave) || 0);
+    // 10/10: cabecalho e as duas primeiras fatias numa chamada so (quase toda tela cabe em 1 ou 2).
+    const partes = cache.getAll([chave, chave + ':0', chave + ':1']) || {};
+    const quantos = Number(partes[chave] || 0);
     if (!quantos) return null;
-
-    const nomes = [];
-    for (let i = 0; i < quantos; i++) nomes.push(chave + ':' + i);
-    const partes = cache.getAll(nomes);
+    if (quantos > 2) {
+      const nomes = [];
+      for (let i = 2; i < quantos; i++) nomes.push(chave + ':' + i);
+      const resto = cache.getAll(nomes) || {};
+      Object.keys(resto).forEach(function (k) { partes[k] = resto[k]; });
+    }
 
     let texto = '';
     for (let i = 0; i < quantos; i++) {
@@ -96,10 +101,15 @@ var _geracao = null;
 function geracaoDados() {
   if (_geracao) return _geracao;
   const cache = CacheService.getScriptCache();
-  let g = cache.get('geracao');
+  let g = lerChaveCache_(cache, 'geracao');
   if (!g) {
     g = prop('GERACAO_DADOS', '1');
     cache.put('geracao', g, 21600);
+  } else if (_props && Number(g) > Number(_props.GERACAO_DADOS || 0)) {
+    // A foto das propriedades desta execucao e de ANTES da ultima gravacao: as geracoes das
+    // tabelas tambem mudaram. Sem reler, uma tela nova seria montada com a copia velha de uma tabela.
+    esquecerProps();
+    _geracaoTb = {};
   }
   _geracao = g;
   return g;
@@ -176,6 +186,8 @@ function abrirBancoMestre() { return abrirBanco('FILIAIS'); }
 
 function esquecerLeituras() {
   _tabelas = {};
+  _comCacheMemo = {};
+  _preCache = null;
   // O mapa turno -> coordenador e derivado da EQUIPE: se a tabela foi
   // relida, ele tambem tem que cair, senao continuava valendo o mapa
   // montado antes da gravacao dentro da mesma requisicao.
@@ -183,9 +195,13 @@ function esquecerLeituras() {
   if (typeof _digitosMat !== 'undefined') _digitosMat = null;   // RH_DIGITOS_MATRICULA e da filial
 }
 
+var _abasMemo = {};   // banco|tabela -> Sheet (so nesta execucao): cada getSheetByName e uma ida ao Google
 function abaDe(tabela) {
+  const k = (tabela ? idBancoDaTabela(tabela) : '') + '|' + tabela;
+  if (_abasMemo[k]) return _abasMemo[k];
   const aba = abrirBanco(tabela).getSheetByName(tabela);
   if (!aba) throw new Error('A tabela ' + tabela + ' nao existe. Rode sincronizarEsquema().');
+  _abasMemo[k] = aba;
   return aba;
 }
 
@@ -203,7 +219,20 @@ function abaDe(tabela) {
  */
 const TABELAS_CACHEAVEIS = {
   ATIVIDADES: 1, COLABORADORES: 1, SETORES: 1, ROTINAS: 1, PARAMETROS: 1,
-  DE_PARA: 1, FATO_ASSIDUIDADE: 1, AGR_COLAB: 1, PERFIS: 1, FILIAIS: 1
+  DE_PARA: 1, FATO_ASSIDUIDADE: 1, AGR_COLAB: 1, PERFIS: 1, FILIAIS: 1,
+  // 10/10: as tabelas dos modulos. Cada gravacao de qualquer pessoa fazia a tela seguinte de
+  // TODO mundo reler estas abas da planilha (a parte mais cara de abrir uma tela).
+  ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
+  LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1
+};
+/*
+ * Estas so valem do cache FORA da trava. Dentro dela (ler, conferir e gravar:
+ * saldo do estoque, leitura repetida do nobreak, situacao da acao) a leitura
+ * e sempre da planilha — a conferencia tem que ver o dado exato.
+ */
+const CACHE_SO_FORA_DA_TRAVA = {
+  ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
+  LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1
 };
 
 function listar(tabela, incluirExcluidos) {
@@ -219,7 +248,8 @@ function listar(tabela, incluirExcluidos) {
    * leituras de planilha. A geracao na chave garante que qualquer
    * gravacao aposenta a copia na hora.
    */
-  const cacheavel = !!TABELAS_CACHEAVEIS[tabela] && !incluirExcluidos;
+  const cacheavel = !!TABELAS_CACHEAVEIS[tabela] && !incluirExcluidos &&
+    !(_travaAberta > 0 && CACHE_SO_FORA_DA_TRAVA[tabela]);
   const chaveCache = cacheavel ? ('tb|' + geracaoTabela(tabela) + '|' + espacoDaTabela(tabela) + tabela) : '';
 
   if (cacheavel) {
@@ -243,10 +273,16 @@ function listar(tabela, incluirExcluidos) {
   const ultimaColuna = aba.getLastColumn();
   // Tabela vazia tambem entra na memoria da execucao: sem isso, cada
   // chamada seguinte reabria a aba so para descobrir de novo que nao ha
-  // nada nela (acontece o tempo todo em ARQUIVOS_RH e PAINEL).
-  if (ultimaLinha < 2 || ultimaColuna < 1) { _tabelas[chave] = []; return _tabelas[chave]; }
+  // nada nela (acontece o tempo todo em ARQUIVOS_RH e PAINEL). 10/10: e no
+  // cache entre execucoes tambem — cada tela relia as tabelas vazias.
+  const vazia = function () {
+    _tabelas[chave] = [];
+    if (cacheavel && !_travaAberta) gravarTextoCache(chaveCache, '[]', CACHE_SEGUNDOS);
+    return _tabelas[chave];
+  };
+  if (ultimaLinha < 2 || ultimaColuna < 1) return vazia();
   const valores = aba.getRange(1, 1, ultimaLinha, ultimaColuna).getValues();
-  if (valores.length < 2) { _tabelas[chave] = []; return _tabelas[chave]; }
+  if (valores.length < 2) return vazia();
 
   const colunas = valores[0].map(function (c) { return String(c).trim().toUpperCase(); });
   const registros = [];
@@ -269,15 +305,17 @@ function listar(tabela, incluirExcluidos) {
    * quebraria em silencio — o tipo de defeito que so aparece semanas
    * depois. Na duvida, nao guarda.
    */
-  if (cacheavel && registros.length && semObjetos(registros)) {
+  // Dentro da trava nao grava copia: a geracao nova so e publicada depois que a planilha
+  // tem a linha (ver comTrava), e ate la uma copia ficaria com o numero errado.
+  if (cacheavel && !_travaAberta && registros.length && semObjetos(registros)) {
     gravarTextoCache(chaveCache, JSON.stringify(registros), CACHE_SEGUNDOS);
   }
   return registros;
 }
 
-/** true se nenhum valor for objeto (Date, por exemplo). */
+/** true se nenhum valor for objeto (Date, por exemplo). Confere TODAS as linhas (10/10). */
 function semObjetos(registros) {
-  const amostra = registros.length > 40 ? 40 : registros.length;
+  const amostra = registros.length;
   for (let i = 0; i < amostra; i++) {
     const r = registros[i];
     const chaves = Object.keys(r);
@@ -514,6 +552,27 @@ function excluir(tabela, id, quem) {
  * trava ja aberta, comTrava so executa.
  */
 var _travaAberta = 0;
+/*
+ * 10/10 — A GERACAO NOVA SO SAI DEPOIS QUE A PLANILHA TEM A LINHA. Antes a
+ * geracao era publicada no meio da trava, antes do flush: quem lesse a
+ * planilha nesse instante guardava o dado de ANTES com o numero NOVO, e a
+ * tela velha ficava valendo ate o cache vencer ("comentei e nao aparece").
+ * Dentro da trava a geracao nova vale so na memoria desta execucao; no fim,
+ * flush, uma escrita de propriedades so e a chave 'geracao'.
+ */
+var _geracoesPendentes = null;
+var _removerDepois = null;       // copias derivadas (acessos/perfis/filiais) a apagar depois do flush
+function publicarGeracoes_() {
+  const cache = CacheService.getScriptCache();
+  const mapa = _geracoesPendentes, remover = _removerDepois;
+  _geracoesPendentes = null; _removerDepois = null;
+  if (mapa) {
+    PropertiesService.getScriptProperties().setProperties(mapa);
+    if (mapa.GERACAO_DADOS) cache.put('geracao', mapa.GERACAO_DADOS, 21600);
+    esquecerProps();
+  }
+  if (remover && remover.length) cache.removeAll(remover);
+}
 
 function comTrava(funcao, espera) {
   if (_travaAberta > 0) {
@@ -534,6 +593,7 @@ function comTrava(funcao, espera) {
   esquecerProps();
   _geracao = null;
   _geracaoTb = {};
+  _geracoesPendentes = null; _removerDepois = null;
   esquecerLeituras();
   try {
     return funcao();
@@ -543,6 +603,7 @@ function comTrava(funcao, espera) {
     // documentacao do LockService): sem isso, quem pega a trava em seguida
     // pode ler a planilha sem a linha que acabou de ser gravada.
     try { SpreadsheetApp.flush(); } catch (e) {}
+    try { publicarGeracoes_(); } catch (e) {}
     trava.releaseLock();
   }
 }
@@ -645,8 +706,13 @@ function marcado(valor) {
 
 /* --- Cache: guarda resultado calculado, nunca a tabela crua --------- */
 
-const CACHE_SEGUNDOS = 300;
-const CHAVES_CACHE = ['perfis', 'acessos', 'filiais', 'assiduidade'];
+/*
+ * 10/10: 30 min (era 5). Toda gravacao feita PELO SISTEMA aposenta a copia na
+ * hora (geracao); o prazo so pesa para o que for digitado direto na planilha
+ * do banco — para isso, o botao "Atualizar dados".
+ */
+const CACHE_SEGUNDOS = 1800;
+const CHAVES_CACHE = ['perfis', 'acessos', 'filiais'];
 
 /*
  * Cada tabela derruba SO o cache que depende dela. Antes, salvar uma
@@ -656,20 +722,33 @@ const CHAVES_CACHE = ['perfis', 'acessos', 'filiais', 'assiduidade'];
 const CACHE_POR_TABELA = {
   ACESSOS: ['acessos'],
   FILIAIS: ['filiais'],
-  PERFIS: ['perfis'],
-  // ATIVIDADES faltava aqui: sem entrada, cada gravacao caia no "apaga
-  // tudo" e invalidava ate a assiduidade. Era o que deixava os botoes do
-  // calendario lentos.
-  ATIVIDADES: ['calendario'],
-  EQUIPE: ['calendario'],
-  ROTINAS: ['calendario'],
-  SETORES: ['calendario'],
-  FATO_ASSIDUIDADE: ['assiduidade'],
-  AGR_COLAB: ['assiduidade'],
-  PAINEL: ['assiduidade'],
-  DE_PARA: ['assiduidade'],
-  COLABORADORES: ['assiduidade']
+  PERFIS: ['perfis']
+  // As outras tabelas nao alimentam copia derivada (so acessos, perfis e filiais passam pelo
+  // comCache): as antigas chaves 'calendario' e 'assiduidade' eram um removeAll por gravacao a toa.
 };
+
+/*
+ * MEMORIA DA EXECUCAO (10/10). As telas do Plano de Acao, da Limpeza e de
+ * Pessoas liam a mesma chave 'perfis' do cache mais de 30 vezes por pedido;
+ * e todo pedido lia sessao, pessoas, perfis, filiais e geracao uma a uma.
+ */
+var _comCacheMemo = {};   // chave -> texto JSON
+var _preCache = null;     // o que a pre-leitura trouxe: chave -> valor ou null
+/* Uma chamada so para o que TODO pedido le: a sessao, as pessoas, os perfis, as filiais e a geracao. */
+function preLerCache_(token) {
+  if (_preCache) return _preCache;
+  const chaves = ['acessos', 'perfis', 'filiais', 'geracao'];
+  if (token) chaves.unshift('sess_' + token);
+  let r = {};
+  try { r = CacheService.getScriptCache().getAll(chaves) || {}; } catch (e) { r = {}; }
+  _preCache = {};
+  chaves.forEach(function (k) { _preCache[k] = (r[k] === undefined) ? null : r[k]; });
+  return _preCache;
+}
+function lerChaveCache_(cache, chave) {
+  if (_preCache && Object.prototype.hasOwnProperty.call(_preCache, chave)) return _preCache[chave];
+  return cache.get(chave);
+}
 
 function comCache(chaveBase, funcao) {
   // A leitura do cache tem a mesma trava da leitura da planilha: antes um
@@ -677,15 +756,22 @@ function comCache(chaveBase, funcao) {
   // console (e qualquer chave do cache, inclusive a do codigo de acesso).
   exigirPorta_();
   const chave = chaveNoEspaco(chaveBase);
+  if (_comCacheMemo[chave] !== undefined) {
+    try { return JSON.parse(_comCacheMemo[chave]); } catch (e) { /* recalcula */ }
+  }
   const cache = CacheService.getScriptCache();
-  const guardado = cache.get(chave);
+  // Gravada nesta trava: a copia do cache e de antes (so sai depois do flush) — recalcula.
+  const vaiSair = !!(_removerDepois && _removerDepois.indexOf(chave) !== -1);
+  const guardado = vaiSair ? null : lerChaveCache_(cache, chave);
   if (guardado) {
-    try { return JSON.parse(guardado); } catch (e) { /* recalcula */ }
+    try { const v = JSON.parse(guardado); _comCacheMemo[chave] = guardado; return v; } catch (e) { /* recalcula */ }
   }
   const resultado = funcao();
   try {
     const texto = JSON.stringify(resultado);
-    if (texto.length < 95000) cache.put(chave, texto, CACHE_SEGUNDOS);
+    _comCacheMemo[chave] = texto;
+    // Dentro da trava nao: a copia seria apagada depois do flush (ver publicarGeracoes_).
+    if (texto.length < 95000 && !_travaAberta) cache.put(chave, texto, CACHE_SEGUNDOS);
   } catch (e) { /* grande demais, segue sem cache */ }
   return resultado;
 }
@@ -731,10 +817,34 @@ function limparCache(tabela) {
 
   const nome = String(tabela).toUpperCase();
   const chaves = CACHE_POR_TABELA[nome] || [];
-  if (chaves.length) cache.removeAll(chaves.map(chaveNoEspaco));
-
   // LOG nao aparece em tela nenhuma: nao precisa aposentar nada.
   if (nome === 'LOG') return;
+
+  /*
+   * Dentro da trava: a geracao nova vale JA nesta execucao (memoria), mas so
+   * e publicada no fim da trava, DEPOIS do flush (ver publicarGeracoes_) —
+   * uma escrita de propriedades por trava, e ninguem le a geracao nova antes
+   * de a planilha ter a linha.
+   */
+  if (_travaAberta > 0) {
+    _geracoesPendentes = _geracoesPendentes || {};
+    if (chaves.length) _removerDepois = (_removerDepois || []).concat(chaves.map(chaveNoEspaco));
+    if (TABELAS_CACHEAVEIS[nome]) {
+      const kt = chaveGeracaoTabela(nome);
+      if (!_geracoesPendentes[kt]) {
+        const gt0 = String(Number(geracaoTabela(nome) || 1) + 1);
+        _geracoesPendentes[kt] = gt0;
+        _geracaoTb[kt] = gt0;
+      }
+    }
+    if (!_geracoesPendentes.GERACAO_DADOS) {
+      const gg0 = String(Number(geracaoDados() || 1) + 1);
+      _geracoesPendentes.GERACAO_DADOS = gg0;
+      _geracao = gg0;
+    }
+    return;
+  }
+  if (chaves.length) cache.removeAll(chaves.map(chaveNoEspaco));
 
   /*
    * Antes, esta linha era `avancarGeracao()` sozinha — e a geracao global

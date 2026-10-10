@@ -39,7 +39,7 @@ const PLANOS = {
 
 const ACOES_SITUACAO = { PENDENTE: 'PENDENTE', CONCLUIDA: 'CONCLUIDA', CANCELADA: 'CANCELADA' };
 
-const BUILD_ACOES = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_ACOES = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 /* De que plano e a linha. Linha antiga (sem PLANO) e do Calendario. */
 function planoDe_(r) {
@@ -128,13 +128,22 @@ function ehDonoDaAcao_(acao, email) {
   return acao.responsaveisEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
 }
 
+/*
+ * As acoes de UM plano so com o que a linha tem (sem comentarios nem nomes).
+ * E o que a contagem precisa: a bolinha do menu usa so isto; a tela usa isto
+ * e acrescenta o historico (listarAcoes). Uma leitura da aba ACOES.
+ */
+function acoesDoPlano_(idPlano) {
+  const plano = PLANOS[idPlano] ? idPlano : 'CALENDARIO';
+  return listar('ACOES').filter(function (r) { return planoDe_(r) === plano; }).map(hidratarAcao);
+}
+
 /* As acoes de UM plano (o do Calendario, se nada for dito). */
 function listarAcoes(idPlano) {
   const plano = PLANOS[idPlano] ? idPlano : 'CALENDARIO';
   const coment = comentariosPorAcao_(origensDoPlano_(plano));
   const pessoas = pessoasPorEmail_();
-  return listar('ACOES').filter(function (r) { return planoDe_(r) === plano; }).map(function (r) {
-    const a = hidratarAcao(r);
+  return acoesDoPlano_(plano).map(function (a) {
     a.comentarios = coment[a.id] || [];
     a.criadoPorNome = nomeDoEmail_(pessoas, a.criadoPor);
     return a;
@@ -145,7 +154,7 @@ function listarAcoes(idPlano) {
 function pessoasPorEmail_() {
   const m = {};
   try {
-    listar('ACESSOS').forEach(function (l) {
+    cadastrosDeAcesso_().forEach(function (l) {      // do cache, sem reler ACESSOS
       const e = String(l.EMAIL || '').toLowerCase().trim();
       if (!e) return;
       const turno = String(l.TURNO || '').toUpperCase().trim();
@@ -212,7 +221,7 @@ function ordemCriado_(t) {
  */
 function autorDoComentario_(usuario) {
   const email = String(usuario.email || '').toLowerCase().trim();
-  const r = registroDeAcesso_(email);
+  const r = buscarAcesso(email);       // nome, papel e turno do cache: o PIN nao interessa aqui
   const nome = (r && String(r.NOME || '').trim()) || nomeDaPessoa(email, usuario.simulado ? '' : usuario.nome);
   const turno = r ? String(r.TURNO || '').toUpperCase().trim() : '';
   let papel = r ? [String(r.PAPEL || '').trim(), turno ? 'turno ' + turno : ''].filter(Boolean).join(' · ')
@@ -337,6 +346,64 @@ function rankingAcoesPorTurno(acoes) {
     .sort(function (a, b) { return b.total - a.total || b.percentual - a.percentual; });
 }
 
+/*
+ * Os numeros do topo do plano ("Em aberto", "Atrasadas", "Sob sua
+ * responsabilidade", "Concluidas"). A tela E a bolinha do menu usam ESTA
+ * funcao, sobre a MESMA lista (acoesNoAlcance): o numero da bolinha e
+ * sempre o "Em aberto" que a pessoa ve ao abrir o plano.
+ */
+function contagensDoPlano_(minhas, email) {
+  const abertas = minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.PENDENTE; });
+  return {
+    abertas: abertas.length,
+    atrasadas: abertas.filter(function (a) { return a.status === 'Atrasada'; }).length,
+    minhas: abertas.filter(function (a) { return ehDonoDaAcao_(a, email); }).length,
+    concluidas: minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.CONCLUIDA; }).length
+  };
+}
+
+/*
+ * BOLINHA DO MENU (10/10) — acoes em aberto de cada modulo, para quem esta
+ * usando: { calendario: {abertas, atrasadas, minhas}, limpeza: {...} }, so
+ * dos planos cuja tela a pessoa abre NESTA filial (telasDe: nivel, ajuste
+ * por modulo e painel). O caminho e o da tela: acoesDoPlano_ ->
+ * acoesNoAlcance -> contagensDoPlano_.
+ *
+ * Guardado numa chave SO por pessoa e filial (o cache tambem guarda as
+ * sessoes e as telas de todo mundo; uma chave por geracao encheria o cache a
+ * cada gravacao). A marca (geracao dos dados, dia, nivel, ajustes, escopo,
+ * turno, simulacao) vai DENTRO do valor: mudou qualquer uma, conta de novo.
+ */
+const VALIDADE_PENDENCIAS = 3600;
+
+function pendenciasDoUsuario_(usuario) {
+  exigirPorta_();
+  const email = String(usuario.email || '').toLowerCase().trim();
+  const chave = 'pend|' + filialAtual().codigo + '|' + email;
+  const marca = [geracaoDados(), paraISO(hoje()), usuario.perfil, usuario.chaveModulos || '',
+                 escopoDe(usuario).tipo, usuario.turno || '', usuario.simulado ? 'simulado' : ''].join('|');
+  const cache = CacheService.getScriptCache();
+  try {
+    const g = JSON.parse(cache.get(chave) || 'null');
+    if (g && g.marca === marca && g.pendencias) return g.pendencias;
+  } catch (e) { /* recalcula */ }
+  const telas = telasDe(usuario);
+  const saida = {};
+  Object.keys(PLANOS).forEach(function (k) {
+    const plano = PLANOS[k];
+    if (!telas.some(function (t) { return t.id === plano.tela; })) return;   // nao abre o plano: sem bolinha
+    const c = contagensDoPlano_(acoesNoAlcance(usuario, acoesDoPlano_(plano.id), plano), email);
+    saida[plano.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas, minhas: c.minhas };
+  });
+  try { cache.put(chave, JSON.stringify({ marca: marca, pendencias: saida }), VALIDADE_PENDENCIAS); } catch (e) { /* sem cache, segue */ }
+  return saida;
+}
+
+/* Porta da bolinha (executarAcao 'pendencias'): so leitura, sem capacidade — cada um ve os proprios numeros. */
+function acaoPendencias(usuario) {
+  return { ok: true, pendencias: pendenciasDoUsuario_(usuario) };
+}
+
 /** Dados da tela Plano de Acao (o do Calendario). */
 function dadosAcoes(usuario, params) { return dadosPlano_(PLANOS.CALENDARIO, usuario, params); }
 
@@ -379,16 +446,10 @@ function dadosPlano_(plano, usuario, params) {
   });
 
   const email = String(usuario.email || '').toLowerCase().trim();
-  const abertas = minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.PENDENTE; });
 
   return {
     lista: lista,
-    contagens: {
-      abertas: abertas.length,
-      atrasadas: abertas.filter(function (a) { return a.status === 'Atrasada'; }).length,
-      minhas: abertas.filter(function (a) { return ehDonoDaAcao_(a, email); }).length,
-      concluidas: minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.CONCLUIDA; }).length
-    },
+    contagens: contagensDoPlano_(minhas, email),
     ranking: rankingAcoesPorTurno(minhas),
     turnos: ACOES_TURNOS,
     pessoas: pessoasParaAcao(plano),

@@ -352,7 +352,11 @@ caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esque
   const build = ler('Codigo.gs').match(/build: '([^']+)'/)[1];
   const app = ler('App.html');
   afirmar(app.match(/BUILD_APP = '([^']+)'/)[1] === build, 'App.html no carimbo ' + build);
-  afirmar(ler('Aprendiz.html').match(/BUILD_APRENDIZ_TELA = '([^']+)'/)[1] === build, 'Aprendiz.html no carimbo ' + build);
+  const esperaAprendiz = app.match(/BUILD_APRENDIZ_TELA !== '([^']+)'/)[1];
+  afirmar(ler('Aprendiz.html').match(/BUILD_APRENDIZ_TELA = '([^']+)'/)[1] === esperaAprendiz, 'Aprendiz.html no carimbo que o App.html espera (' + esperaAprendiz + ')');
+  const esperaEstilo = app.match(/carimboDoEstilo\(\) !== '([^']+)'/)[1];
+  afirmar(ler('Estilo.html').match(/--gsl-estilo: '([^']+)'/)[1] === esperaEstilo, 'Estilo.html no carimbo que o App.html espera (' + esperaEstilo + ')');
+  afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')), 'Index.html com o que o App.html confere');
   const esperaPaineis = app.match(/BUILD_PAINEIS !== '([^']+)'/)[1];
   afirmar(ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === esperaPaineis, 'Paineis.html no carimbo que o App.html espera (' + esperaPaineis + ')');
   const m = mundo(); const s = entrar(m, DONO, '4321');
@@ -653,6 +657,40 @@ caso('plano de acao: coordenador ve so as suas (inclusive conjuntas) e conclui',
   afirmar(m.emails.some((e) => /tela=acoes/.test(e.html || e.htmlBody || e.body || '')), 'link do e-mail leva ao Plano de Acao');
   const outra = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista.find((a) => a.acao === 'Só do Pedro');
   afirmar(!outra, 'nao ve a acao do Pedro');
+});
+
+caso('bolinha do menu: o numero de cada modulo e o "Em aberto" do plano — por pessoa, depois de gravar e na pagina da reserva', () => {
+  const SUP_B = 'sup.limpeza@bartofil.com.br';
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarUsuario', { email: SUP_B, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
+  const ontem = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+  acao(m, adm, 'salvarAcao', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  acao(m, adm, 'salvarAcao', { acao: 'Atrasada conjunta', prazo: ontem, turno: 'A', responsaveisEmails: [COORD, GERENTE] });
+  acao(m, adm, 'salvarAcao', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+  acao(m, adm, 'salvarAcao', { acao: 'Cancelada', prazo: ontem, turno: 'A', responsaveisEmails: [COORD] });
+  acao(m, adm, 'cancelarAcao', { id: tela(m, adm, 'acoes').lista.find((a) => a.acao === 'Cancelada').id, motivo: 'x' });
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Doca', prazo: '2026-12-01', turno: 'B', responsaveisEmails: [SUP_B], zona: 'Z3' });
+  const bolinha = (s) => acao(m, s, 'pendencias').pendencias;
+  const confere = (s, quem) => {
+    const b = bolinha(s), telas = JSON.parse(chamar(m, s.email, 'retomarSessao', { t: s.t, f: s.f }).valor).telas.map((t) => t.id);
+    const k = telas.includes('acoes') ? tela(m, s, 'acoes').contagens : null;
+    const l = telas.includes('limpeza') ? tela(m, s, 'limpeza').plano.contagens : null;
+    afirmar(k ? b.calendario && b.calendario.abertas === k.abertas && b.calendario.atrasadas === k.atrasadas : !b.calendario, quem + ' calendario: ' + JSON.stringify([b, k]));
+    afirmar(l ? b.limpeza && b.limpeza.abertas === l.abertas && b.limpeza.atrasadas === l.atrasadas : !b.limpeza, quem + ' limpeza: ' + JSON.stringify([b, l]));
+    return b;
+  };
+  const maria = entrar(m, COORD, '1234');
+  afirmar(confere(adm, 'admin').calendario.abertas === 3, 'admin: as 3 em aberto (a cancelada nao conta)');
+  const bm = confere(maria, 'maria');
+  afirmar(bm.calendario.abertas === 2 && bm.calendario.atrasadas === 1 && !bm.limpeza, 'maria: so as dela, sem limpeza: ' + JSON.stringify(bm));
+  afirmar(confere(entrar(m, SUP_B, '2222'), 'supervisor').limpeza.abertas === 1, 'supervisor: so a limpeza');
+  confere(entrar(m, GERENTE, '5555'), 'gerente');
+  acao(m, maria, 'concluirAcao', { id: tela(m, maria, 'acoes').lista.find((a) => a.acao === 'Da Maria').id });
+  afirmar(bolinha(maria).calendario.abertas === 1, 'depois de concluir: ' + JSON.stringify(bolinha(maria)));
+  const carga = (html) => JSON.parse(/CARGA_INICIAL\s*=\s*(\{.*?\});/s.exec(html)[1].replace(/\\u002f/g, '/').replace(/\\u003c/g, '<'));
+  const bilhete = carga(ctx(m, 'computador.cd@bartofil.com.br').doGet({ parameter: {} }).getContent()).bilhete;
+  const pg = carga(ctx(m, 'computador.cd@bartofil.com.br').doPost({ parameter: { bilhete, email: COORD, pin: '1234' } }).getContent());
+  afirmar(pg.entrada === 'APP' && pg.pendencias && pg.pendencias.calendario.abertas === 1, 'pagina da reserva traz a bolinha: ' + JSON.stringify(pg.pendencias));
 });
 
 caso('comentarios: historico no Plano de Acao (andamento, depende de, concluir) e na Limpeza', () => {

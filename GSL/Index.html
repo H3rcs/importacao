@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+  <script>var GSL_T0 = Date.now();</script>
   <base target="_top">
   <meta charset="utf-8">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23111785%22/%3E%3Crect%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%2301973A%22/%3E%3Crect%20x%3D%2232%22%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%23FFEE03%22/%3E%3Ctext%20x%3D%2232%22%20y%3D%2242%22%20font-family%3D%22Archivo%2CArial%2Csans-serif%22%20font-size%3D%2240%22%20font-weight%3D%22800%22%20fill%3D%22%23fff%22%20text-anchor%3D%22middle%22%3EB%3C/text%3E%3C/svg%3E">
@@ -61,6 +62,13 @@
     <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
     <h1>Entrar no GSL</h1>
     <p>Digite o seu e-mail da Bartofil e o seu PIN.</p>
+    <!-- 10/10: a aba ainda tem a sessao (F5 com o canal barrado, pagina recusada,
+         falha passageira): um clique continua, sem PIN. -->
+    <div id="entrar-continuar" class="login-caixa entrar-caixa oculto">
+      <p id="entrar-continuar-msg" class="entrar-msg" role="status" aria-live="polite"></p>
+      <button id="entrar-continuar-botao" class="botao" type="button" onclick="continuarSessao()">Continuar como <b id="entrar-continuar-nome"></b></button>
+      <button class="botao-texto" type="button" onclick="naoSouEu()">Não é você? Entrar com outro e-mail</button>
+    </div>
     <form id="form-entrar" class="login-caixa entrar-caixa" method="post" target="_top"
           autocomplete="off" onsubmit="return entrarNoSistema(event)">
       <label class="entrar-rotulo" for="entrar-email">E-mail</label>
@@ -81,6 +89,7 @@
                autocomplete="off" placeholder="o mesmo PIN">
       </div>
       <input type="hidden" name="filial" id="entrar-filial">
+      <input type="hidden" name="tela" id="entrar-tela">
       <input type="hidden" name="bilhete" id="entrar-bilhete">
       <p id="entrar-msg" class="entrar-msg" role="status" aria-live="polite"></p>
       <button id="entrar-botao" class="botao" type="submit">Entrar</button>

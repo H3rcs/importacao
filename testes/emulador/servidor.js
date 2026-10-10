@@ -15,6 +15,16 @@
  * mesmo navegador; gas_atraso=ms atrasa as respostas; gas_atraso_post=ms
  * atrasa a resposta do POST DEPOIS de o doPost rodar (o Google ja entrou,
  * a pagina nova ainda nao chegou).
+ *
+ * Mais cookies (desempenho, 10/10):
+ *   gas_atraso_get=ms       o doGet demora (partida a frio do Apps Script)
+ *   gas_atraso_iframe=ms    a moldura demora para ser escrita (maquina lenta)
+ *   gas_falha=fn[:status][:n]  as n primeiras chamadas de fn pelo google.script.run
+ *                           falham com HTTP status (500 = falha passageira); sem n, todas
+ *   gas_sem_history=1       o google.script.history.replace nao faz nada
+ *   gas_sem_storage=1       sessionStorage/localStorage barrados (cookie de terceiros bloqueado)
+ * O google.script.history.replace mexe no historico da janela de cima, como
+ * o do Google: depois dele o F5 e um GET (e nao o reenvio do POST).
  */
 'use strict';
 const http = require('http');
@@ -82,16 +92,30 @@ function calco(base) {
     run: corredor({}),
     host: { close: function () {}, setHeight: function () {}, setWidth: function () {}, editor: { focus: function () {} } },
     url: { getLocation: function (cb) { cb({ parameter: {}, parameters: {}, hash: '' }); } },
-    history: { push: function () {}, replace: function () {}, setChangeHandler: function () {} }
+    // como o google.script.history de verdade: mexe no historico da janela de cima
+    history: { push: function () {}, setChangeHandler: function () {},
+      replace: function (estado, params, hash) {
+        try {
+          var q = Object.keys(params || {}).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+          window.parent.history.replaceState(estado, '', BASE + '/exec' + (q ? '?' + q : '') + (hash ? '#' + hash : ''));
+          window.__historyReplace = (window.__historyReplace || 0) + 1;
+        } catch (e) { window.__historyReplaceErro = String(e); }
+      } }
   } };
 })();
 </script>`;
 }
 
-function embrulhar(saida, base) {
+function embrulhar(saida, base, extras) {
+  extras = extras || {};
   const st = saida._estado || { conteudo: saida.getContent(), titulo: '', metas: [] };
   let html = st.conteudo;
-  const cal = calco(base);
+  let cal = calco(base);
+  if (extras.semHistory) cal = cal.replace('window.parent.history.replaceState(estado', 'void (estado');
+  if (extras.semStorage) {
+    cal = '<script>(function(){function negar(){throw new DOMException("Failed to read the \'sessionStorage\' property from \'Window\': Access is denied for this document.","SecurityError");}' +
+      'Object.defineProperty(window,"sessionStorage",{get:negar,configurable:true});Object.defineProperty(window,"localStorage",{get:negar,configurable:true});})();</script>' + cal;
+  }
   html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + cal) : cal + html;
   const metas = (st.metas || []).map(([n, c]) => `<meta name="${n}" content="${c}">`).join('');
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${st.titulo || ''}</title>${metas}</head>
@@ -100,8 +124,8 @@ function embrulhar(saida, base) {
 <script>
 (function () {
   var html = ${JSON.stringify(html).replace(/</g, '\\u003c').split(String.fromCharCode(0x2028)).join('\\u2028').split(String.fromCharCode(0x2029)).join('\\u2029')};
-  var d = document.getElementById('userHtmlFrame').contentDocument;
-  d.open(); d.write(html); d.close();
+  var escrever = function () { var d = document.getElementById('userHtmlFrame').contentDocument; d.open(); d.write(html); d.close(); };
+  if (${Number(extras.atrasoIframe) || 0} > 0) setTimeout(escrever, ${Number(extras.atrasoIframe) || 0}); else escrever();
 })();
 </script></body></html>`;
 }
@@ -112,6 +136,7 @@ function criarServidor(opcoes) {
   const mundo = opcoes.mundo || new Mundo({ dono: opcoes.dono });
   const execOpcoes = { apagarComentarios: opcoes.apagarComentarios, ordem: opcoes.ordem };
   const registro = [];
+  const falhasFeitas = new Map();          // gas_falha com limite: quantas ja falharam
 
   const servidor = http.createServer(async (req, res) => {
     const base = 'http://' + req.headers.host;
@@ -132,27 +157,39 @@ function criarServidor(opcoes) {
           return;
         }
         if (req.method === 'GET') {
-          registro.push({ tipo: 'doGet', q: url.search });
+          registro.push({ tipo: 'doGet', q: url.search, t: Date.now() });
+          if (cookies.gas_atraso_get) await new Promise((ok) => setTimeout(ok, Number(cookies.gas_atraso_get)));
           saida = ctx.doGet(eventoDe(url.searchParams));
         } else {
           const corpo = await lerCorpo(req);
           const params = new URLSearchParams(corpo);
-          registro.push({ tipo: 'doPost', campos: [...params.keys()], corpo: corpo });
+          registro.push({ tipo: 'doPost', campos: [...params.keys()], corpo: corpo, t: Date.now() });
           const e = eventoDe(params);
           e.postData = { contents: corpo, type: 'application/x-www-form-urlencoded', length: corpo.length };
           saida = ctx.doPost(e);
           if (cookies.gas_atraso_post) await new Promise((ok) => setTimeout(ok, Number(cookies.gas_atraso_post)));
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(embrulhar(saida, base));
+        res.end(embrulhar(saida, base, { semHistory: cookies.gas_sem_history === '1', semStorage: cookies.gas_sem_storage === '1',
+          atrasoIframe: Number(cookies.gas_atraso_iframe || 0) }));
         return;
       }
       if (url.pathname === '/__gsr' && req.method === 'POST') {
         const { fn, args } = JSON.parse(await lerCorpo(req));
-        registro.push({ tipo: 'run', fn });
+        registro.push({ tipo: 'run', fn, t: Date.now() });
         // gas_atraso=ms: a resposta (ou a falha) demora — o clique "vence"
         if (cookies.gas_atraso) await new Promise((ok) => setTimeout(ok, Number(cookies.gas_atraso)));
         if (cookies.gas_403 === '1') { res.writeHead(403); res.end('Forbidden'); return; }
+        // gas_falha=fn[:status][:n]: falha passageira (rede, 500) nas n primeiras chamadas de fn
+        if (cookies.gas_falha) {
+          const [alvo, status, n] = cookies.gas_falha.split(':');
+          const ja = falhasFeitas.get(cookies.gas_falha) || 0;
+          if (alvo === fn && (!n || ja < Number(n))) {
+            falhasFeitas.set(cookies.gas_falha, ja + 1);
+            registro.push({ tipo: 'falha', fn, t: Date.now() });
+            res.writeHead(Number(status || 500)); res.end('erro'); return;
+          }
+        }
         // gas_403=perm: o erro que o Google da com varias contas no navegador
         if (cookies.gas_403 === 'perm') {
           res.writeHead(200, { 'Content-Type': 'application/json' });

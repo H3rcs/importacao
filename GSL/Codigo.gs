@@ -97,9 +97,7 @@ function doPost_(p) {
   // SAIR pela reserva: apaga a sessao no servidor (o sairDoSistema pelo
   // google.script.run tambem seria barrado). Reenviado, nao faz mal.
   if (p.sair) {
-    if (/^[a-f0-9]{32,80}$/.test(String(p.sair))) {
-      try { CacheService.getScriptCache().remove('sess_' + p.sair); } catch (x) {}
-    }
+    if (/^[a-f0-9]{32,80}$/.test(String(p.sair))) encerrarSessao_(String(p.sair));
     return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', recado: 'Você saiu do GSL.', viaPost: true });
   }
 
@@ -114,13 +112,18 @@ function doPost_(p) {
    */
   const bilhete = estadoDoBilhete_(p.bilhete);
   if (bilhete !== 'ok') {
-    return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', viaPost: true,
+    // A pagina recusada NAO abre nada. Quem decide e a ABA: se ela ainda tem a
+    // sessao viva (a regra do F5 do lerSessao), mostra "Continuar" — um clique,
+    // sem PIN, e o servidor confere a sessao de novo. Aba restaurada pede o PIN.
+    return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', viaPost: true, retomavel: true,
       emailDigitado: bilhete === 'vencido' ? String(p.email || '') : '',
       erroEntrada: bilhete === 'vencido'
         ? 'Esta página ficou aberta muito tempo. Digite o PIN de novo para entrar.'
         : 'Por segurança, esta página não pode ser reenviada. Digite o e-mail e o PIN de novo.' });
   }
 
+  // GRAVAR pela reserva (o google.script.run e barrado nesta maquina): ver acaoPelaPagina_.
+  if (!String(p.email || '').trim() && p.t && p.acao) return acaoPelaPagina_(p);
   if (!String(p.email || '').trim() && p.t) {
     const nav = cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p });
     nav.viaPost = true;
@@ -132,6 +135,8 @@ function doPost_(p) {
     // Entrou: o bilhete queima de vez (sem a folga de 15 s) — reenviar este
     // POST pelo historico nao pode abrir a sessao de novo.
     if (r && r.ok) queimarBilhete_(p.bilhete);
+    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada.
+    if (r && r.ok && r.entrada === 'APP' && p.tela) embutirTela_(r, r.token, p.tela, '');
     carga = (r && r.ok) ? r : { ok: true, instalado: true, entrada: 'ENTRAR',
       erroEntrada: (r && r.erro) || '', recado: (r && !r.erro && r.recado) || '',
       criarPin: !!(r && r.criarPin), pedirCodigo: !!(r && r.pedirCodigo),
@@ -227,20 +232,71 @@ function cargaDaPagina_(pedido) {
      * de reserva do cliente: se o google.script.run for barrado numa
      * maquina (HTTP 403), abrir uma tela vira navegacao de pagina.
      */
-    if (carga.ok && carga.entrada === 'APP' && pedido.tela) {
-      // Parametros da tela vem em p (JSON) — antes a reserva perdia os filtros.
-      let params = {};
-      try { params = pedido.p ? (JSON.parse(String(pedido.p)) || {}) : {}; } catch (x) { params = {}; }
-      try {
-        carga.telaEmbutida = { id: String(pedido.tela), params: params,
-          resposta: JSON.parse(carregarTela({ t: _tokenDaVez, f: carga.filial.codigo }, String(pedido.tela), params)) };
-      } catch (erroTela) { carga.avisoTela = String(erroTela.message || erroTela); }
-    }
+    if (carga.ok && carga.entrada === 'APP' && pedido.tela) embutirTela_(carga, _tokenDaVez, pedido.tela, pedido.p);
   } catch (erro) {
     carga = { ok: false, erro: String(erro.message || erro) };
   }
   return carga;
 }
+
+/*
+ * A tela pedida ja vai montada dentro da resposta (reserva por POST, link de
+ * e-mail, F5). Os parametros (filtros) vem em JSON. carregarTela e a porta
+ * de sempre: confere sessao, filial e permissao. Tela que a pessoa nao abre
+ * vira o aviso, e ela cai no menu.
+ */
+function embutirTela_(carga, token, tela, pJson) {
+  let params = {};
+  try { params = pJson ? (JSON.parse(String(pJson)) || {}) : {}; } catch (x) { params = {}; }
+  try {
+    carga.telaEmbutida = { id: String(tela), params: params,
+      resposta: JSON.parse(carregarTela({ t: token, f: carga.filial.codigo }, String(tela), params)) };
+  } catch (erroTela) { carga.avisoTela = String(erroTela.message || erroTela); }
+}
+
+/*
+ * GRAVAR PELA RESERVA (10/10). Onde o google.script.run e barrado, o agir()
+ * da tela manda a acao num POST: t (sessao), filial, acao, ap (parametros em
+ * JSON), idem (codigo unico do clique) e tela/p (a tela que volta). A acao
+ * passa pela MESMA porta de sempre (executarAcao: sessao, filial, capacidade,
+ * modulo). O idem guarda o resultado por 10 min: o mesmo POST reenviado
+ * (clique repetido, "Continuar") nao grava de novo.
+ */
+function acaoPelaPagina_(p) {
+  const idem = /^[0-9a-f-]{36}$/i.test(String(p.idem || '')) ? 'feito_' + String(p.idem).toLowerCase() : '';
+  const cache = CacheService.getScriptCache();
+  let resultado = null;
+  if (idem) {
+    try { const ja = cache.get(idem); if (ja) resultado = JSON.parse(ja); } catch (x) {}
+  }
+  if (!resultado) {
+    if (idem) {
+      try { cache.put(idem, JSON.stringify({ ok: false, erro: 'A gravação anterior ainda está em andamento. Confira a tela em instantes.' }), 120); } catch (x) {}
+    }
+    let params = {};
+    try { params = JSON.parse(String(p.ap || '{}')) || {}; } catch (x) { params = {}; }
+    try {
+      const r = JSON.parse(executarAcao({ t: p.t, f: p.filial }, String(p.acao), params)) || {};
+      resultado = { ok: r.ok !== false, erro: r.ok === false ? String(r.erro || '') : '',
+        recado: String(r.recado || ''), avisoEmail: String(r.avisoEmail || '') };
+    } catch (erro) {
+      resultado = { ok: false, erro: String(erro.message || erro) };
+    }
+    if (idem) { try { cache.put(idem, JSON.stringify(resultado), 600); } catch (x) {} }
+  }
+  esquecerUsuario();
+  const nav = cargaDaPagina_({ t: p.t, filial: p.filial, tela: p.tela, p: p.p });
+  nav.viaPost = true;
+  if (nav.entrada === 'APP') nav.resultadoAcao = Object.assign({ recadoBotao: String(p.recado || '').slice(0, 200) }, resultado);
+  return paginaComCarga_(nav);
+}
+
+/*
+ * SONDA DO CANAL. A tela chama ao abrir a entrada (e de vez em quando nas
+ * paginas da reserva) para saber se o google.script.run passa nesta
+ * maquina — antes de a pessoa clicar. Nao le nem grava nada.
+ */
+function sondarCanal() { return 'ok'; }
 
 function paginaComCarga_(carga) {
   carga.urlApp = urlDoApp_();

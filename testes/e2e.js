@@ -169,6 +169,123 @@ async function cenario(nome, fn) {
   }
 }
 
+/*
+ * ENTRADA DE VERDADE (10/10). O evaluate do Playwright roda com "gesto do
+ * usuario": cada evaluate da ao navegador um clique novo, e a moldura navega
+ * mesmo quando, para uma pessoa, o clique ja teria "vencido" — exatamente o
+ * caso do "Continuar". Estes cenarios nao tocam na pagina enquanto um passo
+ * roda: um observador no documento de cima (addInitScript) le a moldura e
+ * conta o estado pelo console; os cliques sao do mouse, nas coordenadas que
+ * ele informa; o teclado digita.
+ */
+const OBSERVADOR = `(() => {
+  if (window.top !== window) return;
+  let ultimo = '';
+  const caixa = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); if (!r.width || !r.height || r.bottom > window.innerHeight || r.top < 0) return null; return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; };
+  const ler = () => {
+    const fr = document.getElementById('userHtmlFrame');
+    const d = fr && fr.contentDocument, w = fr && fr.contentWindow;
+    if (!d || !d.body) return null;
+    const vis = ['carregando', 'falha', 'instalacao', 'entrar', 'sem-acesso', 'escolher-filial', 'aplicacao']
+      .filter((id) => { const e = d.getElementById(id); return e && !e.classList.contains('oculto'); });
+    const jan = d.getElementById('janela');
+    const janela = jan && !jan.classList.contains('oculto') ? ((d.getElementById('janela-titulo') || {}).textContent || '') : '';
+    const cont = d.getElementById('entrar-continuar');
+    const achar = (sel, re) => [...d.querySelectorAll(sel)].find((x) => !re || re.test(x.textContent));
+    const card = d.querySelector('.cartao-acao');
+    const mc = card ? /Coment[^(]*[(]([0-9]+)[)]/.exec(card.textContent) : null;
+    let barrado = null; try { barrado = w.eval('typeof CANAL_BARRADO !== "undefined" ? CANAL_BARRADO : null'); } catch (e) {}
+    return {
+      tela: vis.join(','), janela, barrado,
+      titulo: (d.getElementById('titulo-pagina') || {}).textContent || '',
+      pagina: (((d.getElementById('pagina') || {}).textContent) || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
+      msg: (((d.getElementById('entrar-msg') || {}).textContent) || '').slice(0, 90),
+      continuar: !!(cont && !cont.classList.contains('oculto')),
+      coment: card ? (mc ? Number(mc[1]) : 0) : -1,
+      recado: ((d.getElementById('recado') || {}).textContent || '').slice(0, 90),
+      pos: {
+        email: caixa(d.getElementById('entrar-email')), pin: caixa(d.getElementById('entrar-pin')),
+        entrar: caixa(d.getElementById('entrar-botao')), continuar: caixa(d.getElementById('entrar-continuar-botao')),
+        janelaContinuar: janela === 'Continuar' ? caixa(d.querySelector('#janela-rodape .botao')) : null,
+        card0: caixa(d.querySelector('.holocard')), cardEstoque: caixa(achar('.holocard', /Estoque de TI/)),
+        cardCalendario: caixa(achar('.holocard', /Calend/)),
+        menuAcoes: caixa(d.querySelector('.item-menu[data-pagina="acoes"]')),
+        menuCalendario: caixa(d.querySelector('.item-menu[data-pagina="calendario"]')),
+        comentarios: janela ? null : caixa(achar('.cartao-acao button', /^\\s*Coment/)),
+        cmTexto: caixa(d.getElementById('cm-texto')),
+        registrar: caixa(achar('#janela-rodape .botao', /Registrar coment/))
+      }
+    };
+  };
+  setInterval(() => {
+    let e; try { e = ler(); } catch (x) { return; }
+    if (!e) return;
+    const k = JSON.stringify(e);
+    if (k !== ultimo) { ultimo = k; console.debug('\\u00a7' + k); }
+  }, 30);
+})();`;
+
+/* Aba "de verdade": cookies, observador, eventos do servidor com hora. */
+async function abrirAbaReal(s, conta, extras) {
+  extras = extras || {};
+  const contexto = await navegador.newContext({ viewport: { width: 1400, height: 1600 } });
+  await contexto.addInitScript(OBSERVADOR);
+  const cookies = [{ name: 'gas_conta', value: conta, url: s.url }];
+  if (extras.bloqueio403) cookies.push({ name: 'gas_403', value: extras.bloqueio403 === 'perm' ? 'perm' : '1', url: s.url });
+  if (extras.atraso) cookies.push({ name: 'gas_atraso', value: String(extras.atraso), url: s.url });
+  if (extras.atrasoPost) cookies.push({ name: 'gas_atraso_post', value: String(extras.atrasoPost), url: s.url });
+  if (extras.falha) cookies.push({ name: 'gas_falha', value: extras.falha, url: s.url });
+  await contexto.addCookies(cookies);
+  const page = await contexto.newPage();
+  const aba = { page, contexto, s, estado: null, erros: [], marca: 0 };
+  page.on('console', (m) => {
+    const t = m.text();
+    if (t.charAt(0) === '§') { try { aba.estado = JSON.parse(t.slice(1)); } catch (e) {} return; }
+    if (m.type() === 'error' && !/ERR_CERT|fonts\.googleapis|Failed to load resource|escape its sandboxing|Unsafe attempt to initiate navigation/.test(t)) aba.erros.push('console: ' + t);
+  });
+  page.on('pageerror', (e) => aba.erros.push(e.message));
+  page.on('framenavigated', (fr) => { if (fr === page.mainFrame()) aba.estado = null; });
+  await page.goto(s.url + (extras.query || ''), { waitUntil: 'domcontentloaded' });
+  return aba;
+}
+/* Espera um estado (sem tocar na pagina). */
+async function esperarEstado(aba, pred, ms, rotulo) {
+  const fim = Date.now() + (ms || 20000);
+  while (Date.now() < fim) {
+    if (aba.estado && pred(aba.estado)) return aba.estado;
+    await new Promise((ok) => setTimeout(ok, 40));
+  }
+  throw new Error('esperava ' + (rotulo || 'estado') + '; estava: ' + JSON.stringify(aba.estado && Object.assign({}, aba.estado, { pos: undefined })));
+}
+async function clicarEm(aba, nome, ms) {
+  // A posicao tem que ficar parada um instante (fontes e logo ainda acomodando a tela).
+  let antes = '', iguais = 0;
+  const fim = Date.now() + (ms || 15000);
+  while (Date.now() < fim) {
+    const p = aba.estado && aba.estado.pos && aba.estado.pos[nome];
+    const k = p ? p.join(',') : '';
+    if (k && k === antes) { if (++iguais >= 3) { await aba.page.mouse.click(p[0], p[1]); return; } } else iguais = 0;
+    antes = k;
+    await new Promise((ok) => setTimeout(ok, 80));
+  }
+  throw new Error('posicao de ' + nome + ' nao apareceu; estado: ' + JSON.stringify(aba.estado && Object.assign({}, aba.estado, { pos: undefined })));
+}
+/* Entra digitando e-mail e PIN e clicando em Entrar (a pessoa leva ~1 s para digitar). */
+async function entrarReal(aba, email, pin) {
+  await clicarEm(aba, 'email', 20000);
+  await aba.page.keyboard.type(email, { delay: 5 });
+  await clicarEm(aba, 'pin');
+  await aba.page.keyboard.type(pin, { delay: 5 });
+  await clicarEm(aba, 'entrar');
+}
+/* Pedidos ao servidor desde a marca: POSTs de pagina e chamadas (por funcao). */
+function marcar(aba) { aba.marca = aba.s.registro.length; }
+function desdeMarca(aba) {
+  const r = aba.s.registro.slice(aba.marca);
+  return { posts: r.filter((x) => x.tipo === 'doPost').length, gets: r.filter((x) => x.tipo === 'doGet').length,
+    runs: r.filter((x) => x.tipo === 'run').map((x) => x.fn) };
+}
+
 /* ------------------------------------------------------------------ */
 /* cenarios                                                            */
 /* ------------------------------------------------------------------ */
@@ -472,7 +589,11 @@ async function rodar() {
     const aba = await abrirAba(s, GERAL, { bloqueio403: true });
     await entrar(aba, COORD, '1234');
     afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela reserva');
-    for (const k of [...s.mundo.cache.keys()]) if (/^sess_/.test(k)) s.mundo.cache.delete(k);      // 1 h parada
+    // 1 h parada: some do cache e a copia duravel (propriedades do dono) fica com o ultimo uso de 61 min atras
+    for (const k of [...s.mundo.cache.keys()]) if (/^sess_/.test(k)) s.mundo.cache.delete(k);
+    for (const k of Object.keys(s.mundo.props.user)) if (/^sessao_/.test(k)) {
+      const reg = JSON.parse(s.mundo.props.user[k]); reg.u = Date.now() - 61 * 60000; s.mundo.props.user[k] = JSON.stringify(reg);
+    }
     const f = await frame(aba);
     await f.click('.holocard >> nth=0');
     await aba.page.waitForTimeout(2500);
@@ -515,14 +636,17 @@ async function rodar() {
     await entrar(aba, COORD, '1234', true);
     await esperarTela(aba, ['aplicacao']);
     const f = await frame(aba);
+    // A janela do F5 (20 s) conta do primeiro script da pagina nova (GSL_T0), nao do fim da carga.
     const r = await f.evaluate(() => {
-      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(Date.now() - 20000));
+      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(GSL_T0 - 21000));
       const velha = lerSessao();
-      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(Date.now() - 1000));
+      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.setItem('gsl_saida', String(GSL_T0 - 1000));
       const f5 = lerSessao();
-      return { velha, f5 };
+      sessionStorage.setItem('gsl_sessao', 'abc123'); sessionStorage.removeItem('gsl_saida');
+      const semPagehide = lerSessao();          // aba descartada pelo navegador, travou: pede o PIN
+      return { velha, f5, semPagehide };
     });
-    afirmar(r.velha === '' && r.f5 === 'abc123', 'restaurada depois de 20 s: nada; F5: sessao — ' + JSON.stringify(r));
+    afirmar(r.velha === '' && r.f5 === 'abc123' && r.semPagehide === '', 'restaurada depois de 20 s: nada; F5: sessao; sem pagehide: nada — ' + JSON.stringify(r));
     await aba.contexto.close(); await s.fechar();
   });
 
@@ -1140,6 +1264,129 @@ async function rodar() {
     afirmar(/dono@bartofil\.com\.br/.test(quem) && /\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/.test(quem), 'identificacao de quem comentou: ' + quem);
     afirmar(/Ação criada/.test(await f.evaluate(() => document.querySelector('.coment-historico').textContent)), 'quem criou');
     if (process.env.FOTO_COMENT) await aba.page.screenshot({ path: process.env.FOTO_COMENT });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+
+  /* ================================================================ */
+  /* DESEMPENHO (10/10): canal barrado sem espera, sessao que fica      */
+  /* ================================================================ */
+
+  for (const cfg of [{ nome: '403', bloqueio403: '1', atraso: 6000, atrasoPost: 1500 }, { nome: 'PERMISSION_DENIED', bloqueio403: 'perm', atraso: 6000, atrasoPost: 1500 }]) {
+    await cenario('canal barrado (' + cfg.nome + ', falha lenta de 6 s): cada clique vai direto pela pagina, sem chamada condenada e sem "Continuar"', async () => {
+      const s = await subir(); instalarComPessoas(s);
+      criarPin(s, GERAL, GERENTE, '5555');
+      const aba = await abrirAbaReal(s, GERAL, cfg);
+      await entrarReal(aba, GERENTE, '5555');
+      // primeira vez: a sonda da pagina de entrada ja descobriu o bloqueio (ou o entrar falha) e a entrada vai por POST
+      await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.card0, 30000, 'menu depois da entrada');
+      const barrado = aba.estado.barrado;
+      afirmar(barrado === true, 'a pagina da reserva sabe que o canal e barrado');
+      // cada tela: 1 POST, nenhuma chamada google.script.run, nenhum "Continuar"
+      for (const alvo of ['cardCalendario', 'menuAcoes']) {
+        marcar(aba);
+        const t0 = Date.now();
+        await clicarEm(aba, alvo, 15000);
+        await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.titulo && !/Abrindo|Carregando/.test(x.pagina) && x.janela !== 'Continuar' &&
+          desdeMarca(aba).posts >= 1, 15000, 'tela aberta por ' + alvo);
+        const d = desdeMarca(aba);
+        afirmar(d.posts === 1 && !d.runs.filter((f) => f !== 'sondarCanal').length, alvo + ': 1 POST e nenhuma chamada condenada: ' + JSON.stringify(d));
+        afirmar(Date.now() - t0 < 6000, alvo + ': sem esperar a falha (' + (Date.now() - t0) + ' ms)');
+      }
+      afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+      await aba.contexto.close(); await s.fechar();
+    });
+  }
+
+  await cenario('canal barrado: F5 numa pagina da reserva vira GET e um clique em "Continuar como ..." volta na mesma tela, sem PIN', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const aba = await abrirAbaReal(s, GERAL, { bloqueio403: 'perm', atraso: 1500, atrasoPost: 800 });
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => /Plano de A/.test(x.titulo) && !/Abrindo|Carregando/.test(x.pagina), 15000, 'Plano de Acao');
+    afirmar(/\?tela=acoes/.test(aba.page.url()), 'endereco da aba depois do history.replace: ' + aba.page.url());
+    marcar(aba);
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarEstado(aba, (x) => x.continuar && x.pos.continuar, 15000, 'Continuar como ...');
+    let d = desdeMarca(aba);
+    afirmar(d.gets === 1 && d.posts === 0, 'o F5 foi um GET (nao reenviou o POST): ' + JSON.stringify(d));
+    afirmar(!/PIN/.test(aba.estado.msg), 'nao pediu o PIN: ' + aba.estado.msg);
+    await clicarEm(aba, 'continuar');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && /Plano de A/.test(x.titulo) && !/Abrindo|Carregando/.test(x.pagina), 15000, 'de volta no Plano de Acao');
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1, 'um POST para continuar: ' + JSON.stringify(d));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal barrado: comentar uma acao grava pela pagina (1 POST) e o comentario aparece', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const e = JSON.parse(s.chamar(GERAL, 'entrar', GERENTE, '5555', '', '', '').valor);
+    s.chamar(GERAL, 'executarAcao', { t: e.token, f: e.filial.codigo }, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+    const aba = await abrirAbaReal(s, GERAL, { bloqueio403: '1', atraso: 1500, atrasoPost: 800 });
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => x.coment === 0 && x.pos.comentarios, 15000, 'cartao da acao');
+    await clicarEm(aba, 'comentarios');
+    await clicarEm(aba, 'cmTexto');
+    await aba.page.keyboard.type('Lâmpadas compradas', { delay: 5 });
+    marcar(aba);
+    await clicarEm(aba, 'registrar');
+    await esperarEstado(aba, (x) => x.coment === 1, 15000, 'comentario gravado');
+    const d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((f) => f !== 'sondarCanal').length, 'gravou pela pagina: ' + JSON.stringify(d));
+    const coment = s.contexto(DONO).listar('COMENTARIOS').filter((c) => /Lâmpadas compradas/.test(c.TEXTO || ''));
+    afirmar(coment.length === 1, 'um comentario so na planilha: ' + coment.length);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('falha passageira no F5 nao derruba a sessao: tenta de novo; falhou de novo, "Continuar" sem PIN', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const aba = await abrirAbaReal(s, GERAL, {});
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => /Plano de A/.test(x.titulo) && !/Carregando/.test(x.pagina), 15000, 'Plano de Acao');
+    // uma falha: a segunda tentativa entra (e volta na mesma tela)
+    await aba.contexto.addCookies([{ name: 'gas_falha', value: 'retomarSessao:500:1', url: s.url }]);
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && /Plano de A/.test(x.titulo) && !/Carregando/.test(x.pagina), 20000, 'de volta no Plano depois de 1 falha');
+    // duas falhas: "Continuar" (a sessao fica), e o clique entra
+    await aba.contexto.addCookies([{ name: 'gas_falha', value: 'retomarSessao:500:2', url: s.url }]);
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarEstado(aba, (x) => x.continuar && x.pos.continuar, 20000, 'Continuar depois de 2 falhas');
+    await clicarEm(aba, 'continuar');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && /Plano de A/.test(x.titulo) && !/Carregando/.test(x.pagina), 20000, 'continuou sem PIN');
+    afirmar(!aba.erros.filter((e) => !/HTTP 500/.test(e)).length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('sessao: o cache perdeu a sessao (despejo) e a pessoa continua; 50 min sem ir ao servidor mostra o aviso', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    for (const k of [...s.mundo.cache.keys()]) if (/^sess_/.test(k)) s.mundo.cache.delete(k);      // o Google despejou o item
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForFunction(() => /Plano de A/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    afirmar(await esperarTela(aba, ['aplicacao', 'entrar']) === 'aplicacao', 'continuou dentro');
+    afirmar(Number(s.mundo.cache.get('diag_sessao_salva_pela_loja') && s.mundo.cache.get('diag_sessao_salva_pela_loja').v) === 1, 'contou a sessao salva pela loja');
+    // 51 min sem ir ao servidor: a faixa aparece; o botao renova
+    await f.evaluate(() => { ULTIMO_CONTATO = Date.now() - 51 * 60000; ULTIMA_ATIVIDADE = Date.now() - 20 * 60000; vigiarSessao(); });
+    afirmar(/termina em \d+ min/.test(await texto(aba, 'aviso-sessao')), 'faixa do aviso');
+    await f.click('#aviso-sessao button');
+    await f.waitForFunction(() => !document.getElementById('aviso-sessao'), null, { timeout: 10000 });
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

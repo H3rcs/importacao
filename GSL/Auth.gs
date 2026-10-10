@@ -515,31 +515,119 @@ function resumoPin_(email, pin) {
   return bytes.map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
 }
 
+/*
+ * SESSAO DURAVEL (10/10). O CacheService e so o caminho rapido: o Google
+ * nao garante que um item fique ate o prazo, e o cache do script (no maximo
+ * 1.000 itens) e dividido com as telas, tabelas e bilhetes de todo mundo.
+ * Uma sessao despejada era a pessoa "saindo sozinha". A copia que vale
+ * fica nas propriedades de USUARIO do dono (com "Executar como: eu", uma
+ * loja so, separada das configuracoes que o prop() le a cada chamada). Na
+ * loja vai so o RESUMO do codigo: quem le as propriedades nao entra como
+ * ninguem.
+ *
+ *   cache 'sess_<codigo>'   -> { e, t (ultimo uso, de 5 em 5 min), c (criada), d (ultima escrita na loja) }
+ *   loja  'sessao_<resumo>' -> { e, c, u (ultimo uso, de 10 em 10 min) }
+ *
+ * As regras nao mudam: 1 h sem uso acaba a sessao (pela loja, no maximo
+ * 10 min mais cedo, nunca mais tarde) e "Sair" apaga as duas copias.
+ */
+const SESSAO_GRAVAR_USO_MS = 10 * 60 * 1000;   // no maximo uma escrita na loja a cada 10 min por sessao
+const SESSAO_PODA_MS = SESSAO_OCIOSA_MS + 15 * 60 * 1000;
+const PREFIXO_SESSAO_DURAVEL = 'sessao_';
+var _sessoesDaVez = {};                         // codigo -> e-mail ('' = nao existe), so nesta execucao
+
+function lojaDeSessoes_() { return PropertiesService.getUserProperties(); }
+
+function chaveSessaoDuravel_(token) {
+  const d = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'sessao|' + token, Utilities.Charset.UTF_8);
+  return PREFIXO_SESSAO_DURAVEL + Utilities.base64EncodeWebSafe(d).replace(/=+$/, '').slice(0, 32);
+}
+
 function criarSessao_(email) {
   const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
-  CacheService.getScriptCache().put('sess_' + token, JSON.stringify({ e: email, t: Date.now() }), SESSAO_SEGUNDOS);
+  const agora = Date.now();
+  // A loja e a copia que vale, mas nunca impede a entrada: loja cheia ou fora do ar = como antes (so o cache).
+  try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(token), JSON.stringify({ e: email, c: agora, u: agora })); } catch (e) {}
+  CacheService.getScriptCache().put('sess_' + token, JSON.stringify({ e: email, t: agora, c: agora, d: agora }), SESSAO_SEGUNDOS);
+  _sessoesDaVez[token] = String(email || '').toLowerCase().trim();
+  try { podarSessoes_(false); } catch (e) {}
   return token;
 }
 
-/* E-mail dono da sessao, ou '' se ela nao existe/venceu. Renova a validade de tempos em tempos. */
+/* E-mail dono da sessao, ou '' se ela nao existe/venceu. Renova o ultimo uso de tempos em tempos. */
 function emailDaSessao_(token) {
   const t = String(token || '');
   if (!/^[a-f0-9]{32,80}$/.test(t)) return '';
+  if (_sessoesDaVez[t] !== undefined) return _sessoesDaVez[t];
   const cache = CacheService.getScriptCache();
-  const bruto = cache.get('sess_' + t);
-  if (!bruto) return '';
-  let s;
-  try { s = JSON.parse(bruto); } catch (e) { return ''; }
-  const parada = Date.now() - Number(s.t || 0);
-  if (parada > SESSAO_OCIOSA_MS) {
-    try { cache.remove('sess_' + t); } catch (e) {}
+  let s = null;
+  try { s = JSON.parse(cache.get('sess_' + t) || 'null'); } catch (e) { s = null; }
+  const doCache = !!s;
+  if (!s) {
+    // O cache perdeu (despejo) ou a sessao nunca existiu: a loja decide.
+    let reg = null;
+    try { reg = JSON.parse(lojaDeSessoes_().getProperty(chaveSessaoDuravel_(t)) || 'null'); } catch (e) { reg = null; }
+    if (!reg || !reg.e) { _sessoesDaVez[t] = ''; return ''; }
+    s = { e: reg.e, t: Number(reg.u || 0), c: Number(reg.c || 0), d: Number(reg.u || 0) };
+  }
+  const agora = Date.now();
+  if (agora - Number(s.t || 0) > SESSAO_OCIOSA_MS) {
+    encerrarSessao_(t);
     return '';
   }
-  if (parada > SESSAO_RENOVAR_MS) {
-    s.t = Date.now();
-    try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {}
+  // Diagnostico: sessao viva que so a loja tinha = antes desta versao, uma "saida sozinha".
+  if (!doCache) contarDiagnostico_('sessao_salva_pela_loja');
+  let mudou = !doCache;
+  if (agora - Number(s.t || 0) > SESSAO_RENOVAR_MS) { s.t = agora; mudou = true; }
+  if (agora - Number(s.d || 0) > SESSAO_GRAVAR_USO_MS) {
+    s.d = agora;
+    try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(t), JSON.stringify({ e: s.e, c: s.c || agora, u: agora })); } catch (e) {}
+    mudou = true;
   }
-  return String(s.e || '').toLowerCase().trim();
+  if (mudou) { try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {} }
+  const email = String(s.e || '').toLowerCase().trim();
+  _sessoesDaVez[t] = email;
+  return email;
+}
+
+/* Fim da sessao (Sair, 1 h sem uso): as duas copias. */
+function encerrarSessao_(token) {
+  const t = String(token || '');
+  if (!/^[a-f0-9]{32,80}$/.test(t)) return;
+  try { CacheService.getScriptCache().remove('sess_' + t); } catch (e) {}
+  try { lojaDeSessoes_().deleteProperty(chaveSessaoDuravel_(t)); } catch (e) {}
+  _sessoesDaVez[t] = '';
+}
+
+/*
+ * PODA: sessao parada ha mais de 1 h 15 min sai da loja. Roda na rotina
+ * diaria e, no maximo uma vez por hora, numa entrada. Nunca apaga sessao
+ * viva: quem esta em uso tem o ultimo uso gravado ha no maximo 10 min.
+ */
+function podarSessoes_(forcar) {
+  const cache = CacheService.getScriptCache();
+  if (!forcar && cache.get('poda_sessoes')) return 0;
+  try { cache.put('poda_sessoes', '1', 3600); } catch (e) {}
+  const loja = lojaDeSessoes_();
+  const todas = loja.getProperties();
+  const agora = Date.now();
+  let n = 0;
+  Object.keys(todas).forEach(function (k) {
+    if (k.indexOf(PREFIXO_SESSAO_DURAVEL) !== 0) return;
+    let reg = null;
+    try { reg = JSON.parse(todas[k]); } catch (e) { reg = null; }
+    if (!reg || agora - Number(reg.u || 0) > SESSAO_PODA_MS) { try { loja.deleteProperty(k); n++; } catch (e) {} }
+  });
+  return n;
+}
+
+/* Contadores de diagnostico (cache, 6 h): quantas sessoes a loja salvou (aparece no ?diagnostico=1). */
+function contarDiagnostico_(nome) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = 'diag_' + nome;
+    cache.put(k, String(Number(cache.get(k) || 0) + 1), 21600);
+  } catch (e) {}
 }
 
 /* A pessoa inteira (com o resumo do PIN), lida da tabela — nao do cache de acessos. */
@@ -679,10 +767,13 @@ function mandarCodigoPorEmail_(email, nome) {
  *   primeiro acesso     -> { criarPin: true } ate a pessoa repetir o PIN
  *   errado 5 vezes      -> 10 minutos de espera para aquele e-mail
  */
-function entrar(email, pin, confirmacao, filial, codigo) {
+function entrar(email, pin, confirmacao, filial, codigo, tela) {
   _porta = true;
   try {
-    return JSON.stringify(entrar_(email, pin, confirmacao, filial, codigo));
+    const r = entrar_(email, pin, confirmacao, filial, codigo);
+    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (uma ida so).
+    if (r && r.ok && r.entrada === 'APP' && tela) embutirTela_(r, r.token, tela, '');
+    return JSON.stringify(r);
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
   }
@@ -808,13 +899,18 @@ function abrirSessaoPara_(email, filial) {
   return carga;
 }
 
-/* A aba recarregou com a sessao guardada: devolve a entrada de novo, sem pedir o PIN. */
+/*
+ * A aba recarregou com a sessao guardada: devolve a entrada de novo, sem
+ * pedir o PIN. Com ctx.tela (a tela em que a aba estava), ela ja volta
+ * montada — o F5 cai na mesma tela numa ida so.
+ */
 function retomarSessao(ctx) {
   const filial = contextoDaChamada_(ctx);
   try {
     if (!emailDaSessao_(_tokenDaVez)) return JSON.stringify({ ok: true, instalado: true, entrada: 'ENTRAR' });
     const carga = montarEntrada_(filial);
     carga.token = _tokenDaVez;
+    if (carga.ok && carga.entrada === 'APP' && ctx && ctx.tela) embutirTela_(carga, _tokenDaVez, ctx.tela, ctx.p || '');
     return JSON.stringify(carga);
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
@@ -824,8 +920,19 @@ function retomarSessao(ctx) {
 /* Sair: a sessao morre no servidor tambem (nao so no navegador). */
 function sairDoSistema(ctx) {
   contextoDaChamada_(ctx);
-  if (_tokenDaVez) { try { CacheService.getScriptCache().remove('sess_' + _tokenDaVez); } catch (e) {} }
+  if (_tokenDaVez) encerrarSessao_(_tokenDaVez);
   return JSON.stringify({ ok: true });
+}
+
+/*
+ * MANTER A SESSAO: a tela chama enquanto a pessoa esta mexendo nela
+ * (digitando um relato longo, lendo uma tela grande) sem ir ao servidor,
+ * para a 1 h sem uso contar do ultimo movimento. Aba esquecida (ninguem
+ * mexendo) nao chama. Nao devolve dado nenhum.
+ */
+function manterSessao(ctx) {
+  contextoDaChamada_(ctx);
+  return JSON.stringify({ ok: !!emailDaSessao_(_tokenDaVez) });
 }
 
 /*

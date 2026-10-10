@@ -47,19 +47,46 @@ const CHAVE_SESSAO = 'gsl_sessao';
  * — um F5. Aba restaurada depois disso pede e-mail e PIN.
  */
 const CHAVE_SAIDA = 'gsl_saida';
+/*
+ * 10/10: o relogio do F5 conta do PRIMEIRO script da pagina nova (GSL_T0, no
+ * alto do Index), nao do fim da carga — numa maquina lenta, montar a pagina
+ * passava dos 15 s e a pessoa "saia sozinha". Janela de 20 s. Aba fechada e
+ * reaberta depois disso continua pedindo o PIN; aba sem pagehide (descartada,
+ * travou) tambem.
+ */
+const JANELA_F5_MS = 20000;
+const CHAVE_NOME = 'gsl_nome', CHAVE_ONDE = 'gsl_onde';
+function lerSs(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+function gravarSs(k, v) { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch (e) {} }
 function lerSessao() {
   try {
     const t = sessionStorage.getItem(CHAVE_SESSAO) || '';
     const saiu = Number(sessionStorage.getItem(CHAVE_SAIDA) || 0);
     sessionStorage.removeItem(CHAVE_SAIDA);
-    if (!t || Date.now() - saiu > 15000) { sessionStorage.removeItem(CHAVE_SESSAO); return ''; }
+    const ref = (typeof GSL_T0 === 'number' && GSL_T0) || Date.now();
+    if (!t || !saiu || ref - saiu > JANELA_F5_MS) { gravarSessao(''); return ''; }
     return t;
   } catch (e) { return ''; }
 }
-function gravarSessao(t) { try { if (t) sessionStorage.setItem(CHAVE_SESSAO, t); else sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) {} }
+/* Codigo da sessao (e o primeiro nome, para o "Continuar como ...") so nesta aba. */
+function gravarSessao(t, nome) {
+  gravarSs(CHAVE_SESSAO, t || '');
+  if (!t) { gravarSs(CHAVE_NOME, ''); gravarSs(CHAVE_ONDE, ''); }
+  else if (nome) gravarSs(CHAVE_NOME, String(nome).split(' ')[0]);
+}
 window.addEventListener('pagehide', function () {
   try { if (TOKEN) sessionStorage.setItem(CHAVE_SAIDA, String(Date.now())); } catch (e) {}
 });
+/* A tela em que a aba esta (para o F5 e o "Continuar" voltarem nela). So ids e filtros. */
+function lembrarTelaDaAba(tela, params) {
+  if (!TOKEN) return;
+  gravarSs(CHAVE_ONDE, JSON.stringify({ f: FILIAL, tela: tela || '', p: params && Object.keys(params).length ? JSON.stringify(params) : '' }));
+}
+function telaDaAba() {
+  const d = destinoDoLink();
+  if (d && d.tela) return { tela: d.tela, p: '', f: d.filial || '' };
+  try { return JSON.parse(lerSs(CHAVE_ONDE) || '{}') || {}; } catch (e) { return {}; }
+}
 
 /*
  * CANAL BARRADO. Em computador com varias contas Google (ou cookie de
@@ -69,15 +96,58 @@ window.addEventListener('pagehide', function () {
  */
 let CANAL_BARRADO = false;
 const ctx = () => ({ t: TOKEN, f: FILIAL });
+/*
+ * 10/10 — O NAVEGADOR LEMBRA QUE E BARRADO. Antes cada pagina nova (F5,
+ * POST da reserva) esquecia, e cada clique pagava uma chamada condenada de
+ * 1 a 6 s antes de ir pela pagina — e, se o clique "vencesse" nesse meio
+ * tempo, vinha o "Continuar". Agora fica guardada a HORA em que o canal
+ * falhou de vez (localStorage, 12 h; nada que identifique a pessoa), e
+ * qualquer chamada que passa (ou a sonda) apaga a marca.
+ */
+const CHAVE_CANAL = 'gsl_canal_barrado', CHAVE_SONDA = 'gsl_sonda';
+const CANAL_LEMBRA_MS = 12 * 3600 * 1000;
+function lembrarCanalBarrado() { CANAL_BARRADO = true; gravarLocal(CHAVE_CANAL, String(Date.now())); }
+function esquecerCanalBarrado() { CANAL_BARRADO = false; try { localStorage.removeItem(CHAVE_CANAL); } catch (e) {} }
+function canalBarradoLembrado() {
+  const t = Number(lerLocal(CHAVE_CANAL) || 0);
+  return !!t && Date.now() - t < CANAL_LEMBRA_MS;
+}
+let ULTIMO_CONTATO = Date.now();     // ultima ida ao servidor que deu certo (ver vigiarSessao)
 
 const chamar = (f, ...a) => new Promise((ok, erro) => {
-  google.script.run.withSuccessHandler(ok).withFailureHandler((e) => {
+  google.script.run.withSuccessHandler((v) => {
+    if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado();   // passou: nao e mais barrado
+    if (TOKEN) ULTIMO_CONTATO = Date.now();
+    ok(v);
+  }).withFailureHandler((e) => {
     // Sessao vencida (sem uso) ou apagada: volta para a entrada.
     if (/\[SESSAO\]/.test(String((e && e.message) || e || ''))) sessaoTerminou();
-    if (canalBloqueado(e)) CANAL_BARRADO = true;
+    if (canalBarradoDeVez(e)) lembrarCanalBarrado();
     erro(e);
   })[f](...a);
 });
+
+/*
+ * SONDA: uma chamada que nao le nada (sondarCanal) descobre se o canal passa
+ * ENQUANTO a pessoa digita o e-mail e o PIN — o clique de Entrar ja sabe o
+ * caminho. Nas paginas da reserva, no maximo a cada 10 min, ve se o canal
+ * voltou (ai os cliques seguintes voltam ao caminho rapido).
+ */
+let SONDA = '';
+function sondarCanal() {
+  if (SONDA === 'indo' || typeof google === 'undefined' || !google.script || !google.script.run) return;
+  SONDA = 'indo';
+  gravarSs(CHAVE_SONDA, String(Date.now()));
+  try {
+    google.script.run
+      .withSuccessHandler(function () { SONDA = 'ok'; if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado(); })
+      .withFailureHandler(function (e) { SONDA = canalBarradoDeVez(e) ? 'barrado' : 'erro'; if (SONDA === 'barrado') lembrarCanalBarrado(); })
+      .sondarCanal();
+  } catch (e) { SONDA = 'erro'; }
+}
+function sondarDeVezEmQuando() {
+  if (Date.now() - Number(lerSs(CHAVE_SONDA) || 0) > 10 * 60 * 1000) setTimeout(sondarCanal, 4000);
+}
 /*
  * GERACAO DA SESSAO: sobe quando a pessoa sai (ou a sessao termina, ou
  * entra outra no lugar). A resposta de um pedido feito ANTES disso e
@@ -99,7 +169,26 @@ const chamarJSON = async (f, ...a) => {
 };
 
 const carregarTelaSrv = (id, params) => chamarJSON('carregarTela', ctx(), id, params || {});
-const executarAcaoSrv = (nome, params) => chamarJSON('executarAcao', ctx(), nome, params || {});
+/*
+ * Com o canal barrado, fotos e arquivos (e as acoes chamadas direto, fora do
+ * agir) nao tem caminho: em vez de uma chamada condenada de varios segundos,
+ * a explicacao na hora — e a sonda confere se o canal voltou.
+ */
+const SEM_CANAL_PARA_ARQUIVO = 'Este computador bloqueia a conversa direta com o Google. Fotos, arquivos e esta função ' +
+  'precisam dela: use um navegador só com a conta @bartofil.com.br (ou outro computador).';
+const temArquivo = (p) => !!p && Object.keys(p).some((k) => {
+  if (!/foto|arquivo|anexo|dados64|base64/i.test(k)) return false;
+  const v = p[k];
+  if (Array.isArray(v)) return v.length > 0;          // fotos: [] = nenhuma foto escolhida
+  if (typeof v === 'string') return v.length > 200;    // um id de arquivo passa; um base64 nao
+  return !!v && typeof v === 'object';
+});
+const executarAcaoSrv = (nome, params) => {
+  if (CANAL_BARRADO && !LEITURAS_PELA_PAGINA[nome]) { sondarCanal(); return Promise.reject(new Error(SEM_CANAL_PARA_ARQUIVO)); }
+  return chamarJSON('executarAcao', ctx(), nome, params || {});
+};
+/* Leituras que tem caminho proprio pela pagina com o canal barrado (ver fichaPelaPagina). */
+const LEITURAS_PELA_PAGINA = { fichaColaborador: true };
 const esc = (t) => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 /*
@@ -215,7 +304,22 @@ async function iniciar() {
     vigiarVisibilidade();
     const inicio = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true };
     URL_APP = inicio.urlApp || '';
-    if (inicio.viaPost) CANAL_BARRADO = true;       // esta pagina ja veio pela reserva
+    if (inicio.viaPost || canalBarradoLembrado()) CANAL_BARRADO = true;   // esta pagina ja veio pela reserva, ou o navegador ja sabe
+    if (inicio.viaPost) {
+      // A sessao desta pagina veio no proprio HTML: a marca do pagehide anterior nao vale mais.
+      gravarSs(CHAVE_SAIDA, '');
+      // F5 ou Voltar numa pagina que veio por POST reenviava o POST (bilhete ja usado: "Por
+      // seguranca..." e e-mail e PIN de novo). Trocando a entrada do historico, viram um GET, e a
+      // aba continua com um clique. A tela vai no endereco para o "Continuar" voltar nela.
+      try {
+        const em = inicio.telaEmbutida && inicio.telaEmbutida.id ? { tela: inicio.telaEmbutida.id } : {};
+        if (inicio.filial && inicio.filial.codigo) em.filial = inicio.filial.codigo;
+        google.script.history.replace(null, em, '');
+      } catch (e) {}
+      sondarDeVezEmQuando();
+    } else if (inicio.entrada === 'ENTRAR' && !lerSs(CHAVE_SESSAO)) {
+      sondarCanal();          // enquanto a pessoa digita e-mail e PIN, descobre se o canal passa
+    }
     if (!inicio.ok) return mostrarFalha(inicio.erro);
 
     if (inicio.entrada === 'INSTALAR' || inicio.instalado === false) {
@@ -241,7 +345,8 @@ function tratarEntrada(r) {
   if (r.ok === false && !r.entrada) return mostrarEntrada({ erroEntrada: r.erro });
   if (r.entrada === 'SEM_SESSAO') return sessaoTerminou();
   if (r.entrada === 'APP' || r.entrada === 'ESCOLHER_FILIAL') {
-    if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
+    if (r.token) { TOKEN = r.token; gravarSessao(TOKEN, (r.usuario && r.usuario.nome) || ''); }
+    ULTIMO_CONTATO = Date.now();
     if (r.entrada === 'APP') return montarSessao(r);
     return mostrarEscolhaFilial(r.filiais, r.usuario);
   }
@@ -254,30 +359,87 @@ function tratarEntrada(r) {
   return mostrarSemAcesso(r);
 }
 
-/* A aba recarregou: se ainda tem sessao, entra sem pedir o PIN de novo. */
+/*
+ * A aba recarregou: se ainda tem sessao, entra sem pedir o PIN de novo.
+ * 10/10 — a sessao valida NAO e mais jogada fora:
+ *   - canal barrado (sabido, ou a pagina de reserva foi recusada): sem um
+ *     clique o navegador nao deixa a moldura navegar, entao a tela pede um
+ *     clique em "Continuar como Fulano" (e nao o e-mail e o PIN);
+ *   - falha passageira: tenta de novo em 1,5 s; falhou de novo, o mesmo
+ *     "Continuar" (o clique tenta outra vez).
+ * Volta na tela em que a aba estava. A sessao so existe se passou pela regra
+ * do F5 (lerSessao) e o servidor confere de novo (1 h sem uso).
+ */
 async function retomarOuPedirEntrada(inicio) {
   if (inicio.sessaoInvalida) gravarSessao('');
   const salvo = lerSessao();
-  if (!salvo || inicio.erroEntrada) return mostrarEntrada(inicio);
+  if (!salvo || (inicio.erroEntrada && !inicio.retomavel)) return mostrarEntrada(inicio);
   TOKEN = salvo;
+  if (inicio.retomavel || (CANAL_BARRADO && URL_APP)) return mostrarContinuar();
   soMostrar('carregando');
-  try {
-    tratarEntrada(await chamarJSON('retomarSessao', { t: TOKEN, f: lerLocal(CHAVE_FILIAL) || '' }));
-  } catch (e) {
-    // Canal barrado (403): sem um clique o navegador nao deixa a moldura
-    // navegar a pagina, entao a pessoa entra de novo — o formulario de
-    // entrada tem a sua propria reserva (POST no /exec).
-    TOKEN = ''; gravarSessao('');
-    if (canalBloqueado(e)) {
-      return mostrarEntrada({ erroEntrada: 'Este computador bloqueia a conversa direta com o Google. ' +
-        'Entre de novo com o seu e-mail e PIN.' });
+  const onde = telaDaAba();
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    try {
+      const r = await chamarJSON('retomarSessao', { t: TOKEN, f: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' });
+      // Erro do servidor (banco se atualizando, trava): a sessao continua; o clique tenta de novo.
+      if (r && r.ok === false && !r.entrada) return mostrarContinuar({ erroEntrada: r.erro || 'O servidor não respondeu.' });
+      if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
+      return tratarEntrada(r);
+    } catch (e) {
+      if (canalBarradoDeVez(e) && URL_APP) { lembrarCanalBarrado(); return mostrarContinuar(); }
+      if (tentativa === 0 && falhaPassageira(e)) { await esperar(1500); continue; }
+      return mostrarContinuar({ erroEntrada: explicarErro(e) });
     }
-    mostrarEntrada({ erroEntrada: explicarErro(e) });
   }
 }
 
+/* Um clique continua a sessao desta aba — sem e-mail nem PIN. */
+function mostrarContinuar(info) {
+  info = info || {};
+  mostrarEntrada({ erroEntrada: info.erroEntrada || '' });
+  const caixa = el('entrar-continuar');
+  if (!caixa || !TOKEN) return;
+  const b = el('entrar-continuar-botao');
+  if (b) { b.disabled = false; b.innerHTML = 'Continuar como <b id="entrar-continuar-nome"></b>'; }
+  el('entrar-continuar-nome').textContent = lerSs(CHAVE_NOME) || 'a sessão desta aba';
+  const msg = el('entrar-continuar-msg');
+  if (msg) { msg.textContent = info.erroEntrada || ''; msg.className = 'entrar-msg' + (info.erroEntrada ? ' erro' : ''); }
+  caixa.classList.remove('oculto');
+  el('form-entrar').classList.add('oculto');
+  setTimeout(() => { const b = el('entrar-continuar-botao'); if (b) b.focus(); }, 60);
+}
+function esconderContinuar() {
+  const caixa = el('entrar-continuar'); if (caixa) caixa.classList.add('oculto');
+  const f = el('form-entrar'); if (f) f.classList.remove('oculto');
+}
+async function continuarSessao() {
+  const b = el('entrar-continuar-botao');
+  const onde = telaDaAba();
+  const campos = { t: TOKEN, filial: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' };
+  if (b) { b.disabled = true; b.innerHTML = 'Abrindo…'; }
+  // Canal barrado: ja vai por POST, dentro do clique.
+  if (CANAL_BARRADO && URL_APP) { navegarPelaPagina(campos); return; }
+  const clique = Date.now();
+  try {
+    const r = await chamarJSON('retomarSessao', { t: TOKEN, f: campos.filial, tela: campos.tela, p: campos.p });
+    if (r && r.ok === false && !r.entrada) throw new Error(r.erro || 'O servidor não respondeu.');
+    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
+    esconderContinuar();
+    tratarEntrada(r);
+  } catch (e) {
+    if (canalBloqueado(e) && URL_APP) {
+      if (canalBarradoDeVez(e)) lembrarCanalBarrado();
+      if (Date.now() - clique < 4500) { navegarPelaPagina(campos); return; }
+    }
+    mostrarContinuar({ erroEntrada: explicarErro(e) });
+  }
+}
+/* "Nao e voce?": a sessao desta aba acaba (no servidor tambem) e volta o e-mail e o PIN. */
+function naoSouEu() { esconderContinuar(); sair(); }
+
 function mostrarEntrada(info) {
   info = info || {};
+  esconderContinuar();
   soMostrar('entrar');
   const form = el('form-entrar');
   if (form && URL_APP) form.action = URL_APP;
@@ -352,6 +514,8 @@ async function entrarNoSistema(ev) {
   // A filial da ultima pessoa neste computador NAO vai junto: quem tem mais
   // de uma escolhe (antes caia direto na filial de quem usou antes).
   el('entrar-filial').value = (destinoDoLink() || {}).filial || '';
+  // Link de e-mail (?tela=...): a tela ja volta montada junto com a entrada (uma ida so).
+  if (el('entrar-tela')) el('entrar-tela').value = (destinoDoLink() || {}).tela || '';
   el('entrar-bilhete').value = bilheteDaPagina();
   // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
   if (CANAL_BARRADO && URL_APP) { enviarFormEntrada(); return false; }
@@ -359,7 +523,13 @@ async function entrarNoSistema(ev) {
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
   try {
-    const r = await chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo);
+    // A sonda (disparada quando a pagina abriu) corre junto com o entrar: se ela acusar o canal
+    // barrado enquanto o clique ainda vale, a entrada vai por POST na hora (catch abaixo).
+    const r = await Promise.race([
+      chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || ''),
+      canalBarradoPelaSonda(clique)
+    ]);
+    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
       el('entrar-codigo-caixa').classList.toggle('oculto', !r.pedirCodigo);
@@ -384,8 +554,8 @@ async function entrarNoSistema(ev) {
      * depois do clique: se a falha demorou mais, o proximo clique envia.
      */
     if (URL_APP) {
-      CANAL_BARRADO = true;
-      if (Date.now() - clique < 4500) { enviarFormEntrada(); return false; }
+      if (canalBarradoDeVez(e)) lembrarCanalBarrado(); else CANAL_BARRADO = true;
+      if (cliqueAindaVale(clique)) { enviarFormEntrada(); return false; }
       falar('A conexão com o Google falhou. Clique em Entrar de novo para continuar.', 'ok');
       return false;
     }
@@ -394,6 +564,26 @@ async function entrarNoSistema(ev) {
     if (!ENTRADA_ENVIADA) { b.disabled = false; b.textContent = 'Entrar'; }
   }
   return false;
+}
+
+/* Rejeita (como erro de canal) se a sonda acusar o canal barrado enquanto o clique vale. */
+function canalBarradoPelaSonda(clique) {
+  return new Promise((ok, erro) => {
+    const olhar = () => {
+      if (SONDA === 'barrado' || (CANAL_BARRADO && lerLocal(CHAVE_CANAL))) return erro(new Error('PERMISSION_DENIED (sonda do canal)'));
+      if (SONDA !== 'indo' || !cliqueAindaVale(clique)) return;   // sonda ok, ou clique vencido: o entrar decide
+      setTimeout(olhar, 100);
+    };
+    olhar();
+  });
+}
+/*
+ * O navegador so deixa a moldura navegar a pagina ate ~5 s depois de um
+ * clique (ativacao do usuario). Onde existe, a API diz na hora; senao, conta 4,5 s.
+ */
+function cliqueAindaVale(clique) {
+  const ua = navigator.userActivation;
+  return ua ? ua.isActive : Date.now() - clique < 4500;
 }
 
 /*
@@ -419,9 +609,52 @@ function apagarTelaDaPessoa() {
 /* Sessao vencida no meio do uso. */
 function sessaoTerminou() {
   if (!TOKEN && el('entrar') && !el('entrar').classList.contains('oculto')) return;
-  TOKEN = ''; gravarSessao(''); SESSAO = null; apagarTelaDaPessoa();
+  TOKEN = ''; gravarSessao(''); SESSAO = null; apagarTelaDaPessoa(); avisoSessao(false);
   try { fecharJanela(); } catch (e) {}
-  mostrarEntrada({ erroEntrada: 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.' });
+  mostrarEntrada({ erroEntrada: 'Sua sessão terminou (ela acaba depois de 1 hora sem usar o sistema). Entre de novo com o seu e-mail e PIN.' });
+}
+
+/*
+ * 1 HORA SEM USO, SEM SUSTO (10/10). A regra nao muda: 1 h sem usar o
+ * sistema e a sessao acaba. O que muda e o que conta como uso:
+ *   - a pessoa mexendo na tela (tecla, clique, rolagem) sem ir ao servidor
+ *     ha 10 min: um manterSessao() discreto renova (so com o canal normal);
+ *     aba esquecida, ninguem mexendo, nao renova nada;
+ *   - 50 min sem ir ao servidor: faixa "sua sessao termina em N min" com o
+ *     botao "Continuar conectado".
+ */
+let ULTIMA_ATIVIDADE = Date.now();
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
+  document.addEventListener(ev, () => { ULTIMA_ATIVIDADE = Date.now(); }, { capture: true, passive: true }));
+function vigiarSessao() {
+  if (!TOKEN || !SESSAO) return;
+  const agora = Date.now(), parado = agora - ULTIMO_CONTATO;
+  if (!CANAL_BARRADO && agora - ULTIMA_ATIVIDADE < 5 * 60000 && parado > 10 * 60000) {
+    chamar('manterSessao', ctx()).then((r) => {
+      let ok = true; try { ok = JSON.parse(r).ok !== false; } catch (e) {}
+      if (ok) avisoSessao(false); else sessaoTerminou();
+    }).catch(() => {});
+    return;
+  }
+  avisoSessao(parado > 50 * 60000 ? Math.max(1, Math.round((60 * 60000 - parado) / 60000)) : false);
+}
+setInterval(vigiarSessao, 60000);
+function avisoSessao(minutos) {
+  let faixa = el('aviso-sessao');
+  if (minutos === false) { if (faixa) faixa.remove(); return; }
+  if (!faixa) {
+    faixa = document.createElement('div'); faixa.id = 'aviso-sessao'; faixa.className = 'faixa-aviso';
+    const pagina = el('pagina'); if (pagina && pagina.parentNode) pagina.parentNode.insertBefore(faixa, pagina); else document.body.prepend(faixa);
+  }
+  faixa.innerHTML = `Sua sessão termina em ${minutos} min por falta de uso.
+    <button class="botao-texto" onclick="continuarConectado()">Continuar conectado</button>`;
+}
+function continuarConectado() {
+  if (CANAL_BARRADO) { navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: paginaAtual === 'modulos' ? '' : paginaAtual }); return; }
+  chamar('manterSessao', ctx()).then((r) => {
+    let ok = true; try { ok = JSON.parse(r).ok !== false; } catch (e) {}
+    if (ok) avisoSessao(false); else sessaoTerminou();
+  }).catch((e) => avisar(explicarErro(e), true));
 }
 
 /* A propria pessoa troca o PIN (o "senha" do GSL). */
@@ -540,6 +773,7 @@ function mostrarEscolhaFilial(filiais, usuario) {
 function escolherFilial(codigo) {
   gravarLocal(CHAVE_FILIAL, codigo);
   if (typeof google === 'undefined' || !google.script) { irParaFilial(codigo); return false; }
+  if (CANAL_BARRADO && URL_APP) { irParaFilial(codigo); return false; }      // canal barrado: dentro do clique
   soMostrar('carregando');
   let respondeu = false;
   // Sem resposta em 12 s: volta aos cartoes. A navegacao de reserva precisa
@@ -564,7 +798,8 @@ function escolherFilial(codigo) {
 }
 
 function irParaFilial(codigo) {
-  if (!navegarPelaPagina({ t: TOKEN, filial: codigo })) {
+  const destino = destinoDoLink();
+  if (!navegarPelaPagina({ t: TOKEN, filial: codigo, tela: (destino && destino.tela) || '' })) {
     mostrarFalha('Não consegui abrir a filial e não sei o endereço do sistema para recarregar.');
   }
 }
@@ -588,7 +823,8 @@ function montarSessao(r) {
   if (quemEra && quemEra !== r.usuario.email) apagarTelaDaPessoa();   // outra pessoa: nada da anterior fica
   const filialEra = FILIAL;
   SESSAO = r;
-  if (r.token) { TOKEN = r.token; gravarSessao(TOKEN); }
+  if (r.token) { TOKEN = r.token; gravarSessao(TOKEN, (r.usuario && r.usuario.nome) || ''); }
+  ULTIMO_CONTATO = Date.now();
   FILIAL = (r.filial && r.filial.codigo) || '';
   // Outra filial: o portal do Jovem Aprendiz volta ao comeco (a busca e o aprendiz eram da outra).
   if (filialEra && filialEra !== FILIAL && typeof apzZerar === 'function') apzZerar();
@@ -617,8 +853,12 @@ function montarSessao(r) {
   const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
   conferirVersao(r);
   soMostrar('aplicacao');
-  // Tela que ja veio pronta no HTML (navegacao de reserva): abre direto.
+  // A pagina veio de uma gravacao pela reserva: o recado (ou o erro) aparece aqui.
+  if (r.resultadoAcao) setTimeout(() => mostrarResultadoAcao(r.resultadoAcao), 0);
+  // Tela que ja veio pronta no HTML (navegacao de reserva, link de e-mail, F5): abre direto.
   if (r.telaEmbutida && r.telaEmbutida.resposta) {
+    const destino = destinoDoLink();
+    if (destino && destino.tela === r.telaEmbutida.id) esquecerDestinoDoLink();
     const p = r.telaEmbutida.params || {};
     CACHE_TELAS[chaveTela(r.telaEmbutida.id, p)] = { resposta: r.telaEmbutida.resposta, quando: Date.now() };
     return abrir(r.telaEmbutida.id, p);
@@ -641,6 +881,18 @@ function montarSessao(r) {
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
 const BUILD_APP = '2026.10.09c';
+function mostrarResultadoAcao(x) {
+  if (!x) return;
+  if (x.ok === false) {
+    const msg = String(x.erro || 'Não consegui gravar.');
+    if (/MailApp|send_mail|autoriz/i.test(msg)) return janelaAutorizarEmail(msg);
+    return avisar(msg, true);
+  }
+  if (x.avisoEmail) avisar(x.avisoEmail, true);
+  else if (x.recado) avisar(x.recado);
+  else if (x.recadoBotao) avisar(x.recadoBotao);
+}
+
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
@@ -691,8 +943,16 @@ function canalBloqueado(e) {
   // "reading from storage ... PERMISSION_DENIED" e o erro do google.script.run
   // quando ha mais de uma conta Google aberta no navegador — o caso do
   // computador compartilhado. Antes so o 403 ativava a reserva.
-  return /\b40[13]\b|NetworkError|Falha na conex|PERMISSION_DENIED|reading from storage|armazenamento/i
-    .test(String((e && e.message) || e || ''));
+  return canalBarradoDeVez(e) || falhaPassageira(e);
+}
+/* O Google recusa a conversa nesta maquina (varias contas, cookie barrado): vale lembrar. */
+function canalBarradoDeVez(e) {
+  return /\b40[13]\b|PERMISSION_DENIED|reading from storage|armazenamento/i.test(String((e && e.message) || e || ''));
+}
+/* Rede que caiu um instante, servidor que nao respondeu: tenta de novo, nao marca a maquina. */
+function falhaPassageira(e) {
+  const m = String((e && e.message) || e || '');
+  return !canalBarradoDeVez(e) && /NetworkError|Falha na conex|HTTP (0|5\d\d)\b|Failed to fetch|timeout|tempo esgotado/i.test(m);
 }
 
 /* Bilhete de uso unico que o servidor pos nesta pagina (ver doPost). */
@@ -745,6 +1005,11 @@ function navegarPelaPagina(campos) {
   if (!URL_APP) return false;
   campos = Object.assign({ bilhete: bilheteDaPagina() }, campos);
   NAVEGACAO_PENDENTE = campos;
+  // 10/10: o navegador so deixa a moldura navegar ate ~5 s depois de um clique. Sem clique
+  // valido, a navegacao era barrada em silencio (so um erro no console) e o "Continuar" vinha
+  // 6 s depois. Agora ele vem na hora.
+  const ua = navigator.userActivation;
+  if (ua && !ua.isActive) { pedirCliqueParaNavegar(); return true; }
   const f = document.createElement('form');
   f.method = 'post'; f.action = URL_APP; f.target = '_top'; f.style.display = 'none';
   Object.keys(campos).forEach((k) => {
@@ -760,12 +1025,27 @@ function navegarPelaPagina(campos) {
   setTimeout(() => {
     // Navegacao em andamento (servidor lento) nao e bloqueio: nada a fazer.
     if (NAVEGACAO_PENDENTE !== campos || SAINDO_DA_PAGINA) return;
-    abrirJanela('Continuar', `
-      <p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google,
-        então o sistema continua recarregando a página. Clique em <b>Continuar</b>.</p>`, `
-      <button class="botao" onclick="fecharJanela(); navegarPelaPagina(NAVEGACAO_PENDENTE)">Continuar</button>`);
+    pedirCliqueParaNavegar();
   }, 6000);
   return true;
+}
+/* O clique que o navegador exige: na janela e, se ela for fechada, tambem na pagina. */
+function pedirCliqueParaNavegar() {
+  abrirJanela('Continuar', `
+    <p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google,
+      então o sistema continua recarregando a página. Clique em <b>Continuar</b>.</p>`, `
+    <button class="botao" onclick="fecharJanela(); navegarPelaPagina(NAVEGACAO_PENDENTE)">Continuar</button>`);
+  setTimeout(() => { const b = document.querySelector('#janela-rodape .botao'); if (b) b.focus(); }, 50);
+  const pg = el('pagina');
+  if (pg && /Abrindo pela navega/.test(pg.textContent || '')) {
+    pg.innerHTML = '<div class="vazio">Este computador precisa de um clique para abrir. ' +
+      '<button class="botao" onclick="navegarPelaPagina(NAVEGACAO_PENDENTE)">Continuar</button></div>';
+  }
+}
+/* Codigo unico de uma gravacao pela reserva: o mesmo POST reenviado nao grava duas vezes. */
+function novoIdem() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
 }
 
 async function pararSimulacao() {
@@ -781,7 +1061,7 @@ async function pararSimulacao() {
  */
 function sair() {
   const t = TOKEN;
-  TOKEN = ''; gravarSessao(''); SESSAO = null; esquecerTelas(); apagarTelaDaPessoa();
+  TOKEN = ''; gravarSessao(''); SESSAO = null; esquecerTelas(); apagarTelaDaPessoa(); avisoSessao(false);
   // Canal barrado: o sairDoSistema pelo google.script.run tambem seria
   // barrado e a sessao continuaria valida no servidor. Sair e um clique,
   // entao a pagina pode navegar: a saida vai por POST.
@@ -902,6 +1182,7 @@ function abrirModulos() {
   }
   moduloAtual = null;
   paginaAtual = 'modulos'; paramsAtual = {};
+  lembrarTelaDaAba('', {});
   montarMenu(SESSAO.telas || []);
 
   el('titulo-pagina').textContent = 'Sistema de Gestão Operacional';
@@ -1001,6 +1282,7 @@ async function abrir(idTela, params) {
     return avisar('O seu nível de acesso não abre esta tela.', true);
   }
   paginaAtual = idTela; paramsAtual = params || {};
+  lembrarTelaDaAba(idTela, paramsAtual);
 
   // Entrar por atalho (um botao da Central, por exemplo) tem que acender o
   // modulo certo na lateral, senao a pessoa fica sem saber onde esta.
@@ -1019,7 +1301,9 @@ async function abrir(idTela, params) {
   const chave = chaveTela(idTela, paramsAtual);
   const guardado = CACHE_TELAS[chave];
 
-  if (guardado) {
+  // Canal barrado: so a tela fresca (menos de 20 s) do cache serve; o resto vai pela pagina,
+  // AINDA DENTRO DO CLIQUE (antes: uma chamada condenada de 1 a 6 s e, se o clique vencesse, o "Continuar").
+  if (guardado && !(CANAL_BARRADO && Date.now() - guardado.quando >= 20000)) {
     // Vindo do cache do navegador: entra deslizando so quando a tela
     // MUDA de verdade; voltar para a mesma tela nao reanima nada.
     pintar(idTela, guardado.resposta, paginaAnterior === idTela);
@@ -1028,6 +1312,7 @@ async function abrir(idTela, params) {
     revalidar(idTela, paramsAtual, chave);      // por tras, sem "Carregando"
     return;
   }
+  if (CANAL_BARRADO && abrirPorNavegacao(idTela, paramsAtual)) return;
 
   el('pagina').innerHTML = '<div class="vazio">Carregando…</div>';
   pedidosDoUsuario++;
@@ -1066,6 +1351,7 @@ async function abrir(idTela, params) {
  *   - para na hora se a pessoa trocar de modulo.
  */
 async function prebuscarModulo(idModulo) {
+  if (CANAL_BARRADO) return;                       // canal barrado: nada de chamada de fundo condenada
   const alvo = (SESSAO && SESSAO.telas || []).filter((t) => t.modulo === idModulo);
   for (const t of alvo) {
     if (moduloAtual !== idModulo) return;            // a pessoa saiu do modulo
@@ -1081,6 +1367,7 @@ async function prebuscarModulo(idModulo) {
 
 /** Busca de novo em segundo plano e so repinta se mudou de verdade. */
 async function revalidar(idTela, params, chave) {
+  if (CANAL_BARRADO) return;
   try {
     const r = await carregarTelaSrv(idTela, params);
     const antes = CACHE_TELAS[chave];
@@ -1176,6 +1463,29 @@ async function agir(acao, params, recado) {
   // voltavam sem ele depois da acao.
   const rotulo = botao ? botao.innerHTML : '';
   if (botao) { botao.disabled = true; botao.textContent = 'Aguarde…'; }
+
+  /*
+   * 10/10 — CANAL BARRADO: a gravacao vai pela pagina (POST no /exec), dentro
+   * do clique, pela mesma porta do servidor; a pagina volta com a tela atual
+   * ja atualizada e o recado da acao. Fotos e arquivos ficam de fora (pesados
+   * demais para o formulario): a tela explica.
+   */
+  if (CANAL_BARRADO && URL_APP && FILIAL && TOKEN) {
+    const corpo = JSON.stringify(params || {});
+    if (temArquivo(params) || corpo.length > 200000) {
+      if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
+      sondarCanal();
+      const e = new Error(SEM_CANAL_PARA_ARQUIVO);
+      avisar(e.message, true);
+      throw e;
+    }
+    const tela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
+    const temP = tela && paramsAtual && Object.keys(paramsAtual).length;
+    if (navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: tela, p: temP ? JSON.stringify(paramsAtual) : '',
+        acao: acao, ap: corpo, idem: novoIdem(), recado: recado || '' })) {
+      return new Promise(() => {});      // a pagina vai embora; quem esperava o resultado nao roda
+    }
+  }
 
   pedidosDoUsuario++;
   try {

@@ -472,6 +472,8 @@ function paginaDiagnostico_() {
 
   const linha = (r, v) => '<tr><td style="padding:8px 14px;color:#555">' + r +
     '</td><td style="padding:8px 14px;font-weight:bold">' + v + '</td></tr>';
+  // typeof: o Auth.gs da entrega anterior (colado pela metade) nao tem o resumo — a pagina abre assim mesmo
+  const sessoes = typeof resumoDasSessoes_ === 'function' ? resumoDasSessoes_() : null;
 
   const html =
     '<div style="font-family:Arial,sans-serif;max-width:640px;margin:40px auto;color:#14152B">' +
@@ -482,6 +484,8 @@ function paginaDiagnostico_() {
     linha('Cadastrada no GSL?', d.cadastrado ? 'SIM — ' + (d.perfil || '') : 'NÃO') +
     linha('Endereço usado pelo sistema', htmlSeguro(urlDoApp_() || '(vazio)') +
       (/\/dev$/.test(urlDoApp_()) ? ' — é o de TESTE: grave o /exec na propriedade URL_APP' : '')) +
+    (sessoes ? linha('Sessões que o cache do Google perdeu e a cópia salvou (últimas 6 h)', String(sessoes.salvasPelaLoja)) +
+      linha('Sessões guardadas agora', sessoes.naLoja < 0 ? '(não consegui ler)' : String(sessoes.naLoja)) : '') +
     '</table>' +
     '<p style="line-height:1.7;background:#FFF8D6;padding:14px 18px;border-left:4px solid #EA6D0B">' +
     d.veredito + '</p></div>';

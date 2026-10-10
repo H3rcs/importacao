@@ -36,6 +36,47 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
 
+## Pedido de 10/10 (desempenho: computador que barra o Google, sessão que caía sozinha, bolinha das ações em aberto)
+
+**O que acontecia**
+- **Computador que barra a conversa com o Google** (várias contas Google no navegador, ou bloqueio da rede): cada clique tentava primeiro o caminho normal, e o Google demorava para recusar. Só depois aparecia o "Continuar" e a página recarregava. Daí o "lento, lento, lento".
+- **Saía sozinho da conta:** a sessão ficava só no cache do Google, e o Google apaga o que está no cache quando precisa de espaço (mais ainda com muita gente usando). Quando isso acontecia, o sistema pedia e-mail e PIN de novo, com a pessoa no meio do trabalho.
+
+**O que mudou**
+1. **O computador que barra o Google vai direto pela página.** Na primeira recusa, o sistema anota que aquele computador está barrado (a anotação vale 12 horas) e passa a usar direto o caminho da página: um clique, uma recarga, sem espera e sem a tela de "Continuar". Isso vale para abrir telas, trocar de filial e também para **gravar** (salvar, concluir, comentar), que antes falhava nesses computadores. No máximo a cada 10 minutos, o sistema testa sem a pessoa perceber se a conversa voltou.
+   - **F5** volta na mesma tela. Se a página pedir, é um clique em **Continuar como <nome>**, sem PIN. Se não for você, use **Não é você? Entrar com outro e-mail**.
+   - **Exceção:** enviar arquivo ou foto ainda precisa da conversa direta com o Google. Nesses computadores, a tela avisa para usar outro computador, ou um perfil do Chrome só com a conta da Bartofil.
+2. **A sessão não cai mais sozinha.** Além do cache, o sistema guarda uma segunda cópia da sessão no próprio script: o e-mail e a hora, numa chave que é um resumo do código da sessão (nunca o código em si, nunca o PIN). Se o cache perder a sessão, a cópia salva. A regra de 1 hora parada continua, com duas melhorias:
+   - quem está mexendo na tela (clicando, digitando, rolando) tem a sessão renovada sozinha;
+   - com 50 minutos sem nenhum contato, aparece um aviso com o botão **Continuar conectado**.
+
+   **Sair** encerra as duas cópias.
+3. **Mais agilidade no servidor:**
+   - cada pedido consulta o cache uma vez só (antes eram várias idas);
+   - as tabelas que as telas leem ficam guardadas no cache por até 30 minutos e se renovam sozinhas a cada gravação feita pelo sistema;
+   - gravar já devolve a tela atualizada: uma ida só, sem a lista piscar em "Carregando…";
+   - o aquecedor (a cada 15 minutos, das 5h às 21h) prepara as tabelas de todas as filiais para todo mundo. Antes ele só montava as telas do administrador.
+4. **Bolinha no cartão do módulo.** No menu, os cartões do **Calendário** (Plano de Ação) e da **Limpeza** mostram uma bolinha com o número de ações em aberto **da pessoa**: é o mesmo número do "Em aberto" da tela do plano. A bolinha fica **vermelha com "!"** quando alguma está atrasada. Sem ação em aberto, ela não aparece. Ela se atualiza depois de salvar ou concluir, e ao voltar para o menu (no máximo a cada 2 minutos). Funciona também nos computadores que barram o Google.
+
+**Importante: editou a planilha à mão?** Mudanças feitas pelo sistema aparecem na hora. Se alguém editar o GSL_BANCO direto na planilha, clique em **Atualizar dados**: as cópias no cache duram até 30 minutos.
+
+**O melhor conserto para os computadores do CD (para o TI):** o Google barra a conversa quando há várias contas Google abertas no navegador e a da Bartofil não é a primeira. Qualquer uma destas resolve:
+- deixar a conta **@bartofil.com.br como a primeira** do navegador (sair de todas, entrar primeiro com a da Bartofil, depois nas outras);
+- criar um **perfil do Chrome só para o GSL**, com apenas a conta da Bartofil.
+
+Com isso o sistema usa o caminho direto, que é mais rápido e permite enviar fotos.
+
+**Diagnóstico:** `…/exec?diagnostico=1` agora mostra também quantas sessões o cache perdeu e a cópia salvou nas últimas 6 horas. Cada uma delas seria um "saiu sozinho" na versão anterior.
+
+**Arquivos desta entrega:** `App.html`, `Index.html`, `Estilo.html`, `Codigo.gs`, `Auth.gs`, `Banco.gs`, `Acoes.gs` e `Filiais.gs`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum, a faixa amarela no topo diz qual. Agora ela confere também o `Index.html` e o `Estilo.html`.
+
+**Para conferir num computador do CD que barra o Google:**
+1. Entre com e-mail e PIN. A página recarrega uma vez e abre o menu, sem a tela de "Continuar".
+2. Abra um módulo. Uma recarga e a tela aparece, sem esperar.
+3. Aperte F5. A página volta na mesma tela (no máximo um clique em "Continuar como …").
+4. Conclua uma ação do Plano de Ação. Ela é gravada, e a bolinha do Calendário diminui.
+5. Clique em Sair e aperte F5. A página pede e-mail e PIN de novo.
+
 ## Pedido de 09/10 (Jovem Aprendiz: o Portal RH Aprendiz dentro do GSL)
 
 O "Portal RH Aprendiz" virou um módulo do GSL: card **Jovem Aprendiz** no menu, tela **Portal RH Aprendiz**. A cara e as contas são as do programa antigo:
@@ -237,8 +278,9 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz (38 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz (40 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha (39 casos)
+node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache (11 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha (47 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

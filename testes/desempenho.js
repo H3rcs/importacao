@@ -86,6 +86,9 @@ caso('sessao: o cache perdeu a sessao (despejo) e a pessoa continua; o diagnosti
   afirmar(tela(m, s, 'acoes'), 'abriu a tela com a sessao salva pela loja');
   afirmar(Number(m.cache.get('diag_sessao_salva_pela_loja').v) === 1, 'contou uma sessao salva');
   afirmar([...m.cache.keys()].some((k) => k === 'sess_' + s.t), 'a sessao voltou para o cache');
+  const diag = novaExecucao(m, PASTA, { contaGoogle: GERENTE }, OP).doGet({ parameter: { diagnostico: '1' } }).getContent();
+  afirmar(/a cópia salvou \(últimas 6 h\)<\/td><td[^>]*>1</.test(diag) && /Sessões guardadas agora<\/td><td[^>]*>1</.test(diag),
+    'o ?diagnostico=1 mostra as contas: ' + diag.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 400));
 });
 
 caso('sessao: 1 h sem uso acaba (pela loja tambem) e apaga as duas copias; Sair apaga as duas', () => {

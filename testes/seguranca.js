@@ -67,7 +67,7 @@ const bloqueadas = [
   ['lerPlanilhaAprendiz_', LINK_APZ.split('/')[5]], ['idPlanilhaAprendiz_'],
   // 10/10: sessao duravel, gravar pela reserva, cache — tudo interno
   ['acaoPelaPagina_', { t: 'x', acao: 'excluirAcao', ap: '{}' }], ['embutirTela_', {}, 'x', 'acoes', ''],
-  ['encerrarSessao_', 'f'.repeat(64)], ['podarSessoes_', true], ['publicarGeracoes_'], ['preLerCache_', 'x'],
+  ['encerrarSessao_', 'f'.repeat(64)], ['podarSessoes_', true], ['resumoDasSessoes_'], ['publicarGeracoes_'], ['preLerCache_', 'x'],
   ['cadastrosDeAcesso_'], ['lojaDeSessoes_'], ['chaveSessaoDuravel_', 'x']
 ];
 bloqueadas.forEach(([fn, ...a]) => {

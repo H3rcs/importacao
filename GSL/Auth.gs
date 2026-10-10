@@ -641,6 +641,17 @@ function contarDiagnostico_(nome) {
   } catch (e) {}
 }
 
+/* Para o ?diagnostico=1: quantas sessoes a loja salvou (6 h) e quantas estao guardadas nela agora. */
+function resumoDasSessoes_() {
+  const r = { salvasPelaLoja: 0, naLoja: 0 };
+  try { r.salvasPelaLoja = Number(CacheService.getScriptCache().get('diag_sessao_salva_pela_loja') || 0); } catch (e) {}
+  try {
+    r.naLoja = Object.keys(lojaDeSessoes_().getProperties())
+      .filter(function (k) { return k.indexOf(PREFIXO_SESSAO_DURAVEL) === 0; }).length;
+  } catch (e) { r.naLoja = -1; }
+  return r;
+}
+
 /* A pessoa inteira (com o resumo do PIN), lida da tabela — nao do cache de acessos. */
 function registroDeAcesso_(email) {
   const alvo = String(email || '').toLowerCase().trim();

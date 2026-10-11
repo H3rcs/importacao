@@ -83,9 +83,12 @@ function lembrarTelaDaAba(tela, params) {
   gravarSs(CHAVE_ONDE, JSON.stringify({ f: FILIAL, tela: tela || '', p: params && Object.keys(params).length ? JSON.stringify(params) : '' }));
 }
 function telaDaAba() {
-  const d = destinoDoLink();
-  if (d && d.tela) return { tela: d.tela, p: '', f: d.filial || '' };
-  try { return JSON.parse(lerSs(CHAVE_ONDE) || '{}') || {}; } catch (e) { return {}; }
+  // Link de e-mail vale mais. O ?tela= que a propria pagina da reserva poe na barra (daAba) e o da
+  // tela que ELA abriu: a aba pode ter andado depois (outra tela, filtros) — vale a posicao da aba.
+  const d = destinoDoLink(), onde = lerSs(CHAVE_ONDE);
+  if (d && d.tela && !(d.daAba && onde)) return { tela: d.tela, p: '', f: d.filial || '' };
+  if (d && d.daAba) esquecerDestinoDoLink();      // senao o menu (montarSessao) abriria a tela velha do endereco
+  try { return JSON.parse(onde || '{}') || {}; } catch (e) { return {}; }
 }
 
 /*
@@ -112,16 +115,19 @@ function canalBarradoLembrado() {
   const t = Number(lerLocal(CHAVE_CANAL) || 0);
   return !!t && Date.now() - t < CANAL_LEMBRA_MS;
 }
-let ULTIMO_CONTATO = Date.now();     // ultima ida ao servidor que deu certo (ver vigiarSessao)
+let ULTIMO_CONTATO = Date.now();     // ultima ida ao servidor que conferiu a sessao (ver vigiarSessao)
+const NAO_CONFERE_SESSAO = { renovarBilhete: true, sondarCanal: true, instalar: true };
 
 const chamar = (f, ...a) => new Promise((ok, erro) => {
+  const tk = TOKEN;                  // a sessao de quando o pedido saiu
   google.script.run.withSuccessHandler((v) => {
     if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado();   // passou: nao e mais barrado
-    if (TOKEN) ULTIMO_CONTATO = Date.now();
+    if (TOKEN && TOKEN === tk && !NAO_CONFERE_SESSAO[f]) ULTIMO_CONTATO = Date.now();
     ok(v);
   }).withFailureHandler((e) => {
-    // Sessao vencida (sem uso) ou apagada: volta para a entrada.
-    if (/\[SESSAO\]/.test(String((e && e.message) || e || ''))) sessaoTerminou();
+    // Sessao vencida (sem uso) ou apagada: volta para a entrada — so se a resposta e da sessao
+    // de agora (a de quem saiu, chegando atrasada, derrubava quem entrou depois).
+    if (/\[SESSAO\]/.test(String((e && e.message) || e || '')) && tk && tk === TOKEN) sessaoTerminou();
     if (canalBarradoDeVez(e)) lembrarCanalBarrado();
     erro(e);
   })[f](...a);
@@ -311,14 +317,19 @@ async function iniciar() {
     const inicio = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true };
     URL_APP = inicio.urlApp || '';
     if (inicio.viaPost || canalBarradoLembrado()) CANAL_BARRADO = true;   // esta pagina ja veio pela reserva, ou o navegador ja sabe
+    // A gravacao que esta aba mandou pela pagina (ver navegarPelaPagina): esta pagina e a resposta.
+    ACAO_ENVIADA = Date.now() - Number(lerSs(CHAVE_ACAO) || 0) < 5 * 60000;
+    gravarSs(CHAVE_ACAO, '');
     if (inicio.viaPost) {
       // A sessao desta pagina veio no proprio HTML: a marca do pagehide anterior nao vale mais.
-      gravarSs(CHAVE_SAIDA, '');
+      // Pagina RECUSADA (bilhete): a sessao nao veio — a marca decide o "Continuar" (lerSessao).
+      if (!inicio.retomavel) gravarSs(CHAVE_SAIDA, '');
       // F5 ou Voltar numa pagina que veio por POST reenviava o POST (bilhete ja usado: "Por
       // seguranca..." e e-mail e PIN de novo). Trocando a entrada do historico, viram um GET, e a
       // aba continua com um clique. A tela vai no endereco para o "Continuar" voltar nela.
       try {
-        const em = inicio.telaEmbutida && inicio.telaEmbutida.id ? { tela: inicio.telaEmbutida.id } : {};
+        // aba=1: o F5 sabe que esta tela foi a que a pagina abriu, nao um link (ver telaDaAba).
+        const em = inicio.telaEmbutida && inicio.telaEmbutida.id ? { tela: inicio.telaEmbutida.id, aba: '1' } : {};
         if (inicio.filial && inicio.filial.codigo) em.filial = inicio.filial.codigo;
         google.script.history.replace(null, em, '');
       } catch (e) {}
@@ -379,9 +390,14 @@ function tratarEntrada(r) {
 async function retomarOuPedirEntrada(inicio) {
   if (inicio.sessaoInvalida) gravarSessao('');
   const salvo = lerSessao();
-  if (!salvo || (inicio.erroEntrada && !inicio.retomavel)) return mostrarEntrada(inicio);
+  // A gravacao mandada pela pagina voltou na ENTRADA (pagina recusada, sessao vencida): nao foi feita.
+  const naoFeita = ACAO_ENVIADA ? 'A última gravação não foi feita: faça de novo. ' : '';
+  ACAO_ENVIADA = false;
+  if (!salvo || (inicio.erroEntrada && !inicio.retomavel)) {
+    return mostrarEntrada(naoFeita ? Object.assign({}, inicio, { erroEntrada: naoFeita + (inicio.erroEntrada || '') }) : inicio);
+  }
   TOKEN = salvo;
-  if (inicio.retomavel || (CANAL_BARRADO && URL_APP)) return mostrarContinuar();
+  if (inicio.retomavel || (CANAL_BARRADO && URL_APP)) return mostrarContinuar(naoFeita ? { erroEntrada: naoFeita + 'Clique em Continuar.' } : undefined);
   soMostrar('carregando');
   const onde = telaDaAba();
   for (let tentativa = 0; tentativa < 2; tentativa++) {
@@ -487,7 +503,7 @@ function liberarBotaoEntrar() {
 }
 // Voltar do navegador com a pagina guardada (bfcache): o botao nao fica preso em "Entrando…".
 window.addEventListener('pageshow', function (ev) {
-  if (ev.persisted) { SAINDO_DA_PAGINA = false; liberarBotaoEntrar(); }
+  if (ev.persisted) { SAINDO_DA_PAGINA = false; GRAVANDO_PELA_PAGINA = 0; liberarBotaoEntrar(); }
 });
 
 /* Trocou o e-mail: o codigo e a repeticao do PIN eram do primeiro acesso de OUTRO e-mail. */
@@ -633,19 +649,35 @@ function sessaoTerminou() {
 let ULTIMA_ATIVIDADE = Date.now();
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
   document.addEventListener(ev, () => { ULTIMA_ATIVIDADE = Date.now(); }, { capture: true, passive: true }));
+/*
+ * O servidor anota o uso de 5 em 5 min (cache) e de 10 em 10 min (loja): o
+ * prazo dele pode vencer ate 10 min antes da hora cheia. O relogio daqui conta
+ * 50 min, o prazo mais curto: a faixa aparece aos 40 e, aos 50 sem ir ao
+ * servidor E sem ninguem mexer na tela, a sessao acaba aqui tambem — a tela de
+ * quem foi embora nao fica aberta para o proximo do computador.
+ */
+const SESSAO_LOCAL_MS = 50 * 60000, AVISO_SESSAO_MS = 40 * 60000;
 function vigiarSessao() {
   if (!TOKEN || !SESSAO) return;
-  const agora = Date.now(), parado = agora - ULTIMO_CONTATO;
-  if (!CANAL_BARRADO && agora - ULTIMA_ATIVIDADE < 5 * 60000 && parado > 10 * 60000) {
+  const agora = Date.now(), parado = agora - ULTIMO_CONTATO, quieto = agora - ULTIMA_ATIVIDADE;
+  if (!CANAL_BARRADO && quieto < 5 * 60000 && parado > 10 * 60000) {
+    const tk = TOKEN;
     chamar('manterSessao', ctx()).then((r) => {
+      if (tk !== TOKEN) return;                 // outra pessoa entrou nesse meio tempo
       let ok = true; try { ok = JSON.parse(r).ok !== false; } catch (e) {}
       if (ok) avisoSessao(false); else sessaoTerminou();
     }).catch(() => {});
     return;
   }
-  avisoSessao(parado > 50 * 60000 ? Math.max(1, Math.round((60 * 60000 - parado) / 60000)) : false);
+  if (parado >= SESSAO_LOCAL_MS && quieto >= SESSAO_LOCAL_MS) return encerrarPorFaltaDeUso();
+  avisoSessao(parado > AVISO_SESSAO_MS ? Math.max(0, Math.round((SESSAO_LOCAL_MS - parado) / 60000)) : false);
 }
 setInterval(vigiarSessao, 60000);
+function encerrarPorFaltaDeUso() {
+  const t = TOKEN;
+  if (t && !CANAL_BARRADO) { try { google.script.run.withFailureHandler(function () {}).sairDoSistema({ t: t }); } catch (e) {} }
+  sessaoTerminou();
+}
 function avisoSessao(minutos) {
   let faixa = el('aviso-sessao');
   if (minutos === false) { if (faixa) faixa.remove(); return; }
@@ -653,15 +685,36 @@ function avisoSessao(minutos) {
     faixa = document.createElement('div'); faixa.id = 'aviso-sessao'; faixa.className = 'faixa-aviso';
     const pagina = el('pagina'); if (pagina && pagina.parentNode) pagina.parentNode.insertBefore(faixa, pagina); else document.body.prepend(faixa);
   }
-  faixa.innerHTML = `Sua sessão termina em ${minutos} min por falta de uso.
+  faixa.innerHTML = `${minutos > 0 ? `Sua sessão termina em ${minutos} min por falta de uso.` : 'Sua sessão está terminando por falta de uso.'}
     <button class="botao-texto" onclick="continuarConectado()">Continuar conectado</button>`;
 }
+let CONFIRMOU_RECARGA = false;
 function continuarConectado() {
-  if (CANAL_BARRADO) { navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: paginaAtual === 'modulos' ? '' : paginaAtual }); return; }
+  if (CANAL_BARRADO) {
+    // Sem o canal, continuar conectado e recarregar a pagina: o que estiver sendo escrito numa janela se perderia.
+    if (temTextoDigitado() && !CONFIRMOU_RECARGA) {
+      CONFIRMOU_RECARGA = true;
+      return avisar('Para continuar conectado, a página vai recarregar. Salve (ou copie) o que está escrevendo e clique de novo em "Continuar conectado".', true);
+    }
+    CONFIRMOU_RECARGA = false;
+    const tela = paginaAtual === 'modulos' ? '' : paginaAtual;
+    const temP = tela && paramsAtual && Object.keys(paramsAtual).length;
+    navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: tela, p: temP ? JSON.stringify(paramsAtual) : '' });
+    return;
+  }
+  const tk = TOKEN;
   chamar('manterSessao', ctx()).then((r) => {
+    if (tk !== TOKEN) return;
     let ok = true; try { ok = JSON.parse(r).ok !== false; } catch (e) {}
     if (ok) avisoSessao(false); else sessaoTerminou();
   }).catch((e) => avisar(explicarErro(e), true));
+}
+/* Alguma janela aberta com texto digitado (comentario, acao nova)? */
+function temTextoDigitado() {
+  const j = el('janela');
+  if (!j || j.classList.contains('oculto')) return false;
+  return Array.from(j.querySelectorAll('textarea, input')).some((c) =>
+    !/^(hidden|checkbox|radio|file|button|submit)$/i.test(c.type || '') && String(c.value || '').trim());
 }
 
 /* A propria pessoa troca o PIN (o "senha" do GSL). */
@@ -862,8 +915,11 @@ function montarSessao(r) {
   const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
   conferirVersao(r);
   soMostrar('aplicacao');
-  // A pagina veio de uma gravacao pela reserva: o recado (ou o erro) aparece aqui.
+  // A pagina veio de uma gravacao pela reserva: o recado (ou o erro) aparece aqui. Sem o resultado
+  // (Codigo.gs antigo, resposta perdida), a pessoa precisa saber que nao houve confirmacao.
   if (r.resultadoAcao) setTimeout(() => mostrarResultadoAcao(r.resultadoAcao), 0);
+  else if (ACAO_ENVIADA) setTimeout(() => avisar('Não recebi a confirmação da última gravação. Confira na tela se ela foi feita.', true), 0);
+  ACAO_ENVIADA = false;
   // Tela que ja veio pronta no HTML (navegacao de reserva, link de e-mail, F5): abre direto.
   if (r.telaEmbutida && r.telaEmbutida.resposta) {
     const destino = destinoDoLink();
@@ -876,7 +932,8 @@ function montarSessao(r) {
   const destino = destinoDoLink();
   if (destino) {
     esquecerDestinoDoLink();
-    if ((r.telas || []).some((t) => t.id === destino.tela)) return abrir(destino.tela, {});
+    // daAba: o endereco que a propria reserva escreveu — a aba ja decidiu onde estava (telaDaAba).
+    if (!destino.daAba && (r.telas || []).some((t) => t.id === destino.tela)) return abrir(destino.tela, {});
   }
   abrirModulos();
   if (r.avisoTela) avisar(r.avisoTela, true);
@@ -898,6 +955,7 @@ function mostrarResultadoAcao(x) {
     return avisar(msg, true);
   }
   if (x.avisoEmail) avisar(x.avisoEmail, true);
+  else if (x.aviso) avisar(x.aviso, /NÃO atualizad/i.test(x.aviso));     // atualizarRH: meses que falharam
   else if (x.recado) avisar(x.recado);
   else if (x.recadoBotao) avisar(x.recadoBotao);
 }
@@ -942,7 +1000,7 @@ function destinoDoLink() {
   try {
     const c = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) || {};
     if (c.telaDepois) {
-      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: c.telaDepois, filial: c.filialDepois || '' }));
+      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: c.telaDepois, filial: c.filialDepois || '', daAba: !!c.destinoDaAba }));
       c.telaDepois = '';
     }
     return JSON.parse(sessionStorage.getItem('gsl_destino') || 'null');
@@ -964,7 +1022,9 @@ function canalBloqueado(e) {
 }
 /* O Google recusa a conversa nesta maquina (varias contas, cookie barrado): vale lembrar. */
 function canalBarradoDeVez(e) {
-  return /\b40[13]\b|PERMISSION_DENIED|reading from storage|armazenamento/i.test(String((e && e.message) || e || ''));
+  // So os textos do proprio Google: a mensagem de uma acao pode ter "403" ou "armazenamento" dentro
+  // (codigo do DE-PARA, saldo do estoque) e nao pode marcar o computador como barrado.
+  return /HTTP 40[13]\b|PERMISSION_DENIED|reading from storage/i.test(String((e && e.message) || e || ''));
 }
 /* Rede que caiu um instante, servidor que nao respondeu: tenta de novo, nao marca a maquina. */
 function falhaPassageira(e) {
@@ -999,6 +1059,7 @@ document.addEventListener('visibilitychange', function () {
 });
 function abrirPorNavegacao(idTela, params) {
   if (!URL_APP || !FILIAL) return false;
+  if (gravacaoEmAndamento()) { avisar('Aguarde: a gravação anterior ainda está sendo feita.'); return true; }
   el('pagina').innerHTML = '<div class="vazio">Abrindo pela navegação…</div>';
   const temParams = params && Object.keys(params).length;
   return navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: idTela,
@@ -1018,8 +1079,22 @@ function abrirPorNavegacao(idTela, params) {
 let NAVEGACAO_PENDENTE = null;
 let SAINDO_DA_PAGINA = false;        // a janela de cima ja comecou a navegar
 window.addEventListener('beforeunload', function () { SAINDO_DA_PAGINA = true; });
+/*
+ * GRAVACAO PELA PAGINA EM ANDAMENTO. O POST da gravacao saiu e a pagina nova
+ * ainda nao chegou: outro clique que navegasse trocaria a pagina dela, e o
+ * resultado (ou o erro: "saldo insuficiente") se perderia. Sair sempre passa.
+ * A marca na aba (CHAVE_ACAO) diz a pagina seguinte que ela e a resposta de
+ * uma gravacao (ver montarSessao e retomarOuPedirEntrada).
+ */
+const CHAVE_ACAO = 'gsl_acao';
+let GRAVANDO_PELA_PAGINA = 0, ACAO_ENVIADA = false;
+function gravacaoEmAndamento() { return !!GRAVANDO_PELA_PAGINA && Date.now() - GRAVANDO_PELA_PAGINA < 30000; }
 function navegarPelaPagina(campos) {
   if (!URL_APP) return false;
+  if (gravacaoEmAndamento() && campos !== NAVEGACAO_PENDENTE && !campos.sair) {
+    avisar('Aguarde: a gravação anterior ainda está sendo feita.');
+    return true;
+  }
   campos = Object.assign({ bilhete: bilheteDaPagina() }, campos);
   NAVEGACAO_PENDENTE = campos;
   // 10/10: o navegador so deixa a moldura navegar ate ~5 s depois de um clique. Sem clique
@@ -1036,6 +1111,7 @@ function navegarPelaPagina(campos) {
     f.appendChild(i);
   });
   document.body.appendChild(f);
+  if (campos.acao) { GRAVANDO_PELA_PAGINA = Date.now(); gravarSs(CHAVE_ACAO, String(Date.now())); }
   f.submit();
   // Ainda aqui depois de 4 s: o navegador barrou a navegacao (o clique ja
   // tinha "vencido"). Um botao da ao navegador o clique que ele exige.
@@ -1116,12 +1192,12 @@ async function instalarSistema() {
  */
 function explicarErro(t) {
   const m = String((t && t.message) || t || '');
-  if (/PERMISSION_DENIED|reading from storage|armazenamento/i.test(m)) {
+  if (/PERMISSION_DENIED|reading from storage/i.test(m)) {
     return 'O Google recusou a conversa com o servidor porque há mais de uma conta Google aberta neste ' +
            'navegador. Use uma janela só com a conta @bartofil.com.br (ou uma janela anônima). ' +
            'Detalhe técnico: ' + m;
   }
-  if (/\b403\b|NetworkError|Falha na conex/i.test(m)) {
+  if (/HTTP 403\b|NetworkError|Falha na conex/i.test(m)) {
     return 'Este computador abriu o sistema, mas o Google bloqueou (HTTP 403) a conversa '
          + 'com o servidor. Verifique: 1) a conta @bartofil.com.br é a PRIMEIRA conta logada no '
          + 'navegador (ou use uma janela só com ela); 2) cookies de terceiros liberados para '
@@ -1302,7 +1378,8 @@ async function atualizarPendencias() {
     pintarBolinhas();
   } catch (e) {
     // A bolinha e um extra: sem ela o menu funciona igual. Codigo.gs antigo nao conhece a acao: para de pedir.
-    if (/desconhecida/i.test(String((e && e.message) || e))) PENDENCIAS_SEM_PORTA = true;
+    // (Acoes.gs antigo com Codigo.gs novo: "aponta para acaoPendencias, que nao existe".)
+    if (/desconhecida|que nao existe/i.test(String((e && e.message) || e))) PENDENCIAS_SEM_PORTA = true;
   } finally { if (PENDENCIAS_PEDIDO === filial) PENDENCIAS_PEDIDO = ''; }
 }
 
@@ -1454,6 +1531,7 @@ async function prebuscarModulo(idModulo) {
     const alvo = (SESSAO && SESSAO.telas || []).filter((t) => t.modulo === idModulo);
     for (const t of alvo) {
       if (moduloAtual !== idModulo || CANAL_BARRADO || SAINDO_DA_PAGINA) return;   // a pessoa saiu do modulo
+      if (!TOKEN || GERACAO_SESSAO + '|' + idModulo !== marca) return;          // saiu (ou entrou outra pessoa)
       const chave = chaveTela(t.id, {});
       if (CACHE_TELAS[chave]) continue;
       if (!(await filaLivre())) return;              // usuario ocupado: desiste
@@ -1575,6 +1653,13 @@ async function agir(acao, params, recado) {
    * demais para o formulario): a tela explica.
    */
   if (CANAL_BARRADO && URL_APP && FILIAL && TOKEN) {
+    // Codigo.gs de antes desta entrega (colado pela metade): ele trataria o POST como navegacao e nada seria gravado.
+    if (!(SESSAO && SESSAO.app && SESSAO.app.gravarPelaPagina)) {
+      if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
+      const e = new Error('Atualização incompleta do GSL: gravar neste computador precisa do Codigo.gs desta versão. Avise o administrador do sistema.');
+      avisar(e.message, true);
+      throw e;
+    }
     const corpo = JSON.stringify(params || {});
     if (temArquivo(params) || corpo.length > 200000) {
       if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
@@ -1600,6 +1685,7 @@ async function agir(acao, params, recado) {
      */
     const idTela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
     const paramsTela = paramsAtual || {};
+    const filialDoClique = FILIAL;
     let r, tela = null;
     if (SEM_ACAO_E_TELA) r = await executarAcaoSrv(acao, params);
     else {
@@ -1624,8 +1710,9 @@ async function agir(acao, params, recado) {
     if (r && r.invalidarTudo) esquecerTelas();
     else { esquecerTela(paginaAtual); envelhecerTelas(); }
     // A tela que ja voltou com a gravacao entra fresca no cache: o abrir() abaixo pinta sem ir ao servidor.
-    if (tela && idTela) notarBolinhaDaTela(idTela, tela);
-    if (tela && idTela && paginaAtual === idTela) CACHE_TELAS[chaveTela(idTela, paramsTela)] = { resposta: tela, quando: Date.now() };
+    // Trocou de filial enquanto gravava: a tela que voltou e da filial de antes (nao vai para a bolinha nem para o cache).
+    if (tela && idTela && FILIAL === filialDoClique) notarBolinhaDaTela(idTela, tela);
+    if (tela && idTela && FILIAL === filialDoClique && paginaAtual === idTela) CACHE_TELAS[chaveTela(idTela, paramsTela)] = { resposta: tela, quando: Date.now() };
     fecharJanela();
 
     /*

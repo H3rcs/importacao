@@ -201,6 +201,7 @@ const OBSERVADOR = `(() => {
       pagina: (((d.getElementById('pagina') || {}).textContent) || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
       msg: (((d.getElementById('entrar-msg') || {}).textContent) || '').slice(0, 90),
       continuar: !!(cont && !cont.classList.contains('oculto')),
+      continuarMsg: (((d.getElementById('entrar-continuar-msg') || {}).textContent) || '').slice(0, 120),
       coment: card ? (mc ? Number(mc[1]) : 0) : -1,
       recado: ((d.getElementById('recado') || {}).textContent || '').slice(0, 90),
       pos: {
@@ -1104,7 +1105,8 @@ async function rodar() {
     await f.click('text=Trocar PIN');
     await f.fill('#tp-atual', '4321'); await f.fill('#tp-novo', '8642'); await f.fill('#tp-conf', '8642');
     await f.click('.janela .botao >> text=Trocar PIN').catch(async () => { await f.evaluate(() => agir('trocarMeuPin', { atual: '4321', novo: '8642', confirmacao: '8642' })); });
-    await aba.page.waitForTimeout(1500);
+    // a janela fecha quando o servidor confirma a troca (um tempo fixo falhava com a maquina ocupada)
+    await f.waitForFunction(() => document.getElementById('janela').classList.contains('oculto'), null, { timeout: 20000 });
     const r = JSON.parse(s.chamar(DONO, 'entrar', DONO, '8642', '', '', '').valor);
     afirmar(r.token, 'PIN novo entra: ' + JSON.stringify(r).slice(0, 160));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
@@ -1382,11 +1384,116 @@ async function rodar() {
     await f.waitForFunction(() => /Plano de A/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
     afirmar(await esperarTela(aba, ['aplicacao', 'entrar']) === 'aplicacao', 'continuou dentro');
     afirmar(Number(s.mundo.cache.get('diag_sessao_salva_pela_loja') && s.mundo.cache.get('diag_sessao_salva_pela_loja').v) === 1, 'contou a sessao salva pela loja');
-    // 51 min sem ir ao servidor: a faixa aparece; o botao renova
-    await f.evaluate(() => { ULTIMO_CONTATO = Date.now() - 51 * 60000; ULTIMA_ATIVIDADE = Date.now() - 20 * 60000; vigiarSessao(); });
-    afirmar(/termina em \d+ min/.test(await texto(aba, 'aviso-sessao')), 'faixa do aviso');
+    // 45 min sem ir ao servidor (20 sem mexer): a faixa aparece; o botao renova
+    await f.evaluate(() => { ULTIMO_CONTATO = Date.now() - 45 * 60000; ULTIMA_ATIVIDADE = Date.now() - 20 * 60000; vigiarSessao(); });
+    afirmar(/termina em [1-9] min/.test(await texto(aba, 'aviso-sessao')), 'faixa do aviso: ' + await texto(aba, 'aviso-sessao'));
     await f.click('#aviso-sessao button');
     await f.waitForFunction(() => !document.getElementById('aviso-sessao'), null, { timeout: 10000 });
+    // a renovacao do bilhete nao conta como uso (ela nao confere a sessao)
+    const contato = await f.evaluate(async () => { const antes = ULTIMO_CONTATO = Date.now() - 30 * 60000; await chamar('renovarBilhete', ctx()); return ULTIMO_CONTATO === antes; });
+    afirmar(contato, 'renovarBilhete nao renova o relogio da sessao');
+    // 51 min sem ir ao servidor E sem ninguem mexer: a sessao acaba aqui e no servidor, e a tela de quem foi embora some
+    await f.evaluate(() => { ULTIMO_CONTATO = Date.now() - 51 * 60000; ULTIMA_ATIVIDADE = Date.now() - 51 * 60000; vigiarSessao(); });
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao']) === 'entrar', 'voltou para a entrada');
+    afirmar(/sessão terminou/i.test(await texto(aba, 'entrar-msg')), 'diz que a sessao terminou: ' + await texto(aba, 'entrar-msg'));
+    afirmar(!(await f.evaluate(() => document.getElementById('pagina').textContent.trim())), 'a tela da pessoa sumiu');
+    const fim = Date.now() + 5000;
+    while (Date.now() < fim && ![...s.mundo.cache.keys()].some((k) => /^sessfim_/.test(k))) await new Promise((ok) => setTimeout(ok, 100));
+    afirmar([...s.mundo.cache.keys()].some((k) => /^sessfim_/.test(k)), 'o servidor encerrou a sessao tambem');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal barrado: pagina recusada pelo bilhete (o cache do Google perdeu) mostra "Continuar como ..." e diz que a gravacao nao foi feita', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const e = JSON.parse(s.chamar(GERAL, 'entrar', GERENTE, '5555', '', '', '').valor);
+    s.chamar(GERAL, 'executarAcao', { t: e.token, f: e.filial.codigo }, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+    const aba = await abrirAbaReal(s, GERAL, { bloqueio403: '1', atraso: 1500, atrasoPost: 800 });
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => x.coment === 0 && x.pos.comentarios, 15000, 'cartao da acao');
+    await clicarEm(aba, 'comentarios');
+    await clicarEm(aba, 'cmTexto');
+    await aba.page.keyboard.type('Nao vai chegar', { delay: 5 });
+    for (const k of [...s.mundo.cache.keys()]) if (/^bilhete_/.test(k)) s.mundo.cache.delete(k);   // o Google despejou o bilhete
+    await clicarEm(aba, 'registrar');
+    await esperarEstado(aba, (x) => x.continuar && x.pos.continuar, 15000, 'Continuar como ...');
+    afirmar(/gravação não foi feita/i.test(aba.estado.continuarMsg) && !/PIN/.test(aba.estado.continuarMsg), 'avisa que nao gravou (sem pedir PIN): ' + aba.estado.continuarMsg);
+    afirmar(!s.contexto(DONO).listar('COMENTARIOS').some((c) => /Nao vai chegar/.test(c.TEXTO || '')), 'nada gravado');
+    marcar(aba);
+    await clicarEm(aba, 'continuar');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && /Plano de A/.test(x.titulo) && !/Abrindo|Carregando/.test(x.pagina), 15000, 'de volta no Plano, sem PIN');
+    afirmar(desdeMarca(aba).posts === 1, 'um POST para continuar: ' + JSON.stringify(desdeMarca(aba)));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal barrado: outro clique enquanto a gravacao vai pela pagina nao a perde (um POST so, e o comentario aparece)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const e = JSON.parse(s.chamar(GERAL, 'entrar', GERENTE, '5555', '', '', '').valor);
+    s.chamar(GERAL, 'executarAcao', { t: e.token, f: e.filial.codigo }, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+    const aba = await abrirAbaReal(s, GERAL, { bloqueio403: '1', atraso: 1500, atrasoPost: 800 });
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => x.coment === 0 && x.pos.comentarios, 15000, 'cartao da acao');
+    await clicarEm(aba, 'comentarios');
+    await clicarEm(aba, 'cmTexto');
+    await aba.page.keyboard.type('Gravado com calma', { delay: 5 });
+    await aba.contexto.addCookies([{ name: 'gas_atraso_post', value: '5000', url: s.url }]);   // o servidor demora 5 s
+    marcar(aba);
+    await clicarEm(aba, 'registrar');
+    await aba.page.waitForTimeout(300);
+    await clicarEm(aba, 'menuCalendario');                       // fecha a janela (clique no fundo)...
+    await aba.page.waitForTimeout(200);
+    await clicarEm(aba, 'menuCalendario');                       // ...e tenta abrir outra tela
+    await esperarEstado(aba, (x) => /Aguarde/.test(x.recado), 4000, 'aviso de gravacao em andamento');
+    await esperarEstado(aba, (x) => x.coment === 1, 20000, 'comentario gravado e na tela');
+    afirmar(desdeMarca(aba).posts === 1, 'um POST so (o da gravacao): ' + JSON.stringify(desdeMarca(aba)));
+    afirmar(s.contexto(DONO).listar('COMENTARIOS').filter((c) => /Gravado com calma/.test(c.TEXTO || '')).length === 1, 'um comentario na planilha');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal: erro de acao com "403" nao marca o computador; F5 volta na posicao da aba; Codigo.gs antigo nao grava pela pagina', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const r = await f.evaluate(() => [
+      canalBarradoDeVez(new Error('Saldo insuficiente: Toner tem 403 un')),
+      canalBarradoDeVez(new Error('O código 401 já está no DE-PARA (Ajuste de horas)')),
+      canalBarradoDeVez(new Error('Sem espaço de armazenamento no almoxarifado')),
+      canalBarradoDeVez(new Error('NetworkError: Connection failure due to HTTP 403')),
+      canalBarradoDeVez(new Error("We're sorry, a server error occurred while reading from storage. Error code PERMISSION_DENIED."))]);
+    afirmar(JSON.stringify(r) === '[false,false,false,true,true]', 'so os textos do Google marcam: ' + JSON.stringify(r));
+    const t = await f.evaluate(() => {
+      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: 'acoes', filial: '', daAba: true }));
+      sessionStorage.setItem('gsl_onde', JSON.stringify({ f: FILIAL, tela: 'estoque', p: JSON.stringify({ busca: 'toner' }) }));
+      const a = telaDaAba();
+      const esquecido = sessionStorage.getItem('gsl_destino') === null;
+      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: 'acoes', filial: '' }));
+      const b = telaDaAba();
+      sessionStorage.removeItem('gsl_destino');
+      return [a.tela, a.p, b.tela, esquecido];
+    });
+    afirmar(t[0] === 'estoque' && /toner/.test(t[1]) && t[2] === 'acoes' && t[3], 'endereco da reserva perde para a posicao da aba (e e esquecido); link de e-mail ganha: ' + JSON.stringify(t));
+    const posts = s.registro.filter((x) => x.tipo === 'doPost').length;
+    const g = await f.evaluate(async () => {
+      const app = SESSAO.app; CANAL_BARRADO = true;
+      SESSAO.app = Object.assign({}, app, { gravarPelaPagina: undefined });
+      let msg = '';
+      try { await agir('salvarSetor', { setor: 'Doca' }); } catch (e) { msg = e.message; }
+      SESSAO.app = app; CANAL_BARRADO = false;
+      return msg;
+    });
+    afirmar(/Codigo\.gs desta vers/.test(g) && s.registro.filter((x) => x.tipo === 'doPost').length === posts, 'Codigo.gs antigo: nao manda a gravacao: ' + g);
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

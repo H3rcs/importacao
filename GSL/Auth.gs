@@ -539,7 +539,9 @@ function resumoPin_(email, pin) {
  *   loja  'sessao_<resumo>' -> { e, c, u (ultimo uso, de 10 em 10 min) }
  *
  * As regras nao mudam: 1 h sem uso acaba a sessao (pela loja, no maximo
- * 10 min mais cedo, nunca mais tarde) e "Sair" apaga as duas copias.
+ * 10 min mais cedo, nunca mais tarde) e "Sair" apaga as duas copias — e deixa
+ * no cache, por 6 h, a marca 'sessfim_<codigo>': um pedido que leu a sessao
+ * antes do Sair (e escreve depois) nao a traz de volta.
  */
 const SESSAO_GRAVAR_USO_MS = 10 * 60 * 1000;   // no maximo uma escrita na loja a cada 10 min por sessao
 const SESSAO_PODA_MS = SESSAO_OCIOSA_MS + 15 * 60 * 1000;
@@ -560,7 +562,8 @@ function criarSessao_(email) {
   try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(token), JSON.stringify({ e: email, c: agora, u: agora })); } catch (e) {}
   CacheService.getScriptCache().put('sess_' + token, JSON.stringify({ e: email, t: agora, c: agora, d: agora }), SESSAO_SEGUNDOS);
   _sessoesDaVez[token] = String(email || '').toLowerCase().trim();
-  try { podarSessoes_(false); } catch (e) {}
+  // A poda roda no aquecimento (gatilho de 15 min). Sem o gatilho, uma entrada a cada 2 h poda um pouco.
+  try { if (agora - Number(prop('PODA_SESSOES_EM', '0')) > PODA_NA_ENTRADA_MS) podarSessoes_(30); } catch (e) {}
   return token;
 }
 
@@ -570,14 +573,23 @@ function emailDaSessao_(token) {
   if (!/^[a-f0-9]{32,80}$/.test(t)) return '';
   if (_sessoesDaVez[t] !== undefined) return _sessoesDaVez[t];
   const cache = CacheService.getScriptCache();
-  let s = null;
-  // Uma chamada so ao cache para a sessao, as pessoas, os perfis, as filiais e a geracao (preLerCache_).
-  try { preLerCache_(t); s = JSON.parse(lerChaveCache_(cache, 'sess_' + t) || 'null'); } catch (e) { s = null; }
+  // Uma chamada so ao cache para a sessao, a marca de "saiu", as pessoas, os perfis, as filiais e a
+  // geracao (preLerCache_). typeof: com o Banco.gs da entrega anterior (colado pela metade), le direto.
+  const lerDoCache = function (k) {
+    if (typeof preLerCache_ === 'function') { preLerCache_(t); return lerChaveCache_(cache, k); }
+    return cache.get(k);
+  };
+  let s = null, leuCache = false, fim = null;
+  try { s = JSON.parse(lerDoCache('sess_' + t) || 'null'); leuCache = true; } catch (e) { s = null; }
+  try { fim = lerDoCache('sessfim_' + t); } catch (e) { fim = null; }
+  if (fim) { _sessoesDaVez[t] = ''; return ''; }       // saiu (ou acabou por falta de uso)
   const doCache = !!s;
   if (!s) {
-    // O cache perdeu (despejo) ou a sessao nunca existiu: a loja decide.
-    let reg = null;
-    try { reg = JSON.parse(lojaDeSessoes_().getProperty(chaveSessaoDuravel_(t)) || 'null'); } catch (e) { reg = null; }
+    // O cache perdeu (despejo) ou a sessao nunca existiu: a loja decide. Mas so com o Codigo.gs
+    // desta entrega: o antigo encerra a sessao (Sair pela reserva) so no cache, e a loja traria
+    // de volta quem saiu.
+    if (typeof acaoPelaPagina_ !== 'function') { _sessoesDaVez[t] = ''; return ''; }
+    const reg = lerSessaoDaLoja_(t);
     if (!reg || !reg.e) { _sessoesDaVez[t] = ''; return ''; }
     s = { e: reg.e, t: Number(reg.u || 0), c: Number(reg.c || 0), d: Number(reg.u || 0) };
   }
@@ -587,48 +599,75 @@ function emailDaSessao_(token) {
     return '';
   }
   // Diagnostico: sessao viva que so a loja tinha = antes desta versao, uma "saida sozinha".
-  if (!doCache) contarDiagnostico_('sessao_salva_pela_loja');
+  if (!doCache && leuCache) contarDiagnostico_('sessao_salva_pela_loja');
   let mudou = !doCache;
   if (agora - Number(s.t || 0) > SESSAO_RENOVAR_MS) { s.t = agora; mudou = true; }
-  if (agora - Number(s.d || 0) > SESSAO_GRAVAR_USO_MS) {
-    s.d = agora;
-    try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(t), JSON.stringify({ e: s.e, c: s.c || agora, u: agora })); } catch (e) {}
-    mudou = true;
+  const gravarNaLoja = agora - Number(s.d || 0) > SESSAO_GRAVAR_USO_MS;
+  if (mudou || gravarNaLoja) {
+    // Conferido de novo logo antes de escrever: o Sair pode ter passado depois da leitura.
+    let saiu = false;
+    try { saiu = !!cache.get('sessfim_' + t); } catch (e) {}
+    if (saiu) { _sessoesDaVez[t] = ''; return ''; }
+    if (gravarNaLoja) {
+      s.d = agora;
+      try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(t), JSON.stringify({ e: s.e, c: s.c || agora, u: agora })); } catch (e) {}
+    }
+    try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {}
   }
-  if (mudou) { try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {} }
   const email = String(s.e || '').toLowerCase().trim();
   _sessoesDaVez[t] = email;
   return email;
 }
 
-/* Fim da sessao (Sair, 1 h sem uso): as duas copias. */
+/*
+ * A copia da loja. A loja que nao respondeu (duas vezes) NAO quer dizer "sessao
+ * inexistente": e um erro passageiro, sem o [SESSAO] — a aba guarda o codigo e
+ * o proximo clique tenta de novo (antes, a pessoa voltava para o e-mail e o PIN).
+ */
+function lerSessaoDaLoja_(t) {
+  const k = chaveSessaoDuravel_(t);
+  let bruto = null, falhou = null;
+  for (let i = 0; i < 2; i++) {
+    try { bruto = lojaDeSessoes_().getProperty(k); falhou = null; break; }
+    catch (e) { falhou = e; if (i === 0) Utilities.sleep(200); }
+  }
+  if (falhou) throw new Error('Não consegui conferir a sua sessão agora (o Google demorou a responder). Tente de novo em instantes.');
+  try { return JSON.parse(bruto || 'null'); } catch (e) { return null; }
+}
+
+/* Fim da sessao (Sair, 1 h sem uso): a marca de "saiu" primeiro, depois as duas copias. */
 function encerrarSessao_(token) {
   const t = String(token || '');
   if (!/^[a-f0-9]{32,80}$/.test(t)) return;
-  try { CacheService.getScriptCache().remove('sess_' + t); } catch (e) {}
+  const cache = CacheService.getScriptCache();
+  try { cache.put('sessfim_' + t, '1', SESSAO_SEGUNDOS); } catch (e) {}
   try { lojaDeSessoes_().deleteProperty(chaveSessaoDuravel_(t)); } catch (e) {}
+  try { cache.remove('sess_' + t); } catch (e) {}
   _sessoesDaVez[t] = '';
 }
 
 /*
- * PODA: sessao parada ha mais de 1 h 15 min sai da loja. Roda na rotina
- * diaria e, no maximo uma vez por hora, numa entrada. Nunca apaga sessao
- * viva: quem esta em uso tem o ultimo uso gravado ha no maximo 10 min.
+ * PODA: sessao parada ha mais de 1 h 15 min sai da loja. Roda no aquecimento
+ * (gatilho de 15 min, sem ninguem esperando). Sem o gatilho instalado, uma
+ * entrada a cada 2 h poda no maximo 30 — a entrada nunca paga a poda inteira.
+ * Nunca apaga sessao viva: quem esta em uso tem o ultimo uso gravado ha no
+ * maximo 10 min.
  */
-function podarSessoes_(forcar) {
-  const cache = CacheService.getScriptCache();
-  if (!forcar && cache.get('poda_sessoes')) return 0;
-  try { cache.put('poda_sessoes', '1', 3600); } catch (e) {}
+const PODA_NA_ENTRADA_MS = 2 * 3600 * 1000;
+function podarSessoes_(limite) {
+  const maximo = Number(limite) > 1 ? Number(limite) : 30;
   const loja = lojaDeSessoes_();
   const todas = loja.getProperties();
   const agora = Date.now();
   let n = 0;
-  Object.keys(todas).forEach(function (k) {
-    if (k.indexOf(PREFIXO_SESSAO_DURAVEL) !== 0) return;
+  Object.keys(todas).some(function (k) {
+    if (k.indexOf(PREFIXO_SESSAO_DURAVEL) !== 0) return false;
     let reg = null;
     try { reg = JSON.parse(todas[k]); } catch (e) { reg = null; }
     if (!reg || agora - Number(reg.u || 0) > SESSAO_PODA_MS) { try { loja.deleteProperty(k); n++; } catch (e) {} }
+    return n >= maximo;
   });
+  try { PropertiesService.getScriptProperties().setProperty('PODA_SESSOES_EM', String(agora)); esquecerProps(); } catch (e) {}
   return n;
 }
 

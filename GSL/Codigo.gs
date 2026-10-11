@@ -77,7 +77,7 @@ function doGet(e) {
    * entrava como a pessoa anterior, sem digitar PIN. A reserva agora e
    * um POST (ver doPost), que nao deixa o codigo em lugar nenhum.
    */
-  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p }));
+  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p, aba: pedido.aba }));
 }
 
 /*
@@ -101,7 +101,11 @@ function doPost_(p) {
   // SAIR pela reserva: apaga a sessao no servidor (o sairDoSistema pelo
   // google.script.run tambem seria barrado). Reenviado, nao faz mal.
   if (p.sair) {
-    if (/^[a-f0-9]{32,80}$/.test(String(p.sair))) encerrarSessao_(String(p.sair));
+    if (/^[a-f0-9]{32,80}$/.test(String(p.sair))) {
+      // typeof: Auth.gs da entrega anterior (colado pela metade) — apaga ao menos a copia do cache.
+      if (typeof encerrarSessao_ === 'function') encerrarSessao_(String(p.sair));
+      else { try { CacheService.getScriptCache().remove('sess_' + String(p.sair)); } catch (x) {} }
+    }
     return paginaComCarga_({ ok: true, instalado: true, entrada: 'ENTRAR', recado: 'Você saiu do GSL.', viaPost: true });
   }
 
@@ -237,6 +241,8 @@ function cargaDaPagina_(pedido) {
         if (!pedido.t && TELAS.some(function (x) { return x.id === destino; })) {
           carga.telaDepois = destino;
           carga.filialDepois = String(pedido.filial || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          // aba=1: o endereco que a pagina da reserva pos na barra (F5), nao um link — a posicao da aba vale mais.
+          if (pedido.aba) carga.destinoDaAba = true;
         }
         // Veio com sessao e ela acabou (1 h parada, ou saiu): a tela diz por que.
         if (pedido.t) carga.erroEntrada = 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.';
@@ -289,14 +295,15 @@ function acaoPelaPagina_(p) {
   }
   if (!resultado) {
     if (idem) {
-      try { cache.put(idem, JSON.stringify({ ok: false, erro: 'A gravação anterior ainda está em andamento. Confira a tela em instantes.' }), 120); } catch (x) {}
+      // O mesmo clique reenviado enquanto o primeiro roda: aviso neutro (nao e erro — nao convida a gravar de novo).
+      try { cache.put(idem, JSON.stringify({ ok: true, pendente: true, recado: 'A gravação ainda está sendo feita. Confira a tela em instantes.' }), 120); } catch (x) {}
     }
     let params = {};
     try { params = JSON.parse(String(p.ap || '{}')) || {}; } catch (x) { params = {}; }
     try {
       const r = JSON.parse(executarAcao({ t: p.t, f: p.filial }, String(p.acao), params)) || {};
       resultado = { ok: r.ok !== false, erro: r.ok === false ? String(r.erro || '') : '',
-        recado: String(r.recado || ''), avisoEmail: String(r.avisoEmail || '') };
+        recado: String(r.recado || ''), avisoEmail: String(r.avisoEmail || ''), aviso: String(r.aviso || '') };
     } catch (erro) {
       resultado = { ok: false, erro: String(erro.message || erro) };
     }
@@ -424,7 +431,9 @@ function montarSessaoNaFilial_(usuario, codigo) {
     ok: true,
     instalado: true,
     entrada: 'APP',
-    app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_() }),
+    // gravarPelaPagina: este Codigo.gs grava pela reserva (acaoPelaPagina_). App.html novo com o Codigo.gs
+    // antigo nao manda a gravacao por POST — o doPost_ antigo trataria como navegacao e nada seria gravado.
+    app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_(), gravarPelaPagina: true }),
     usuario: {
       nome: usuario.nome, email: usuario.email, papel: usuario.papel || '', perfil: usuario.perfil,
       turno: usuario.turno, escopo: descreverEscopo(usuario), podes: usuario.permissoes.podes
@@ -764,6 +773,8 @@ function carregarTela(ctx, idTela, params) {
  */
 function aquecerCache() {
   exigirPorta_();
+  // As sessoes paradas saem da loja aqui (a qualquer hora), e nao na entrada de alguem.
+  try { if (typeof podarSessoes_ === 'function') podarSessoes_(500); } catch (e) {}
   const hora = Number(Utilities.formatDate(new Date(), fuso(), 'H'));
   if (hora < 5 || hora > 21) return { ok: true, pulou: 'fora de horario' };
   if (!bancoInstalado()) return { ok: true, pulou: 'sem banco' };
@@ -847,16 +858,19 @@ function exigirModuloDaAcao_(usuario, acao) {
 /* --- Acoes gerais --- */
 
 function acaoAtualizarDados() {
-  // Aproveita a varrida para alinhar rotulo de mes e semana ao prazo de
-  // cada atividade. Uma linha remarcada por uma versao antiga ficou com
-  // COMPETENCIA de agosto e prazo em setembro; e aqui que ela se acerta.
-  let corrigidas = 0;
-  try { corrigidas = (corrigirCompetencias('atualizar dados') || {}).corrigidas || 0; } catch (e) {}
   // As copias das planilhas de fora (Quadro do CD e Jovem Aprendiz) ficam 5 minutos guardadas e nao
   // passam pelo limparCache: "Atualizar dados" tem que reler as da filial aberta tambem.
   try { const q = idPlanilhaQuadro_(); if (q) CacheService.getScriptCache().remove(chaveNoEspaco('quadro|' + q)); } catch (e) {}
   try { const a = idPlanilhaAprendiz_(); if (a) CacheService.getScriptCache().remove(chaveNoEspaco('aprendiz|' + a)); } catch (e) {}
+  // As copias saem ANTES da varrida abaixo: ela tem que ler a planilha como esta agora (quem
+  // clica aqui pode ter acabado de mexer nela a mao), e nao a copia de ate 30 min.
   limparCache();
+  // Aproveita a varrida para alinhar rotulo de mes e semana ao prazo de
+  // cada atividade. Uma linha remarcada por uma versao antiga ficou com
+  // COMPETENCIA de agosto e prazo em setembro; e aqui que ela se acerta
+  // (a gravacao dela aposenta as telas de novo).
+  let corrigidas = 0;
+  try { corrigidas = (corrigirCompetencias('atualizar dados') || {}).corrigidas || 0; } catch (e) {}
   return { ok: true, recado: corrigidas
     ? 'Dados atualizados — ' + corrigidas + ' atividade(s) tiveram o mês corrigido pela data do prazo.'
     : '' };

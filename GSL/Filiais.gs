@@ -224,7 +224,9 @@ function pessoaNaFilial_(registroAcesso, filial) {
  */
 function pessoasDaFilial() {
   const f = filialAtual();
-  return cadastrosDeAcesso_().filter(function (p) { return pessoaNaFilial_(p, f); });   // sem reler ACESSOS (nem o PIN)
+  // typeof: Auth.gs da entrega anterior (colado pela metade) — le a tabela, como antes.
+  const pessoas = typeof cadastrosDeAcesso_ === 'function' ? cadastrosDeAcesso_() : listar('ACESSOS');
+  return pessoas.filter(function (p) { return pessoaNaFilial_(p, f); });   // sem reler ACESSOS (nem o PIN)
 }
 
 /** Estado de um painel na filial em uso: ATIVO, OCULTO, DESATIVADO ou '' (nao foi para ela). */

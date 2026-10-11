@@ -371,23 +371,28 @@ function contagensDoPlano_(minhas, email) {
  *
  * Guardado numa chave SO por pessoa e filial (o cache tambem guarda as
  * sessoes e as telas de todo mundo; uma chave por geracao encheria o cache a
- * cada gravacao). A marca (geracao dos dados, dia, nivel, ajustes, escopo,
- * turno, simulacao) vai DENTRO do valor: mudou qualquer uma, conta de novo.
+ * cada gravacao). A marca vai DENTRO do valor: mudou qualquer parte, conta de
+ * novo. Ela leva a geracao da tabela ACOES (e nao a de todos os dados: uma
+ * leitura de nobreak nao recontava as acoes de todo mundo), o dia, as telas
+ * que a pessoa abre, o nivel, os ajustes, o escopo, o turno e a simulacao.
+ * Vale 10 min, como as telas: o que for mexido direto na planilha aparece na
+ * bolinha junto com a tela.
  */
-const VALIDADE_PENDENCIAS = 3600;
+const VALIDADE_PENDENCIAS = 600;
 
 function pendenciasDoUsuario_(usuario) {
   exigirPorta_();
   const email = String(usuario.email || '').toLowerCase().trim();
   const chave = 'pend|' + filialAtual().codigo + '|' + email;
-  const marca = [geracaoDados(), paraISO(hoje()), usuario.perfil, usuario.chaveModulos || '',
-                 escopoDe(usuario).tipo, usuario.turno || '', usuario.simulado ? 'simulado' : ''].join('|');
+  const telas = telasDe(usuario);
+  const marca = [geracaoTabela('ACOES'), paraISO(hoje()), telas.map(function (t) { return t.id; }).join(','),
+                 usuario.perfil, usuario.chaveModulos || '', escopoDe(usuario).tipo, usuario.turno || '',
+                 usuario.simulado ? 'simulado' : ''].join('|');
   const cache = CacheService.getScriptCache();
   try {
     const g = JSON.parse(cache.get(chave) || 'null');
     if (g && g.marca === marca && g.pendencias) return g.pendencias;
   } catch (e) { /* recalcula */ }
-  const telas = telasDe(usuario);
   const saida = {};
   Object.keys(PLANOS).forEach(function (k) {
     const plano = PLANOS[k];

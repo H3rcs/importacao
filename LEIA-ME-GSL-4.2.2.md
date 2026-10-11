@@ -44,13 +44,16 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
 
 **O que mudou**
 1. **O computador que barra o Google vai direto pela página.** Na primeira recusa, o sistema anota que aquele computador está barrado (a anotação vale 12 horas) e passa a usar direto o caminho da página: um clique, uma recarga, sem espera e sem a tela de "Continuar". Isso vale para abrir telas, trocar de filial e também para **gravar** (salvar, concluir, comentar), que antes falhava nesses computadores. No máximo a cada 10 minutos, o sistema testa sem a pessoa perceber se a conversa voltou.
-   - **F5** volta na mesma tela. Se a página pedir, é um clique em **Continuar como <nome>**, sem PIN. Se não for você, use **Não é você? Entrar com outro e-mail**.
+   - **F5** volta na mesma tela, com os filtros. Se a página pedir, é um clique em **Continuar como <nome>**, sem PIN. Se não for você, use **Não é você? Entrar com outro e-mail**.
+   - **Gravação em andamento:** enquanto a página da gravação não volta, outro clique mostra "Aguarde: a gravação anterior ainda está sendo feita" e não atropela a gravação.
+   - **Página recusada pelo Google** (o Google às vezes apaga a "senha" de uso único da página): aparece **Continuar como <nome>**, sem PIN. Se era uma gravação, a tela avisa que **ela não foi feita** e é preciso fazer de novo.
    - **Exceção:** enviar arquivo ou foto ainda precisa da conversa direta com o Google. Nesses computadores, a tela avisa para usar outro computador, ou um perfil do Chrome só com a conta da Bartofil.
-2. **A sessão não cai mais sozinha.** Além do cache, o sistema guarda uma segunda cópia da sessão no próprio script: o e-mail e a hora, numa chave que é um resumo do código da sessão (nunca o código em si, nunca o PIN). Se o cache perder a sessão, a cópia salva. A regra de 1 hora parada continua, com duas melhorias:
+2. **A sessão não cai mais sozinha.** Além do cache, o sistema guarda uma segunda cópia da sessão no próprio script: o e-mail e a hora, numa chave que é um resumo do código da sessão (nunca o código em si, nunca o PIN). Se o cache perder a sessão, a cópia salva. Se o Google demorar a responder na hora de conferir, a pessoa vê "tente de novo" e continua dentro; antes, voltava para o e-mail e o PIN. A regra de 1 hora parada continua, com três melhorias:
    - quem está mexendo na tela (clicando, digitando, rolando) tem a sessão renovada sozinha;
-   - com 50 minutos sem nenhum contato, aparece um aviso com o botão **Continuar conectado**.
+   - com 40 minutos sem usar o sistema, aparece um aviso com o botão **Continuar conectado**;
+   - com 50 minutos sem ninguém mexer na tela, a sessão termina sozinha e a tela se fecha, para o próximo a usar o computador não ver os dados de quem saiu.
 
-   **Sair** encerra as duas cópias.
+   **Sair** encerra as duas cópias. Um pedido que já estava a caminho não traz a sessão de volta.
 3. **Mais agilidade no servidor:**
    - cada pedido consulta o cache uma vez só (antes eram várias idas);
    - as tabelas que as telas leem ficam guardadas no cache por até 30 minutos e se renovam sozinhas a cada gravação feita pelo sistema;
@@ -58,7 +61,7 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
    - o aquecedor (a cada 15 minutos, das 5h às 21h) prepara as tabelas de todas as filiais para todo mundo. Antes ele só montava as telas do administrador.
 4. **Bolinha no cartão do módulo.** No menu, os cartões do **Calendário** (Plano de Ação) e da **Limpeza** mostram uma bolinha com o número de ações em aberto **da pessoa**: é o mesmo número do "Em aberto" da tela do plano. A bolinha fica **vermelha com "!"** quando alguma está atrasada. Sem ação em aberto, ela não aparece. Ela se atualiza depois de salvar ou concluir, e ao voltar para o menu (no máximo a cada 2 minutos). Funciona também nos computadores que barram o Google.
 
-**Importante: editou a planilha à mão?** Mudanças feitas pelo sistema aparecem na hora. Se alguém editar o GSL_BANCO direto na planilha, clique em **Atualizar dados**: as cópias no cache duram até 30 minutos.
+**Importante: editou a planilha à mão?** Mudanças feitas pelo sistema aparecem na hora. Se alguém editar o GSL_BANCO direto na planilha, clique em **Atualizar dados**: as cópias no cache duram até 30 minutos. Exceção: **Pessoas e acessos** e **níveis** (as abas ACESSOS e PERFIS) valem em no máximo 5 minutos. Assim, desativar alguém direto na planilha tira a pessoa do sistema em até 5 minutos, mesmo sem o clique.
 
 **O melhor conserto para os computadores do CD (para o TI):** o Google barra a conversa quando há várias contas Google abertas no navegador e a da Bartofil não é a primeira. Qualquer uma destas resolve:
 - deixar a conta **@bartofil.com.br como a primeira** do navegador (sair de todas, entrar primeiro com a da Bartofil, depois nas outras);
@@ -66,9 +69,9 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
 
 Com isso o sistema usa o caminho direto, que é mais rápido e permite enviar fotos.
 
-**Diagnóstico:** `…/exec?diagnostico=1` agora mostra também quantas sessões o cache perdeu e a cópia salvou nas últimas 6 horas. Cada uma delas seria um "saiu sozinho" na versão anterior.
+**Diagnóstico:** `…/exec?diagnostico=1` agora mostra também quantas sessões o cache perdeu e a cópia salvou nas últimas 6 horas, e quantas sessões estão guardadas. Cada sessão salva seria um "saiu sozinho" na versão anterior. As sessões paradas há mais de 1h15 são apagadas pelo aquecimento (a rotina de 15 em 15 minutos). Sem as rotinas ligadas, uma entrada a cada 2 horas apaga algumas.
 
-**Arquivos desta entrega:** `App.html`, `Index.html`, `Estilo.html`, `Codigo.gs`, `Auth.gs`, `Banco.gs`, `Acoes.gs` e `Filiais.gs`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum, a faixa amarela no topo diz qual. Agora ela confere também o `Index.html` e o `Estilo.html`.
+**Arquivos desta entrega:** `App.html`, `Index.html`, `Estilo.html`, `Codigo.gs`, `Auth.gs`, `Banco.gs`, `Acoes.gs` e `Filiais.gs`. Cole todos e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum, a faixa amarela no topo diz qual. Agora ela confere também o `Index.html` e o `Estilo.html`. Colado pela metade, o sistema continua entrando e saindo normalmente (foi testado com cada arquivo da versão anterior). Num computador que barra o Google, ele não tenta gravar com o `Codigo.gs` antigo: avisa que a atualização está incompleta.
 
 **Para conferir num computador do CD que barra o Google:**
 1. Entre com e-mail e PIN. A página recarrega uma vez e abre o menu, sem a tela de "Continuar".
@@ -279,8 +282,8 @@ node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
 node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha (39 casos)
-node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache (11 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha (47 cenários)
+node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha (50 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

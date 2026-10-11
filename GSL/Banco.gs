@@ -102,7 +102,12 @@ function geracaoDados() {
   if (_geracao) return _geracao;
   const cache = CacheService.getScriptCache();
   let g = lerChaveCache_(cache, 'geracao');
+  // A pre-leitura (preLerCache_) e do comeco do pedido: sem a chave la, confere de novo agora.
+  if (!g && _preCache) g = cache.get('geracao');
   if (!g) {
+    // A foto das propriedades tambem e do comeco do pedido: uma gravacao publicada nesse meio
+    // tempo voltaria para tras no cache (e a tela velha voltaria a valer).
+    esquecerProps();
     g = prop('GERACAO_DADOS', '1');
     cache.put('geracao', g, 21600);
   } else if (_props && Number(g) > Number(_props.GERACAO_DADOS || 0)) {
@@ -117,12 +122,32 @@ function geracaoDados() {
 
 function avancarGeracao() {
   exigirPorta_();
-  const g = String(Number(geracaoDados() || 1) + 1);
-  PropertiesService.getScriptProperties().setProperty('GERACAO_DADOS', g);
-  CacheService.getScriptCache().put('geracao', g, 21600);
+  return publicarNumeros_({ GERACAO_DADOS: String(Number(geracaoDados() || 1) + 1) }).GERACAO_DADOS;
+}
+
+/*
+ * PUBLICAR GERACOES (10/10, revisao). Cada numero sai como o MAIOR entre o
+ * calculado e o publicado agora + 1. Quem calculou com uma foto velha das
+ * propriedades (outra execucao publicou no meio: "Atualizar dados", uma
+ * gravacao fora da trava) nao repete o numero dela — repetir faria valer de
+ * novo uma tela ou copia montada com o dado de antes.
+ */
+function publicarNumeros_(mapa) {
+  const props = PropertiesService.getScriptProperties();
+  let atuais = {};
+  try { atuais = props.getProperties() || {}; } catch (e) { atuais = {}; }
+  const saida = {};
+  Object.keys(mapa).forEach(function (k) {
+    saida[k] = String(Math.max(Number(mapa[k]) || 1, (Number(atuais[k]) || 0) + 1));
+  });
+  props.setProperties(saida);
+  if (saida.GERACAO_DADOS) CacheService.getScriptCache().put('geracao', saida.GERACAO_DADOS, 21600);
   esquecerProps();
-  _geracao = g;
-  return g;
+  Object.keys(saida).forEach(function (k) {
+    if (k === 'GERACAO_DADOS') _geracao = saida[k];
+    else _geracaoTb[k] = saida[k];
+  });
+  return saida;
 }
 
 /* ------------------------------------------------------------------ */
@@ -231,6 +256,9 @@ const TABELAS_CACHEAVEIS = {
  * e sempre da planilha — a conferencia tem que ver o dado exato.
  */
 const CACHE_SO_FORA_DA_TRAVA = {
+  // COLABORADORES: a importacao do RH confere "quem ja existe" dentro da trava (sem isso, uma
+  // importacao morta no meio deixava a copia velha e a seguinte inseria as mesmas matriculas de novo).
+  COLABORADORES: 1,
   ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
   LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1
 };
@@ -562,16 +590,20 @@ var _travaAberta = 0;
  */
 var _geracoesPendentes = null;
 var _removerDepois = null;       // copias derivadas (acessos/perfis/filiais) a apagar depois do flush
+var _inicioDaExecucao = Date.now();   // o Apps Script carrega os arquivos a cada execucao
 function publicarGeracoes_() {
-  const cache = CacheService.getScriptCache();
-  const mapa = _geracoesPendentes, remover = _removerDepois;
-  _geracoesPendentes = null; _removerDepois = null;
-  if (mapa) {
-    PropertiesService.getScriptProperties().setProperties(mapa);
-    if (mapa.GERACAO_DADOS) cache.put('geracao', mapa.GERACAO_DADOS, 21600);
-    esquecerProps();
+  const remover = _removerDepois;
+  if (remover && remover.length) {
+    // PRIMEIRO as copias derivadas: se a escrita das propriedades falhar, ninguem fica com a copia velha.
+    CacheService.getScriptCache().removeAll(remover);
+    _removerDepois = null;
   }
-  if (remover && remover.length) cache.removeAll(remover);
+  const mapa = _geracoesPendentes;
+  if (!mapa) return;
+  // Falha passageira das propriedades: mais uma tentativa. Falhou de novo, sobe (ver comTrava).
+  try { publicarNumeros_(mapa); }
+  catch (e) { Utilities.sleep(300); publicarNumeros_(mapa); }
+  _geracoesPendentes = null;
 }
 
 function comTrava(funcao, espera) {
@@ -603,7 +635,14 @@ function comTrava(funcao, espera) {
     // documentacao do LockService): sem isso, quem pega a trava em seguida
     // pode ler a planilha sem a linha que acabou de ser gravada.
     try { SpreadsheetApp.flush(); } catch (e) {}
-    try { publicarGeracoes_(); } catch (e) {}
+    try { publicarGeracoes_(); }
+    catch (e) {
+      // As geracoes novas nao sairam: esta execucao nao guarda mais tela nem copia com numeros
+      // que ninguem conhece (a gravacao esta na planilha; as telas se acertam na proxima gravacao).
+      _geracoesPendentes = null; _removerDepois = null;
+      _geracao = null; _geracaoTb = {}; esquecerProps(); esquecerLeituras();
+      console.error('GSL: geracoes nao publicadas depois da gravacao: ' + ((e && e.message) || e));
+    }
     trava.releaseLock();
   }
 }
@@ -713,6 +752,12 @@ function marcado(valor) {
  */
 const CACHE_SEGUNDOS = 1800;
 const CHAVES_CACHE = ['perfis', 'acessos', 'filiais'];
+/*
+ * Quem entra e o que cada nivel pode: 5 min, como antes. Desativar alguem (ou
+ * tirar uma permissao) direto na planilha vale em no maximo 5 min para quem ja
+ * esta dentro — pelo sistema, vale na hora.
+ */
+const CACHE_SEGUNDOS_POR_CHAVE = { acessos: 300, perfis: 300 };
 
 /*
  * Cada tabela derruba SO o cache que depende dela. Antes, salvar uma
@@ -738,7 +783,7 @@ var _preCache = null;     // o que a pre-leitura trouxe: chave -> valor ou null
 function preLerCache_(token) {
   if (_preCache) return _preCache;
   const chaves = ['acessos', 'perfis', 'filiais', 'geracao'];
-  if (token) chaves.unshift('sess_' + token);
+  if (token) chaves.unshift('sess_' + token, 'sessfim_' + token);
   let r = {};
   try { r = CacheService.getScriptCache().getAll(chaves) || {}; } catch (e) { r = {}; }
   _preCache = {};
@@ -771,7 +816,7 @@ function comCache(chaveBase, funcao) {
     const texto = JSON.stringify(resultado);
     _comCacheMemo[chave] = texto;
     // Dentro da trava nao: a copia seria apagada depois do flush (ver publicarGeracoes_).
-    if (texto.length < 95000 && !_travaAberta) cache.put(chave, texto, CACHE_SEGUNDOS);
+    if (texto.length < 95000 && !_travaAberta) cache.put(chave, texto, CACHE_SEGUNDOS_POR_CHAVE[chaveBase] || CACHE_SEGUNDOS);
   } catch (e) { /* grande demais, segue sem cache */ }
   return resultado;
 }
@@ -792,7 +837,6 @@ function comCache(chaveBase, funcao) {
 function limparCache(tabela) {
   exigirPorta_();
   esquecerLeituras();
-  const props = PropertiesService.getScriptProperties();
   const cache = CacheService.getScriptCache();
 
   if (!tabela) {
@@ -806,12 +850,8 @@ function limparCache(tabela) {
       mapa[k] = gt;
       _geracaoTb[k] = gt;
     });
-    const gg = String(Number(geracaoDados() || 1) + 1);
-    mapa.GERACAO_DADOS = gg;
-    props.setProperties(mapa);
-    cache.put('geracao', gg, 21600);
-    esquecerProps();
-    _geracao = gg;
+    mapa.GERACAO_DADOS = String(Number(geracaoDados() || 1) + 1);
+    publicarNumeros_(mapa);
     return;
   }
 
@@ -842,6 +882,14 @@ function limparCache(tabela) {
       _geracoesPendentes.GERACAO_DADOS = gg0;
       _geracao = gg0;
     }
+    /*
+     * Execucao longa (importacao do RH, geracao do mes): o Apps Script mata a
+     * execucao aos 6 min SEM rodar o finally da trava. Depois de 1 min, cada
+     * gravacao ja sai publicada (flush e numero novo), como era antes do 10/10.
+     */
+    if (Date.now() - _inicioDaExecucao > 60000) {
+      try { SpreadsheetApp.flush(); publicarGeracoes_(); } catch (e) { /* o fim da trava tenta de novo */ }
+    }
     return;
   }
   if (chaves.length) cache.removeAll(chaves.map(chaveNoEspaco));
@@ -861,10 +909,6 @@ function limparCache(tabela) {
     mapa[k] = gt;
     _geracaoTb[k] = gt;
   }
-  const gg = String(Number(geracaoDados() || 1) + 1);
-  mapa.GERACAO_DADOS = gg;
-  props.setProperties(mapa);
-  cache.put('geracao', gg, 21600);
-  esquecerProps();
-  _geracao = gg;
+  mapa.GERACAO_DADOS = String(Number(geracaoDados() || 1) + 1);
+  publicarNumeros_(mapa);
 }

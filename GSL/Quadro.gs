@@ -17,7 +17,7 @@
  * padrao, produtivo ou matricula repetidos e admitido que nao entrou na
  * GERAL. Cada uma diz a linha da planilha.
  */
-const BUILD_QUADRO = '2026.10.13';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_QUADRO = '2026.10.13b';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const QUADRO_ABA_GERAL = 'GERAL';
 const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];
@@ -25,7 +25,7 @@ const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
 const QUADRO_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
 // O formato do que vai para o cache: copia de outro formato (versao anterior do Quadro.gs) e relida.
-const QUADRO_FORMATO = 2;
+const QUADRO_FORMATO = 3;
 
 /*
  * A aba e achada pelo nome sem diferenciar maiuscula, acento, espaco ou
@@ -435,39 +435,54 @@ function inconsistenciasQ_(geral, adm, des) {
    * saida (CADMITIDOS com data) foi recontratado: o quadro esta certo e nao ha
    * aviso — a saida antiga fica na CDESLIGADOS, porque conta no turnover.
    */
-  const jaVisto = {}, hoje = hojeISO();
+  const jaVisto = {}, recontratado = {}, hoje = hojeISO();
   const desAte = des.filter(function (d) { return !(d.data && d.data > hoje); })
-    .sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
+    .sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });     // a mais recente primeiro; sem data no fim
+  // Admissoes da pessoa achadas por NUMERO (COD ou RH): so elas provam uma recontratacao.
+  const admPorNumero = function (r) {
+    return [acharQ_(ixAdm, r)].filter(function (x) { return x && x.chave !== 'nome'; })
+      .reduce(function (l, x) { return l.concat(x.lista); }, []);
+  };
   desAte.forEach(function (d) {
     const achou = acharQ_(ix, d);
     if (!achou) return;
     achou.lista.filter(function (g) { return g.ativo; }).forEach(function (g) {
       if (jaVisto[g.ref]) return;
+      // Ja calado por recontratacao: as saidas datadas mais antigas nao contam; uma saida SEM data ainda pode ser nova.
+      if (recontratado[g.ref] && d.data) return;
+      const adms = admPorNumero(d).concat(admPorNumero(g));
+      if (d.data && adms.some(function (a) { return a.data && a.data > d.data; })) { recontratado[g.ref] = true; return; }
       jaVisto[g.ref] = true;
-      const adms = (acharQ_(ixAdm, d) || { lista: [] }).lista;
-      if (d.data && adms.some(function (a) { return a.data && a.data > d.data; })) return;     // recontratado(a)
-      const admSemData = adms.length && adms.every(function (a) { return !a.data; });
+      const admTodas = (acharQ_(ixAdm, d) || { lista: [] }).lista;
+      const dica = recontratado[g.ref] ? ' Há também uma saída antiga e uma readmissão: ponha a data desta saída para conferir.'
+        : (admTodas.length && !admTodas.some(function (a) { return a.data && d.data && a.data > d.data; }) && admTodas.some(function (a) { return !a.data; })
+          ? ' Está também na CADMITIDOS, sem data: se foi recontratação, ponha a data da nova admissão na CADMITIDOS.' : '');
       saida.push(Object.assign(quem(g), {
         tipo: 'DESLIGADO_ATIVO', gravidade: 'grave', data: d.data || '', chave: achou.chave,
         detalhe: (d.data ? 'Desligado em ' + dataCurtaQ_(d.data) : 'Está na CDESLIGADOS (sem data)') + (d.motivo ? ' (' + d.motivo + ')' : '') +
           ', mas está ' + (g.status || 'sem status') + ' na ' + (g.aba || 'GERAL') + '.' +
-          (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') +
-          (admSemData ? ' Está também na CADMITIDOS, sem data: se foi recontratação, ponha a data da nova admissão na CADMITIDOS.' : '')
+          (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') + dica
       }));
     });
   });
-  // 1b. Mesmo nome de um desligado, mas com outro COD ou RH: homonimo ou numero digitado errado. Atencao, para conferir.
+  /*
+   * 1b. MESMO_NOME: alguem ativo tem o mesmo nome de um desligado, mas outro
+   * COD ou RH — homonimo ou numero digitado errado. Atencao, para conferir;
+   * nunca manda inativar ninguem. Quem foi admitido (por numero) depois da
+   * saida e recontratacao com numero novo: sem aviso.
+   */
   const jaVistoNome = {};
   desAte.forEach(function (d) {
     if (acharQ_(ix, d)) return;
     const n = nomeChaveQ_(d.nome);
-    ((n && ix.nome[n]) || []).filter(function (g) { return g.ativo && !jaVisto[g.ref] && !jaVistoNome[g.ref]; }).forEach(function (g) {
+    ((n && ix.nome[n]) || []).filter(function (g) { return g.ativo && !jaVisto[g.ref] && !recontratado[g.ref] && !jaVistoNome[g.ref]; }).forEach(function (g) {
+      if (d.data && admPorNumero(g).some(function (a) { return a.data && a.data > d.data; })) return;
       jaVistoNome[g.ref] = true;
       const dif = [];
       if (codigoQ_(d.cod) && codigoQ_(g.cod) && codigoQ_(d.cod) !== codigoQ_(g.cod)) dif.push('o COD é ' + d.cod + ' na CDESLIGADOS e ' + g.cod + ' na ' + (g.aba || 'GERAL'));
       if (codigoQ_(d.rh) && codigoQ_(g.rh) && codigoQ_(d.rh) !== codigoQ_(g.rh)) dif.push('a matrícula é ' + d.rh + ' na CDESLIGADOS e ' + g.rh + ' na ' + (g.aba || 'GERAL'));
       saida.push(Object.assign(quem(g), {
-        tipo: 'DESLIGADO_ATIVO', gravidade: 'atencao', data: d.data || '', chave: 'nome', conflito: true,
+        tipo: 'MESMO_NOME', gravidade: 'atencao', data: d.data || '', chave: 'nome',
         detalhe: 'Tem o mesmo nome de quem está na CDESLIGADOS' + (d.data ? ' (desligado em ' + dataCurtaQ_(d.data) + ')' : '') + ', mas ' +
           (dif.join(' e ') || 'os números não batem') + '. Confira se é a mesma pessoa (número digitado errado) ou um homônimo.'
       }));

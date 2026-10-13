@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.13'
+  build: '2026.10.13b'
 };
 
 /*
@@ -35,6 +35,7 @@ const APP = {
  *   2026.10.10  = desempenho: sessao que nao cai, canal barrado sem espera,
  *                 bolinha das acoes em aberto no menu
  *   2026.10.13  = Quadro do CD pela aba GERAL, inconsistencias e painel novo
+ *   2026.10.13b = Quadro do CD: correcoes da revisao (recontratado, mesmo nome, datas, casamento na tela)
  */
 function arquivosForaDaVersao_() {
   const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c', DESEMPENHO = '2026.10.10';
@@ -710,7 +711,8 @@ function chaveDeTela(idTela, usuario, params) {
   const dia = paraISO(hoje());
   // A filial entra na chave: a mesma tela de duas filiais sao dois payloads. O carimbo
   // (APP.build) tambem: cada implantacao nova aposenta as telas montadas pelo codigo anterior.
-  return ['t', APP.build, geracaoDados(), dia, filialAtual().codigo, idTela, usuario.perfil, usuario.chaveModulos || '',
+  // Os arquivos fora da versao tambem: colar o arquivo que faltava (mesmo carimbo) aposenta a tela montada sem ele.
+  return ['t', APP.build + arquivosForaDaVersao_().join(','), geracaoDados(), dia, filialAtual().codigo, idTela, usuario.perfil, usuario.chaveModulos || '',
           e.tipo, usuario.turno || '', dono, JSON.stringify(params || {})].join('|');
 }
 

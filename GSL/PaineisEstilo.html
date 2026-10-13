@@ -3,7 +3,7 @@
    PAINEIS NOVOS — filiais, nobreaks, limpeza e quadro do CD.
    Usa as mesmas variaveis do Estilo (claro e escuro).
    ========================================================= */
-:root { --gsl-paineis-estilo: '2026.10.13'; }   /* carimbo da entrega (conferirVersao no App.html) */
+:root { --gsl-paineis-estilo: '2026.10.13b'; }   /* carimbo da entrega (conferirVersao no App.html) */
 
 /* ---- barra lateral: filial em uso ---- */
 .filial-atual {
@@ -357,7 +357,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .qd-chip { min-height: 32px; padding: 4px 11px; border-radius: 99px; cursor: pointer; border: 1.5px solid var(--bq-linha);
   background: var(--bq-surface); font-size: 12.5px; font-weight: 600; color: var(--tinta-media); }
-.qd-chip b { color: var(--tinta-fraca); font-weight: 600; margin-left: 2px; }
+.qd-chip b { color: var(--tinta-media); font-weight: 600; margin-left: 2px; }
 .qd-chip[aria-pressed="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--vidro-alto); }
 .qd-chip[aria-pressed="true"] b { color: inherit; opacity: .75; }
 .qd-exportar { display: flex; gap: 8px; margin-left: auto; }
@@ -415,7 +415,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-mapa td.q1 { background: var(--seq-1); } .qd-mapa td.q2 { background: var(--seq-2); } .qd-mapa td.q3 { background: var(--seq-3); }
 .qd-mapa td.q4 { background: var(--seq-4); } .qd-mapa td.q5 { background: var(--seq-5); }
 .qd-mapa td.q5 button { color: var(--seq-ink-5); }
-.qd-mapa td.vazio, .qd-mapa td.soma { color: var(--tinta-fraca); height: 34px; }
+.qd-mapa td.vazio, .qd-mapa td.soma { color: var(--tinta-media); height: 34px; }
 .qd-mapa td.soma { color: var(--tinta); font-weight: 700; font-variant-numeric: tabular-nums; }
 .qd-mapa td.apagada, .qd-mapa th.apagada { opacity: .35; }
 .qd-mapa td.t { white-space: nowrap; text-align: right; padding-left: 10px; vertical-align: middle; }
@@ -428,7 +428,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-mapa tfoot th { text-align: left; }
 .qd-mapa tfoot td.t { text-align: right; }
 .qd-mapa-sep th { background: transparent !important; font-family: 'Archivo', sans-serif; font-size: 10.5px !important; font-weight: 600 !important;
-  letter-spacing: .1em !important; text-transform: uppercase !important; color: var(--tinta-fraca) !important; padding-top: 12px !important;
+  letter-spacing: .1em !important; text-transform: uppercase !important; color: var(--tinta-media) !important; padding-top: 12px !important;
   border-bottom: 1px solid var(--bq-linha) !important; }
 .qd-mapa-recolhido th { font-weight: 600; }
 .qd-mapa-recolhido th .qd-link { text-decoration: none; color: var(--tinta); }
@@ -470,7 +470,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-card-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .qd-alternar { font-size: 12.5px; }
 .qd-espelho { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(30px, 1fr); gap: 4px; margin: 8px 0 10px; --qd-cor: var(--qd-cd); }
-.qd-grade2 .qd-espelho { overflow-x: auto; padding-top: 16px; }      /* 12 ou 24 meses: o grafico rola dentro do cartao */
+.qd-grade2 .qd-espelho { overflow-x: auto; padding-top: 16px; position: relative; }      /* 12 ou 24 meses: o grafico rola dentro do cartao */
 .qd-esp-mes { display: grid; grid-template-rows: 92px 92px auto; cursor: pointer; border: none; background: transparent; padding: 0 2px;
   border-radius: 8px; min-width: 24px; }
 .qd-espelho.mini .qd-esp-mes { grid-template-rows: 30px 30px auto; }
@@ -500,6 +500,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   text-align: left; padding: 5px 6px; border: none; background: transparent; border-radius: 8px; cursor: pointer; min-height: 30px; }
 .qd-barra:hover { background: var(--bq-surface-2); }
 .qd-desf-item:focus-visible, .qd-esp-mes:focus-visible, .qd-barra:focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; }
+.qd-esp-mes.fora:focus-visible, .qd-barra.apagada:focus-visible { opacity: 1; }
 .qd-barra.escolhida { box-shadow: inset 0 0 0 1.5px var(--tinta); }
 .qd-barra.escolhida .qd-barra-nome { font-weight: 700; }
 .qd-barra.apagada { opacity: .35; }
@@ -519,12 +520,12 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-mov-div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; padding: 14px 4px 6px;
   font-family: 'Archivo', sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: var(--tinta-media);
   border-bottom: 1px solid var(--bq-linha); }
-.qd-mov-div span { letter-spacing: 0; font-weight: 600; color: var(--tinta-fraca); font-family: inherit; }
+.qd-mov-div span { letter-spacing: 0; font-weight: 600; color: var(--tinta-media); font-family: inherit; }
 .qd-mov { display: grid; grid-template-columns: 88px 70px minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 10px;
   align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--bq-linha); font-size: 13px; }
 .qd-mov-data { color: var(--tinta-media); font-size: 12.5px; }
 .qd-mov-seta { font-size: 12px; font-weight: 600; color: var(--tinta-media); white-space: nowrap; }
-.qd-mov-quem small, .qd-mov-eq small { display: block; color: var(--tinta-fraca); font-size: 11.5px; margin-top: 1px; }
+.qd-mov-quem small, .qd-mov-eq small { display: block; color: var(--tinta-media); font-size: 11.5px; margin-top: 1px; }
 .qd-mov-eq { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .qd-mov-det { color: var(--tinta-media); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 .qd-mais { display: block; margin: 12px auto 0; padding: 8px 18px; border-radius: 99px; border: 1.5px solid var(--bq-linha);
@@ -571,7 +572,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-grupo.grave { border-left-color: #d03b3b; }
 .qd-grupo-cab { display: flex; align-items: center; gap: 10px; }
 .qd-grupo-cab h3 { font-family: 'Archivo', sans-serif; font-size: 15px; margin: 0; }
-.qd-grupo-cab h3 span { color: var(--tinta-fraca); font-weight: 600; margin-left: 4px; }
+.qd-grupo-cab h3 span { color: var(--tinta-media); font-weight: 600; margin-left: 4px; }
 .qd-itens { list-style: none; margin: 0; padding: 0; }
 .qd-item { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) auto; gap: 4px 14px; align-items: center;
   padding: 9px 0; border-top: 1px solid var(--bq-linha); font-size: 13px; }
@@ -592,7 +593,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-col.ok small { font-weight: 500; color: var(--tinta-fraca); }
 .qd-leitura-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 8px 0 6px; }
 .qd-leitura-tabs table th { cursor: default; }
-.qd-leitura-tabs th, .qd-leitura-tabs td { white-space: normal; }
+.qd-leitura-tabs th, .qd-leitura-tabs td, .qd-leitura-cols .qd-selo { white-space: normal; }
 .qd-leitura-mais { margin: 10px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--tinta-media); line-height: 1.7; }
 
 /* ficha (na janela) */
@@ -666,9 +667,10 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .modo-leve .qd-cartao, .modo-leve .bi-quadro.qd-relendo { transition: none; }
 @media (forced-colors: active) {
   .qd-eq i, .qd-pill i, .qd-medidor, .qd-medidor i, .qd-mapa-tot i, .qd-ico, .qd-esp-cima i, .qd-esp-baixo i, .qd-barra-trilho i,
-  .bi-quadro .bq-escala i, .qd-mapa td.c { forced-color-adjust: none; }
+  .bi-quadro .bq-escala i, .qd-mapa td.q1, .qd-mapa td.q2, .qd-mapa td.q3, .qd-mapa td.q4, .qd-mapa td.q5 { forced-color-adjust: none; }
   .qd-selo, .qd-tag, .qd-cartao, .qd-faixa { border: 1px solid CanvasText; }
   .qd-pill[aria-pressed="true"], .qd-chip[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .qd-cartao.escolhido, .qd-esp-mes.escolhido, .qd-barra.escolhida, .qd-mapa th.escolhida .qd-eq { outline: 3px solid Highlight; }
+  .qd-esp-mes.escolhido { outline-offset: -3px; }
 }
 </style>

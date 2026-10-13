@@ -1,6 +1,6 @@
 <script>
 /* Carimbo desta entrega (ver conferirVersao no App.html). */
-const BUILD_PAINEIS = '2026.10.13';
+const BUILD_PAINEIS = '2026.10.13b';
 
 /* =====================================================================
    PAINEIS NOVOS DO GSL
@@ -58,7 +58,7 @@ const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) 
  * minimo que o Excel, o LibreOffice e o Google Planilhas abrem.
  */
 function pnBaixarXlsx(nomeArquivo, abas) {
-  const xml = (t) => String(t).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+  const xml = (t) => String(t).replace(/[\u000B\u000C]/g, ' ').replace(/[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]/g, '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const col = (i) => { let s = ''; i++; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
   const NS = 'http:\/\/schemas.openxmlformats.org';
@@ -1206,8 +1206,9 @@ const qdNomeTxt = (r) => String((r && r.nome) || '').toUpperCase();
 /* Tipo do desligamento: involuntario, voluntario (pedido) ou sem tipo. */
 function qdTipo(t) {
   const k = qdChaveNome(t);
-  if (/^INVOL|DISPENS|JUSTA CAUSA|DEMITID|DECISAO DA EMPRESA|INICIATIVA DA EMPRESA|TERMIN|FIM D[EO] CONTRATO/.test(k)) return 'inv';
+  if (/^INVOL|DISPENS|JUSTA CAUSA|DEMITID|DECISAO DA EMPRESA|INICIATIVA DA EMPRESA/.test(k)) return 'inv';
   if (/^VOL|PEDID|PEDIU|INICIATIVA DO (COLABORADOR|EMPREGADO|FUNCIONARIO)/.test(k)) return 'vol';
+  if (/(^| )TERMIN|FIM D[EO] CONTRATO/.test(k)) return 'inv';
   return 'sem';
 }
 /* Motivo agrupado sem diferenciar maiuscula nem acento; vazio = nao informado. */
@@ -1336,7 +1337,7 @@ function pintarQuadro(r) {
     ${completo ? '<button class="icone-botao" onclick="qdCopiarResumo()">Copiar resumo</button>' : ''}
     ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
   if (d.erro) { el('acoes-topo').innerHTML = acoes(false); el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
-  if (d.formato !== 2) {
+  if (d.formato !== 3) {
     // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.
     el('acoes-topo').innerHTML = acoes(false);
     el('subtitulo-pagina').textContent = 'Atualização incompleta';
@@ -1392,8 +1393,10 @@ function qdEquipe(e) {
 }
 function qdFuncao(f) {
   // a funcao fica com a grafia da GERAL (a CDESLIGADOS pode escrever sem acento)
-  const g = f && qdNaEmpresa().find((x) => qdChaveNome(qdFuncaoDe(x)) === qdChaveNome(f));
-  if (g) f = qdFuncaoDe(g);
+  if (f && !qdNaEmpresa().some((x) => qdFuncaoDe(x) === f)) {
+    const g = qdNaEmpresa().find((x) => qdChaveNome(qdFuncaoDe(x)) === qdChaveNome(f));
+    if (g) f = qdFuncaoDe(g);
+  }
   QD.funcao = (QD.funcao === f) ? '' : f; QD.limite = 100; qdDesenhar();
 }
 function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = ''; QD.limite = 100; QD.limiteMov = 30; qdDesenhar(); }
@@ -1401,6 +1404,7 @@ function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = 
 function qdVerPessoas(equipe, funcao, mostrar) {
   QD.equipe = equipe; QD.funcao = funcao; QD.mostrar = mostrar || 'empresa'; QD.busca = ''; QD.limite = 100;
   Object.keys(QD.recolhidas).forEach((k) => { if (k.indexOf('eq') === 0) delete QD.recolhidas[k]; });     // a secao recolhida abre
+  QD.focoDepois = '#qd-lista .qd-pessoa, #qd-lista .qd-tabela tbody tr';                                // teclado: na primeira pessoa
   qdAba('pessoas');
 }
 /* A Conferencia ja rolada ate o grupo (ou com "Como o GSL leu a planilha" aberto). */
@@ -1423,10 +1427,18 @@ function qdGuardarFoco() {
   const a = document.activeElement;
   return a && a !== document.body && a.closest && a.closest('.bi-quadro') ? qdChaveFoco(a) : '';
 }
+function qdFocar(n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } }
 function qdDevolverFoco(k) {
+  // destino escolhido pelo proprio clique (ex.: a primeira pessoa da lista aberta pelo mapa)
+  if (QD.focoDepois) {
+    const alvo = document.querySelector(QD.focoDepois);
+    QD.focoDepois = '';
+    if (alvo) { qdFocar(alvo); return; }
+  }
   if (!k) return;
   const n = Array.from(document.querySelectorAll('.bi-quadro button, .bi-quadro select, .bi-quadro input, .bi-quadro summary')).find((x) => qdChaveFoco(x) === k);
-  if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } }
+  const aba = document.querySelector('#qd-abas .aba.ativa');
+  if (n || aba) qdFocar(n || aba);          // o controle sumiu (Limpar filtros, chip, Mostrar mais): volta para a aba
 }
 let QD_FAIXA_HTML = null;
 function qdDesenhar() {
@@ -1600,6 +1612,9 @@ const QD_TIPOS = {
   DESLIGADO_ATIVO: { titulo: 'Desligados que continuam ATIVOS na GERAL', curto: 'desligado ainda ativo',
     oque: 'Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro.',
     corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se foi recontratação, ponha a data da nova admissão na CADMITIDOS — a saída antiga fica, porque conta no turnover.' },
+  MESMO_NOME: { titulo: 'Mesmo nome de um desligado, outro COD ou RH', curto: 'mesmo nome de um desligado',
+    oque: 'A pessoa está ativa na GERAL e tem o mesmo nome de alguém da CDESLIGADOS, mas o COD ou a matrícula não batem: pode ser um homônimo ou um número digitado errado.',
+    corrigir: 'Se for a mesma pessoa, acerte o COD ou o RH errado (aí o aviso vira o de desligado ativo). Se for outra pessoa (homônimo), não mude nada na GERAL.' },
   SEM_NOME: { titulo: 'Linhas sem nome', curto: 'sem nome',
     oque: 'A coluna PROD está vazia: a pessoa conta no quadro, mas aparece como Sem nome.', corrigir: 'Preencha o PROD.' },
   EQUIPE: { titulo: 'EQUIPE fora do padrão', curto: 'sem turno',
@@ -1615,7 +1630,7 @@ const QD_TIPOS = {
     oque: 'Estão na CADMITIDOS, mas não na GERAL: o quadro conta gente a menos.',
     corrigir: 'Inclua a pessoa na GERAL com EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS.' }
 };
-const QD_ORDEM_TIPOS = ['COLUNA', 'DESLIGADO_ATIVO', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA'];
+const QD_ORDEM_TIPOS = ['COLUNA', 'DESLIGADO_ATIVO', 'MESMO_NOME', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA'];
 /* "linha 14" ou "linhas 14 e 174", cada uma com o link para a linha (so na GERAL). */
 function qdLinhasItem(x) {
   const ls = x.linhas && x.linhas.length > 1 ? x.linhas : (x.linha ? [String(x.linha) + (x.aba ? ' (' + x.aba + ')' : '')] : []);
@@ -1656,7 +1671,7 @@ function qdConferencia() {
           <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(qdNomeTxt(x)) : '<em>Sem nome</em>'}</button>`
             : `<span class="qd-item-nome">${x.nome ? esc(x.tipo === 'COLUNA' ? x.nome : qdNomeTxt(x)) : '<em>Sem nome</em>'}</span>`}
             <span class="qd-item-ids bq-num">${x.cod ? 'COD ' + esc(x.cod) : ''}${x.cod && x.rh ? ' · ' : ''}${x.rh ? 'RH ' + esc(x.rh) : ''}</span>
-            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}${x.tipo === 'DESLIGADO_ATIVO' && x.gravidade !== 'grave' ? qdSelo('atencao', 'confira') : ''}</div>
+            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}</div>
           <div class="qd-item-det">${esc(x.detalhe)}</div>
           <div class="qd-item-acoes">${x.tipo === 'COLUNA' ? '' : qdLinhasItem(x)}
             ${link ? `<a class="icone-botao" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha ↗</a>` : ''}</div>
@@ -1747,8 +1762,7 @@ function qdEtiquetas(g) {
     t.push(`<span class="qd-tag" title="Admissão: ${a.data ? pnDataLonga(a.data) : 'sem data na planilha'}${a.status ? ' · ' + esc(a.status) : ''}">${trein ? 'Novo · em treinamento' : 'Novo'}</span>`);
   }
   (memo.pend[g.ref] || []).forEach((x) => t.push(qdSelo(x.gravidade, x.tipo === 'DESLIGADO_ATIVO'
-    ? (x.gravidade !== 'grave' ? 'mesmo nome de um desligado' : (x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'desligado (sem data)'))
-    : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
+    ? (x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'desligado (sem data)') : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
   return t.join('');
 }
 /* Nome vazio nunca fica em branco. */
@@ -1812,7 +1826,7 @@ function qdListaPessoas(lista) {
     const fechado = QD.recolhidas[chave] === true;
     return `<section class="bq-card qd-turno">
       <header class="qd-turno-cab"><div>${qdEq(e)}<span class="qd-turno-n"><b class="bq-num">${qdN(deles.length)}</b> ${deles.length === 1 ? 'pessoa' : 'pessoas'}${QD.mostrar === 'empresa' ? ' · ' + qdN(disp) + ' disponíve' + (disp === 1 ? 'l' : 'is') : ''}</span></div>
-        <button class="qd-link" aria-expanded="${!fechado}" onclick="QD.recolhidas[${jsArg(chave)}]=${!fechado};qdRedesenharLista()">${fechado ? 'Abrir' : 'Recolher'}</button></header>
+        <button class="qd-link" aria-expanded="${!fechado}" onclick="QD.recolhidas[${jsArg(chave)}]=!QD.recolhidas[${jsArg(chave)}];qdRedesenharLista()">${fechado ? 'Abrir' : 'Recolher'}</button></header>
       ${fechado ? '' : `<div class="qd-blocos">${qdOrdemFuncoes(porF).map((f) => {
         const ps = porF[f].slice().sort((a, b) => (qdNomeTxt(a) || '￿').localeCompare(qdNomeTxt(b) || '￿'));
         const fora = ps.filter((g) => g.ativo && g.situacao !== 'ATIVO').length;
@@ -2135,7 +2149,7 @@ function qdListaMov(adm, des, j) {
       <span class="qd-mov-eq">${qdEq(r.equipe, r.equipeBruta)} <small>${r.funcao ? esc(r.funcao) : ''}</small></span>
       <span class="qd-mov-det">${x.s === 'saida' ? (tipo === 'vol' ? 'Voluntário' : (tipo === 'inv' ? 'Involuntário' : esc(r.tipo || 'Tipo não informado'))) +
           ' · ' + (r.motivo ? esc(r.motivo) : '<em>motivo não informado</em>') : esc(r.status ? r.status.charAt(0) + r.status.slice(1).toLowerCase() : 'Admitido')}
-        ${pend ? qdSelo(pend.gravidade, pend.gravidade === 'grave' ? 'ainda ativo na GERAL' : 'confira na Conferência') : ''}${fora ? qdSelo('atencao', 'não está na GERAL') : ''}</span>
+        ${pend ? qdSelo('grave', 'ainda ativo na GERAL') : ''}${fora ? qdSelo('atencao', 'não está na GERAL') : ''}</span>
     </li>`;
   };
   return `<div class="bq-card qd-movlista"><div class="qd-movlista-cab"><div><h2>Quem entrou e quem saiu</h2>
@@ -2261,10 +2275,10 @@ function qdMapa() {
   const visivel = (f) => !eqEscolhida || eqEscolhida === '' || cel[f + '|' + eqEscolhida];
   const admAberto = QD.admAberto || QD.equipe === 'ADM' || (QD.funcao && administrativo.indexOf(QD.funcao) !== -1);
   const maxTot = Math.max(1, ...funcoes.map((f) => totF[f]));
-  const linha = (f) => {
+  const linha = (f, idBotao) => {
     const apagadaLinha = QD.funcao && QD.funcao !== f;
     return `<tr class="${QD.funcao === f ? 'escolhida' : ''}${apagadaLinha ? ' apagada' : ''}">
-    <th scope="row"><button class="qd-link qd-mapa-funcao" onclick="qdFuncao(${jsArg(f)})">${qdRotFuncao(f)}</button></th>
+    <th scope="row"><button${idBotao ? ' id="' + idBotao + '"' : ''} class="qd-link qd-mapa-funcao" onclick="qdFuncao(${jsArg(f)})">${qdRotFuncao(f)}</button></th>
     ${QD_EQUIPES.map((e) => {
       const v = cel[f + '|' + e] || 0, x = det[f + '|' + e];
       const i = v ? Math.min(5, Math.ceil(v / max * 5)) : 0;
@@ -2276,12 +2290,13 @@ function qdMapa() {
     }).join('')}
     <td class="t"><span class="qd-mapa-tot"><i style="width:${Math.max(3, totF[f] / maxTot * 100)}%"></i></span><b class="bq-num">${totF[f]}</b></td></tr>`;
   };
-  const grupo = (rot, lista) => lista.filter(visivel).length ? `<tr class="qd-mapa-sep"><th colspan="${QD_EQUIPES.length + 2}">${rot}</th></tr>` + lista.filter(visivel).map(linha).join('') : '';
+  const grupo = (rot, lista, idPrimeiro) => lista.filter(visivel).length ? `<tr class="qd-mapa-sep"><th colspan="${QD_EQUIPES.length + 2}">${rot}</th></tr>` +
+    lista.filter(visivel).map((f, i) => linha(f, i === 0 ? idPrimeiro : '')).join('') : '';
   const somaAdm = administrativo.reduce((t, f) => t + totF[f], 0);
-  const admLinhas = !administrativo.length || !administrativo.filter(visivel).length ? '' : (admAberto ? grupo('Administrativo', administrativo)
-    : `<tr class="qd-mapa-recolhido"><th scope="row"><button class="qd-link" onclick="QD.admAberto=true;qdDesenhar()" aria-expanded="false">Administrativo · ${qdPlural(administrativo.length, 'função', 'funções')} <span aria-hidden="true">▾</span></button></th>
+  const admLinhas = !administrativo.length || !administrativo.filter(visivel).length ? '' : (admAberto ? grupo('Administrativo', administrativo, 'qd-adm-1')
+    : `<tr class="qd-mapa-recolhido"><th scope="row"><button class="qd-link" onclick="QD.admAberto=true;QD.focoDepois='#qd-adm-1';qdDesenhar()" aria-expanded="false">Administrativo · ${qdPlural(administrativo.length, 'função', 'funções')} <span aria-hidden="true">▾</span></button></th>
         ${QD_EQUIPES.map((e) => `<td class="c soma${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}">${e === 'ADM' ? somaAdm : '–'}</td>`).join('')}<td class="t"><b class="bq-num">${somaAdm}</b></td></tr>`);
-  const corpo = operacao.filter(visivel).map(linha).join('') + grupo('Liderança', lideranca) + admLinhas;
+  const corpo = operacao.filter(visivel).map((f) => linha(f, '')).join('') + grupo('Liderança', lideranca, '') + admLinhas;
   return `<h2>Função × Turno</h2>
     <p class="bq-sub">Pessoas no quadro por função e turno — quanto mais forte o azul, mais gente (veja a escala). Toque num número para ver quem é.</p>
     <div class="bq-rolagem"><table class="qd-mapa">

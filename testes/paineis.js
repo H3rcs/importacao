@@ -665,10 +665,11 @@ caso('quadro do CD: homonimo (ou COD digitado errado) vira atencao; COD de preen
   const d = tela(m, s, 'quadro');
   afirmar(!d.erro, 'erro: ' + d.erro);
   afirmar(d.leitura.colunas.funcao === 'CARGO ATUAL' && d.leitura.colunas.rh === 'COD RH' && d.leitura.colunas.cod === 'COD', 'colunas pela prioridade: ' + JSON.stringify(d.leitura.colunas));
-  const da = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO');
-  // a recontratada (admitida de novo depois da saida), o aviso previo e o COD "-" nao geram nada; o homonimo pede conferencia
-  afirmar(da.length === 1 && da[0].cod === '30002' && da[0].gravidade === 'atencao' && da[0].conflito &&
-    /o COD é 99999 na CDESLIGADOS e 30002 na GERAL/.test(da[0].detalhe), 'so o homonimo, como atencao: ' + JSON.stringify(da));
+  // a recontratada (admitida de novo depois da saida), o aviso previo e o COD "-" nao geram nada; o homonimo pede conferencia (tipo proprio)
+  afirmar(!d.inconsistencias.some((x) => x.tipo === 'DESLIGADO_ATIVO'), 'nenhum desligado ativo: ' + JSON.stringify(d.inconsistencias));
+  const mn = d.inconsistencias.filter((x) => x.tipo === 'MESMO_NOME');
+  afirmar(mn.length === 1 && mn[0].cod === '30002' && mn[0].gravidade === 'atencao' && /o COD é 99999 na CDESLIGADOS e 30002 na GERAL/.test(mn[0].detalhe),
+    'so o homonimo, como atencao: ' + JSON.stringify(mn));
   // a tela anterior do Quadro (aberta durante a implantacao) le "apoio": os ativos, com o turno no jeito antigo
   afirmar(d.apoio.length === 4 && d.apoio.filter((a) => a.equipe === 'TA').length === 2 && d.apoio.every((a) => a.nome && a.funcao), 'apoio de transicao: ' + JSON.stringify(d.apoio));
   // planilha sem a GERAL (nem as APOIO): erro que diz o que fazer, e nada fica guardado no cache
@@ -725,6 +726,33 @@ caso('quadro do CD: "COD COLABORADOR" nao vira o nome, "DATA ADMISSAO" nao vira 
   afirmar(k.split('|')[1] === /build: '([^']+)'/.exec(require('fs').readFileSync(PASTA + '/Codigo.gs', 'utf8'))[1], 'carimbo na chave da tela: ' + k);
 });
 
+caso('quadro do CD: recontratacao so cala o aviso quando a admissao casa por NUMERO; com numero novo nao vira "mesmo nome"; saida nova sem data depois da readmissao avisa', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+      ['1° TURNO', '30010', 'JOSE SILVA', 'SEPARADOR', '100', 'ATIVO'],        // desligado de verdade; um homonimo foi admitido sem produtivo
+      ['1° TURNO', '30200', 'MARIA SOUZA', 'SEPARADOR', '200', 'ATIVO'],       // recontratada com COD novo
+      ['2° TURNO', '30300', 'DORA MELO', 'CONFERENTE', '300', 'ATIVO']],       // recontratada que saiu de novo (linha nova sem data)
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'STATUS', 'DATA ADMISSÃO'],
+      ['', 'JOSE SILVA', 'TB', 'CONFERENTE', 'EM TREINAMENTO', D(-5)],
+      ['30200', 'MARIA SOUZA', 'TA', 'SEPARADOR', 'ATIVO', D(-10)],
+      ['30300', 'DORA MELO', 'TB', 'CONFERENTE', 'ATIVO', D(-90)]],
+    'CDESLIGADOS': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'],
+      ['30010', 'JOSE SILVA', 'TA', 'SEPARADOR', D(-30), 'INVOLUNTÁRIO', 'Faltas'],
+      ['30010', 'MARIA SOUZA', 'TA', 'SEPARADOR', D(-60), 'VOLUNTÁRIO', ''],
+      ['30300', 'DORA MELO', 'TB', 'CONFERENTE', D(-200), 'VOLUNTÁRIO', ''],
+      ['30300', 'DORA MELO', 'TB', 'CONFERENTE', '', 'INVOLUNTÁRIO', 'Faltas']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  const graves = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO').map((x) => x.cod + ':' + x.gravidade).sort().join();
+  afirmar(graves === '30010:grave,30300:grave', 'JOSE (admissao so pelo nome nao cala) e DORA (saida nova sem data) avisam: ' + JSON.stringify(d.inconsistencias));
+  afirmar(!d.inconsistencias.some((x) => x.cod === '30200'), 'MARIA, recontratada com COD novo, sem aviso: ' + JSON.stringify(d.inconsistencias));
+  afirmar(/readmissão/.test(d.inconsistencias.find((x) => x.cod === '30300').detalhe), 'a dica da DORA fala da readmissao');
+});
+
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const link = planilhaAntiga(m, 'BI Quadro Feira', {
@@ -748,7 +776,7 @@ caso('quadro do CD: a aba GERAL faz a triagem dos turnos; titulo em cima, "1º"/
   const { abas, esperado: E } = require('./dados-quadro.js')(m.DataDoScript, new Date());
   acao(m, s, 'salvarFonteQuadro', { link: planilhaAntiga(m, 'BI Quadro CD Feira', abas) });
   const d = tela(m, s, 'quadro');
-  afirmar(!d.erro && d.formato === 2 && d.leitura.layout === 'GERAL' && d.leitura.aba === 'GERAL', 'leu a GERAL: ' + JSON.stringify(d.leitura));
+  afirmar(!d.erro && d.formato === 3 && d.leitura.layout === 'GERAL' && d.leitura.aba === 'GERAL', 'leu a GERAL: ' + JSON.stringify(d.leitura));
   afirmar(d.leitura.colunas.nome === 'PROD' && d.leitura.colunas.funcao === 'DESCRICAO' && d.leitura.colunas.rh === 'RH' && !d.leitura.faltam.length,
     'colunas: ' + JSON.stringify(d.leitura));
   afirmar(!d.geral.some((g) => /NAO LER/.test(g.nome)), 'a aba APOIO TA nao foi lida');
@@ -799,7 +827,7 @@ caso('quadro do CD: titulo com "COLABORADORES" em cima do cabecalho nao rouba a 
   const c = novaExecucao(m, PASTA, { contaGoogle: DONO }, OP); c._porta = true;
   c.gravarTextoCache(c.chaveNoEspaco('quadro|' + id), JSON.stringify({ apoio: [{ nome: 'VELHO' }] }), 300);
   const d2 = tela(m, s, 'quadro');
-  afirmar(d2.formato === 2 && d2.geral.length === 3, 'copia velha relida: ' + JSON.stringify(Object.keys(d2)));
+  afirmar(d2.formato === 3 && d2.geral.length === 3, 'copia velha relida: ' + JSON.stringify(Object.keys(d2)));
 });
 
 caso('perfil SUPERVISOR cuida so da Limpeza: plano e estoque da limpeza; nada do calendario nem do estoque de TI', () => {

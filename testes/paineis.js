@@ -354,6 +354,8 @@ caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esque
   afirmar(app.match(/BUILD_APP = '([^']+)'/)[1] === build, 'App.html no carimbo ' + build);
   const esperaAprendiz = app.match(/BUILD_APRENDIZ_TELA !== '([^']+)'/)[1];
   afirmar(ler('Aprendiz.html').match(/BUILD_APRENDIZ_TELA = '([^']+)'/)[1] === esperaAprendiz, 'Aprendiz.html no carimbo que o App.html espera (' + esperaAprendiz + ')');
+  const esperaPE = app.match(/carimboCss\('--gsl-paineis-estilo'\) !== '([^']+)'/)[1];
+  afirmar(ler('PaineisEstilo.html').match(/--gsl-paineis-estilo: '([^']+)'/)[1] === esperaPE, 'PaineisEstilo.html no carimbo que o App.html espera (' + esperaPE + ')');
   const esperaEstilo = app.match(/carimboDoEstilo\(\) !== '([^']+)'/)[1];
   afirmar(ler('Estilo.html').match(/--gsl-estilo: '([^']+)'/)[1] === esperaEstilo, 'Estilo.html no carimbo que o App.html espera (' + esperaEstilo + ')');
   afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')), 'Index.html com o que o App.html confere');
@@ -589,7 +591,7 @@ caso('trocar o proprio PIN: confere o atual, e o novo passa a valer', () => {
   afirmar(novo.token, 'PIN novo entra: ' + JSON.stringify(novo).slice(0, 160));
 });
 
-caso('quadro do CD: le os admitidos da aba CADMITIDOS sem data (Produtiva / Colaborador / Equipe / Funcao / Status)', () => {
+caso('quadro do CD (layout antigo, sem a GERAL): le as abas APOIO e os admitidos da CADMITIDOS sem data', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const D = (a, b, c) => new m.DataDoScript(a, b, c);
   const link = planilhaAntiga(m, 'BI Quadro Feira', {
@@ -608,9 +610,69 @@ caso('quadro do CD: le os admitidos da aba CADMITIDOS sem data (Produtiva / Cola
   afirmar(!d.erro, 'erro: ' + d.erro);
   afirmar(d.adm.length === 3, 'admitidos: ' + JSON.stringify(d.adm));
   const carla = d.adm.find((a) => a.nome === 'CARLA');
-  afirmar(carla.cod === '3' && carla.equipe === 'TB' && carla.funcao === 'SEPARADOR' && carla.status === 'ATIVO', 'carla: ' + JSON.stringify(carla));
+  afirmar(carla.cod === '3' && carla.equipe === '2° TURNO' && carla.funcao === 'SEPARADOR' && carla.status === 'ATIVO', 'carla: ' + JSON.stringify(carla));
   afirmar(d.adm.filter((a) => a.status === 'EM TREINAMENTO').length === 1, 'status');
-  afirmar(d.des.length === 1 && d.apoio.length === 2, 'desligados ' + d.des.length + ' apoio ' + d.apoio.length);
+  afirmar(d.des.length === 1 && d.geral.length === 2 && d.leitura.layout === 'APOIO', 'desligados ' + d.des.length + ' quadro ' + d.geral.length + ' ' + d.leitura.layout);
+  afirmar(d.geral.every((g) => g.equipe === '1° TURNO' && g.nome && g.ativo), 'turno da aba antiga: ' + JSON.stringify(d.geral));
+});
+
+caso('quadro do CD: a aba GERAL faz a triagem dos turnos; titulo em cima, "1º"/"1°", PROD como nome; as abas APOIO ficam de lado', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const { abas, esperado: E } = require('./dados-quadro.js')(m.DataDoScript, new Date());
+  acao(m, s, 'salvarFonteQuadro', { link: planilhaAntiga(m, 'BI Quadro CD Feira', abas) });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro && d.formato === 2 && d.leitura.layout === 'GERAL' && d.leitura.aba === 'GERAL', 'leu a GERAL: ' + JSON.stringify(d.leitura));
+  afirmar(d.leitura.colunas.nome === 'PROD' && d.leitura.colunas.funcao === 'DESCRICAO' && d.leitura.colunas.rh === 'RH' && !d.leitura.faltam.length,
+    'colunas: ' + JSON.stringify(d.leitura));
+  afirmar(!d.geral.some((g) => /NAO LER/.test(g.nome)), 'a aba APOIO TA nao foi lida');
+  const ativos = d.geral.filter((g) => g.ativo);
+  afirmar(ativos.length === E.ativos && d.geral.length - ativos.length === E.fora, 'ativos ' + ativos.length + ' fora ' + (d.geral.length - ativos.length));
+  const por = {}; ativos.forEach((g) => { por[g.equipe] = (por[g.equipe] || 0) + 1; });
+  Object.keys(E.porEquipe).forEach((k) => afirmar(por[k] === E.porEquipe[k], k + ': ' + por[k] + ' (esperava ' + E.porEquipe[k] + ')'));
+  afirmar(por[''] === E.semEquipe, 'equipe fora do padrao: ' + por['']);
+  afirmar(ativos.filter((g) => g.situacao === 'FERIAS').length === E.ferias && ativos.filter((g) => g.situacao === 'AFASTADO').length === E.afastados, 'ferias e afastados');
+  // o "nome que some": todo mundo com nome, menos a linha que esta sem nome na planilha
+  const semNome = d.geral.filter((g) => !g.nome);
+  afirmar(semNome.length === 1 && semNome[0].cod === '39002', 'sem nome: ' + JSON.stringify(semNome));
+  afirmar(d.geral.every((g) => !/^\d+$/.test(g.nome)), 'nenhum nome virou numero');
+  const primeira = d.geral[0];
+  afirmar(primeira.linha === 4 && primeira.cod === '30001' && primeira.rh === '100001' && primeira.nome && primeira.funcao === 'SEPARADOR', 'linha 4 da planilha: ' + JSON.stringify(primeira));
+  // admitidos e desligados: os mesmos de antes, com os turnos antigos (TA/TB/TC) no padrao novo
+  afirmar(d.adm.length === E.admitidos && d.des.length === E.desligados, 'adm ' + d.adm.length + ' des ' + d.des.length);
+  afirmar(d.des.filter((x) => x.equipeBruta === 'TB').every((x) => x.equipe === '2° TURNO'), 'TB = 2° TURNO');
+  // inconsistencias
+  const tipo = (t) => d.inconsistencias.filter((x) => x.tipo === t);
+  const da = tipo('DESLIGADO_ATIVO');
+  afirmar(da.map((x) => x.cod).sort().join() === E.desligadoAtivo.slice().sort().join() && da.every((x) => x.gravidade === 'grave' && x.linha > 3),
+    'desligado ativo: ' + JSON.stringify(da));
+  afirmar(da.some((x) => x.chave === 'nome' && /pelo nome/.test(x.detalhe)), 'um deles achado pelo nome (sem produtivo na aba de desligados)');
+  afirmar(!d.inconsistencias.some((x) => /SILVIA/.test(x.nome)), 'desligada que esta INATIVA na GERAL nao e inconsistencia');
+  afirmar(tipo('SEM_NOME').map((x) => x.cod).join() === E.semNome.join(), 'sem nome');
+  afirmar(tipo('EQUIPE').map((x) => x.cod).join() === E.equipeForaDoPadrao.join() && /TURNO 4/.test(tipo('EQUIPE')[0].detalhe), 'equipe: ' + JSON.stringify(tipo('EQUIPE')));
+  afirmar(tipo('COD_REPETIDO').map((x) => x.cod).join() === E.codRepetido.join() && tipo('COD_REPETIDO')[0].linhas.length === 2, 'produtivo repetido');
+  afirmar(!tipo('RH_REPETIDO').length, 'matricula repetida: nenhuma');
+  afirmar(tipo('ADMITIDO_FORA').map((x) => x.cod).sort().join() === E.admitidoFora.join(), 'admitido fora da GERAL: ' + JSON.stringify(tipo('ADMITIDO_FORA')));
+  afirmar(d.inconsistencias.length === 8, 'oito inconsistencias: ' + d.inconsistencias.length);
+});
+
+caso('quadro do CD: titulo com "COLABORADORES" em cima do cabecalho nao rouba a coluna do nome; copia velha do cache e relida', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'Quadro', {
+    'GERAL': [['QUADRO DE COLABORADORES', '', 'ATUALIZADO EM 10/10'], ['EQUIPE', 'COD', 'COLABORADOR', 'FUNÇÃO', 'MATRÍCULA', 'SITUAÇÃO'],
+      ['1° TURNO', 30001, 'ANA PAULA REIS', 'SEPARADOR', '100001', 'Ativo'], ['3º TURNO', '30002', 'BRUNO DIAS', 'CONFERENTE', '100002', 'Férias'],
+      ['adm', '30003', 'CAIO LIMA', 'ANALISTA', '100003', 'Inativo']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(d.geral.map((g) => g.nome).join() === 'ANA PAULA REIS,BRUNO DIAS,CAIO LIMA', 'nomes: ' + JSON.stringify(d.geral));
+  afirmar(d.geral.map((g) => g.equipe).join() === '1° TURNO,3° TURNO,ADM' && d.geral[0].cod === '30001', 'equipes e produtivo: ' + JSON.stringify(d.geral));
+  afirmar(d.geral.map((g) => g.situacao).join() === 'ATIVO,FERIAS,FORA', 'situacao: ' + d.geral.map((g) => g.situacao).join());
+  // copia de outro formato no cache (o Quadro.gs anterior): nao e servida
+  const id = /\/d\/([\w-]+)/.exec(link)[1];
+  const c = novaExecucao(m, PASTA, { contaGoogle: DONO }, OP); c._porta = true;
+  c.gravarTextoCache(c.chaveNoEspaco('quadro|' + id), JSON.stringify({ apoio: [{ nome: 'VELHO' }] }), 300);
+  const d2 = tela(m, s, 'quadro');
+  afirmar(d2.formato === 2 && d2.geral.length === 3, 'copia velha relida: ' + JSON.stringify(Object.keys(d2)));
 });
 
 caso('perfil SUPERVISOR cuida so da Limpeza: plano e estoque da limpeza; nada do calendario nem do estoque de TI', () => {

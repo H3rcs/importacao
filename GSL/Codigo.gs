@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.10'
+  build: '2026.10.13'
 };
 
 /*
@@ -34,20 +34,22 @@ const APP = {
  *   2026.10.09c = Jovem Aprendiz (o 09b foi o primeiro envio do mesmo pacote)
  *   2026.10.10  = desempenho: sessao que nao cai, canal barrado sem espera,
  *                 bolinha das acoes em aberto no menu
+ *   2026.10.13  = Quadro do CD pela aba GERAL, inconsistencias e painel novo
  */
 function arquivosForaDaVersao_() {
-  const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c';
+  const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c', DESEMPENHO = '2026.10.10';
   const carimbos = {
-    'Acoes.gs':      [APP.build, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Acoes.gs':      [DESEMPENHO, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
     'Estoque.gs':    [LIMPEZA,   typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
     'Limpeza.gs':    [LIMPEZA,   typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
     'Emails.gs':     [LIMPEZA,   typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
     'Instalacao.gs': [APRENDIZ,  typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
-    'Filiais.gs':    [APP.build, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
+    'Filiais.gs':    [DESEMPENHO, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
     'Aprendiz.gs':   [APRENDIZ,  typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
     'Permissoes.gs': [APRENDIZ,  typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
-    'Auth.gs':       [APP.build, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
-    'Banco.gs':      [APP.build, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO]
+    'Auth.gs':       [DESEMPENHO, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
+    'Banco.gs':      [DESEMPENHO, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO],
+    'Quadro.gs':     [APP.build, typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO]
   };
   return Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
 }

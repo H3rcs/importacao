@@ -946,7 +946,7 @@ function montarSessao(r) {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.10.10';
+const BUILD_APP = '2026.10.13';
 function mostrarResultadoAcao(x) {
   if (!x) return;
   if (x.ok === false) {
@@ -960,18 +960,20 @@ function mostrarResultadoAcao(x) {
   else if (x.recadoBotao) avisar(x.recadoBotao);
 }
 
-/* O Estilo.html traz o carimbo numa variavel do CSS (--gsl-estilo). */
-function carimboDoEstilo() {
-  try { return getComputedStyle(document.documentElement).getPropertyValue('--gsl-estilo').replace(/["'\s]/g, ''); }
+/* O Estilo.html e o PaineisEstilo.html trazem o carimbo numa variavel do CSS (--gsl-estilo, --gsl-paineis-estilo). */
+function carimboCss(nome) {
+  try { return getComputedStyle(document.documentElement).getPropertyValue(nome).replace(/["'\s]/g, ''); }
   catch (e) { return ''; }
 }
+function carimboDoEstilo() { return carimboCss('--gsl-estilo'); }
 
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
   if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
   // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
-  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.09') faltam.push('Paineis.html');
+  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.13') faltam.push('Paineis.html');
+  if (carimboCss('--gsl-paineis-estilo') !== '2026.10.13') faltam.push('PaineisEstilo.html');
   if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.10.09c') faltam.push('Aprendiz.html (e a linha dele no Index.html)');
   if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar')) faltam.push('Index.html');
   if (carimboDoEstilo() !== '2026.10.10') faltam.push('Estilo.html');

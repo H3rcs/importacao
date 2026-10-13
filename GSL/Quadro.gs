@@ -1,26 +1,40 @@
 /**
  * QUADRO DO CD — o BI de funcoes dentro do GSL.
  *
- * Continua lendo a MESMA planilha de apoio de antes (abas APOIO TA,
- * APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS) e desenhando o mesmo
- * painel. A diferenca e que ele agora mora no GSL, com o acesso do GSL,
- * e cada filial aponta para a planilha dela (parametro QUADRO_PLANILHA).
+ * 13/10 — UMA ABA SO. O quadro vem da aba GERAL da planilha de apoio:
  *
- * Novidade pedida pela gerencia: o MOTIVO do desligamento, lido da
- * coluna MOTIVO da aba CDESLIGADOS.
+ *   EQUIPE | COD | PROD | DESCRIÇÃO | RH | STATUS
+ *   (turno) (produtivo) (nome) (funcao) (matricula) (na empresa?)
+ *
+ * e o GSL separa os turnos (1° TURNO, 2° TURNO, 3° TURNO e ADM). As abas
+ * APOIO TA / TB / TC ficam de lado: so sao lidas se a planilha ainda nao
+ * tiver a GERAL (outra filial no layout antigo). Admitidos (CADMITIDOS) e
+ * desligados (CDESLIGADOS) continuam vindo das mesmas abas.
+ *
+ * INCONSISTENCIAS: desligado (CDESLIGADOS) que continua ATIVO na GERAL — o
+ * pedido da gerencia — e, do mesmo jeito, o que deixa o quadro errado:
+ * linha sem nome, EQUIPE fora do padrao, produtivo ou matricula repetidos e
+ * admitido que nao entrou na GERAL. Cada uma diz a linha da planilha.
  */
+const BUILD_QUADRO = '2026.10.13';   // carimbo da entrega — ver APP.build no Codigo.gs
 
+const QUADRO_ABA_GERAL = 'GERAL';
 const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];
 const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
+const QUADRO_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
+// O formato do que vai para o cache: copia de outro formato (versao anterior do Quadro.gs) e relida.
+const QUADRO_FORMATO = 2;
 
 /*
  * A aba e achada pelo nome sem diferenciar maiuscula, acento, espaco ou
  * pontuacao, e por apelidos: a planilha de apoio de algumas filiais chama
  * "CDADMITIDOS" (e nao "CADMITIDOS") — e a aba inteira era ignorada, sem
- * admitido nenhum no Quadro.
+ * admitido nenhum no Quadro. A GERAL so pelo nome (sem pedacos: "RESUMO
+ * GERAL" nao e ela).
  */
 const QUADRO_APELIDOS = {
+  GERAL: { nomes: ['GERAL', 'QUADROGERAL', 'BASEGERAL', 'GERALCD'], pedacos: [] },
   CADMITIDOS: { nomes: ['CADMITIDOS', 'CDADMITIDOS', 'ADMITIDOS', 'ADMISSOES', 'CADMISSOES', 'CDADMISSOES'], pedacos: ['ADMITID', 'ADMISS'] },
   CDESLIGADOS: { nomes: ['CDESLIGADOS', 'CDDESLIGADOS', 'DESLIGADOS', 'DESLIGAMENTOS', 'CDESLIGAMENTOS', 'CDDESLIGAMENTOS'], pedacos: ['DESLIG', 'DEMITID', 'DEMISS'] }
 };
@@ -61,7 +75,10 @@ function dadosQuadro(usuario) {
   const chave = chaveNoEspaco('quadro|' + id);
   const guardado = lerTextoCache(chave);
   if (guardado) {
-    try { return Object.assign(base, JSON.parse(guardado)); } catch (e) { /* le de novo */ }
+    try {
+      const g = JSON.parse(guardado);
+      if (g && g.formato === QUADRO_FORMATO) return Object.assign(base, g);
+    } catch (e) { /* le de novo */ }
   }
   try {
     const dados = lerPlanilhaQuadro_(id);
@@ -74,115 +91,351 @@ function dadosQuadro(usuario) {
   }
 }
 
-function lerPlanilhaQuadro_(id) {
-exigirPorta_();
-  const ss = SpreadsheetApp.openById(id);
-  const apoio = [];
-  QUADRO_ABAS_APOIO.forEach(function (nomeAba) {
-    const turnoPadrao = nomeAba.replace(/APOIO\s*/i, '').trim().toUpperCase();
-    lerAbaQuadro_(ss, nomeAba).forEach(function (linha) {
-      const reg = {
-        cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
-        nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
-        equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase() || turnoPadrao,
-        funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase()
-      };
-      if (reg.nome || reg.cod) apoio.push(reg);
-    });
-  });
+/* ------------------------------------------------------------------ */
+/* COLUNAS                                                             */
+/* ------------------------------------------------------------------ */
 
-  /*
-   * A aba de admitidos da filial e mais simples: Produtiva / Colaborador /
-   * Equipe / Funcao / Status — SEM data. Antes so entrava quem tinha data
-   * de admissao, e o Quadro mostrava zero admitidos. Agora todos entram; a
-   * data, quando existir, so serve para o grafico mes a mes.
-   */
-  const adm = lerAbaQuadro_(ss, QUADRO_ABA_ADMITIDOS).map(function (linha) {
-    return {
-      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
-      nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
-      equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase(),
-      funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase(),
-      status: txtQ_(pegaQ_(linha, ['STATUS', 'SITUACAO'])).toUpperCase(),
-      mes:    aoMesQ_(pegaQ_(linha, ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], ['MOTIVO', 'TIPO', 'STATUS', 'SITUACAO']))
-    };
-  }).filter(function (r) { return r.nome || r.cod; });
+/*
+ * O "NOME QUE SOME" (13/10). A coluna do nome era achada por pedaco do
+ * cabecalho — COLABORADOR ou NOME — e o cabecalho era a primeira linha com
+ * uma dessas palavras. Duas coisas davam errado, de vez em quando:
+ *   - a coluna do nome chamada PROD (como na GERAL) nao era achada: o nome
+ *     ficava vazio e a lista mostrava so o produtivo;
+ *   - um titulo em cima do cabecalho ("QUADRO DE COLABORADORES") era tomado
+ *     como o cabecalho: as colunas de verdade viravam uma linha de dados e o
+ *     "nome" passava a ser o valor de outra coluna (ou nada).
+ * Agora o cabecalho e a primeira das 15 primeiras linhas com pelo menos DUAS
+ * colunas conhecidas, comparadas pelo nome INTEIRO; o pedaco so entra para
+ * o que o nome inteiro nao achou, e nunca para uma coluna ja usada.
+ */
+const QUADRO_COLUNAS = {
+  nome:   { exatos: ['PROD', 'COLABORADOR', 'NOME', 'NOME DO COLABORADOR', 'NOME COMPLETO', 'FUNCIONARIO'], pedacos: ['COLABORADOR', 'NOME', 'FUNCIONARIO'] },
+  cod:    { exatos: ['COD', 'CODIGO', 'PRODUTIVA', 'PRODUTIVO', 'COD PRODUTIVO', 'CODIGO PRODUTIVO', 'N PRODUTIVO'], pedacos: ['PRODUTIV', 'COD'], evitar: ['DESCRI'] },
+  rh:     { exatos: ['RH', 'MATRICULA', 'MATRICULA RH', 'MAT RH', 'MAT'], pedacos: ['MATRIC'] },
+  equipe: { exatos: ['EQUIPE', 'TURNO', 'EQUIPE TURNO'], pedacos: ['EQUIPE', 'TURNO'] },
+  funcao: { exatos: ['DESCRICAO', 'FUNCAO', 'CARGO', 'DESCRICAO DA FUNCAO'], pedacos: ['FUNCAO', 'CARGO', 'DESCRICAO'] },
+  status: { exatos: ['STATUS', 'SITUACAO'], pedacos: ['STATUS', 'SITUAC'] }
+};
+const QUADRO_COLUNAS_ADM = {
+  data: { exatos: ['DATA ADMISSAO', 'DATA DE ADMISSAO', 'ADMISSAO', 'DATA'], pedacos: ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], evitar: ['MOTIVO', 'TIPO', 'STATUS', 'SITUAC'] }
+};
+const QUADRO_COLUNAS_DES = {
+  data:   { exatos: ['DATA DESLIGAMENTO', 'DATA DO DESLIGAMENTO', 'DATA DEMISSAO', 'DATA DE DEMISSAO', 'DESLIGAMENTO', 'DATA'], pedacos: ['DESLIG', 'DEMISS', 'DATA'], evitar: ['MOTIVO', 'TIPO'] },
+  tipo:   { exatos: ['TIPO', 'TIPO DE DESLIGAMENTO', 'TIPO DESLIGAMENTO'], pedacos: ['TIPO'], evitar: ['MOTIVO'] },
+  motivo: { exatos: ['MOTIVO', 'MOTIVO DO DESLIGAMENTO', 'MOTIVO DESLIGAMENTO'], pedacos: ['MOTIVO'] }
+};
 
-  const des = lerAbaQuadro_(ss, QUADRO_ABA_DESLIGADOS).map(function (linha) {
-    const quando = pegaQ_(linha, ['DESLIG', 'DEMISS', 'DATA'], ['MOTIVO', 'TIPO']);
-    return {
-      cod:    txtQ_(pegaQ_(linha, ['COD', 'PRODUTIV', 'MATRIC'])),
-      nome:   txtQ_(pegaQ_(linha, ['COLABORADOR', 'NOME'])),
-      equipe: txtQ_(pegaQ_(linha, ['EQUIPE', 'TURNO'])).toUpperCase(),
-      funcao: txtQ_(pegaQ_(linha, ['FUNCAO', 'CARGO'])).toUpperCase(),
-      mes:    aoMesQ_(quando),
-      data:   dataQ_(quando),
-      tipo:   txtQ_(pegaQ_(linha, ['TIPO'], ['MOTIVO'])) || 'Não informado',
-      motivo: txtQ_(pegaQ_(linha, ['MOTIVO']))
-    };
-  }).filter(function (r) { return r.mes; });
+/* Cabecalho comparavel: sem acento, maiusculo, pontuacao vira espaco ("PROD." = "PROD"). */
+function cabQ_(v) { return normalizaQ_(v).replace(/[^A-Z0-9]+/g, ' ').trim(); }
 
-  return {
-    apoio: apoio, adm: adm, des: des, atualizado: new Date().toISOString(),
-    fonte: { nome: ss.getName(), url: ss.getUrl() },
-    temColunaMotivo: temColunaQ_(ss, QUADRO_ABA_DESLIGADOS, 'MOTIVO')
-  };
-}
-
-/** Le uma aba inteira como [{CABECALHO: valor}]. Aba inexistente devolve []. */
-function lerAbaQuadro_(ss, nomeAba) {
-  const aba = abaQuadro_(ss, nomeAba);
-  if (!aba) return [];
+/*
+ * Le a aba: o cabecalho (ver acima), as linhas de dados e o numero, na
+ * planilha, da primeira delas (para a inconsistencia dizer "linha 37").
+ */
+function lerTabelaQ_(aba, campos) {
   const valores = aba.getDataRange().getValues();
-  if (valores.length <= 1) return [];
-  // O cabecalho nem sempre e a 1a linha (titulo em cima): e a primeira das
-  // 10 primeiras que tem uma coluna de nome/colaborador.
-  let iCab = 0;
-  for (let i = 0; i < Math.min(10, valores.length); i++) {
-    if (valores[i].some(function (c) { const t = normalizaQ_(c); return t.indexOf('COLABORADOR') !== -1 || t === 'NOME' || t.indexOf('NOME ') === 0; })) { iCab = i; break; }
+  const conhecidos = {};
+  Object.keys(campos).forEach(function (k) { campos[k].exatos.forEach(function (x) { conhecidos[x] = true; }); });
+  let iCab = -1;
+  for (let i = 0; i < Math.min(15, valores.length); i++) {
+    const n = valores[i].filter(function (c) { return conhecidos[cabQ_(c)]; }).length;
+    if (n >= 2) { iCab = i; break; }
   }
-  const cab = valores[iCab].map(function (c) { return normalizaQ_(c); });
-  return valores.slice(iCab + 1).map(function (linha) {
-    const obj = {};
-    cab.forEach(function (nome, i) { if (nome && obj[nome] === undefined) obj[nome] = linha[i]; });
-    return obj;
-  }).filter(function (obj) {
-    return Object.keys(obj).some(function (k) { return String(obj[k]).trim() !== ''; });
-  });
+  if (iCab === -1) {
+    // Layout desconhecido: o jeito antigo (a linha com COLABORADOR/NOME), senao a primeira.
+    iCab = 0;
+    for (let i = 0; i < Math.min(15, valores.length); i++) {
+      if (valores[i].some(function (c) { const t = cabQ_(c); return t === 'COLABORADOR' || t === 'NOME' || t === 'PROD'; })) { iCab = i; break; }
+    }
+  }
+  const cab = (valores[iCab] || []).map(cabQ_);
+  return { cab: cab, linhas: valores.slice(iCab + 1), primeiraLinha: iCab + 2, col: colunasQ_(cab, campos) };
 }
 
-function temColunaQ_(ss, nomeAba, pedaco) {
-  const aba = abaQuadro_(ss, nomeAba);
-  if (!aba || aba.getLastColumn() < 1) return false;
-  return aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
-    .some(function (c) { return normalizaQ_(c).indexOf(pedaco) !== -1; });
+/* Coluna de cada campo: nome inteiro primeiro (na ordem da lista), pedaco depois; cada coluna serve a um campo so. */
+function colunasQ_(cab, campos) {
+  const usada = {}, col = {};
+  Object.keys(campos).forEach(function (k) {
+    const lista = campos[k].exatos;
+    for (let e = 0; e < lista.length; e++) {
+      const i = cab.indexOf(lista[e]);
+      if (i !== -1 && !usada[i]) { col[k] = i; usada[i] = true; return; }
+    }
+  });
+  Object.keys(campos).forEach(function (k) {
+    if (col[k] !== undefined || !campos[k].pedacos.length) return;
+    const evitar = campos[k].evitar || [];
+    for (let i = 0; i < cab.length; i++) {
+      const c = cab[i];
+      if (!c || usada[i]) continue;
+      if (campos[k].pedacos.some(function (p) { return c.indexOf(p) !== -1; }) &&
+          !evitar.some(function (x) { return c.indexOf(x) !== -1; })) { col[k] = i; usada[i] = true; return; }
+    }
+  });
+  return col;
+}
+
+function valorQ_(linha, col, campo) { return col[campo] === undefined ? '' : linha[col[campo]]; }
+
+/* ------------------------------------------------------------------ */
+/* EQUIPE E STATUS                                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * "1° TURNO", "1º TURNO" (o ordinal), "1 TURNO", "TURNO 1", "TA" (as abas
+ * antigas e as abas de admitidos/desligados), "A" -> 1° TURNO; o mesmo para
+ * o 2° e o 3°; ADM / ADMINISTRATIVO -> ADM. Fora disso: '' (vira
+ * inconsistencia "equipe fora do padrao", com o valor como esta escrito).
+ */
+function equipeQ_(v) {
+  const t = normalizaQ_(v).replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!t) return '';
+  if (/^ADM/.test(t)) return 'ADM';
+  let m = t.match(/^(\d)\s*O?\s*TURNO$/) || t.match(/^TURNO\s*(\d)$/) || t.match(/^T\s*(\d)$/) || t.match(/^(\d)$/);
+  if (m) return ['', '1° TURNO', '2° TURNO', '3° TURNO'][Number(m[1])] || '';
+  m = t.match(/^(?:TURNO\s*|T\s*)?([ABC])$/);
+  if (m) return { A: '1° TURNO', B: '2° TURNO', C: '3° TURNO' }[m[1]];
+  if (/^PRIMEIRO/.test(t)) return '1° TURNO';
+  if (/^SEGUNDO/.test(t)) return '2° TURNO';
+  if (/^TERCEIRO/.test(t)) return '3° TURNO';
+  return '';
 }
 
 /*
- * Primeiro campo cujo cabecalho contem um dos pedacos. `evitar` tira da
- * busca cabecalhos que tambem contem o pedaco mas sao outra coisa — sem
- * isso, uma coluna "MOTIVO DO DESLIGAMENTO" seria lida como a DATA do
- * desligamento, porque contem "DESLIG".
+ * STATUS -> se a pessoa ainda esta na empresa. FORA: inativo, desligado,
+ * demitido, rescisao, "nao"... Na empresa: ATIVO, FERIAS e AFASTADO
+ * (afastamento, licenca, atestado, INSS) — os dois ultimos contam no
+ * efetivo, mas a tela mostra quantos estao fora do posto. Vazio: na empresa.
  */
-function pegaQ_(linha, pedacos, evitar) {
-  const chaves = Object.keys(linha).filter(function (k) {
-    return !(evitar || []).some(function (x) { return k.indexOf(x) !== -1; });
-  });
-  for (let p = 0; p < pedacos.length; p++) {
-    const alvo = normalizaQ_(pedacos[p]);
-    for (let c = 0; c < chaves.length; c++) {
-      if (chaves[c].indexOf(alvo) >= 0) return linha[chaves[c]];
-    }
-  }
-  return '';
+function situacaoQ_(v) {
+  const t = normalizaQ_(v).replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return 'ATIVO';
+  if (/^(INATIV|DESLIG|DEMIT|DEMISS|RESCI|RESCIS|EX |SAIU|SAIDA|FORA|BAIXA|NAO|N$|FALSE|ENCERR|TERMIN|DISPENS|TRANSFERID)/.test(t)) return 'FORA';
+  if (/FERIAS/.test(t)) return 'FERIAS';
+  if (/(AFAST|LICEN|ATESTAD|INSS|AUXILIO|MATERNID|PATERNID|ACIDENT)/.test(t)) return 'AFASTADO';
+  return 'ATIVO';
 }
+
+/* ------------------------------------------------------------------ */
+/* LEITURA                                                             */
+/* ------------------------------------------------------------------ */
+
+function lerPlanilhaQuadro_(id) {
+  exigirPorta_();
+  const ss = SpreadsheetApp.openById(id);
+  const leitura = { aba: '', linhas: 0, colunas: {}, faltam: [], status: {} };
+  const geral = [];
+
+  const abaGeral = abaQuadro_(ss, QUADRO_ABA_GERAL);
+  if (abaGeral) {
+    const t = lerTabelaQ_(abaGeral, QUADRO_COLUNAS);
+    leitura.aba = abaGeral.getName();
+    Object.keys(t.col).forEach(function (k) { leitura.colunas[k] = t.cab[t.col[k]]; });
+    leitura.faltam = ['equipe', 'cod', 'nome', 'funcao', 'rh', 'status'].filter(function (k) { return t.col[k] === undefined; });
+    t.linhas.forEach(function (linha, i) {
+      const r = linhaGeralQ_(linha, t.col, t.primeiraLinha + i, '');
+      if (r) geral.push(r);
+    });
+    leitura.layout = 'GERAL';
+  } else {
+    // Planilha ainda no layout antigo: as tres abas APOIO, com o turno vindo do nome da aba.
+    QUADRO_ABAS_APOIO.forEach(function (nomeAba) {
+      const aba = abaQuadro_(ss, nomeAba);
+      if (!aba) return;
+      const t = lerTabelaQ_(aba, QUADRO_COLUNAS);
+      const turnoDaAba = nomeAba.replace(/APOIO\s*/i, '').trim();
+      t.linhas.forEach(function (linha, i) {
+        const r = linhaGeralQ_(linha, t.col, t.primeiraLinha + i, turnoDaAba);
+        if (r) { r.aba = aba.getName(); geral.push(r); }
+      });
+      if (!leitura.aba) Object.keys(t.col).forEach(function (k) { leitura.colunas[k] = t.cab[t.col[k]]; });
+      leitura.aba = leitura.aba ? leitura.aba + ', ' + aba.getName() : aba.getName();
+    });
+    leitura.layout = leitura.aba ? 'APOIO' : '';
+  }
+  leitura.linhas = geral.length;
+  geral.forEach(function (r) { const k = r.status || '(vazio)'; leitura.status[k] = (leitura.status[k] || 0) + 1; });
+
+  const adm = [];
+  const abaAdm = abaQuadro_(ss, QUADRO_ABA_ADMITIDOS);
+  if (abaAdm) {
+    const t = lerTabelaQ_(abaAdm, Object.assign({}, QUADRO_COLUNAS, QUADRO_COLUNAS_ADM));
+    t.linhas.forEach(function (linha) {
+      const r = {
+        cod: txtQ_(valorQ_(linha, t.col, 'cod')),
+        rh: txtQ_(valorQ_(linha, t.col, 'rh')),
+        nome: txtQ_(valorQ_(linha, t.col, 'nome')),
+        equipeBruta: txtQ_(valorQ_(linha, t.col, 'equipe')).toUpperCase(),
+        funcao: txtQ_(valorQ_(linha, t.col, 'funcao')).toUpperCase(),
+        status: txtQ_(valorQ_(linha, t.col, 'status')).toUpperCase(),
+        data: dataQ_(valorQ_(linha, t.col, 'data'))
+      };
+      if (!r.nome && !r.cod) return;
+      r.equipe = equipeQ_(r.equipeBruta);
+      r.mes = r.data ? r.data.slice(0, 7) : '';
+      adm.push(r);
+    });
+  }
+
+  const des = [];
+  let temColunaMotivo = false;
+  const abaDes = abaQuadro_(ss, QUADRO_ABA_DESLIGADOS);
+  if (abaDes) {
+    const t = lerTabelaQ_(abaDes, Object.assign({}, QUADRO_COLUNAS, QUADRO_COLUNAS_DES));
+    temColunaMotivo = t.col.motivo !== undefined;
+    t.linhas.forEach(function (linha) {
+      const r = {
+        cod: txtQ_(valorQ_(linha, t.col, 'cod')),
+        rh: txtQ_(valorQ_(linha, t.col, 'rh')),
+        nome: txtQ_(valorQ_(linha, t.col, 'nome')),
+        equipeBruta: txtQ_(valorQ_(linha, t.col, 'equipe')).toUpperCase(),
+        funcao: txtQ_(valorQ_(linha, t.col, 'funcao')).toUpperCase(),
+        data: dataQ_(valorQ_(linha, t.col, 'data')),
+        tipo: txtQ_(valorQ_(linha, t.col, 'tipo')) || 'Não informado',
+        motivo: txtQ_(valorQ_(linha, t.col, 'motivo'))
+      };
+      if (!r.data || (!r.nome && !r.cod)) return;     // sem data nao entra no periodo (como antes)
+      r.equipe = equipeQ_(r.equipeBruta);
+      r.mes = r.data.slice(0, 7);
+      des.push(r);
+    });
+  }
+
+  return {
+    formato: QUADRO_FORMATO,
+    geral: geral, adm: adm, des: des,
+    inconsistencias: inconsistenciasQ_(geral, adm, des),
+    leitura: leitura,
+    atualizado: new Date().toISOString(),
+    fonte: { nome: ss.getName(), url: ss.getUrl() },
+    temColunaMotivo: temColunaMotivo
+  };
+}
+
+/* Uma linha da GERAL (ou de uma aba APOIO). Linha sem nome, produtivo nem matricula nao e gente. */
+function linhaGeralQ_(linha, col, numeroLinha, turnoDaAba) {
+  const r = {
+    cod: txtQ_(valorQ_(linha, col, 'cod')),
+    nome: txtQ_(valorQ_(linha, col, 'nome')),
+    rh: txtQ_(valorQ_(linha, col, 'rh')),
+    equipeBruta: txtQ_(valorQ_(linha, col, 'equipe')).toUpperCase() || turnoDaAba,
+    funcao: txtQ_(valorQ_(linha, col, 'funcao')).toUpperCase(),
+    status: txtQ_(valorQ_(linha, col, 'status')).toUpperCase(),
+    linha: numeroLinha
+  };
+  if (!r.nome && !r.cod && !r.rh) return null;
+  r.equipe = equipeQ_(r.equipeBruta);
+  r.situacao = situacaoQ_(r.status);
+  r.ativo = r.situacao !== 'FORA';
+  return r;
+}
+
+/* ------------------------------------------------------------------ */
+/* INCONSISTENCIAS                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Produtivo e matricula comparados sem zeros a esquerda ("030001" = 30001); nome sem acento e espaco duplo. */
+function codigoQ_(v) { return txtQ_(v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase(); }
+function nomeChaveQ_(v) { return normalizaQ_(v).replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+function dataCurtaQ_(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso || ''); }
+
+function indiceQ_(lista) {
+  const ix = { cod: {}, rh: {}, nome: {} };
+  lista.forEach(function (r) {
+    const c = codigoQ_(r.cod), m = codigoQ_(r.rh), n = nomeChaveQ_(r.nome);
+    if (c) (ix.cod[c] = ix.cod[c] || []).push(r);
+    if (m) (ix.rh[m] = ix.rh[m] || []).push(r);
+    if (n) (ix.nome[n] = ix.nome[n] || []).push(r);
+  });
+  return ix;
+}
+/* Acha a pessoa: pelo produtivo, senao pela matricula, senao pelo nome. Devolve { lista, chave }. */
+function acharQ_(ix, r) {
+  const c = codigoQ_(r.cod), m = codigoQ_(r.rh), n = nomeChaveQ_(r.nome);
+  if (c && ix.cod[c]) return { lista: ix.cod[c], chave: 'produtivo' };
+  if (m && ix.rh[m]) return { lista: ix.rh[m], chave: 'matrícula' };
+  if (n && ix.nome[n]) return { lista: ix.nome[n], chave: 'nome' };
+  return null;
+}
+
+function inconsistenciasQ_(geral, adm, des) {
+  const saida = [];
+  const ix = indiceQ_(geral), ixAdm = indiceQ_(adm), ixDes = indiceQ_(des);
+  const quem = function (g) { return { cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta, linha: g.linha }; };
+
+  // 1. Desligado que continua ATIVO na GERAL (o pedido): um aviso por linha da GERAL, com o desligamento mais recente.
+  const jaVisto = {};
+  des.slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); }).forEach(function (d) {
+    const achou = acharQ_(ix, d);
+    if (!achou) return;
+    achou.lista.filter(function (g) { return g.ativo; }).forEach(function (g) {
+      if (jaVisto[g.linha]) return;
+      jaVisto[g.linha] = true;
+      const voltou = acharQ_(ixAdm, d);
+      const readmitido = voltou && voltou.lista.some(function (a) { return a.data && a.data > d.data; });
+      saida.push(Object.assign(quem(g), {
+        tipo: 'DESLIGADO_ATIVO', gravidade: 'grave', data: d.data, chave: achou.chave,
+        detalhe: 'Desligado em ' + dataCurtaQ_(d.data) + (d.motivo ? ' (' + d.motivo + ')' : '') +
+          ', mas está ' + (g.status || 'sem status') + ' na ' + (g.aba || 'GERAL') + '.' +
+          (achou.chave !== 'produtivo' ? ' Encontrado pelo ' + achou.chave + '.' : '') +
+          (readmitido ? ' Está também nos admitidos depois dessa data: confira se foi readmitido.' : '')
+      }));
+    });
+  });
+
+  // 2. Linha sem nome (a coluna PROD vazia).
+  geral.filter(function (g) { return !g.nome; }).forEach(function (g) {
+    saida.push(Object.assign(quem(g), { tipo: 'SEM_NOME', gravidade: 'grave', nome: '',
+      detalhe: 'Sem o nome (coluna PROD)' + (g.cod ? ' — produtivo ' + g.cod : '') + (g.rh ? ', matrícula ' + g.rh : '') + '.' }));
+  });
+
+  // 3. Equipe fora do padrao (so de quem esta na empresa: e quem precisa de um turno).
+  geral.filter(function (g) { return g.ativo && !g.equipe; }).forEach(function (g) {
+    saida.push(Object.assign(quem(g), { tipo: 'EQUIPE', gravidade: 'atencao',
+      detalhe: g.equipeBruta ? 'EQUIPE "' + g.equipeBruta + '" não é 1° TURNO, 2° TURNO, 3° TURNO nem ADM.' : 'Sem EQUIPE.' }));
+  });
+
+  // 4 e 5. Produtivo e matricula repetidos entre os que estao na empresa.
+  [['cod', 'COD_REPETIDO', 'O produtivo'], ['rh', 'RH_REPETIDO', 'A matrícula']].forEach(function (x) {
+    const grupos = {};
+    geral.filter(function (g) { return g.ativo; }).forEach(function (g) {
+      const k = codigoQ_(g[x[0]]);
+      if (k) (grupos[k] = grupos[k] || []).push(g);
+    });
+    Object.keys(grupos).filter(function (k) { return grupos[k].length > 1; }).forEach(function (k) {
+      const gs = grupos[k];
+      saida.push(Object.assign(quem(gs[0]), { tipo: x[1], gravidade: 'atencao',
+        nome: gs.map(function (g) { return g.nome || '(sem nome)'; }).join(' · '),
+        linhas: gs.map(function (g) { return g.linha; }),
+        detalhe: x[2] + ' ' + gs[0][x[0]] + ' está em ' + gs.length + ' linhas ativas (' +
+          gs.map(function (g) { return g.linha; }).join(', ') + ').' }));
+    });
+  });
+
+  // 6. Admitido que nao entrou na GERAL (nem saiu depois).
+  adm.forEach(function (a) {
+    if (situacaoQ_(a.status) === 'FORA' || acharQ_(ix, a) || acharQ_(ixDes, a)) return;
+    saida.push({ tipo: 'ADMITIDO_FORA', gravidade: 'atencao', cod: a.cod, rh: a.rh, nome: a.nome,
+      equipe: a.equipe || a.equipeBruta, linha: 0, data: a.data,
+      detalhe: 'Está na aba de admitidos' + (a.data ? ' (' + dataCurtaQ_(a.data) + ')' : '') + ', mas não na GERAL.' });
+  });
+  return saida;
+}
+
+/* ------------------------------------------------------------------ */
+/* UTEIS                                                               */
+/* ------------------------------------------------------------------ */
 
 function normalizaQ_(v) {
   return String(v == null ? '' : v).trim().toUpperCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-function txtQ_(v) { return String(v == null ? '' : v).trim(); }
+function txtQ_(v) {
+  // Numero da planilha (produtivo, matricula) sem o ".0" que o Sheets as vezes devolve.
+  if (typeof v === 'number' && isFinite(v) && Math.floor(v) === v) return String(v);
+  return String(v == null ? '' : v).trim();
+}
 
 /** Data (ou texto dd/mm/aaaa) -> "aaaa-mm". */
 function aoMesQ_(v) {
@@ -224,12 +477,13 @@ function acaoSalvarFonteQuadro(usuario, params) {
   if (!id) throw new Error('Esse link não parece de uma planilha do Google.');
   let nome = '';
   try {
-exigirPorta_();
+    exigirPorta_();
     const ss = SpreadsheetApp.openById(id);
     nome = ss.getName();
-    const faltam = QUADRO_ABAS_APOIO.concat([QUADRO_ABA_ADMITIDOS, QUADRO_ABA_DESLIGADOS])
-      .filter(function (a) { return !abaQuadro_(ss, a); });
-    if (faltam.length === 5) throw new Error('A planilha não tem nenhuma das abas esperadas (APOIO TA, APOIO TB, APOIO TC, CADMITIDOS, CDESLIGADOS).');
+    const temQuadro = abaQuadro_(ss, QUADRO_ABA_GERAL) || QUADRO_ABAS_APOIO.some(function (a) { return abaQuadro_(ss, a); });
+    if (!temQuadro && !abaQuadro_(ss, QUADRO_ABA_ADMITIDOS) && !abaQuadro_(ss, QUADRO_ABA_DESLIGADOS)) {
+      throw new Error('A planilha não tem nenhuma das abas esperadas (GERAL, CADMITIDOS, CDESLIGADOS).');
+    }
   } catch (e) {
     throw new Error(String(e.message || e).indexOf('abas') !== -1 ? e.message
       : 'Não consegui abrir a planilha. A conta dona do GSL precisa ter acesso a ela.');

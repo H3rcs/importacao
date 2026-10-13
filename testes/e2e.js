@@ -1070,7 +1070,8 @@ async function rodar() {
     await aba.contexto.addCookies([{ name: 'gas_atraso', value: '0', url: s.url }]);
     const resto = await f.evaluate(() => ({ dados: DADOS === null, pagina: document.getElementById('pagina').innerHTML === '',
       cache: Object.keys(CACHE_TELAS).length === 0, apz: APZ.chave === '' && APZ.busca === '' && APZ.aba === 'relatorio',
-      assiduidade: COLAB_CACHE === null && FICHA.matricula === '', janela: el('janela-corpo').innerHTML === '' && el('janela').classList.contains('oculto') }));
+      assiduidade: COLAB_CACHE === null && FICHA.matricula === '', janela: el('janela-corpo').innerHTML === '' && el('janela').classList.contains('oculto'),
+      quadro: typeof QD_MEMO === 'undefined' || QD_MEMO === null }));
     afirmar(Object.values(resto).every(Boolean), 'depois de sair, com a resposta atrasada ja chegada: ' + JSON.stringify(resto));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
@@ -1606,6 +1607,13 @@ async function rodar() {
       grupos0.indexOf('GERENTE DE CD') === -1, 'grupos do mapa: ' + grupos0.join(' | '));
     await f.evaluate(() => document.querySelector('.qd-mapa-recolhido button').click());
     afirmar(await f.evaluate(() => Array.from(document.querySelectorAll('.qd-mapa tbody th')).some((t) => t.innerText.trim() === 'GERENTE DE CD')), 'Administrativo abre');
+    // a tela casa as pessoas com a mesma regra do servidor: COD "-" nao e chave; homonimo com outro COD nao e a mesma pessoa
+    const casa = await f.evaluate((nome) => {
+      const ix = qdMemo().ixGeral;
+      return [qdIdCod('-'), qdIdCod('#N/A'), qdIdCod('030001'), qdAchar(ix, { cod: '-', nome: 'NINGUEM' }), qdAchar(ix, { cod: '99999', nome: nome }),
+        (qdAchar(ix, { cod: '', nome: nome }) || []).length];
+    }, nomeDoCod('30001'));
+    afirmar(casa[0] === '' && casa[1] === '' && casa[2] === '30001' && casa[3] === null && casa[4] === null && casa[5] === 1, 'casamento na tela: ' + JSON.stringify(casa));
     const resumo = await f.evaluate(() => qdResumoTexto());
     afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL$/.test(resumo),
       'copiar resumo: ' + resumo);
@@ -1673,6 +1681,7 @@ async function rodar() {
     await g.evaluate(() => { qdEquipe('3° TURNO'); qdAba('pessoas'); });
     await g.evaluate(() => sair());
     await esperarTela(pc, ['entrar']);
+    afirmar(await g.evaluate(() => QD_MEMO === null && QD.equipe === '*' && QD.aba === 'geral'), 'sair apaga o Quadro de quem saiu da memoria da pagina');
     await entrar(pc, COORD, '1357', true);
     await esperarTela(pc, ['aplicacao']);
     const c = await frame(pc);

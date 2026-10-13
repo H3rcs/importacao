@@ -708,8 +708,9 @@ function chaveDeTela(idTela, usuario, params) {
    * sendo servida e mostrava numeros de um mes que ja virou.
    */
   const dia = paraISO(hoje());
-  // A filial entra na chave: a mesma tela de duas filiais sao dois payloads.
-  return ['t', geracaoDados(), dia, filialAtual().codigo, idTela, usuario.perfil, usuario.chaveModulos || '',
+  // A filial entra na chave: a mesma tela de duas filiais sao dois payloads. O carimbo
+  // (APP.build) tambem: cada implantacao nova aposenta as telas montadas pelo codigo anterior.
+  return ['t', APP.build, geracaoDados(), dia, filialAtual().codigo, idTela, usuario.perfil, usuario.chaveModulos || '',
           e.tipo, usuario.turno || '', dono, JSON.stringify(params || {})].join('|');
 }
 

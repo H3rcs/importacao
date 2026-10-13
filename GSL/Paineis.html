@@ -58,7 +58,8 @@ const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) 
  * minimo que o Excel, o LibreOffice e o Google Planilhas abrem.
  */
 function pnBaixarXlsx(nomeArquivo, abas) {
-  const xml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const xml = (t) => String(t).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const col = (i) => { let s = ''; i++; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
   const NS = 'http:\/\/schemas.openxmlformats.org';
   // (montado em pedacos: o HtmlService trataria o cabecalho XML como scriptlet)
@@ -1190,6 +1191,8 @@ const qdN = (n) => Number(n || 0).toLocaleString('pt-BR');
 const qdPct = (v) => (Math.round(v * 10) / 10).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 const qdPlural = (n, um, varios) => qdN(n) + ' ' + (n === 1 ? um : varios);
 function qdChaveCod(v) { return String(v == null ? '' : v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase(); }
+/* COD/RH que identifica alguem: precisa de algarismo de 1 a 9 ("-", "0", "#N/A" nao) — a mesma regra do servidor. */
+const qdIdCod = (v) => { const c = qdChaveCod(v); return /[1-9]/.test(c) ? c : ''; };
 function qdChaveNome(v) {
   return String(v == null ? '' : v).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1203,7 +1206,7 @@ const qdNomeTxt = (r) => String((r && r.nome) || '').toUpperCase();
 /* Tipo do desligamento: involuntario, voluntario (pedido) ou sem tipo. */
 function qdTipo(t) {
   const k = qdChaveNome(t);
-  if (/^INVOL|DISPENS|JUSTA CAUSA|DEMITID|DECISAO DA EMPRESA|INICIATIVA DA EMPRESA/.test(k)) return 'inv';
+  if (/^INVOL|DISPENS|JUSTA CAUSA|DEMITID|DECISAO DA EMPRESA|INICIATIVA DA EMPRESA|TERMIN|FIM D[EO] CONTRATO/.test(k)) return 'inv';
   if (/^VOL|PEDID|PEDIU|INICIATIVA DO (COLABORADOR|EMPREGADO|FUNCIONARIO)/.test(k)) return 'vol';
   return 'sem';
 }
@@ -1260,7 +1263,7 @@ function qdMemo() {
   const indice = (lista) => {
     const ix = { cod: {}, rh: {}, nome: {} };
     lista.forEach((r) => {
-      const c = qdChaveCod(r.cod), m = qdChaveCod(r.rh), n = qdChaveNome(r.nome);
+      const c = qdIdCod(r.cod), m = qdIdCod(r.rh), n = qdChaveNome(r.nome);
       if (c) (ix.cod[c] = ix.cod[c] || []).push(r);
       if (m) (ix.rh[m] = ix.rh[m] || []).push(r);
       if (n) (ix.nome[n] = ix.nome[n] || []).push(r);
@@ -1273,8 +1276,12 @@ function qdMemo() {
   return QD_MEMO;
 }
 function qdAchar(ix, r) {
-  const c = qdChaveCod(r.cod), m = qdChaveCod(r.rh), n = qdChaveNome(r.nome);
-  return (c && ix.cod[c]) || (m && ix.rh[m]) || (n && ix.nome[n]) || null;
+  const c = qdIdCod(r.cod), m = qdIdCod(r.rh), n = qdChaveNome(r.nome);
+  if (c && ix.cod[c]) return ix.cod[c];
+  if (m && ix.rh[m]) return ix.rh[m];
+  // pelo nome, so quem nao tem outro COD/RH: homonimo nao e a mesma pessoa (como o servidor)
+  const l = ((n && ix.nome[n]) || []).filter((g) => !(c && qdIdCod(g.cod)) && !(m && qdIdCod(g.rh)));
+  return l.length ? l : null;
 }
 const qdGeral = () => (DADOS && DADOS.geral) || [];
 const qdNaEmpresa = () => qdGeral().filter((g) => g.ativo);
@@ -1324,7 +1331,7 @@ function pintarQuadro(r) {
     return;
   }
   const acoes = (completo) => `
-    <button class="botao secundario" onclick="qdAtualizar()">Atualizar dados</button>
+    <button class="botao secundario" onclick="qdAtualizar()" title="Lê a planilha de novo, na hora.">Atualizar dados</button>
     ${d.fonte && d.fonte.url ? `<a class="icone-botao" href="${esc(String(d.fonte.url).replace(/#.*$/, ''))}" target="_blank" rel="noopener">Abrir planilha ↗</a>` : ''}
     ${completo ? '<button class="icone-botao" onclick="qdCopiarResumo()">Copiar resumo</button>' : ''}
     ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
@@ -1356,7 +1363,7 @@ function pintarQuadro(r) {
   el('subtitulo-pagina').textContent = (l.layout === 'APOIO' ? 'Abas APOIO' : 'Aba GERAL') + (d.fonte ? ' de «' + d.fonte.nome + '»' : '') +
     (lida ? ' · lida ' + (hoje ? 'hoje' : 'em ' + pnDataLonga(pnISO(lida)).slice(0, 5)) + ' às ' + qdHoraLeitura() : '') +
     (qdMemo().inc.length ? '' : ' · planilha conferida');
-  el('subtitulo-pagina').title = 'A leitura fica guardada por 5 minutos; "Atualizar dados" lê a planilha de novo.';
+  QD_FAIXA_HTML = null;                    // o #qd-faixa e novo: uma leitura nova da planilha e anunciada uma vez
   el('pagina').innerHTML = `<div class="bi-quadro qd">
     <div id="qd-faixa"></div>
     <div id="qd-abas"></div>
@@ -1365,6 +1372,9 @@ function pintarQuadro(r) {
   </div>`;
   qdDesenhar();
 }
+
+/* Sair (ou sessao vencida, no computador compartilhado): nada do Quadro de quem saiu fica na memoria da pagina. */
+function qdZerar() { QD_MEMO = null; QD = qdEstadoInicial(); QD_FAIXA_HTML = null; }
 
 /* Atualizar dados: a tela fica a 60% (sem pular) ate a leitura nova chegar. */
 function qdAtualizar() {
@@ -1377,14 +1387,20 @@ function qdAba(qual) { QD.aba = qual; qdDesenhar(); try { window.scrollTo({ top:
 function qdEquipe(e) {
   QD.equipe = (QD.equipe === e && e !== '*') ? '*' : e;
   // a funcao escolhida sai se nao existir na equipe nova
-  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => qdFuncaoDe(g) === QD.funcao)) QD.funcao = '';
+  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => qdChaveNome(qdFuncaoDe(g)) === qdChaveNome(QD.funcao))) QD.funcao = '';
   QD.limite = 100; QD.desfalquesTodos = false; qdDesenhar();
 }
-function qdFuncao(f) { QD.funcao = (QD.funcao === f) ? '' : f; QD.limite = 100; qdDesenhar(); }
+function qdFuncao(f) {
+  // a funcao fica com a grafia da GERAL (a CDESLIGADOS pode escrever sem acento)
+  const g = f && qdNaEmpresa().find((x) => qdChaveNome(qdFuncaoDe(x)) === qdChaveNome(f));
+  if (g) f = qdFuncaoDe(g);
+  QD.funcao = (QD.funcao === f) ? '' : f; QD.limite = 100; qdDesenhar();
+}
 function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = ''; QD.limite = 100; QD.limiteMov = 30; qdDesenhar(); }
 /* Atalho para o Quadro por turno ja recortado (celula do mapa, desfalque, "ver quem"). */
 function qdVerPessoas(equipe, funcao, mostrar) {
   QD.equipe = equipe; QD.funcao = funcao; QD.mostrar = mostrar || 'empresa'; QD.busca = ''; QD.limite = 100;
+  Object.keys(QD.recolhidas).forEach((k) => { if (k.indexOf('eq') === 0) delete QD.recolhidas[k]; });     // a secao recolhida abre
   qdAba('pessoas');
 }
 /* A Conferencia ja rolada ate o grupo (ou com "Como o GSL leu a planilha" aberto). */
@@ -1393,12 +1409,32 @@ function qdIrConferencia(alvo) {
   QD.aba = 'conf';
   qdDesenhar();
   const e = el(alvo === 'leitura' ? 'qd-leitura' : 'qd-grupo-' + alvo);
-  try { if (e) e.scrollIntoView({ block: 'start' }); else window.scrollTo({ top: 0 }); } catch (x) {}
+  try {
+    if (!e) { window.scrollTo({ top: 0 }); return; }
+    const t = document.querySelector('.topo');                      // o topo do GSL fica fixo: o grupo nao pode parar embaixo dele
+    const fixo = t && getComputedStyle(t).position === 'sticky' ? t.offsetHeight : 0;
+    window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - fixo - 12 });
+  } catch (x) {}
 }
 
+/* Depois de redesenhar, o foco do teclado volta ao mesmo controle (filtro, aba, ordenacao). */
+const qdChaveFoco = (x) => x.tagName + '|' + String(x.className).split(' ')[0] + '|' + (x.getAttribute('onclick') || x.getAttribute('onchange') || x.id || '');
+function qdGuardarFoco() {
+  const a = document.activeElement;
+  return a && a !== document.body && a.closest && a.closest('.bi-quadro') ? qdChaveFoco(a) : '';
+}
+function qdDevolverFoco(k) {
+  if (!k) return;
+  const n = Array.from(document.querySelectorAll('.bi-quadro button, .bi-quadro select, .bi-quadro input, .bi-quadro summary')).find((x) => qdChaveFoco(x) === k);
+  if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } }
+}
+let QD_FAIXA_HTML = null;
 function qdDesenhar() {
   const alvo = el('qd-conteudo'); if (!alvo) return;
-  el('qd-faixa').innerHTML = qdFaixa();
+  const foco = qdGuardarFoco();
+  // a faixa (role=alert) so e trocada quando muda: recriada a cada clique, o leitor de tela a leria de novo
+  const fx = qdFaixa();
+  if (fx !== QD_FAIXA_HTML) { el('qd-faixa').innerHTML = fx; QD_FAIXA_HTML = fx; }
   el('qd-abas').innerHTML = pnAbas([['geral', 'Visão geral'], ['pessoas', 'Quadro por turno'], ['mov', 'Movimentação'],
     ['conf', 'Conferência ' + qdSeloAba()]], QD.aba, 'qdAba');
   el('qd-filtros').innerHTML = qdFiltros();
@@ -1408,6 +1444,10 @@ function qdDesenhar() {
     else if (QD.aba === 'conf') alvo.innerHTML = qdConferencia();
     else alvo.innerHTML = qdVisaoGeral();
   } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+  // o grafico mes a mes rola dentro do cartao: abre nos meses mais recentes (ou no mes escolhido)
+  const gr = document.querySelector('.qd-grade2 .qd-espelho');
+  if (gr) { const m = gr.querySelector('.qd-esp-mes.escolhido'); gr.scrollLeft = m ? m.offsetLeft - 40 : gr.scrollWidth; }
+  qdDevolverFoco(foco);
 }
 
 /* Contador da aba Conferencia: ■ graves, ▲ so atencao, ✓ nada (conta a planilha inteira). */
@@ -1559,7 +1599,7 @@ const QD_TIPOS = {
     corrigir: 'Escreva o nome da coluna exatamente assim no cabeçalho.' },
   DESLIGADO_ATIVO: { titulo: 'Desligados que continuam ATIVOS na GERAL', curto: 'desligado ainda ativo',
     oque: 'Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro.',
-    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se a pessoa foi recontratada, tire-a da CDESLIGADOS.' },
+    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se foi recontratação, ponha a data da nova admissão na CADMITIDOS — a saída antiga fica, porque conta no turnover.' },
   SEM_NOME: { titulo: 'Linhas sem nome', curto: 'sem nome',
     oque: 'A coluna PROD está vazia: a pessoa conta no quadro, mas aparece como Sem nome.', corrigir: 'Preencha o PROD.' },
   EQUIPE: { titulo: 'EQUIPE fora do padrão', curto: 'sem turno',
@@ -1616,7 +1656,7 @@ function qdConferencia() {
           <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(qdNomeTxt(x)) : '<em>Sem nome</em>'}</button>`
             : `<span class="qd-item-nome">${x.nome ? esc(x.tipo === 'COLUNA' ? x.nome : qdNomeTxt(x)) : '<em>Sem nome</em>'}</span>`}
             <span class="qd-item-ids bq-num">${x.cod ? 'COD ' + esc(x.cod) : ''}${x.cod && x.rh ? ' · ' : ''}${x.rh ? 'RH ' + esc(x.rh) : ''}</span>
-            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}${x.readmitido ? qdSelo('atencao', 'recontratado?') : ''}</div>
+            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}${x.tipo === 'DESLIGADO_ATIVO' && x.gravidade !== 'grave' ? qdSelo('atencao', 'confira') : ''}</div>
           <div class="qd-item-det">${esc(x.detalhe)}</div>
           <div class="qd-item-acoes">${x.tipo === 'COLUNA' ? '' : qdLinhasItem(x)}
             ${link ? `<a class="icone-botao" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha ↗</a>` : ''}</div>
@@ -1707,7 +1747,8 @@ function qdEtiquetas(g) {
     t.push(`<span class="qd-tag" title="Admissão: ${a.data ? pnDataLonga(a.data) : 'sem data na planilha'}${a.status ? ' · ' + esc(a.status) : ''}">${trein ? 'Novo · em treinamento' : 'Novo'}</span>`);
   }
   (memo.pend[g.ref] || []).forEach((x) => t.push(qdSelo(x.gravidade, x.tipo === 'DESLIGADO_ATIVO'
-    ? (x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'desligado (sem data)') : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
+    ? (x.gravidade !== 'grave' ? 'mesmo nome de um desligado' : (x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'desligado (sem data)'))
+    : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
   return t.join('');
 }
 /* Nome vazio nunca fica em branco. */
@@ -1738,7 +1779,9 @@ function qdPessoas() {
 /* A busca redesenha so a lista (o cursor fica no campo). */
 function qdRedesenharLista() {
   const alvo = el('qd-lista'); if (!alvo) return;
+  const foco = qdGuardarFoco();
   alvo.innerHTML = qdListaPessoas(qdListaDaTela());
+  qdDevolverFoco(foco);
 }
 /* Enter com um resultado so abre a ficha. */
 function qdBuscaEnter() {
@@ -1894,7 +1937,7 @@ function qdMovimentacao() {
   const tipos = { vol: 0, inv: 0, sem: 0 };
   saidas.forEach((d) => { tipos[qdTipo(d.tipo)]++; });
   const sub = [tipos.vol ? qdPlural(tipos.vol, 'voluntária', 'voluntárias') : '', tipos.inv ? qdPlural(tipos.inv, 'involuntária', 'involuntárias') : '',
-    tipos.sem ? tipos.sem + ' sem tipo' : ''].filter(Boolean).join(' · ');
+    tipos.sem ? tipos.sem + ' de outro tipo ou sem tipo' : ''].filter(Boolean).join(' · ');
   const semDataDes = qdRecorte(DADOS.desSemData || []).length;
   // o mes tocado no grafico recorta motivos, "onde saem" e a lista pelo proprio mes
   const jMes = QD.mes ? { ini: QD.mes + '-01', fim: QD.mes + '-31' } : j;
@@ -1997,7 +2040,7 @@ function qdMotivoRotulo(chave) {
 /* Por que saem: barras por motivo, agrupadas por tipo (pedido do colaborador x decisao da empresa). */
 function qdPorQueSaem(saidas) {
   if (!saidas.length) return '';
-  const grupos = [['vol', 'Pedido do colaborador (voluntário)'], ['inv', 'Decisão da empresa (involuntário)'], ['sem', 'Tipo não informado']];
+  const grupos = [['vol', 'Pedido do colaborador (voluntário)'], ['inv', 'Decisão da empresa (involuntário)'], ['sem', 'Outro tipo ou não informado']];
   const max = Math.max(1, ...grupos.map(([t]) => {
     const c = {}; saidas.filter((d) => qdTipo(d.tipo) === t).forEach((d) => { const k = qdMotivoChave(d.motivo); c[k] = (c[k] || 0) + 1; });
     return Math.max(0, ...Object.keys(c).map((k) => c[k]));
@@ -2069,12 +2112,12 @@ function qdListaMov(adm, des, j) {
   itens.forEach((x) => { const k = x.data ? x.data.slice(0, 7) : '-'; const c = porMes[k] = porMes[k] || { s: 0, e: 0 }; c[x.s === 'saida' ? 's' : 'e']++; });
   let mesAnt = null;
   const admFora = {};
-  memo.inc.filter((x) => x.tipo === 'ADMITIDO_FORA').forEach((x) => { admFora[qdChaveCod(x.cod) || ('N' + qdChaveNome(x.nome))] = true; });
+  memo.inc.filter((x) => x.tipo === 'ADMITIDO_FORA').forEach((x) => { admFora[qdIdCod(x.cod) || ('N' + qdChaveNome(x.nome))] = true; });
   const linha = (x) => {
     const r = x.r, naGeral = qdAchar(memo.ixGeral, r);
     const g = naGeral ? naGeral.find((y) => y.ativo) || naGeral[0] : null;
-    const ainda = x.s === 'saida' && naGeral && naGeral.some((y) => y.ativo);
-    const fora = x.s === 'entrada' && admFora[qdChaveCod(r.cod) || ('N' + qdChaveNome(r.nome))];
+    const pend = x.s === 'saida' && g ? (memo.pend[g.ref] || []).find((q) => q.tipo === 'DESLIGADO_ATIVO') : null;
+    const fora = x.s === 'entrada' && admFora[qdIdCod(r.cod) || ('N' + qdChaveNome(r.nome))];
     const k = x.data ? x.data.slice(0, 7) : '-';
     let div = '';
     if (k !== mesAnt) {
@@ -2092,7 +2135,7 @@ function qdListaMov(adm, des, j) {
       <span class="qd-mov-eq">${qdEq(r.equipe, r.equipeBruta)} <small>${r.funcao ? esc(r.funcao) : ''}</small></span>
       <span class="qd-mov-det">${x.s === 'saida' ? (tipo === 'vol' ? 'Voluntário' : (tipo === 'inv' ? 'Involuntário' : esc(r.tipo || 'Tipo não informado'))) +
           ' · ' + (r.motivo ? esc(r.motivo) : '<em>motivo não informado</em>') : esc(r.status ? r.status.charAt(0) + r.status.slice(1).toLowerCase() : 'Admitido')}
-        ${ainda ? qdSelo('grave', 'ainda ativo na GERAL') : ''}${fora ? qdSelo('atencao', 'não está na GERAL') : ''}</span>
+        ${pend ? qdSelo(pend.gravidade, pend.gravidade === 'grave' ? 'ainda ativo na GERAL' : 'confira na Conferência') : ''}${fora ? qdSelo('atencao', 'não está na GERAL') : ''}</span>
     </li>`;
   };
   return `<div class="bq-card qd-movlista"><div class="qd-movlista-cab"><div><h2>Quem entrou e quem saiu</h2>
@@ -2188,7 +2231,7 @@ function qdRegua() {
 
 /*
  * MAPA DE CALOR Funcao × Turno (o grafico de que o usuario mais gosta). Uma
- * rampa so (azul, mais = mais escuro), em mosaico; a escala e cada celula
+ * rampa so (azul, mais = mais forte), em mosaico; a escala e cada celula
  * vem do CD inteiro e nao mudam com o filtro: a Equipe deixa a coluna dela
  * inteira (as outras a 35%) e esconde as linhas que tem 0 nela; a Funcao
  * deixa a linha inteira. Tres grupos: operacao, Lideranca (o "1 para cada N"
@@ -2240,7 +2283,7 @@ function qdMapa() {
         ${QD_EQUIPES.map((e) => `<td class="c soma${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}">${e === 'ADM' ? somaAdm : '–'}</td>`).join('')}<td class="t"><b class="bq-num">${somaAdm}</b></td></tr>`);
   const corpo = operacao.filter(visivel).map(linha).join('') + grupo('Liderança', lideranca) + admLinhas;
   return `<h2>Função × Turno</h2>
-    <p class="bq-sub">Pessoas no quadro por função e turno — quanto mais escuro, mais gente. Toque num número para ver quem é.</p>
+    <p class="bq-sub">Pessoas no quadro por função e turno — quanto mais forte o azul, mais gente (veja a escala). Toque num número para ver quem é.</p>
     <div class="bq-rolagem"><table class="qd-mapa">
       <thead><tr><th>Função</th>${QD_EQUIPES.map((e) => `<th class="n${QD.equipe === e ? ' escolhida' : ''}${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}"><button class="qd-link" onclick="qdEquipe(${jsArg(e)})" title="${esc(e)}"><span class="qd-eq"><i style="background:${qdCor(e)}"></i>${e === 'ADM' ? 'ADM' : esc(e.slice(0, 2))}</span></button></th>`).join('')}<th class="n">Total</th></tr></thead>
       <tbody>${corpo || `<tr><td colspan="${QD_EQUIPES.length + 2}" class="bq-vazio">Ninguém nesta equipe.</td></tr>`}</tbody>

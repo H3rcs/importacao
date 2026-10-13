@@ -645,7 +645,7 @@ caso('quadro do CD: desligado SEM DATA na CDESLIGADOS que continua ATIVO na GERA
     'resumo das abas: ' + JSON.stringify([d.leitura.adm, d.leitura.des]));
 });
 
-caso('quadro do CD: homonimo com outro COD, COD de preenchimento, desligamento futuro e recontratado nao viram "desligado ativo" grave; COD RH e matricula', () => {
+caso('quadro do CD: homonimo (ou COD digitado errado) vira atencao; COD de preenchimento, desligamento futuro e recontratado nao viram aviso; COD RH e matricula', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
   const link = planilhaAntiga(m, 'BI Quadro Feira', {
@@ -666,8 +666,11 @@ caso('quadro do CD: homonimo com outro COD, COD de preenchimento, desligamento f
   afirmar(!d.erro, 'erro: ' + d.erro);
   afirmar(d.leitura.colunas.funcao === 'CARGO ATUAL' && d.leitura.colunas.rh === 'COD RH' && d.leitura.colunas.cod === 'COD', 'colunas pela prioridade: ' + JSON.stringify(d.leitura.colunas));
   const da = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO');
-  afirmar(da.length === 1 && da[0].cod === '30004' && da[0].gravidade === 'atencao' && da[0].readmitido && /recontratação/.test(da[0].detalhe),
-    'so a recontratada, como atencao: ' + JSON.stringify(da));
+  // a recontratada (admitida de novo depois da saida), o aviso previo e o COD "-" nao geram nada; o homonimo pede conferencia
+  afirmar(da.length === 1 && da[0].cod === '30002' && da[0].gravidade === 'atencao' && da[0].conflito &&
+    /o COD é 99999 na CDESLIGADOS e 30002 na GERAL/.test(da[0].detalhe), 'so o homonimo, como atencao: ' + JSON.stringify(da));
+  // a tela anterior do Quadro (aberta durante a implantacao) le "apoio": os ativos, com o turno no jeito antigo
+  afirmar(d.apoio.length === 4 && d.apoio.filter((a) => a.equipe === 'TA').length === 2 && d.apoio.every((a) => a.nome && a.funcao), 'apoio de transicao: ' + JSON.stringify(d.apoio));
   // planilha sem a GERAL (nem as APOIO): erro que diz o que fazer, e nada fica guardado no cache
   const semAba = planilhaAntiga(m, 'Outra planilha', { 'QUADRO': [['EQUIPE', 'COD', 'PROD']], 'CDESLIGADOS': [['COD']] });
   acao(m, s, 'salvarFonteQuadro', { link: semAba });
@@ -694,6 +697,32 @@ caso('quadro do CD: EQUIPE e DESCRICAO em celulas mescladas valem para todas as 
     'mescladas preenchidas: ' + JSON.stringify(d.geral.map((g) => [g.nome, g.equipe, g.funcao])));
   afirmar(por('FABIO').equipe === '' && d.inconsistencias.some((x) => x.tipo === 'EQUIPE' && x.nome === 'FABIO'), 'fora da mesclagem continua sem turno (e vira aviso)');
   afirmar(d.leitura.mescladas === 5, 'linhas completadas: ' + d.leitura.mescladas);
+});
+
+caso('quadro do CD: "COD COLABORADOR" nao vira o nome, "DATA ADMISSAO" nao vira a saida, data impossivel conta como sem data; a versao entra na chave das telas', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'], ['1° TURNO', '30001', 'ANA LIMA', 'SEPARADOR', '101', 'ATIVO'],
+      ['1° TURNO', '30002', 'BRUNO DIAS', 'SEPARADOR', '102', 'ATIVO'], ['2° TURNO', '30003', 'CARLA REIS', 'CONFERENTE', '103', 'ATIVO']],
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR', 'DATA NASCIMENTO', 'ADMITIDO EM'], ['30003', 'CARLA REIS', '15/01/1995', '01/09/2026']],
+    'CDESLIGADOS': [['COD COLABORADOR', 'NOME COLABORADOR', 'DATA ADMISSÃO', 'DATA SAÍDA', 'TIPO'],
+      ['30001', 'ANA LIMA', '02/05/2019', '20/09/2026', 'VOLUNTÁRIO'],
+      ['30002', 'BRUNO DIAS', '02/05/2019', '09/15/2026', 'VOLUNTÁRIO']]      // formato americano colado como texto: mes 15
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  const ana = d.des.find((x) => x.cod === '30001');
+  afirmar(ana && ana.nome === 'ANA LIMA' && ana.data === '2026-09-20', 'nome e data da saida pelas colunas certas: ' + JSON.stringify(d.des));
+  afirmar(d.desSemData.length === 1 && d.desSemData[0].cod === '30002', 'data impossivel = sem data: ' + JSON.stringify(d.desSemData));
+  afirmar(d.adm.length === 1 && d.adm[0].data === '2026-09-01', 'admissao pela coluna certa (nao a de nascimento): ' + JSON.stringify(d.adm));
+  const da = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO').map((x) => x.cod + ':' + x.gravidade).sort().join();
+  afirmar(da === '30001:grave,30002:grave', 'os dois desligados ativos aparecem: ' + da);
+  // a chave das telas guardadas leva o carimbo: uma implantacao nova nao serve a tela montada pelo codigo anterior
+  const c = ctx(m);
+  const u = { email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') };
+  const k = c.chaveDeTela('quadro', u, {});
+  afirmar(k.split('|')[1] === /build: '([^']+)'/.exec(require('fs').readFileSync(PASTA + '/Codigo.gs', 'utf8'))[1], 'carimbo na chave da tela: ' + k);
 });
 
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {

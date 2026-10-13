@@ -110,7 +110,7 @@ function dadosQuadro(usuario) {
  * o que o nome inteiro nao achou, e nunca para uma coluna ja usada.
  */
 const QUADRO_COLUNAS = {
-  nome:   { exatos: ['PROD', 'COLABORADOR', 'NOME', 'NOME DO COLABORADOR', 'NOME COMPLETO', 'FUNCIONARIO'], pedacos: ['COLABORADOR', 'NOME', 'FUNCIONARIO'] },
+  nome:   { exatos: ['PROD', 'COLABORADOR', 'NOME', 'NOME DO COLABORADOR', 'NOME COMPLETO', 'FUNCIONARIO'], pedacos: ['COLABORADOR', 'NOME', 'FUNCIONARIO'], evitar: ['COD', 'MATRIC', 'PRODUTIV'] },
   cod:    { exatos: ['COD', 'CODIGO', 'PRODUTIVA', 'PRODUTIVO', 'COD PRODUTIVO', 'CODIGO PRODUTIVO', 'N PRODUTIVO'], pedacos: ['PRODUTIV', 'COD'], evitar: ['DESCRI', 'RH', 'MATRIC'] },
   rh:     { exatos: ['RH', 'MATRICULA', 'MATRICULA RH', 'MAT RH', 'MAT', 'COD RH', 'CODIGO RH', 'N RH'], pedacos: ['MATRIC', 'RH'] },
   equipe: { exatos: ['EQUIPE', 'TURNO', 'EQUIPE TURNO'], pedacos: ['EQUIPE', 'TURNO'] },
@@ -118,10 +118,10 @@ const QUADRO_COLUNAS = {
   status: { exatos: ['STATUS', 'SITUACAO'], pedacos: ['STATUS', 'SITUAC'] }
 };
 const QUADRO_COLUNAS_ADM = {
-  data: { exatos: ['DATA ADMISSAO', 'DATA DE ADMISSAO', 'ADMISSAO', 'DATA'], pedacos: ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], evitar: ['MOTIVO', 'TIPO', 'STATUS', 'SITUAC'] }
+  data: { exatos: ['DATA ADMISSAO', 'DATA DE ADMISSAO', 'ADMISSAO', 'DATA'], pedacos: ['ADMISS', 'ADMIT', 'DATA', 'ENTRADA', 'INICIO', 'MES'], evitar: ['MOTIVO', 'TIPO', 'STATUS', 'SITUAC', 'NASC'] }
 };
 const QUADRO_COLUNAS_DES = {
-  data:   { exatos: ['DATA DESLIGAMENTO', 'DATA DO DESLIGAMENTO', 'DATA DEMISSAO', 'DATA DE DEMISSAO', 'DESLIGAMENTO', 'DATA'], pedacos: ['DESLIG', 'DEMISS', 'DATA'], evitar: ['MOTIVO', 'TIPO'] },
+  data:   { exatos: ['DATA DESLIGAMENTO', 'DATA DO DESLIGAMENTO', 'DATA DEMISSAO', 'DATA DE DEMISSAO', 'DESLIGAMENTO', 'DATA'], pedacos: ['DESLIG', 'DEMISS', 'SAIDA', 'DATA'], evitar: ['MOTIVO', 'TIPO', 'ADMISS', 'NASC'] },
   tipo:   { exatos: ['TIPO', 'TIPO DE DESLIGAMENTO', 'TIPO DESLIGAMENTO'], pedacos: ['TIPO'], evitar: ['MOTIVO'] },
   motivo: { exatos: ['MOTIVO', 'MOTIVO DO DESLIGAMENTO', 'MOTIVO DESLIGAMENTO'], pedacos: ['MOTIVO'] }
 };
@@ -358,6 +358,10 @@ function lerPlanilhaQuadro_(id) {
   return {
     formato: QUADRO_FORMATO,
     geral: geral, adm: adm, des: des, desSemData: desSemData,
+    // Transicao (13/10): so a tela anterior do Quadro le "apoio" (aberta durante a implantacao). Sai na proxima entrega.
+    apoio: geral.filter(function (g) { return g.ativo; }).map(function (g) {
+      return { cod: g.cod, nome: g.nome, equipe: { '1° TURNO': 'TA', '2° TURNO': 'TB', '3° TURNO': 'TC' }[g.equipe] || g.equipe || g.equipeBruta, funcao: g.funcao };
+    }),
     inconsistencias: inconsistenciasQ_(geral, adm, des.concat(desSemData)),
     leitura: leitura,
     atualizado: new Date().toISOString(),
@@ -424,23 +428,48 @@ function inconsistenciasQ_(geral, adm, des) {
   const quem = function (g) { return { cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta, linha: g.linha, ref: g.ref, aba: g.aba || '' }; };
   const ondeQ = function (g) { return (g.aba ? g.aba + ' ' : '') + g.linha; };
 
-  // 1. Desligado que continua ATIVO na GERAL (o pedido): um aviso por linha da GERAL, com o desligamento mais recente.
+  /*
+   * 1. Desligado que continua ATIVO na GERAL (o pedido): um aviso por linha da
+   * GERAL, decidido pelo desligamento mais recente. Desligamento com data
+   * futura (aviso previo) ainda nao conta. Quem foi admitido de novo DEPOIS da
+   * saida (CADMITIDOS com data) foi recontratado: o quadro esta certo e nao ha
+   * aviso — a saida antiga fica na CDESLIGADOS, porque conta no turnover.
+   */
   const jaVisto = {}, hoje = hojeISO();
-  des.slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); }).forEach(function (d) {
-    if (d.data && d.data > hoje) return;          // desligamento marcado para depois de hoje (aviso previo): ainda trabalha
+  const desAte = des.filter(function (d) { return !(d.data && d.data > hoje); })
+    .sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
+  desAte.forEach(function (d) {
     const achou = acharQ_(ix, d);
     if (!achou) return;
     achou.lista.filter(function (g) { return g.ativo; }).forEach(function (g) {
       if (jaVisto[g.ref]) return;
       jaVisto[g.ref] = true;
-      const voltou = d.data ? acharQ_(ixAdm, d) : null;
-      const readmitido = voltou && voltou.lista.some(function (a) { return a.data && a.data > d.data; });
+      const adms = (acharQ_(ixAdm, d) || { lista: [] }).lista;
+      if (d.data && adms.some(function (a) { return a.data && a.data > d.data; })) return;     // recontratado(a)
+      const admSemData = adms.length && adms.every(function (a) { return !a.data; });
       saida.push(Object.assign(quem(g), {
-        tipo: 'DESLIGADO_ATIVO', gravidade: readmitido ? 'atencao' : 'grave', data: d.data || '', chave: achou.chave, readmitido: !!readmitido,
+        tipo: 'DESLIGADO_ATIVO', gravidade: 'grave', data: d.data || '', chave: achou.chave,
         detalhe: (d.data ? 'Desligado em ' + dataCurtaQ_(d.data) : 'Está na CDESLIGADOS (sem data)') + (d.motivo ? ' (' + d.motivo + ')' : '') +
           ', mas está ' + (g.status || 'sem status') + ' na ' + (g.aba || 'GERAL') + '.' +
           (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') +
-          (readmitido ? ' Foi admitido(a) de novo depois dessa data: se é recontratação, tire a linha antiga da CDESLIGADOS.' : '')
+          (admSemData ? ' Está também na CADMITIDOS, sem data: se foi recontratação, ponha a data da nova admissão na CADMITIDOS.' : '')
+      }));
+    });
+  });
+  // 1b. Mesmo nome de um desligado, mas com outro COD ou RH: homonimo ou numero digitado errado. Atencao, para conferir.
+  const jaVistoNome = {};
+  desAte.forEach(function (d) {
+    if (acharQ_(ix, d)) return;
+    const n = nomeChaveQ_(d.nome);
+    ((n && ix.nome[n]) || []).filter(function (g) { return g.ativo && !jaVisto[g.ref] && !jaVistoNome[g.ref]; }).forEach(function (g) {
+      jaVistoNome[g.ref] = true;
+      const dif = [];
+      if (codigoQ_(d.cod) && codigoQ_(g.cod) && codigoQ_(d.cod) !== codigoQ_(g.cod)) dif.push('o COD é ' + d.cod + ' na CDESLIGADOS e ' + g.cod + ' na ' + (g.aba || 'GERAL'));
+      if (codigoQ_(d.rh) && codigoQ_(g.rh) && codigoQ_(d.rh) !== codigoQ_(g.rh)) dif.push('a matrícula é ' + d.rh + ' na CDESLIGADOS e ' + g.rh + ' na ' + (g.aba || 'GERAL'));
+      saida.push(Object.assign(quem(g), {
+        tipo: 'DESLIGADO_ATIVO', gravidade: 'atencao', data: d.data || '', chave: 'nome', conflito: true,
+        detalhe: 'Tem o mesmo nome de quem está na CDESLIGADOS' + (d.data ? ' (desligado em ' + dataCurtaQ_(d.data) + ')' : '') + ', mas ' +
+          (dif.join(' e ') || 'os números não batem') + '. Confira se é a mesma pessoa (número digitado errado) ou um homônimo.'
       }));
     });
   });
@@ -518,13 +547,14 @@ function dataQ_(v) {
     const ano = mx[2].length === 2 ? '20' + mx[2] : mx[2];
     return ano + '-' + ('0' + (MESES_Q.indexOf(mx[1]) + 1)).slice(-2) + '-01';
   }
+  // Mes fora de 1-12 ou dia fora de 1-31 (ex.: 09/15/2026, colado no formato americano) = sem data.
+  const ok = function (ano, mes, dia) {
+    return (mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31) ? ano + '-' + ('0' + mes).slice(-2) + '-' + ('0' + dia).slice(-2) : '';
+  };
   const iso = s.match(/^(\d{4})[\/\-](\d{1,2})(?:[\/\-](\d{1,2}))?/);
-  if (iso) return iso[1] + '-' + ('0' + iso[2]).slice(-2) + '-' + ('0' + (iso[3] || '1')).slice(-2);
+  if (iso) return ok(iso[1], Number(iso[2]), Number(iso[3] || 1));
   const br = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (br) {
-    const ano = br[3].length === 2 ? '20' + br[3] : br[3];
-    return ano + '-' + ('0' + br[2]).slice(-2) + '-' + ('0' + br[1]).slice(-2);
-  }
+  if (br) return ok(br[3].length === 2 ? '20' + br[3] : br[3], Number(br[2]), Number(br[1]));
   return '';
 }
 

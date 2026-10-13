@@ -67,13 +67,14 @@ Quando alguém está na CDESLIGADOS e o STATUS na GERAL ainda é ativo, o GSL ap
 
 Como o GSL acha a pessoa:
 - primeiro pelo COD, depois pela matrícula (RH);
-- se a CDESLIGADOS não tiver nenhum dos dois, pelo nome, sem diferenciar acento nem maiúscula. Nesse caso o aviso diz "Achado pelo nome — confira se é a mesma pessoa". Um homônimo com outro COD não é confundido;
+- se a CDESLIGADOS não tiver nenhum dos dois, pelo nome, sem diferenciar acento nem maiúscula. Nesse caso o aviso diz "Achado pelo nome — confira se é a mesma pessoa";
+- **mesmo nome, mas outro COD ou RH:** pode ser um homônimo ou um número digitado errado. O GSL não tem como saber, então aponta como **atenção** (sem a faixa vermelha), dizendo os dois números, para você conferir;
 - valores de preenchimento no COD ou no RH ("-", "0", "#N/A") não contam como número.
 
 Casos especiais:
-- **Desligamento sem data** na CDESLIGADOS também é conferido. Ele só fica fora dos gráficos e das contas por período.
+- **Desligamento sem data** na CDESLIGADOS também é conferido. Ele só fica fora dos gráficos e das contas por período. Uma data impossível (mês 13, ou 09/15/2026 colado no formato americano) conta como sem data.
 - **Desligamento com data futura** (aviso prévio) ainda não é inconsistência: a pessoa ainda trabalha.
-- **Recontratação:** se a pessoa aparece de novo na CADMITIDOS com data posterior ao desligamento, o aviso vira **atenção** (sem a faixa vermelha) e lembra de tirar a linha antiga da CDESLIGADOS.
+- **Recontratação:** se a pessoa aparece de novo na CADMITIDOS com data **posterior** ao desligamento, não há aviso: o quadro está certo. A saída antiga continua na CDESLIGADOS, porque conta no turnover. Se a CADMITIDOS não tiver a data, o aviso continua vermelho, com a dica de pôr a data da nova admissão.
 
 A faixa vermelha também aparece se a GERAL estiver **sem a coluna PROD, EQUIPE ou STATUS**: ela explica o efeito ("por isso os nomes não aparecem", "por isso todos estão contando como ativos"). Se a planilha não tiver a aba GERAL, o Quadro diz isso, em vez de mostrar um quadro vazio.
 
@@ -115,7 +116,7 @@ São quatro abas. A linha de filtros (Equipe e Função) vale para tudo o que es
 
 O coordenador abre o Quadro já no turno dele (A = 1° TURNO, B = 2°, C = 3°). No computador compartilhado, quem entra depois não herda os filtros de quem saiu. **O nível COORDENADOR não vê o Quadro por padrão.** Para liberar para alguém: **Pessoas e acessos › Quem vê cada módulo**, coluna **Quadro do CD**, opção **Ver**.
 
-**Arquivos desta entrega:** `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, abra o Quadro e clique em **Atualizar dados**.
+**Arquivos desta entrega:** `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, **recarregue a página (F5)**, abra o Quadro e clique em **Atualizar dados**. As telas guardadas pela versão anterior são descartadas sozinhas na implantação nova.
 
 **Para conferir:**
 1. Abra o Quadro do CD. O subtítulo diz "Aba GERAL de «…» · lida hoje às hh:mm", e o cartão CD inteiro mostra quantas pessoas estão no quadro.

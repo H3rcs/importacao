@@ -627,6 +627,7 @@ function apagarTelaDaPessoa() {
   COLAB_CACHE = null; periodoParams = null; FICHA = { matricula: '', de: '', ate: '' };
   FOTO_CACHE.clear();
   if (typeof apzZerar === 'function') apzZerar();
+  if (typeof qdZerar === 'function') qdZerar();       // o Quadro do CD de quem saiu (QD_MEMO guarda a GERAL inteira)
 }
 
 /* Sessao vencida no meio do uso. */

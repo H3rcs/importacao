@@ -86,7 +86,7 @@ function dadosQuadro(usuario) {
     gravarTextoCache(chave, JSON.stringify(dados), QUADRO_CACHE_SEGUNDOS);
     return Object.assign(base, dados);
   } catch (e) {
-    base.erro = 'Não consegui ler a planilha do Quadro: ' + (e.message || e) +
+    base.erro = e && e.semAba ? e.message : 'Não consegui ler a planilha do Quadro: ' + (e.message || e) +
       '. Confira se o link está certo e se a conta dona do GSL tem acesso a ela.';
     return base;
   }
@@ -111,8 +111,8 @@ function dadosQuadro(usuario) {
  */
 const QUADRO_COLUNAS = {
   nome:   { exatos: ['PROD', 'COLABORADOR', 'NOME', 'NOME DO COLABORADOR', 'NOME COMPLETO', 'FUNCIONARIO'], pedacos: ['COLABORADOR', 'NOME', 'FUNCIONARIO'] },
-  cod:    { exatos: ['COD', 'CODIGO', 'PRODUTIVA', 'PRODUTIVO', 'COD PRODUTIVO', 'CODIGO PRODUTIVO', 'N PRODUTIVO'], pedacos: ['PRODUTIV', 'COD'], evitar: ['DESCRI'] },
-  rh:     { exatos: ['RH', 'MATRICULA', 'MATRICULA RH', 'MAT RH', 'MAT'], pedacos: ['MATRIC'] },
+  cod:    { exatos: ['COD', 'CODIGO', 'PRODUTIVA', 'PRODUTIVO', 'COD PRODUTIVO', 'CODIGO PRODUTIVO', 'N PRODUTIVO'], pedacos: ['PRODUTIV', 'COD'], evitar: ['DESCRI', 'RH', 'MATRIC'] },
+  rh:     { exatos: ['RH', 'MATRICULA', 'MATRICULA RH', 'MAT RH', 'MAT', 'COD RH', 'CODIGO RH', 'N RH'], pedacos: ['MATRIC', 'RH'] },
   equipe: { exatos: ['EQUIPE', 'TURNO', 'EQUIPE TURNO'], pedacos: ['EQUIPE', 'TURNO'] },
   funcao: { exatos: ['DESCRICAO', 'FUNCAO', 'CARGO', 'DESCRICAO DA FUNCAO'], pedacos: ['FUNCAO', 'CARGO', 'DESCRICAO'] },
   status: { exatos: ['STATUS', 'SITUACAO'], pedacos: ['STATUS', 'SITUAC'] }
@@ -163,20 +163,46 @@ function colunasQ_(cab, campos) {
       if (i !== -1 && !usada[i]) { col[k] = i; usada[i] = true; return; }
     }
   });
+  // Depois, por pedaco — na ordem de prioridade dos pedacos (nao a da posicao da coluna).
   Object.keys(campos).forEach(function (k) {
     if (col[k] !== undefined || !campos[k].pedacos.length) return;
     const evitar = campos[k].evitar || [];
-    for (let i = 0; i < cab.length; i++) {
-      const c = cab[i];
-      if (!c || usada[i]) continue;
-      if (campos[k].pedacos.some(function (p) { return c.indexOf(p) !== -1; }) &&
-          !evitar.some(function (x) { return c.indexOf(x) !== -1; })) { col[k] = i; usada[i] = true; return; }
+    const pedacos = campos[k].pedacos;
+    for (let p = 0; p < pedacos.length; p++) {
+      for (let i = 0; i < cab.length; i++) {
+        const c = cab[i];
+        if (!c || usada[i]) continue;
+        if (c.indexOf(pedacos[p]) !== -1 && !evitar.some(function (x) { return c.indexOf(x) !== -1; })) { col[k] = i; usada[i] = true; return; }
+      }
     }
   });
   return col;
 }
 
 function valorQ_(linha, col, campo) { return col[campo] === undefined ? '' : linha[col[campo]]; }
+
+/*
+ * Celulas mescladas (ex.: "1° TURNO" mesclado no bloco do turno): o Sheets
+ * so devolve o valor na primeira linha da mesclagem. Aqui as linhas de baixo
+ * recebem o valor de cima — so dentro das mesclagens de verdade, nunca por
+ * palpite. Devolve quantas linhas foram completadas.
+ */
+function preencherMescladasQ_(aba, t) {
+  let n = 0;
+  try {
+    const mescladas = aba.getDataRange().getMergedRanges();
+    mescladas.forEach(function (m) {
+      const topo = m.getRow() - t.primeiraLinha, c = m.getColumn() - 1;
+      if (topo < 0 || !t.linhas[topo]) return;              // mesclagem no titulo ou no cabecalho
+      const v = t.linhas[topo][c];
+      if (v === '' || v === null || v === undefined) return;
+      for (let i = topo + 1; i < topo + m.getNumRows(); i++) {
+        if (t.linhas[i] && (t.linhas[i][c] === '' || t.linhas[i][c] === null)) { t.linhas[i][c] = v; n++; }
+      }
+    });
+  } catch (e) { /* sem acesso as mesclagens: segue com os valores como vieram */ }
+  return n;
+}
 
 /* ------------------------------------------------------------------ */
 /* EQUIPE E STATUS                                                     */
@@ -230,6 +256,7 @@ function lerPlanilhaQuadro_(id) {
   const abaGeral = abaQuadro_(ss, QUADRO_ABA_GERAL);
   if (abaGeral) {
     const t = lerTabelaQ_(abaGeral, QUADRO_COLUNAS);
+    leitura.mescladas = preencherMescladasQ_(abaGeral, t);
     leitura.aba = abaGeral.getName();
     leitura.linhaCabecalho = t.primeiraLinha - 1;
     try { leitura.gid = abaGeral.getSheetId(); } catch (e) { leitura.gid = null; }   // "abrir na planilha" vai direto a linha
@@ -246,6 +273,7 @@ function lerPlanilhaQuadro_(id) {
       const aba = abaQuadro_(ss, nomeAba);
       if (!aba) return;
       const t = lerTabelaQ_(aba, QUADRO_COLUNAS);
+      preencherMescladasQ_(aba, t);
       const turnoDaAba = nomeAba.replace(/APOIO\s*/i, '').trim();
       t.linhas.forEach(function (linha, i) {
         const r = linhaGeralQ_(linha, t.col, t.primeiraLinha + i, turnoDaAba);
@@ -255,6 +283,11 @@ function lerPlanilhaQuadro_(id) {
       leitura.aba = leitura.aba ? leitura.aba + ', ' + aba.getName() : aba.getName();
     });
     leitura.layout = leitura.aba ? 'APOIO' : '';
+    if (!leitura.layout) {
+      const e = new Error('Não achei a aba GERAL na planilha «' + ss.getName() + '». Confira o nome da aba (GERAL) — as abas APOIO TA, TB e TC não são mais usadas.');
+      e.semAba = true;
+      throw e;
+    }
   }
   leitura.linhas = geral.length;
   // Chave de cada pessoa na tela: no layout APOIO o numero da linha se repete entre as abas.
@@ -288,9 +321,12 @@ function lerPlanilhaQuadro_(id) {
       r.mes = r.data ? r.data.slice(0, 7) : '';
       adm.push(r);
     });
+    leitura.adm = { aba: abaAdm.getName(), linhas: adm.length, semData: adm.filter(function (a) { return !a.data; }).length };
+  } else {
+    leitura.adm = null;
   }
 
-  const des = [];
+  const des = [], desSemData = [];
   let temColunaMotivo = false;
   const abaDes = abaQuadro_(ss, QUADRO_ABA_DESLIGADOS);
   if (abaDes) {
@@ -307,17 +343,22 @@ function lerPlanilhaQuadro_(id) {
         tipo: txtQ_(valorQ_(linha, t.col, 'tipo')) || 'Não informado',
         motivo: txtQ_(valorQ_(linha, t.col, 'motivo'))
       };
-      if (!r.data || (!r.nome && !r.cod)) return;     // sem data nao entra no periodo (como antes)
+      if (!r.nome && !r.cod && !r.rh) return;
       r.equipe = equipeQ_(r.equipeBruta);
+      // Sem data: fica fora dos graficos e do periodo, mas entra na conferencia (desligado que continua ATIVO).
+      if (!r.data) { r.mes = ''; desSemData.push(r); return; }
       r.mes = r.data.slice(0, 7);
       des.push(r);
     });
+    leitura.des = { aba: abaDes.getName(), linhas: des.length + desSemData.length, semData: desSemData.length, semMotivo: !temColunaMotivo };
+  } else {
+    leitura.des = null;
   }
 
   return {
     formato: QUADRO_FORMATO,
-    geral: geral, adm: adm, des: des,
-    inconsistencias: inconsistenciasQ_(geral, adm, des),
+    geral: geral, adm: adm, des: des, desSemData: desSemData,
+    inconsistencias: inconsistenciasQ_(geral, adm, des.concat(desSemData)),
     leitura: leitura,
     atualizado: new Date().toISOString(),
     fonte: { nome: ss.getName(), url: ss.getUrl() },
@@ -348,7 +389,10 @@ function linhaGeralQ_(linha, col, numeroLinha, turnoDaAba) {
 /* ------------------------------------------------------------------ */
 
 /* Produtivo e matricula comparados sem zeros a esquerda ("030001" = 30001); nome sem acento e espaco duplo. */
-function codigoQ_(v) { return txtQ_(v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase(); }
+function codigoQ_(v) {
+  const c = txtQ_(v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase();
+  return /[1-9]/.test(c) ? c : '';          // "-", "0", "#N/A", "SEM" nao identificam ninguem
+}
 function nomeChaveQ_(v) { return normalizaQ_(v).replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
 function dataCurtaQ_(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso || ''); }
 
@@ -367,7 +411,10 @@ function acharQ_(ix, r) {
   const c = codigoQ_(r.cod), m = codigoQ_(r.rh), n = nomeChaveQ_(r.nome);
   if (c && ix.cod[c]) return { lista: ix.cod[c], chave: 'produtivo' };
   if (m && ix.rh[m]) return { lista: ix.rh[m], chave: 'matrícula' };
-  if (n && ix.nome[n]) return { lista: ix.nome[n], chave: 'nome' };
+  if (n && ix.nome[n]) {
+    const lista = ix.nome[n].filter(function (g) { return !(c && codigoQ_(g.cod)) && !(m && codigoQ_(g.rh)); });
+    if (lista.length) return { lista: lista, chave: 'nome' };
+  }
   return null;
 }
 
@@ -378,21 +425,22 @@ function inconsistenciasQ_(geral, adm, des) {
   const ondeQ = function (g) { return (g.aba ? g.aba + ' ' : '') + g.linha; };
 
   // 1. Desligado que continua ATIVO na GERAL (o pedido): um aviso por linha da GERAL, com o desligamento mais recente.
-  const jaVisto = {};
+  const jaVisto = {}, hoje = hojeISO();
   des.slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); }).forEach(function (d) {
+    if (d.data && d.data > hoje) return;          // desligamento marcado para depois de hoje (aviso previo): ainda trabalha
     const achou = acharQ_(ix, d);
     if (!achou) return;
     achou.lista.filter(function (g) { return g.ativo; }).forEach(function (g) {
-      if (jaVisto[g.linha]) return;
-      jaVisto[g.linha] = true;
-      const voltou = acharQ_(ixAdm, d);
+      if (jaVisto[g.ref]) return;
+      jaVisto[g.ref] = true;
+      const voltou = d.data ? acharQ_(ixAdm, d) : null;
       const readmitido = voltou && voltou.lista.some(function (a) { return a.data && a.data > d.data; });
       saida.push(Object.assign(quem(g), {
-        tipo: 'DESLIGADO_ATIVO', gravidade: 'grave', data: d.data, chave: achou.chave,
-        detalhe: 'Desligado em ' + dataCurtaQ_(d.data) + (d.motivo ? ' (' + d.motivo + ')' : '') +
+        tipo: 'DESLIGADO_ATIVO', gravidade: readmitido ? 'atencao' : 'grave', data: d.data || '', chave: achou.chave, readmitido: !!readmitido,
+        detalhe: (d.data ? 'Desligado em ' + dataCurtaQ_(d.data) : 'Está na CDESLIGADOS (sem data)') + (d.motivo ? ' (' + d.motivo + ')' : '') +
           ', mas está ' + (g.status || 'sem status') + ' na ' + (g.aba || 'GERAL') + '.' +
-          (achou.chave !== 'produtivo' ? ' Encontrado pelo ' + achou.chave + '.' : '') +
-          (readmitido ? ' Está também nos admitidos depois dessa data: confira se foi readmitido.' : '')
+          (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') +
+          (readmitido ? ' Foi admitido(a) de novo depois dessa data: se é recontratação, tire a linha antiga da CDESLIGADOS.' : '')
       }));
     });
   });

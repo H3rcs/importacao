@@ -272,11 +272,17 @@ async function clicarEm(aba, nome, ms) {
   throw new Error('posicao de ' + nome + ' nao apareceu; estado: ' + JSON.stringify(aba.estado && Object.assign({}, aba.estado, { pos: undefined })));
 }
 /* Entra digitando e-mail e PIN e clicando em Entrar (a pessoa leva ~1 s para digitar). */
+/*
+ * Digita no ritmo de uma pessoa (~2 s para e-mail e PIN). A sonda do canal
+ * sai quando a pagina abre; com a falha lenta de 6 s, ela so acusa o
+ * bloqueio dentro dos ~5 s que o clique vale se o Entrar vier mais de 1 s
+ * depois dela. Digitando em 0,3 s, a maquina carregada passava do limite.
+ */
 async function entrarReal(aba, email, pin) {
   await clicarEm(aba, 'email', 20000);
-  await aba.page.keyboard.type(email, { delay: 5 });
+  await aba.page.keyboard.type(email, { delay: 60 });
   await clicarEm(aba, 'pin');
-  await aba.page.keyboard.type(pin, { delay: 5 });
+  await aba.page.keyboard.type(pin, { delay: 60 });
   await clicarEm(aba, 'entrar');
 }
 /* Pedidos ao servidor desde a marca: POSTs de pagina e chamadas (por funcao). */
@@ -1578,15 +1584,31 @@ async function rodar() {
     await f.click('#pagina button:has-text("Ligar planilha")');
     await f.waitForSelector('.qd-faixa', { timeout: 20000 });
     const sub = await texto(aba, 'subtitulo-pagina');
-    afirmar(/^Aba GERAL de «BI Quadro CD Feira» · 167 pessoas na empresa/.test(sub), 'subtitulo: ' + sub);
+    afirmar(/^Aba GERAL de «BI Quadro CD Feira» · lida hoje às \d\d:\d\d$/.test(sub), 'subtitulo: ' + sub);
     // a faixa: os desligados que continuam ATIVOS, com o nome de cada um
     const faixa = await f.evaluate(() => document.querySelector('.qd-faixa').innerText.replace(/\s+/g, ' '));
-    afirmar(/3 desligados continuam ATIVOS na GERAL/.test(faixa) && faixa.includes(nomeDoCod(E.desligadoAtivo[0])) && /\+ 5 outros pontos/.test(faixa), 'faixa: ' + faixa);
+    afirmar(/3 desligados continuam ATIVOS na GERAL/.test(faixa) && /Sem eles, o CD teria 164 pessoas/.test(faixa) && faixa.includes(nomeDoCod(E.desligadoAtivo[0])) &&
+      /\+ 5 pontos de atenção na planilha/.test(faixa), 'faixa: ' + faixa);
     const abasTela = await f.evaluate(() => Array.from(document.querySelectorAll('#qd-abas .aba')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(abasTela.join('|') === 'Visão geral|Pessoas|Movimentação|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
+    afirmar(abasTela.join('|') === 'Visão geral|Quadro por turno|Movimentação|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
     // cartoes: o CD e as quatro equipes, com o numero de cada uma
     const cartoes = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-cartao')).map((c) => c.innerText.replace(/\s+/g, ' ')));
-    afirmar(cartoes.length === 5 && /167 pessoas na empresa/.test(cartoes[0]) && /1° TURNO .*60/.test(cartoes[1]) && /ADM .*14/.test(cartoes[4]), 'cartoes: ' + cartoes.join(' || '));
+    afirmar(cartoes.length === 5 && /167 pessoas no quadro/.test(cartoes[0]) && /inclui 3 desligados ainda ativos/.test(cartoes[0]) &&
+      /1° TURNO 60 pessoas 36% do CD/.test(cartoes[1]) && /1 para cada 19/.test(cartoes[1]) && /ADM 14 pessoas 8% do CD/.test(cartoes[4]) && /1 função com desfalque/.test(cartoes[4]),
+      'cartoes: ' + cartoes.join(' || '));
+    // desfalques de hoje: so o que esta fino (pelo STATUS), com o resumo de quem esta fora
+    const desf = await f.evaluate(() => document.querySelector('#qd-desfalques').innerText.replace(/\s+/g, ' '));
+    afirmar(/ADM COORDENADOR DE LOGÍSTICA 0 de 1 disponível/.test(desf) && /Fora do posto: 9 pessoas — 6 de férias · 3 afastados/.test(desf) &&
+      (desf.match(/\d+ de \d+ disponíve/g) || []).length === 1, 'desfalques: ' + desf);
+    // mapa: grupo Lideranca e o Administrativo recolhido numa linha (abre com um toque)
+    const grupos0 = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-mapa tbody th')).map((t) => t.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(grupos0.indexOf('LIDERANÇA') !== -1 && grupos0.indexOf('LÍDER DE EQUIPE') > grupos0.indexOf('LIDERANÇA') && grupos0.some((t) => /^Administrativo · 8 funções/.test(t)) &&
+      grupos0.indexOf('GERENTE DE CD') === -1, 'grupos do mapa: ' + grupos0.join(' | '));
+    await f.evaluate(() => document.querySelector('.qd-mapa-recolhido button').click());
+    afirmar(await f.evaluate(() => Array.from(document.querySelectorAll('.qd-mapa tbody th')).some((t) => t.innerText.trim() === 'GERENTE DE CD')), 'Administrativo abre');
+    const resumo = await f.evaluate(() => qdResumoTexto());
+    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL$/.test(resumo),
+      'copiar resumo: ' + resumo);
     // mapa de calor: SEPARADOR x 1° TURNO = 18; tocar leva para a lista dessas 18 pessoas
     const celula = await f.evaluate(() => {
       const tr = Array.from(document.querySelectorAll('.qd-mapa tbody tr')).find((t) => /^SEPARADOR$/.test((t.querySelector('th') || {}).innerText || ''));
@@ -1599,7 +1621,7 @@ async function rodar() {
     const lista = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-pessoa .qd-pessoa-nome')).map((x) => x.innerText.trim()));
     afirmar(lista.length === 18 && lista.every((n) => n && !/^\d+$/.test(n) && n !== 'COD'), 'as 18 pessoas, com nome: ' + lista.join(', '));
     const filtros = await f.evaluate(() => [QD.equipe, QD.funcao, document.querySelector('.qd-pill[aria-pressed="true"]').innerText.replace(/\s+/g, ' ').trim()]);
-    afirmar(filtros[0] === '1° TURNO' && filtros[1] === 'SEPARADOR' && /^1° TURNO 18/.test(filtros[2]), 'filtros vindos do mapa (a contagem da equipe respeita a funcao): ' + filtros.join(' | '));
+    afirmar(filtros[0] === '1° TURNO' && filtros[1] === 'SEPARADOR' && filtros[2] === '1° TURNO', 'filtros vindos do mapa: ' + filtros.join(' | '));
     // ficha: nome, COD, RH e o link direto para a linha da GERAL
     await f.click('.qd-pessoa >> nth=0');
     await f.waitForSelector('#janela:not(.oculto) .qd-ficha', { timeout: 5000 });
@@ -1623,13 +1645,16 @@ async function rodar() {
     // Conferencia: os cinco tipos, cada um com como corrigir; e como o GSL leu a planilha
     await f.evaluate(() => qdAba('conf'));
     const grupos = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(grupos.join('|') === 'Desligados que continuam ativos 3|Linhas sem nome 1|EQUIPE fora do padrão 1|Produtivo (COD) repetido 1|Admitidos que não estão na GERAL 2', 'grupos: ' + grupos.join('|'));
+    afirmar(grupos.join('|') === 'Desligados que continuam ATIVOS na GERAL 3|Linhas sem nome 1|EQUIPE fora do padrão 1|Produtivo (COD) repetido 1|Admitidos que não estão na GERAL 2', 'grupos: ' + grupos.join('|'));
+    afirmar(/Achado pelo nome — confira se é a mesma pessoa/.test(await f.evaluate(() => document.querySelector('#qd-grupo-DESLIGADO_ATIVO').innerText)), 'o achado pelo nome pede conferencia');
     afirmar(!(await f.$('.qd-faixa')), 'a faixa some na propria Conferencia');
     const leitura = await f.evaluate(() => document.querySelector('.qd-leitura').textContent.replace(/\s+/g, ' '));
     afirmar(/PROD/.test(leitura) && /TURNO 4/.test(leitura) && /cabeçalho na linha 3/.test(leitura), 'como leu: ' + leitura.slice(0, 300));
     // Movimentacao abre sem erro, com os quatro numeros
     await f.evaluate(() => qdAba('mov'));
-    afirmar(await f.evaluate(() => document.querySelectorAll('.qd-kpi').length === 4 && !document.querySelector('#qd-conteudo .erro-caixa')), 'movimentacao');
+    const kpis = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-kpi')).map((k) => k.innerText.replace(/\s+/g, ' ')));
+    afirmar(kpis.length === 3 && /SAÍDAS 24 sem histórico anterior para comparar 12 voluntárias · 12 involuntárias/.test(kpis[0]) && /ENTRADAS 12/.test(kpis[1]) &&
+      /2,4% ao mês/.test(kpis[2]) && !(await f.$('#qd-conteudo .erro-caixa')), 'movimentacao: ' + kpis.join(' || '));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close();
 

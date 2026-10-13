@@ -628,6 +628,74 @@ caso('quadro do CD: como o STATUS e a EQUIPE escritos na GERAL sao entendidos (E
   Object.keys(eq).forEach((v) => afirmar(c.equipeQ_(v) === eq[v], 'EQUIPE "' + v + '": "' + c.equipeQ_(v) + '" (esperava "' + eq[v] + '")'));
 });
 
+caso('quadro do CD: desligado SEM DATA na CDESLIGADOS que continua ATIVO na GERAL tambem vira inconsistencia (fora dos graficos)', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'], ['1° TURNO', '1', 'ANA LIMA', 'SEPARADOR', '101', 'ATIVO'],
+      ['2° TURNO', '2', 'BRUNO DIAS', 'CONFERENTE', '102', 'ATIVO']],
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'STATUS']],
+    'CDESLIGADOS': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'], ['2', 'BRUNO DIAS', 'TB', 'CONFERENTE', '', 'VOLUNTÁRIO', 'Outro emprego']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro && d.des.length === 0 && d.desSemData.length === 1, 'sem data fica fora do periodo: des ' + d.des.length + ' semData ' + (d.desSemData || []).length);
+  const da = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO');
+  afirmar(da.length === 1 && da[0].cod === '2' && da[0].data === '' && /sem data/.test(da[0].detalhe), 'desligado sem data e ativo: ' + JSON.stringify(da));
+  afirmar(d.leitura.des && d.leitura.des.linhas === 1 && d.leitura.des.semData === 1 && d.leitura.adm && d.leitura.adm.linhas === 0,
+    'resumo das abas: ' + JSON.stringify([d.leitura.adm, d.leitura.des]));
+});
+
+caso('quadro do CD: homonimo com outro COD, COD de preenchimento, desligamento futuro e recontratado nao viram "desligado ativo" grave; COD RH e matricula', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO DO SETOR', 'CARGO ATUAL', 'COD RH', 'STATUS'],
+      ['1° TURNO', '-', 'ANA LIMA', 'EXPEDICAO', 'SEPARADOR', '101', 'ATIVO'],
+      ['1° TURNO', '30002', 'JOSE SILVA', 'EXPEDICAO', 'SEPARADOR', '102', 'ATIVO'],
+      ['2° TURNO', '30003', 'CARLOS ROCHA', 'EXPEDICAO', 'CONFERENTE', '103', 'ATIVO'],
+      ['2° TURNO', '30004', 'DORA MELO', 'EXPEDICAO', 'CONFERENTE', '104', 'ATIVO']],
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'STATUS', 'DATA ADMISSÃO'], ['30004', 'DORA MELO', 'TB', 'CONFERENTE', 'ATIVO', D(-5)]],
+    'CDESLIGADOS': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'],
+      ['-', 'MARIA SOUZA', 'TA', 'SEPARADOR', D(-30), 'VOLUNTÁRIO', ''],          // COD "-" nao casa com a ANA (COD "-")
+      ['99999', 'JOSE SILVA', 'TA', 'SEPARADOR', D(-20), 'VOLUNTÁRIO', ''],      // homonimo: outro produtivo
+      ['30003', 'CARLOS ROCHA', 'TB', 'CONFERENTE', D(10), 'INVOLUNTÁRIO', ''],  // aviso previo: sai daqui a 10 dias
+      ['30004', 'DORA MELO', 'TB', 'CONFERENTE', D(-60), 'VOLUNTÁRIO', '']]      // recontratada (admitida de novo ha 5 dias)
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  afirmar(d.leitura.colunas.funcao === 'CARGO ATUAL' && d.leitura.colunas.rh === 'COD RH' && d.leitura.colunas.cod === 'COD', 'colunas pela prioridade: ' + JSON.stringify(d.leitura.colunas));
+  const da = d.inconsistencias.filter((x) => x.tipo === 'DESLIGADO_ATIVO');
+  afirmar(da.length === 1 && da[0].cod === '30004' && da[0].gravidade === 'atencao' && da[0].readmitido && /recontratação/.test(da[0].detalhe),
+    'so a recontratada, como atencao: ' + JSON.stringify(da));
+  // planilha sem a GERAL (nem as APOIO): erro que diz o que fazer, e nada fica guardado no cache
+  const semAba = planilhaAntiga(m, 'Outra planilha', { 'QUADRO': [['EQUIPE', 'COD', 'PROD']], 'CDESLIGADOS': [['COD']] });
+  acao(m, s, 'salvarFonteQuadro', { link: semAba });
+  const d2 = tela(m, s, 'quadro');
+  afirmar(/Não achei a aba GERAL na planilha «Outra planilha»/.test(d2.erro || '') && !/Confira se o link/.test(d2.erro), 'sem a aba: ' + d2.erro);
+});
+
+caso('quadro do CD: EQUIPE e DESCRICAO em celulas mescladas valem para todas as linhas do bloco (o Sheets so devolve a primeira)', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['QUADRO GERAL'], ['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+      ['1° TURNO', '1', 'ANA', 'SEPARADOR', '101', 'ATIVO'], ['', '2', 'BRUNO', '', '102', 'ATIVO'], ['', '3', 'CARLA', '', '103', 'ATIVO'],
+      ['2° TURNO', '4', 'DIEGO', 'CONFERENTE', '104', 'ATIVO'], ['', '5', 'EVA', 'CONFERENTE', '105', 'ATIVO'],
+      ['', '6', 'FABIO', 'CONFERENTE', '106', 'ATIVO']],                       // esta ultima nao esta em mesclagem nenhuma
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR']], 'CDESLIGADOS': [['COD', 'COLABORADOR']]
+  });
+  const pl = m.planilhas.get(link.split('/d/')[1].split('/')[0]);
+  const geral = pl.abas.find((a) => a.nome === 'GERAL');
+  geral.mescladas = [[1, 1, 1, 6], [3, 1, 3, 1], [3, 4, 3, 1], [6, 1, 2, 1]];   // titulo, 1° TURNO (3 linhas), SEPARADOR (3), 2° TURNO (so 2)
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  const por = (nome) => d.geral.find((g) => g.nome === nome);
+  afirmar(['ANA', 'BRUNO', 'CARLA'].every((n) => por(n).equipe === '1° TURNO' && por(n).funcao === 'SEPARADOR') && por('EVA').equipe === '2° TURNO',
+    'mescladas preenchidas: ' + JSON.stringify(d.geral.map((g) => [g.nome, g.equipe, g.funcao])));
+  afirmar(por('FABIO').equipe === '' && d.inconsistencias.some((x) => x.tipo === 'EQUIPE' && x.nome === 'FABIO'), 'fora da mesclagem continua sem turno (e vira aviso)');
+  afirmar(d.leitura.mescladas === 5, 'linhas completadas: ' + d.leitura.mescladas);
+});
+
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const link = planilhaAntiga(m, 'BI Quadro Feira', {

@@ -288,11 +288,18 @@ function fazerIntervalo(aba, l, c, nl, nc) {
     getSheet() { return fazerAba(aba); },
     getA1Notation() { return colunaA1(c) + l + (nl > 1 || nc > 1 ? ':' + colunaA1(c + nc - 1) + (l + nl - 1) : ''); },
     offset(dl, dc, nnl, nnc) { return fazerIntervalo(aba, l + dl, c + dc, nnl || nl, nnc || nc); },
+    // celulas mescladas: so a de cima a esquerda guarda o valor (como no Sheets)
+    merge() { (aba.mescladas = aba.mescladas || []).push([l, c, nl, nc]); return self; },
+    getMergedRanges() {
+      m.chamadasPlanilha++;
+      return (aba.mescladas || []).filter(([ml, mc, mnl, mnc]) => ml <= l + nl - 1 && ml + mnl - 1 >= l && mc <= c + nc - 1 && mc + mnc - 1 >= c)
+        .map(([ml, mc, mnl, mnc]) => fazerIntervalo(aba, ml, mc, mnl, mnc));
+    },
     activate() { return self; }
   };
   ['setFontWeight', 'setFontWeights', 'setBackground', 'setBackgrounds', 'setFontColor', 'setFontColors', 'setHorizontalAlignment', 'setVerticalAlignment',
    'setWrap', 'setWrapStrategy', 'setBorder', 'setFontSize', 'setFontFamily', 'setNote', 'clearFormat', 'setDataValidation', 'setDataValidations',
-   'clearDataValidations', 'protect', 'setFontStyle', 'setFontLine', 'setTextStyle', 'merge', 'breakApart', 'setBackgroundRGB', 'setShowHyperlink'].forEach((k) => {
+   'clearDataValidations', 'protect', 'setFontStyle', 'setFontLine', 'setTextStyle', 'breakApart', 'setBackgroundRGB', 'setShowHyperlink'].forEach((k) => {
     self[k] = function () { return self; };
   });
   return estrito('Range', self);

@@ -616,6 +616,36 @@ caso('quadro do CD (layout antigo, sem a GERAL): le as abas APOIO e os admitidos
   afirmar(d.geral.every((g) => g.equipe === '1° TURNO' && g.nome && g.ativo), 'turno da aba antiga: ' + JSON.stringify(d.geral));
 });
 
+caso('quadro do CD: como o STATUS e a EQUIPE escritos na GERAL sao entendidos (EXPERIENCIA e ativo; EX-FUNCIONARIO esta fora)', () => {
+  const c = ctx(mundo());
+  const st = { 'ATIVO': 'ATIVO', '': 'ATIVO', 'Em treinamento': 'ATIVO', 'EXPERIÊNCIA': 'ATIVO', 'Contrato de experiência': 'ATIVO', 'Aviso prévio': 'ATIVO',
+    'INATIVO': 'FORA', 'Desligado': 'FORA', 'DEMITIDO': 'FORA', 'Demissão': 'FORA', 'Ex-funcionário': 'FORA', 'DESATIVADO': 'FORA', 'NÃO': 'FORA', 'Transferido': 'FORA',
+    'FÉRIAS': 'FERIAS', 'Em férias': 'FERIAS', 'AFASTADO': 'AFASTADO', 'Afastado INSS': 'AFASTADO', 'Licença maternidade': 'AFASTADO', 'Atestado': 'AFASTADO' };
+  Object.keys(st).forEach((v) => afirmar(c.situacaoQ_(v) === st[v], 'STATUS "' + v + '": ' + c.situacaoQ_(v) + ' (esperava ' + st[v] + ')'));
+  const eq = { '1° TURNO': '1° TURNO', '1º TURNO': '1° TURNO', '1º turno': '1° TURNO', 'TURNO 1': '1° TURNO', 'T1': '1° TURNO', 'TA': '1° TURNO', 'A': '1° TURNO',
+    'Turno A': '1° TURNO', 'PRIMEIRO TURNO': '1° TURNO', '2° TURNO': '2° TURNO', 'TB': '2° TURNO', '3 TURNO': '3° TURNO', 'TC': '3° TURNO',
+    'ADM': 'ADM', 'ADMINISTRATIVO': 'ADM', 'TURNO 4': '', '': '' };
+  Object.keys(eq).forEach((v) => afirmar(c.equipeQ_(v) === eq[v], 'EQUIPE "' + v + '": "' + c.equipeQ_(v) + '" (esperava "' + eq[v] + '")'));
+});
+
+caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'APOIO TA': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO'], ['1', 'ANA', 'TA', 'CONFERENTE'], ['2', 'BRUNO', 'TA', 'SEPARADOR']],
+    'APOIO TB': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO'], ['7', 'CARLA', 'TB', 'CONFERENTE'], ['2', 'DIEGO', 'TB', 'SEPARADOR']],
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'STATUS']],
+    'CDESLIGADOS': [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro && d.leitura.layout === 'APOIO', 'leu as abas APOIO: ' + JSON.stringify(d.leitura));
+  const refs = d.geral.map((g) => g.ref);
+  afirmar(d.geral.length === 4 && new Set(refs).size === 4 && refs.every(Boolean), 'uma chave por pessoa: ' + JSON.stringify(d.geral));
+  afirmar(d.geral.filter((g) => g.linha === 2).map((g) => g.aba).join() === 'APOIO TA,APOIO TB', 'a linha 2 existe nas duas abas');
+  const rep = d.inconsistencias.find((x) => x.tipo === 'COD_REPETIDO');
+  afirmar(rep && rep.refs.length === 2 && rep.linhas.join() === 'APOIO TA 3,APOIO TB 3' && /APOIO TA 3, APOIO TB 3/.test(rep.detalhe), 'repetido entre abas: ' + JSON.stringify(rep));
+});
+
 caso('quadro do CD: a aba GERAL faz a triagem dos turnos; titulo em cima, "1º"/"1°", PROD como nome; as abas APOIO ficam de lado', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const { abas, esperado: E } = require('./dados-quadro.js')(m.DataDoScript, new Date());

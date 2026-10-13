@@ -1157,293 +1157,817 @@ function lpFormImportar() {
 }
 
 /* =====================================================================
-   QUADRO DO CD — o BI de funcoes, igual, com o motivo do desligamento
+   QUADRO DO CD (13/10) — o quadro de cada turno, montado pelo GSL a partir
+   da aba GERAL da planilha de apoio (EQUIPE, COD, PROD, DESCRICAO, RH,
+   STATUS). Quatro abas:
+     Visao geral   o CD e os turnos em 10 segundos
+     Pessoas       o quadro de parede de cada turno (por funcao) e a lista A-Z
+     Movimentacao  quem entrou, quem saiu e por que (antes eram tres abas)
+     Conferencia   o que corrigir na planilha, com a linha
+   Cor = equipe em toda a tela (1° azul, 2° laranja, 3° verde-agua, ADM
+   amarelo, sem turno cinza), sempre com o nome escrito ao lado — nunca o
+   texto pintado. Vermelho e ambar so para problema, sempre com icone e
+   palavra. Uma linha de filtros (Equipe, Funcao) vale para tudo abaixo dela.
    ===================================================================== */
-let BQ = { aba: 'quadro', turno: '', funcao: '', busca: '', ordK: 'nome', ordA: 1, motivo: '', ordDes: 'data' };
+const qdEstadoInicial = (de) => ({ de: de || '', aba: 'geral', equipe: '*', funcao: '', iniciado: false,
+  busca: '', mostrar: 'empresa', organizar: 'funcao', ordK: 'nome', ordA: 1, limite: 100,
+  periodo: 180, motivo: '', mes: '', sentido: 'tudo', limiteMov: 30, recolhidas: {} });
+let QD = qdEstadoInicial();
+const QD_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
+const QD_COR = { '1° TURNO': 'var(--s1)', '2° TURNO': 'var(--s2)', '3° TURNO': 'var(--s3)', 'ADM': 'var(--s4)' };
+const qdCor = (e) => QD_COR[e] || 'var(--bq-ink-3)';
+const QD_LIDER = /LIDER|SUPERVISOR|COORDENADOR|ENCARREGAD|GERENTE|CHEFE/;
+const QD_SITUACAO = { ATIVO: 'Disponível', FERIAS: 'Férias', AFASTADO: 'Afastado', FORA: 'Fora da empresa' };
+const qdN = (n) => Number(n || 0).toLocaleString('pt-BR');
+const qdPct = (v) => (Math.round(v * 10) / 10).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+const qdPlural = (n, um, varios) => qdN(n) + ' ' + (n === 1 ? um : varios);
+function qdChaveCod(v) { return String(v == null ? '' : v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase(); }
+function qdChaveNome(v) {
+  return String(v == null ? '' : v).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/* Etiqueta de equipe: quadradinho na cor da equipe e o nome em tinta. */
+function qdEq(equipe, bruta) {
+  return `<span class="qd-eq${equipe ? '' : ' sem'}"><i style="background:${qdCor(equipe)}"></i>${equipe ? esc(equipe)
+    : (bruta ? `<em>${esc(bruta)}</em>` : 'Sem turno')}</span>`;
+}
+/* Selo de problema: icone + palavra (a cor nunca fala sozinha). */
+const qdSelo = (grav, texto) => `<span class="qd-selo ${grav}"><b aria-hidden="true">${grav === 'grave' ? '■' : '▲'}</b>${esc(texto)}</span>`;
+
+/* --- dados do servidor, com indices guardados por carga --- */
+let QD_MEMO = null;
+function qdMemo() {
+  if (QD_MEMO && QD_MEMO.dados === DADOS) return QD_MEMO;
+  const pend = {};
+  (DADOS.inconsistencias || []).forEach((x) => {
+    (x.refs && x.refs.length ? x.refs : [x.ref]).forEach((r) => { if (r) (pend[r] = pend[r] || []).push(x); });
+  });
+  const indice = (lista) => {
+    const ix = { cod: {}, rh: {}, nome: {} };
+    lista.forEach((r) => {
+      const c = qdChaveCod(r.cod), m = qdChaveCod(r.rh), n = qdChaveNome(r.nome);
+      if (c) (ix.cod[c] = ix.cod[c] || []).push(r);
+      if (m) (ix.rh[m] = ix.rh[m] || []).push(r);
+      if (n) (ix.nome[n] = ix.nome[n] || []).push(r);
+    });
+    return ix;
+  };
+  QD_MEMO = { dados: DADOS, pend, ixAdm: indice(DADOS.adm || []), ixDes: indice(DADOS.des || []), ixGeral: indice(DADOS.geral || []) };
+  return QD_MEMO;
+}
+function qdAchar(ix, r) {
+  const c = qdChaveCod(r.cod), m = qdChaveCod(r.rh), n = qdChaveNome(r.nome);
+  return (c && ix.cod[c]) || (m && ix.rh[m]) || (n && ix.nome[n]) || null;
+}
+const qdGeral = () => (DADOS && DADOS.geral) || [];
+const qdNaEmpresa = () => qdGeral().filter((g) => g.ativo);
+/* Recorte da linha de filtros. `sem` = 'funcao' ou 'equipe': ignora aquele filtro (contagem de faceta). */
+function qdRecorte(lista, sem) {
+  return lista.filter((g) => (sem === 'equipe' || QD.equipe === '*' || (g.equipe || '') === QD.equipe) &&
+    (sem === 'funcao' || !QD.funcao || g.funcao === QD.funcao));
+}
+const qdRotuloRecorte = () => [QD.equipe === '*' ? '' : (QD.equipe || 'Sem turno'), QD.funcao].filter(Boolean).join(' · ');
+/* Hoje, em aaaa-mm-dd (o fuso do navegador e o do CD). */
+const qdHoje = () => pnISO(new Date());
+
+/* ------------------------------------------------------------------ */
+/* A TELA                                                              */
+/* ------------------------------------------------------------------ */
 
 function pintarQuadro(r) {
   const d = r.dados;
   el('acoes-topo').innerHTML = '';
+  QD_MEMO = null;
   if (!d.configurado) {
-    el('subtitulo-pagina').textContent = 'Efetivo por função, turno e movimentação';
+    el('subtitulo-pagina').textContent = 'O quadro de cada turno, montado a partir da aba GERAL';
     el('pagina').innerHTML = `<div class="cartao pn-vazio-grande">
-      <strong>Falta ligar o Quadro à planilha de apoio desta filial.</strong>
-      É a mesma planilha do BI de funções: abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS e CDESLIGADOS.
+      <strong>Falta ligar o Quadro à planilha desta filial.</strong>
+      É a planilha com as abas <b>GERAL</b> (EQUIPE, COD, PROD, DESCRIÇÃO, RH, STATUS), <b>CADMITIDOS</b> e <b>CDESLIGADOS</b>.
       ${d.podeConfigurar ? `<div class="pn-linha" style="justify-content:center;margin-top:16px">
         <input id="bq-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..." style="max-width:460px">
         <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link')}).catch(()=>{})">Ligar planilha</button></div>`
         : '<br><br>Peça para quem configura o sistema ligar a planilha.'}</div>`;
     return;
   }
-  el('subtitulo-pagina').textContent = 'Planilhas de apoio TA · TB · TC — efetivo por função, turno e movimentação';
   el('acoes-topo').innerHTML = `
-    <span class="pn-mini" style="align-self:center">Efetivo em base <b class="pn-num" style="font-size:18px">${(d.apoio || []).length}</b></span>
     <button class="botao secundario" onclick="agir('atualizarQuadro',{}).catch(()=>{})">Atualizar dados</button>
+    ${d.fonte && d.fonte.url ? `<a class="icone-botao" href="${esc(d.fonte.url)}" target="_blank" rel="noopener">Abrir planilha ↗</a>` : ''}
     ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
   if (d.erro) { el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
-
-  el('pagina').innerHTML = `<div class="bi-quadro">
-    ${pnAbas([['quadro', 'Quadro atual'], ['mov', 'Movimentação'], ['admitidos', 'Admitidos'], ['desligados', 'Desligados e motivos']], BQ.aba, 'bqAba')}
-    <div id="bq-conteudo"></div>
-    <p class="bq-rodape">Fonte: ${d.fonte ? `<a href="${esc(d.fonte.url)}" target="_blank">${esc(d.fonte.nome)}</a>` : 'planilha de apoio'} —
-      abas APOIO TA, APOIO TB e APOIO TC · CADMITIDOS e CDESLIGADOS.
-      ${d.atualizado ? 'Dados lidos em ' + new Date(d.atualizado).toLocaleString('pt-BR') + '.' : ''}</p>
+  if (d.formato !== 2) {
+    // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.
+    el('subtitulo-pagina').textContent = 'Atualização incompleta';
+    el('pagina').innerHTML = `<div class="cartao pn-vazio-grande"><strong>O Quadro.gs desta implantação é da versão anterior.</strong>
+      Cole o Quadro.gs desta entrega no Apps Script e crie uma Nova versão da implantação.</div>`;
+    return;
+  }
+  // Computador compartilhado: outra pessoa entrou nesta aba — o recorte de quem saiu nao vale para ela.
+  const quem = (SESSAO && SESSAO.usuario && SESSAO.usuario.email) || '';
+  if (QD.de !== quem) QD = qdEstadoInicial(quem);
+  // Primeira abertura: o coordenador cai no turno dele (A = 1° TURNO, B = 2°, C = 3°).
+  if (!QD.iniciado) {
+    QD.iniciado = true;
+    const t = String((SESSAO && SESSAO.usuario && SESSAO.usuario.turno) || '').toUpperCase().trim();
+    const meu = { A: '1° TURNO', B: '2° TURNO', C: '3° TURNO' }[t];
+    if (meu && qdNaEmpresa().some((g) => g.equipe === meu)) QD.equipe = meu;
+  }
+  if (QD.equipe !== '*' && QD.equipe !== '' && QD_EQUIPES.indexOf(QD.equipe) === -1) QD.equipe = '*';
+  const lida = d.atualizado ? new Date(d.atualizado) : null;
+  el('subtitulo-pagina').textContent = (d.leitura && d.leitura.layout === 'APOIO'
+    ? 'Abas APOIO (a planilha ainda não tem a aba GERAL)' : 'Aba GERAL') +
+    (d.fonte ? ' de «' + d.fonte.nome + '»' : '') + ' · ' + qdPlural(qdNaEmpresa().length, 'pessoa na empresa', 'pessoas na empresa') +
+    (lida ? ' · lida às ' + lida.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '');
+  el('pagina').innerHTML = `<div class="bi-quadro qd">
+    <div id="qd-faixa"></div>
+    <div id="qd-abas"></div>
+    <div id="qd-filtros"></div>
+    <div id="qd-conteudo"></div>
+    <p class="bq-rodape">Fonte: ${d.fonte ? `<a href="${esc(d.fonte.url)}" target="_blank" rel="noopener">${esc(d.fonte.nome)}</a>` : 'planilha de apoio'} —
+      aba ${esc((d.leitura && d.leitura.aba) || 'GERAL')}, CADMITIDOS e CDESLIGADOS.
+      ${lida ? 'Lida em ' + lida.toLocaleString('pt-BR') + '. A leitura fica guardada por 5 minutos; "Atualizar dados" lê de novo.' : ''}</p>
   </div>`;
-  bqDesenhar();
+  qdDesenhar();
 }
 
-function bqAba(qual) {
-  BQ.aba = qual;
-  document.querySelectorAll('.bi-quadro .abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === qual));
-  bqDesenhar();
+function qdAba(qual) { QD.aba = qual; qdDesenhar(); try { window.scrollTo({ top: 0 }); } catch (e) {} }
+function qdEquipe(e) {
+  QD.equipe = (QD.equipe === e && e !== '*') ? '*' : e;
+  // a funcao escolhida sai se nao existir na equipe nova
+  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => g.funcao === QD.funcao)) QD.funcao = '';
+  QD.limite = 100; qdDesenhar();
+}
+function qdFuncao(f) { QD.funcao = (QD.funcao === f) ? '' : f; QD.limite = 100; qdDesenhar(); }
+function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = ''; QD.limite = 100; qdDesenhar(); }
+
+function qdDesenhar() {
+  const alvo = el('qd-conteudo'); if (!alvo) return;
+  el('qd-faixa').innerHTML = qdFaixa();
+  el('qd-abas').innerHTML = pnAbas([['geral', 'Visão geral'], ['pessoas', 'Pessoas'], ['mov', 'Movimentação'],
+    ['conf', 'Conferência ' + qdSeloAba()]], QD.aba, 'qdAba');
+  el('qd-filtros').innerHTML = qdFiltros();
+  try {
+    if (QD.aba === 'pessoas') alvo.innerHTML = qdPessoas();
+    else if (QD.aba === 'mov') alvo.innerHTML = qdMovimentacao();
+    else if (QD.aba === 'conf') alvo.innerHTML = qdConferencia();
+    else alvo.innerHTML = qdVisaoGeral();
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+/* Selo da aba Conferencia: ■ n (grave), ▲ n (so atencao) ou ✓. */
+function qdSeloAba() {
+  const inc = DADOS.inconsistencias || [];
+  const g = inc.filter((x) => x.gravidade === 'grave').length;
+  if (g) return `<span class="qd-contador grave" title="${g} grave(s)">■ ${g}</span>`;
+  if (inc.length) return `<span class="qd-contador atencao" title="${inc.length} ponto(s) de atenção">▲ ${inc.length}</span>`;
+  return '<span class="qd-contador ok" title="Planilha conferida">✓</span>';
+}
+
+/*
+ * FAIXA: so existe quando ha desligado que continua ATIVO na GERAL (o pedido
+ * da gerencia). Fica acima das abas e nunca e filtrada; some na Conferencia.
+ */
+function qdFaixa() {
+  const inc = DADOS.inconsistencias || [];
+  const graves = inc.filter((x) => x.gravidade === 'grave');
+  if (!graves.length || QD.aba === 'conf') return '';
+  const nomes = graves.slice(0, 2).map((x) => `<button class="qd-link" onclick="qdFicha(${Number(x.ref) || 0})">${esc(x.nome || 'Sem nome')}</button>
+    (${esc(x.equipe || 'sem turno')}${x.data ? ', desligado em ' + pnDataLonga(x.data) : ''})`).join(', ');
+  const outros = inc.length - graves.length;
+  return `<div class="qd-faixa" role="alert">
+    <span class="qd-faixa-ico" aria-hidden="true">■</span>
+    <div class="qd-faixa-txt"><b>${graves.length === 1 ? '1 desligado continua ATIVO na GERAL' : graves.length + ' desligados continuam ATIVOS na GERAL'}</b>
+      <span>Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro: ${nomes}${graves.length > 2 ? ' e mais ' + (graves.length - 2) : ''}.</span>
+      ${outros ? `<button class="qd-link" onclick="qdAba('conf')">+ ${qdPlural(outros, 'outro ponto', 'outros pontos')} na planilha</button>` : ''}</div>
+    <button class="botao secundario" onclick="qdAba('conf')">Ver e corrigir</button>
+  </div>`;
+}
+
+/* LINHA DE FILTROS: Equipe (com a contagem de cada uma) e Funcao. Some na Conferencia. */
+function qdFiltros() {
+  if (QD.aba === 'conf') return '';
+  const base = qdNaEmpresa();
+  const porFuncao = qdRecorte(base, 'equipe');           // conta das equipes respeita a funcao
+  const temSem = base.some((g) => !g.equipe);
+  const opcoes = [['*', 'Todas', 'Todas']].concat(QD_EQUIPES.map((e) => [e, e, e === 'ADM' ? 'ADM' : e.slice(0, 2)]))
+    .concat(temSem ? [['', 'Sem turno', 'Sem turno']] : []);
+  const conta = (e) => e === '*' ? porFuncao.length : porFuncao.filter((g) => (g.equipe || '') === e).length;
+  const funcoes = {};
+  qdRecorte(base, 'funcao').forEach((g) => { const f = g.funcao || 'SEM FUNÇÃO'; funcoes[f] = (funcoes[f] || 0) + 1; });
+  const lista = Object.keys(funcoes).sort((a, b) => a.localeCompare(b));
+  if (QD.funcao && !funcoes[QD.funcao]) lista.unshift(QD.funcao);
+  const ativo = QD.equipe !== '*' || QD.funcao || QD.motivo || QD.mes;
+  return `<div class="qd-filtros" role="group" aria-label="Filtros do quadro">
+    <div class="qd-seg" role="group" aria-label="Equipe">${opcoes.map(([e, longo, curto]) => `<button class="qd-pill" aria-pressed="${QD.equipe === e}"
+        onclick="qdEquipe(${jsArg(e)})" title="${esc(longo)}">${e !== '*' ? `<i style="background:${qdCor(e)}"></i>` : ''}<span class="qd-pill-longo">${esc(longo)}</span><span class="qd-pill-curto">${esc(curto)}</span>
+        <b class="qd-pill-n">${qdN(conta(e))}</b></button>`).join('')}</div>
+    <label class="qd-funcao"><span class="bq-rot">Função</span>
+      <select onchange="QD.funcao=this.value;QD.limite=100;qdDesenhar()"><option value="">Todas as funções</option>
+        ${lista.map((f) => `<option value="${esc(f)}" ${QD.funcao === f ? 'selected' : ''}>${esc(f)} (${funcoes[f] || 0})</option>`).join('')}</select></label>
+    ${ativo ? '<button class="bq-limpar" onclick="qdLimpar()">Limpar filtros</button>' : ''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* FICHA DA PESSOA                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Link para a linha da planilha (com o gid da aba GERAL); sem o gid, so a planilha. */
+function qdLinkLinha(linha) {
+  const f = DADOS.fonte, l = DADOS.leitura || {};
+  if (!f || !f.url) return '';
+  const base = String(f.url).replace(/#.*$/, '');
+  return (l.gid !== null && l.gid !== undefined && linha) ? base + '#gid=' + l.gid + '&range=A' + linha : base;
+}
+
+function qdFicha(ref) {
+  const g = qdGeral().find((x) => x.ref === ref);
+  if (!g) return;
+  const linha = g.linha;
+  const memo = qdMemo();
+  const adm = qdAchar(memo.ixAdm, g) || [], des = qdAchar(memo.ixDes, g) || [];
+  const pend = memo.pend[ref] || [];
+  const ini = (g.nome || '?').split(' ').filter(Boolean);
+  const link = g.aba ? '' : qdLinkLinha(linha);            // no layout APOIO o gid nao e o da aba da pessoa
+  abrirJanela('', `<div class="qd-ficha">
+    <div class="qd-ficha-topo"><div class="qd-avatar" aria-hidden="true">${esc(((ini[0] || '?')[0] || '?') + (ini.length > 1 ? ini[ini.length - 1][0] : ''))}</div>
+      <div><h3>${g.nome ? esc(g.nome) : '<em>Sem nome na GERAL</em>'}</h3>
+        <div class="qd-ficha-chips">${qdEq(g.equipe, g.equipeBruta)}<span class="qd-tag">${esc(g.funcao || 'Sem função')}</span></div></div></div>
+    <dl class="qd-ficha-dados">
+      <div><dt>Produtivo (COD)</dt><dd class="bq-num">${esc(g.cod || '—')}</dd></div>
+      <div><dt>Matrícula (RH)</dt><dd class="bq-num">${esc(g.rh || '—')}</dd></div>
+      <div><dt>STATUS na planilha</dt><dd>${esc(g.status || '(vazio)')}</dd></div>
+      <div><dt>Como o GSL entendeu</dt><dd>${g.ativo ? 'Na empresa' + (g.situacao === 'ATIVO' ? ', disponível' : ' — ' + QD_SITUACAO[g.situacao].toLowerCase()) : 'Fora da empresa (não conta no quadro)'}</dd></div>
+      <div><dt>Linha da ${esc(g.aba || 'GERAL')}</dt><dd class="bq-num">${linha}</dd></div>
+    </dl>
+    ${adm.length || des.length ? `<h4>Movimentação</h4><ul class="qd-ficha-lista">
+      ${adm.map((a) => `<li>↑ Admitido(a)${a.data ? ' em ' + pnDataLonga(a.data) : ' (sem data na planilha)'}${a.status ? ' · ' + esc(a.status) : ''}</li>`).join('')}
+      ${des.map((x) => `<li>↓ Desligado(a) em ${pnDataLonga(x.data)} · ${esc(x.tipo)}${x.motivo ? ' · ' + esc(x.motivo) : ''}</li>`).join('')}</ul>` : ''}
+    ${pend.length ? `<h4>Para corrigir</h4><ul class="qd-ficha-lista">${pend.map((x) => `<li>${qdSelo(x.gravidade, QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo)} ${esc(x.detalhe)}</li>`).join('')}</ul>` : ''}
+  </div>`, `${link ? `<a class="botao secundario" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha (linha ${linha}) ↗</a>` : ''}
+    <button class="botao" onclick="fecharJanela()">Fechar</button>`);
+}
+
+/* ------------------------------------------------------------------ */
+/* CONFERENCIA                                                         */
+/* ------------------------------------------------------------------ */
+
+const QD_TIPOS = {
+  DESLIGADO_ATIVO: { titulo: 'Desligados que continuam ativos', curto: 'desligado ainda ativo',
+    oque: 'Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro.',
+    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se a pessoa foi recontratada, tire-a da CDESLIGADOS.' },
+  SEM_NOME: { titulo: 'Linhas sem nome', curto: 'sem nome',
+    oque: 'A coluna PROD está vazia: a pessoa conta no quadro, mas aparece como "Sem nome".', corrigir: 'Preencha o PROD.' },
+  EQUIPE: { titulo: 'EQUIPE fora do padrão', curto: 'equipe fora do padrão',
+    oque: 'O GSL não sabe em que turno pôr a pessoa: ela conta no CD, mas em nenhum turno.',
+    corrigir: 'Use exatamente 1° TURNO, 2° TURNO, 3° TURNO ou ADM.' },
+  COD_REPETIDO: { titulo: 'Produtivo (COD) repetido', curto: 'COD repetido',
+    oque: 'O mesmo produtivo em mais de uma linha de quem está na empresa.', corrigir: 'Confira o COD de cada linha (ou apague a linha duplicada).' },
+  RH_REPETIDO: { titulo: 'Matrícula (RH) repetida', curto: 'RH repetido',
+    oque: 'A mesma matrícula em mais de uma linha de quem está na empresa.', corrigir: 'Confira o RH de cada linha (ou apague a linha duplicada).' },
+  ADMITIDO_FORA: { titulo: 'Admitidos que não estão na GERAL', curto: 'fora da GERAL',
+    oque: 'Estão na aba CADMITIDOS, mas não aparecem na GERAL (nem nos desligados).', corrigir: 'Inclua a pessoa na GERAL, com EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS.' }
+};
+const QD_ORDEM_TIPOS = ['DESLIGADO_ATIVO', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA'];
+
+function qdConferencia() {
+  const inc = DADOS.inconsistencias || [];
+  const graves = inc.filter((x) => x.gravidade === 'grave').length;
+  const grupos = QD_ORDEM_TIPOS.map((t) => [t, inc.filter((x) => x.tipo === t)]).filter((g) => g[1].length);
+  const outros = inc.filter((x) => QD_ORDEM_TIPOS.indexOf(x.tipo) === -1);
+  if (outros.length) grupos.push(['OUTROS', outros]);
+  const cabeca = inc.length
+    ? `<div class="qd-conf-resumo"><h2>${qdPlural(inc.length, 'ponto para corrigir na planilha', 'pontos para corrigir na planilha')}</h2>
+        ${graves ? qdSelo('grave', qdPlural(graves, 'grave', 'graves')) : ''}${inc.length - graves ? qdSelo('atencao', qdPlural(inc.length - graves, 'de atenção', 'de atenção')) : ''}</div>`
+    : `<div class="qd-conf-resumo ok"><span class="qd-ok" aria-hidden="true">●</span><h2>Planilha conferida — nenhuma inconsistência</h2></div>`;
+  return cabeca + grupos.map(([tipo, itens]) => {
+    const t = QD_TIPOS[tipo] || { titulo: 'Outros', oque: '', corrigir: '' };
+    const grav = itens[0].gravidade;
+    const aberto = QD.recolhidas['conf' + tipo] !== true;
+    const mostra = (itens.length > 8 && !QD.recolhidas['tudo' + tipo]) ? itens.slice(0, 8) : itens;
+    return `<section class="bq-card qd-grupo ${grav}">
+      <header class="qd-grupo-cab">${qdSelo(grav, grav === 'grave' ? 'grave' : 'atenção')}<h3>${esc(t.titulo)} <span class="bq-num">${itens.length}</span></h3></header>
+      <p class="bq-sub">${esc(t.oque)} <b>Como corrigir:</b> ${esc(t.corrigir)}</p>
+      ${aberto ? `<ul class="qd-itens">${mostra.map((x) => {
+        const link = x.linha && !x.aba ? qdLinkLinha(x.linha) : '';
+        return `<li class="qd-item">
+          <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(x.nome) : '<em>Sem nome</em>'}</button>`
+            : `<span class="qd-item-nome">${x.nome ? esc(x.nome) : '<em>Sem nome</em>'}</span>`}
+            <span class="qd-item-ids bq-num">${x.cod ? 'COD ' + esc(x.cod) : ''}${x.cod && x.rh ? ' · ' : ''}${x.rh ? 'RH ' + esc(x.rh) : ''}</span>
+            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}</div>
+          <div class="qd-item-det">${esc(x.detalhe)}</div>
+          <div class="qd-item-acoes">${x.linhas && x.linhas.length > 1 ? `<span class="bq-num">linhas ${esc(x.linhas.join(', '))}</span>` : (x.linha ? `<span class="bq-num">linha ${x.linha}${x.aba ? ' · ' + esc(x.aba) : ''}</span>` : '')}
+            ${link ? `<a class="icone-botao" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha ↗</a>` : ''}</div>
+        </li>`; }).join('')}</ul>
+        ${itens.length > mostra.length ? `<button class="qd-link" onclick="QD.recolhidas['tudo${tipo}']=true;qdDesenhar()">Ver todos (${itens.length})</button>` : ''}` : ''}
+    </section>`;
+  }).join('') + qdLeitura();
+}
+
+/* Como o GSL leu a planilha: colunas achadas e como cada STATUS e EQUIPE foi entendido. */
+function qdLeitura() {
+  const l = DADOS.leitura || {};
+  const colunas = [['equipe', 'EQUIPE'], ['cod', 'COD'], ['nome', 'PROD'], ['funcao', 'DESCRIÇÃO'], ['rh', 'RH'], ['status', 'STATUS']];
+  const faltam = l.faltam || [];
+  const st = l.status || {}, eq = l.equipes || {};
+  const linhasSt = Object.keys(st).sort((a, b) => (st[b].n || 0) - (st[a].n || 0));
+  const linhasEq = Object.keys(eq).sort((a, b) => (eq[b].n || 0) - (eq[a].n || 0));
+  const comoSt = (s) => s === 'FORA' ? 'fora da empresa (não conta)' : (s === 'ATIVO' ? 'na empresa, disponível' : 'na empresa, ' + (QD_SITUACAO[s] || s).toLowerCase());
+  return `<details class="bq-card qd-leitura"${faltam.indexOf('nome') !== -1 ? ' open' : ''}>
+    <summary><h3>Como o GSL leu a planilha</h3><span class="bq-sub">${esc(l.aba || 'GERAL')} · ${qdPlural(l.linhas || 0, 'linha com dados', 'linhas com dados')}${l.linhaCabecalho ? ' · cabeçalho na linha ' + l.linhaCabecalho : ''}</span></summary>
+    <div class="qd-leitura-cols">${colunas.map(([k, rot]) => faltam.indexOf(k) === -1
+      ? `<span class="qd-col ok">✓ ${esc(rot)}${l.colunas && l.colunas[k] && l.colunas[k] !== rot && !(k === 'funcao' && l.colunas[k] === 'DESCRICAO') ? ' <small>(' + esc(l.colunas[k]) + ')</small>' : ''}</span>`
+      : `<span class="qd-col falta">${qdSelo(k === 'nome' ? 'grave' : 'atencao', rot + ' não encontrada')}</span>`).join('')}</div>
+    ${faltam.indexOf('nome') !== -1 ? '<p class="qd-aviso-nome">Sem a coluna PROD os nomes aparecem como "Sem nome". Confira se o cabeçalho da GERAL tem exatamente PROD.</p>' : ''}
+    <div class="qd-leitura-tabs">
+      <div><h4>Valores de STATUS</h4><table><thead><tr><th>Como está escrito</th><th class="n">Linhas</th><th>O GSL entende</th></tr></thead>
+        <tbody>${linhasSt.map((k) => `<tr><td>${esc(k)}</td><td class="n">${qdN(st[k].n)}</td><td>${esc(comoSt(st[k].situacao))}</td></tr>`).join('')}</tbody></table></div>
+      <div><h4>Valores de EQUIPE</h4><table><thead><tr><th>Como está escrito</th><th class="n">Linhas</th><th>Turno</th></tr></thead>
+        <tbody>${linhasEq.map((k) => `<tr><td>${esc(k)}</td><td class="n">${qdN(eq[k].n)}</td><td>${eq[k].equipe ? qdEq(eq[k].equipe) : qdSelo('atencao', 'não reconhecido')}</td></tr>`).join('')}</tbody></table></div>
+    </div>
+    <p class="bq-sub">${l.layout === 'APOIO' ? 'A planilha ainda não tem a aba GERAL: o GSL leu as abas APOIO TA, APOIO TB e APOIO TC.'
+      : 'As abas APOIO TA, APOIO TB e APOIO TC não são mais lidas.'}</p>
+  </details>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* PESSOAS — o quadro de parede de cada turno                          */
+/* ------------------------------------------------------------------ */
+
+const QD_MOSTRAR = [['empresa', 'Na empresa'], ['disponiveis', 'Disponíveis'], ['ferias', 'Férias'], ['afastados', 'Afastados'],
+  ['pendencia', 'Com pendência'], ['fora', 'Fora da empresa']];
+function qdMostrar(lista, qual) {
+  const pend = qdMemo().pend;
+  if (qual === 'fora') return lista.filter((g) => !g.ativo);
+  const na = lista.filter((g) => g.ativo);
+  if (qual === 'disponiveis') return na.filter((g) => g.situacao === 'ATIVO');
+  if (qual === 'ferias') return na.filter((g) => g.situacao === 'FERIAS');
+  if (qual === 'afastados') return na.filter((g) => g.situacao === 'AFASTADO');
+  if (qual === 'pendencia') return lista.filter((g) => pend[g.ref]);
+  return na;
+}
+function qdBuscar(lista) {
+  const b = qdChaveNome(QD.busca), bc = qdChaveCod(QD.busca);
+  if (!b && !bc) return lista;
+  return lista.filter((g) => (b && qdChaveNome(g.nome).indexOf(b) !== -1) ||
+    (bc && (qdChaveCod(g.cod).indexOf(bc) === 0 || qdChaveCod(g.rh).indexOf(bc) === 0)));
+}
+/* Etiquetas da pessoa: situacao, novo (na CADMITIDOS) e pendencias. Sempre com palavra. */
+function qdEtiquetas(g) {
+  const memo = qdMemo(), t = [];
+  if (!g.ativo) t.push('<span class="qd-tag">Fora da empresa</span>');
+  else if (g.situacao === 'FERIAS') t.push('<span class="qd-tag">Férias</span>');
+  else if (g.situacao === 'AFASTADO') t.push('<span class="qd-tag">Afastado</span>');
+  const adm = qdAchar(memo.ixAdm, g);
+  if (adm && g.ativo) t.push(`<span class="qd-tag novo" title="Na aba de admitidos${adm[0].data ? ' (' + pnDataLonga(adm[0].data) + ')' : ''}">Novo</span>`);
+  (memo.pend[g.ref] || []).forEach((x) => t.push(qdSelo(x.gravidade, x.tipo === 'DESLIGADO_ATIVO' && x.data
+    ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
+  return t.join('');
+}
+function qdPessoaNome(g) { return g.nome ? esc(g.nome) : '<em class="qd-semnome">Sem nome</em>'; }
+
+function qdPessoas() {
+  const recorte = qdRecorte(qdGeral());
+  const lista = qdBuscar(qdMostrar(recorte, QD.mostrar));
+  const contaMostrar = (q) => qdMostrar(recorte, q).length;
+  const controles = `<div class="qd-sub-filtros">
+    <label class="qd-busca"><span class="bq-rot">Buscar nome, COD ou RH</span>
+      <input type="search" id="qd-busca" value="${esc(QD.busca)}" placeholder="Ex.: Maria, 30063 ou 100063" autocomplete="off"
+        oninput="QD.busca=this.value;QD.limite=100;clearTimeout(QD.tBusca);QD.tBusca=setTimeout(qdRedesenharLista,200)"></label>
+    <div class="qd-chips" role="group" aria-label="Mostrar">${QD_MOSTRAR.filter(([q]) => q === 'empresa' || contaMostrar(q)).map(([q, rot]) =>
+      `<button class="qd-chip" aria-pressed="${QD.mostrar === q}" onclick="QD.mostrar=${jsArg(q)};QD.limite=100;qdDesenhar()">${esc(rot)} <b class="bq-num">${qdN(contaMostrar(q))}</b></button>`).join('')}</div>
+    <div class="qd-seg pequeno" role="group" aria-label="Organizar">
+      <button class="qd-pill" aria-pressed="${QD.organizar === 'funcao'}" onclick="QD.organizar='funcao';qdDesenhar()">Por função</button>
+      <button class="qd-pill" aria-pressed="${QD.organizar === 'az'}" onclick="QD.organizar='az';qdDesenhar()">A–Z</button></div>
+    <div class="qd-exportar"><button class="icone-botao" onclick="qdExportarExcel()">Exportar Excel</button>
+      <button class="icone-botao" onclick="qdImprimirQuadro()">Imprimir quadro</button></div>
+  </div>`;
+  return controles + `<div id="qd-lista">${qdListaPessoas(lista)}</div>`;
+}
+/* A busca redesenha so a lista (o cursor fica no campo). */
+function qdRedesenharLista() {
+  const alvo = el('qd-lista'); if (!alvo) return;
+  alvo.innerHTML = qdListaPessoas(qdBuscar(qdMostrar(qdRecorte(qdGeral()), QD.mostrar)));
+}
+
+function qdListaPessoas(lista) {
+  if (!lista.length) return `<div class="bq-card"><p class="bq-vazio">${QD.busca ? 'Ninguém com "' + esc(QD.busca) + '" neste recorte.' : 'Ninguém neste recorte.'}</p></div>`;
+  if (QD.organizar === 'az') return qdListaAZ(lista);
+  // Por funcao: uma secao por equipe (ordem fixa) e, dentro, blocos por funcao (maior primeiro).
+  const equipes = QD_EQUIPES.concat(['']).filter((e) => lista.some((g) => (g.equipe || '') === e));
+  return equipes.map((e) => {
+    const deles = lista.filter((g) => (g.equipe || '') === e);
+    const disp = deles.filter((g) => g.ativo && g.situacao === 'ATIVO').length;
+    const porF = {};
+    deles.forEach((g) => { const f = g.funcao || 'SEM FUNÇÃO'; (porF[f] = porF[f] || []).push(g); });
+    const funcoes = Object.keys(porF).sort((a, b) => porF[b].length - porF[a].length || a.localeCompare(b));
+    const chave = 'eq' + (e || 'sem');
+    const fechado = QD.recolhidas[chave] === true;
+    return `<section class="bq-card qd-turno">
+      <header class="qd-turno-cab"><div>${qdEq(e)}<span class="qd-turno-n"><b class="bq-num">${qdN(deles.length)}</b> ${deles.length === 1 ? 'pessoa' : 'pessoas'}${QD.mostrar === 'empresa' ? ' · ' + qdN(disp) + ' disponíve' + (disp === 1 ? 'l' : 'is') : ''}</span></div>
+        <button class="qd-link" aria-expanded="${!fechado}" onclick="QD.recolhidas[${jsArg(chave)}]=${!fechado};qdRedesenharLista()">${fechado ? 'Abrir' : 'Recolher'}</button></header>
+      ${fechado ? '' : `<div class="qd-blocos">${funcoes.map((f) => {
+        const ps = porF[f].slice().sort((a, b) => (a.nome || '￿').localeCompare(b.nome || '￿'));
+        const fora = ps.filter((g) => g.ativo && g.situacao !== 'ATIVO').length;
+        return `<div class="qd-bloco"><h4>${esc(f)} <span class="bq-num">${ps.length}</span>${fora ? `<small>${fora} fora do posto</small>` : ''}</h4>
+          <ul>${ps.map((g) => `<li><button class="qd-pessoa" onclick="qdFicha(${g.ref})"><span class="qd-pessoa-nome">${qdPessoaNome(g)}</span>
+            <span class="qd-pessoa-cod bq-num">${esc(g.cod || '')}</span></button><span class="qd-pessoa-tags">${qdEtiquetas(g)}</span></li>`).join('')}</ul></div>`;
+      }).join('')}</div>`}
+    </section>`;
+  }).join('');
+}
+
+function qdOrdem(k) { QD.ordA = (QD.ordK === k) ? -QD.ordA : 1; QD.ordK = k; qdRedesenharLista(); }
+function qdListaAZ(lista) {
+  const k = QD.ordK, a = QD.ordA;
+  const num = (v) => Number(qdChaveCod(v)) || 0;
+  const ord = lista.slice().sort((x, y) => (k === 'cod' || k === 'rh') ? (num(x[k]) - num(y[k])) * a
+    : String(x[k] || '￿').localeCompare(String(y[k] || '￿')) * a);
+  const mostra = ord.slice(0, QD.limite);
+  const seta = (c) => QD.ordK === c ? (QD.ordA > 0 ? ' ▲' : ' ▼') : '';
+  return `<div class="bq-card"><div class="bq-rolagem"><table class="qd-tabela">
+    <thead><tr><th onclick="qdOrdem('nome')">Nome${seta('nome')}</th><th onclick="qdOrdem('equipe')">Equipe${seta('equipe')}</th>
+      <th onclick="qdOrdem('funcao')">Função${seta('funcao')}</th><th class="n" onclick="qdOrdem('cod')">COD${seta('cod')}</th>
+      <th class="n" onclick="qdOrdem('rh')">RH${seta('rh')}</th><th onclick="qdOrdem('status')">STATUS${seta('status')}</th></tr></thead>
+    <tbody>${mostra.map((g) => `<tr onclick="qdFicha(${g.ref})" tabindex="0" onkeydown="if(event.key==='Enter')qdFicha(${g.ref})">
+      <td><span class="qd-pessoa-nome">${qdPessoaNome(g)}</span> <span class="qd-pessoa-tags">${qdEtiquetas(g)}</span></td>
+      <td>${qdEq(g.equipe, g.equipeBruta)}</td><td>${esc(g.funcao || '—')}</td>
+      <td class="n">${esc(g.cod || '—')}</td><td class="n">${esc(g.rh || '—')}</td><td>${esc(g.status || '—')}</td></tr>`).join('')}</tbody>
+  </table></div>
+  ${ord.length > mostra.length ? `<button class="qd-mais" onclick="QD.limite+=200;qdRedesenharLista()">Mostrar mais (${qdN(ord.length - mostra.length)})</button>` : ''}</div>`;
+}
+
+/* Excel: a GERAL organizada e filtrada (o que esta na tela), mais as pendencias. */
+function qdExportarExcel() {
+  const lista = qdBuscar(qdMostrar(qdRecorte(qdGeral()), QD.mostrar));
+  const pend = qdMemo().pend;
+  const linhas = [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS', 'SITUAÇÃO', 'LINHA', 'PENDÊNCIA']].concat(lista
+    .slice().sort((a, b) => QD_EQUIPES.concat(['']).indexOf(a.equipe || '') - QD_EQUIPES.concat(['']).indexOf(b.equipe || '') ||
+      String(a.funcao).localeCompare(String(b.funcao)) || String(a.nome).localeCompare(String(b.nome)))
+    .map((g) => [g.equipe || g.equipeBruta || '', g.cod, g.nome, g.funcao, g.rh, g.status, g.ativo ? QD_SITUACAO[g.situacao] : 'Fora da empresa',
+      g.aba ? g.aba + ' ' + g.linha : g.linha, (pend[g.ref] || []).map((x) => x.detalhe).join(' | ')]));
+  const inc = (DADOS.inconsistencias || []).map((x) => [x.gravidade === 'grave' ? 'GRAVE' : 'ATENÇÃO', (QD_TIPOS[x.tipo] || {}).titulo || x.tipo,
+    x.nome, x.cod, x.rh, x.equipe, x.linhas ? x.linhas.join(', ') : (x.linha || ''), x.detalhe]);
+  const abas = [{ nome: 'Quadro', linhas }];
+  if (inc.length) abas.push({ nome: 'Conferência', linhas: [['GRAVIDADE', 'TIPO', 'NOME', 'COD', 'RH', 'EQUIPE', 'LINHA', 'DETALHE']].concat(inc) });
+  const sufixo = qdRotuloRecorte().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  pnBaixarXlsx('quadro-cd-' + qdHoje() + (sufixo ? '-' + sufixo : '') + '.xlsx', abas);
+}
+
+/* Imprimir: o quadro de parede, por turno e funcao (A4 deitado, colunas). */
+function qdImprimirQuadro() {
+  const lista = qdBuscar(qdMostrar(qdRecorte(qdGeral()), QD.mostrar));
+  const equipes = QD_EQUIPES.concat(['']).filter((e) => lista.some((g) => (g.equipe || '') === e));
+  const corpo = equipes.map((e) => {
+    const deles = lista.filter((g) => (g.equipe || '') === e);
+    const porF = {};
+    deles.forEach((g) => { const f = g.funcao || 'SEM FUNÇÃO'; (porF[f] = porF[f] || []).push(g); });
+    const fs = Object.keys(porF).sort((a, b) => porF[b].length - porF[a].length || a.localeCompare(b));
+    return `<h2>${esc(e || 'Sem turno')} — ${deles.length} ${deles.length === 1 ? 'pessoa' : 'pessoas'}</h2><div class="cols">${fs.map((f) =>
+      `<div class="bloco"><b>${esc(f)} (${porF[f].length})</b><ol>${porF[f].slice().sort((a, b) => String(a.nome).localeCompare(String(b.nome)))
+        .map((g) => `<li>${esc(g.nome || 'Sem nome')} <span>${esc(g.cod || '')}${g.ativo && g.situacao !== 'ATIVO' ? ' · ' + esc(QD_SITUACAO[g.situacao]) : ''}</span></li>`).join('')}</ol></div>`).join('')}</div>`;
+  }).join('');
+  pnImprimirRelatorio('Quadro do CD', (qdRotuloRecorte() || 'CD inteiro') + ' · ' + lista.length + ' pessoas · ' + pnDataLonga(qdHoje()), corpo,
+    `.cols { column-count: 3; column-gap: 18px; } .bloco { break-inside: avoid; margin: 0 0 10px; }
+     .bloco b { font-size: 11px; color: #111785; } .bloco ol { margin: 4px 0 0; padding-left: 18px; }
+     .bloco li { font-size: 10.5px; padding: 1px 0; } .bloco li span { color: #777; font-size: 9.5px; }`);
+}
+
+/* ------------------------------------------------------------------ */
+/* MOVIMENTACAO — quem entrou, quem saiu e por que                     */
+/* ------------------------------------------------------------------ */
+
+const QD_PERIODOS = [[30, '30 dias'], [90, '90 dias'], [180, '6 meses'], [365, '12 meses'], [0, 'Tudo']];
+/* Janela do periodo [ini, fim] em aaaa-mm-dd, e a anterior do mesmo tamanho. */
+function qdJanela(dias, deslocar) {
+  const hoje = qdHoje();
+  if (!dias) return { ini: '0000-00-00', fim: '9999-99-99' };
+  const fim = pnSomarDias(hoje, -(deslocar ? dias : 0));
+  return { ini: pnSomarDias(fim, -dias + 1), fim };
+}
+const qdDentro = (iso, j) => !!iso && iso >= j.ini && iso <= j.fim;
+/* Admitidos e desligados no recorte de Equipe e Funcao (a equipe ja vem no padrao novo). */
+const qdMovRecorte = (lista) => qdRecorte(lista);
+
+function qdMovimentacao() {
+  const adm = qdMovRecorte(DADOS.adm || []), des = qdMovRecorte(DADOS.des || []);
+  const p = QD.periodo, j = qdJanela(p), jAnt = qdJanela(p, true);
+  const saidas = des.filter((d) => qdDentro(d.data, j)), saidasAnt = p ? des.filter((d) => qdDentro(d.data, jAnt)).length : null;
+  const entradas = adm.filter((a) => qdDentro(a.data, j)), semData = adm.filter((a) => !a.data);
+  const efetivo = qdRecorte(qdNaEmpresa()).length;
+  const meses = p ? Math.max(1, Math.round(p / 30.4)) : Math.max(1, qdMesesEntre(des.map((d) => d.mes).concat(adm.map((a) => a.mes)).filter(Boolean)));
+  const turnover = efetivo ? saidas.length / efetivo / meses * 100 : 0;
+  const delta = saidasAnt === null ? '' : (saidas.length > saidasAnt ? `<span class="qd-delta pior">▲ ${saidas.length - saidasAnt} a mais que no período anterior</span>`
+    : (saidas.length < saidasAnt ? `<span class="qd-delta melhor">▼ ${saidasAnt - saidas.length} a menos que no período anterior</span>` : '<span class="qd-delta">= igual ao período anterior</span>'));
+  const tipos = {};
+  saidas.forEach((d) => { const t = qdChaveNome(d.tipo); const k = /^INVOL/.test(t) ? 'inv' : (/^VOL|PEDID/.test(t) ? 'vol' : 'sem'); tipos[k] = (tipos[k] || 0) + 1; });
+  const sub = [tipos.vol ? qdPlural(tipos.vol, 'voluntária', 'voluntárias') + ' (pediram para sair)' : '', tipos.inv ? qdPlural(tipos.inv, 'involuntária', 'involuntárias') + ' (decisão da empresa)' : '',
+    tipos.sem ? tipos.sem + ' sem tipo' : ''].filter(Boolean).join(' · ');
+
+  const cabeca = `<div class="qd-sub-filtros"><div class="qd-seg pequeno" role="group" aria-label="Período">${QD_PERIODOS.map(([d, rot]) =>
+      `<button class="qd-pill" aria-pressed="${QD.periodo === d}" onclick="QD.periodo=${d};QD.mes='';qdDesenhar()">${rot}</button>`).join('')}</div>
+    ${QD.motivo ? `<button class="qd-chip" aria-pressed="true" onclick="QD.motivo='';qdDesenhar()">Motivo: ${esc(QD.motivo)} ✕</button>` : ''}
+    ${QD.mes ? `<button class="qd-chip" aria-pressed="true" onclick="QD.mes='';qdDesenhar()">Mês: ${pnRotuloMes(QD.mes)} ✕</button>` : ''}</div>`;
+  const kpis = `<div class="qd-kpis">
+    <div class="qd-kpi"><span class="bq-rot">Saídas</span><b>${qdN(saidas.length)}</b>${delta}<small>${sub || 'nenhuma no período'}</small></div>
+    <div class="qd-kpi"><span class="bq-rot">Entradas</span><b>${qdN(entradas.length)}</b><small>${semData.length ? qdPlural(semData.length, 'admitido sem data', 'admitidos sem data') + ' na planilha (fora desta conta)' : 'admitidos com data no período'}</small></div>
+    <div class="qd-kpi"><span class="bq-rot">Saldo</span><b>${(entradas.length - saidas.length > 0 ? '+' : '') + qdN(entradas.length - saidas.length)}</b><small>entradas menos saídas${semData.length ? ', sem os admitidos sem data' : ''}</small></div>
+    <div class="qd-kpi"><span class="bq-rot">Turnover de saída</span><b>${qdPct(turnover)}<span class="qd-kpi-un"> ao mês</span></b><small>saídas ÷ ${qdN(efetivo)} na empresa hoje ÷ ${meses} ${meses === 1 ? 'mês' : 'meses'}</small></div>
+  </div>`;
+  return cabeca + kpis + `<div class="qd-grade2">
+      <div class="bq-card"><h2>Entradas e saídas por mês</h2>
+        <p class="bq-sub">Entradas para cima, saídas para baixo — a mesma escala.${semData.length ? ' ' + qdPlural(semData.length, 'admitido sem data não entra', 'admitidos sem data não entram') + ' no gráfico (estão na lista abaixo).' : ''} Toque num mês para filtrar a lista.</p>
+        ${qdEspelho(adm, des)}</div>
+      <div class="bq-card"><h2>Por que saem</h2><p class="bq-sub">${saidas.length ? 'Motivo de cada saída no período (coluna MOTIVO da CDESLIGADOS). Toque num motivo para filtrar a lista.' : 'Nenhuma saída no período.'}</p>
+        ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS ainda não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome e preencha o motivo de cada desligamento.</div>'}
+        ${qdBarrasMotivo(saidas)}</div>
+    </div>
+    <div class="bq-card qd-onde"><h2>Onde saem</h2><p class="bq-sub">Saídas no período por turno (e o peso no turno de hoje) e as funções que mais perdem gente.</p>
+      ${qdOndeSaem(saidas)}</div>
+    ${qdListaMov(adm, des, j)}`;
+}
+function qdMesesEntre(meses) {
+  if (!meses.length) return 1;
+  const s = meses.slice().sort(), a = s[0].split('-'), b = s[s.length - 1].split('-');
+  return (Number(b[0]) - Number(a[0])) * 12 + Number(b[1]) - Number(a[1]) + 1;
+}
+/* Os ultimos N meses do calendario ate o atual (aaaa-mm). */
+function qdUltimosMeses(n) {
+  const d = new Date(); d.setDate(1);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0')); }
+  return out;
+}
+/* Colunas espelhadas: um eixo so (pessoas), entradas acima e saidas abaixo da base. */
+function qdEspelho(adm, des) {
+  const n = QD.periodo && QD.periodo <= 180 ? 6 : 12;
+  const meses = QD.periodo === 0 ? (function () {
+    const todos = des.map((d) => d.mes).concat(adm.map((a) => a.mes)).filter(Boolean).sort();
+    return todos.length ? qdUltimosMeses(Math.min(24, qdMesesEntre(todos))) : qdUltimosMeses(6);
+  })() : qdUltimosMeses(n);
+  const j = qdJanela(QD.periodo);
+  const e = {}, s = {};
+  adm.forEach((a) => { if (a.mes) e[a.mes] = (e[a.mes] || 0) + 1; });
+  des.forEach((d) => { if (d.mes) s[d.mes] = (s[d.mes] || 0) + 1; });
+  const max = Math.max(1, ...meses.map((m) => Math.max(e[m] || 0, s[m] || 0)));
+  const cor = QD.equipe !== '*' ? qdCor(QD.equipe) : 'var(--bq-ink-2)';
+  const mesAtual = qdUltimosMeses(1)[0];
+  return `<div class="qd-espelho" style="--qd-cor:${cor}">${meses.map((m) => {
+    const fimMes = m + '-31', iniMes = m + '-01';
+    const noPeriodo = QD.periodo === 0 || (fimMes >= j.ini && iniMes <= j.fim);
+    const ve = e[m] || 0, vs = s[m] || 0;
+    const dica = pnRotuloMes(m) + (m === mesAtual ? ' (até hoje)' : '') + ' — ' + qdPlural(ve, 'entrada', 'entradas') + ' · ' + qdPlural(vs, 'saída', 'saídas');
+    return `<button class="qd-esp-mes${noPeriodo ? '' : ' fora'}${QD.mes === m ? ' escolhido' : ''}" title="${esc(dica)}" aria-label="${esc(dica)}"
+        onclick="QD.mes=(QD.mes===${jsArg(m)}?'':${jsArg(m)});qdDesenhar()">
+      <span class="qd-esp-cima">${ve ? `<i style="height:${Math.max(4, ve / max * 100)}%"></i><em>${ve}</em>` : ''}</span>
+      <span class="qd-esp-baixo">${vs ? `<i style="height:${Math.max(4, vs / max * 100)}%"></i><em>${vs}</em>` : ''}</span>
+      <span class="qd-esp-rot">${pnRotuloMes(m)}</span></button>`;
+  }).join('')}</div>
+  <div class="bq-leg"><span><i class="qd-leg-ent"></i>Entradas (acima)</span><span><i class="qd-leg-sai"></i>Saídas (abaixo)</span></div>`;
+}
+function qdBarrasMotivo(saidas) {
+  if (!saidas.length) return '';
+  const m = {};
+  saidas.forEach((d) => { const k = String(d.motivo || '').trim() || 'Não informado'; m[k] = (m[k] || 0) + 1; });
+  const pares = Object.keys(m).map((k) => [k, m[k]]).sort((a, b) => (a[0] === 'Não informado') - (b[0] === 'Não informado') || b[1] - a[1] || a[0].localeCompare(b[0]));
+  const max = Math.max(...pares.map((p) => p[1]));
+  return `<div class="qd-barras">${pares.map(([k, v]) => `<button class="qd-barra${QD.motivo === k ? ' escolhida' : ''}${k === 'Não informado' ? ' cinza' : ''}"
+      onclick="QD.motivo=(QD.motivo===${jsArg(k)}?'':${jsArg(k)});qdDesenhar()" title="${esc(k)}: ${v} (${Math.round(v / saidas.length * 100)}% das saídas)">
+      <span class="qd-barra-nome">${esc(k)}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, v / max * 100)}%"></i></span>
+      <span class="qd-barra-n bq-num">${v}</span></button>`).join('')}</div>`;
+}
+function qdOndeSaem(saidas) {
+  if (!saidas.length) return '<p class="bq-vazio">Nenhuma saída no período.</p>';
+  const efetivo = {};
+  qdNaEmpresa().forEach((g) => { efetivo[g.equipe || ''] = (efetivo[g.equipe || ''] || 0) + 1; });
+  const porEq = {};
+  saidas.forEach((d) => { porEq[d.equipe || ''] = (porEq[d.equipe || ''] || 0) + 1; });
+  const eqs = QD_EQUIPES.concat(['']).filter((e) => porEq[e]);
+  const maxE = Math.max(...eqs.map((e) => porEq[e]));
+  const porF = {};
+  saidas.forEach((d) => { const f = d.funcao || 'SEM FUNÇÃO'; porF[f] = (porF[f] || 0) + 1; });
+  const fs = Object.keys(porF).sort((a, b) => porF[b] - porF[a] || a.localeCompare(b)).slice(0, 5);
+  const maxF = fs.length ? porF[fs[0]] : 1;
+  return `<div class="qd-onde-grade"><div><h4>Por turno</h4>${eqs.map((e) => `<button class="qd-barra" onclick="qdEquipe(${jsArg(e)})"
+      title="${esc(e || 'Sem turno')}: ${porEq[e]} saídas${efetivo[e] ? ' — ' + Math.round(porEq[e] / efetivo[e] * 100) + '% do turno hoje' : ''}">
+      <span class="qd-barra-nome">${qdEq(e, e ? '' : 'sem turno')}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, porEq[e] / maxE * 100)}%;background:${qdCor(e)}"></i></span>
+      <span class="qd-barra-n bq-num">${porEq[e]}${efetivo[e] ? ` <small>${Math.round(porEq[e] / efetivo[e] * 100)}%</small>` : ''}</span></button>`).join('')}</div>
+    <div><h4>Por função</h4>${fs.map((f) => `<button class="qd-barra" onclick="qdFuncao(${jsArg(f)})" title="${esc(f)}: ${porF[f]} saídas">
+      <span class="qd-barra-nome">${esc(f)}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, porF[f] / maxF * 100)}%"></i></span>
+      <span class="qd-barra-n bq-num">${porF[f]}</span></button>`).join('')}</div></div>`;
+}
+/* Lista unica de entradas e saidas, da mais recente para a mais antiga; admitidos sem data no fim. */
+function qdListaMov(adm, des, j) {
+  const memo = qdMemo();
+  let itens = [];
+  if (QD.sentido !== 'entradas') des.filter((d) => qdDentro(d.data, j)).forEach((d) => itens.push({ s: 'saida', r: d, data: d.data }));
+  if (QD.sentido !== 'saidas') adm.filter((a) => !a.data || qdDentro(a.data, j)).forEach((a) => itens.push({ s: 'entrada', r: a, data: a.data || '' }));
+  if (QD.motivo) itens = itens.filter((x) => x.s === 'saida' && (String(x.r.motivo || '').trim() || 'Não informado') === QD.motivo);
+  if (QD.mes) itens = itens.filter((x) => x.data && x.data.slice(0, 7) === QD.mes);
+  itens.sort((a, b) => (b.data || '0') .localeCompare(a.data || '0'));
+  const nS = itens.filter((x) => x.s === 'saida').length, nE = itens.length - nS;
+  const mostra = itens.slice(0, QD.limiteMov);
+  const linha = (x) => {
+    const r = x.r, naGeral = qdAchar(memo.ixGeral, r);
+    const g = naGeral ? naGeral.find((y) => y.ativo) || naGeral[0] : null;
+    const ainda = x.s === 'saida' && naGeral && naGeral.some((y) => y.ativo);
+    const fora = x.s === 'entrada' && !naGeral && !qdAchar(memo.ixDes, r);
+    return `<li class="qd-mov ${x.s}">
+      <span class="qd-mov-data bq-num">${x.data ? pnDataLonga(x.data) : 'sem data'}</span>
+      <span class="qd-mov-seta" aria-hidden="true">${x.s === 'saida' ? '↓' : '↑'}</span>
+      <span class="qd-mov-quem">${g ? `<button class="qd-link" onclick="qdFicha(${g.ref})">${esc(r.nome || 'Sem nome')}</button>` : esc(r.nome || 'Sem nome')}
+        <small class="bq-num">${r.cod ? 'COD ' + esc(r.cod) : ''}</small></span>
+      <span class="qd-mov-eq">${qdEq(r.equipe, r.equipeBruta)} <small>${esc(r.funcao || '')}</small></span>
+      <span class="qd-mov-det">${x.s === 'saida' ? esc(x.r.tipo) + (x.r.motivo ? ' · ' + esc(x.r.motivo) : ' · <em>motivo não informado</em>') : esc(r.status || 'admitido')}
+        ${ainda ? qdSelo('grave', 'ainda ativo na GERAL') : ''}${fora ? qdSelo('atencao', 'fora da GERAL') : ''}</span>
+    </li>`;
+  };
+  return `<div class="bq-card qd-movlista"><div class="qd-movlista-cab"><h2>Quem entrou e quem saiu</h2>
+      <div class="qd-seg pequeno" role="group" aria-label="Mostrar">${[['tudo', 'Tudo'], ['saidas', 'Saídas'], ['entradas', 'Entradas']].map(([k, rot]) =>
+        `<button class="qd-pill" aria-pressed="${QD.sentido === k}" onclick="QD.sentido=${jsArg(k)};QD.limiteMov=30;qdDesenhar()">${rot}</button>`).join('')}</div></div>
+    <p class="bq-sub">${qdPlural(nS, 'saída', 'saídas')} e ${qdPlural(nE, 'entrada', 'entradas')} no período${QD.motivo || QD.mes ? ' (com o filtro escolhido)' : ''}. Admitidos sem data aparecem no fim.</p>
+    ${mostra.length ? `<ul class="qd-movs">${mostra.map(linha).join('')}</ul>` : '<p class="bq-vazio">Nada neste período.</p>'}
+    ${itens.length > mostra.length ? `<button class="qd-mais" onclick="QD.limiteMov+=60;qdDesenhar()">Mostrar mais (${itens.length - mostra.length})</button>` : ''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* VISAO GERAL — o CD e os turnos em 10 segundos                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A regua de cartoes e a comparacao: mostra sempre os quatro turnos (a
+ * Funcao muda os numeros; a Equipe escolhida ganha destaque, sem esconder
+ * os outros). O resto da visao geral (mapa, fora do posto, movimentacao)
+ * segue o recorte inteiro.
+ */
+function qdVisaoGeral() {
+  const naEmpresa = qdNaEmpresa();
+  const porFuncao = qdRecorte(naEmpresa, 'equipe');          // cartoes: a funcao vale, a equipe so destaca
+  const j90 = qdJanela(90);
+  const des = DADOS.des || [], adm = DADOS.adm || [];
+  const sai90 = (lista) => lista.filter((d) => qdDentro(d.data, j90)).length;
+  const desF = qdRecorte(des, 'equipe'), admF = qdRecorte(adm, 'equipe');
+  const graves = (DADOS.inconsistencias || []).filter((x) => x.gravidade === 'grave');
+  const conta = (lista) => ({ n: lista.length, d: lista.filter((g) => g.situacao === 'ATIVO').length,
+    f: lista.filter((g) => g.situacao === 'FERIAS').length, a: lista.filter((g) => g.situacao === 'AFASTADO').length });
+  const fora = (c) => [c.f ? qdPlural(c.f, 'de férias', 'de férias') : '', c.a ? qdPlural(c.a, 'afastado', 'afastados') : ''].filter(Boolean).join(' · ');
+  const medidor = (c, cor) => `<div class="qd-medidor" style="--qd-cor:${cor}" role="img" aria-label="${c.d} de ${c.n} disponíveis">
+    <i style="width:${c.n ? Math.round(c.d / c.n * 100) : 0}%"></i></div>`;
+
+  const total = conta(porFuncao), semTurno = porFuncao.filter((g) => !g.equipe).length;
+  const cd = `<button class="qd-cartao cd${QD.equipe === '*' ? '' : ' apagado'}" onclick="qdEquipe('*')" aria-pressed="${QD.equipe === '*'}">
+    <span class="bq-rot">CD inteiro${QD.funcao ? ' · ' + esc(QD.funcao) : ''}</span>
+    <span class="qd-heroi">${qdN(total.n)}</span><span class="qd-heroi-leg">${total.n === 1 ? 'pessoa na empresa' : 'pessoas na empresa'}</span>
+    ${medidor(total, 'var(--bq-ink-2)')}
+    <span class="qd-cartao-linha"><b>${qdN(total.d)}</b> disponíve${total.d === 1 ? 'l' : 'is'}${fora(total) ? ' · ' + fora(total) : ''}</span>
+    <span class="qd-cartao-linha">↓ ${qdPlural(sai90(desF), 'saída', 'saídas')} · ↑ ${qdPlural(admF.filter((a) => qdDentro(a.data, j90)).length, 'entrada', 'entradas')} em 90 dias</span>
+    ${semTurno ? `<span class="qd-cartao-linha">${qdSelo('atencao', 'inclui ' + semTurno + ' sem turno definido')}</span>` : ''}
+  </button>`;
+  const turnos = QD_EQUIPES.map((e) => {
+    const deles = porFuncao.filter((g) => g.equipe === e);
+    const c = conta(deles);
+    const lideres = QD.funcao ? 0 : deles.filter((g) => QD_LIDER.test(qdChaveNome(g.funcao))).length;
+    const k = graves.filter((x) => x.equipe === e).length;
+    const escolhido = QD.equipe === e;
+    return `<button class="qd-cartao turno${QD.equipe !== '*' && !escolhido ? ' apagado' : ''}${escolhido ? ' escolhido' : ''}" style="--qd-cor:${qdCor(e)}"
+        onclick="qdEquipe(${jsArg(e)})" aria-pressed="${escolhido}">
+      <span class="qd-cartao-topo">${qdEq(e)}<span class="qd-cartao-pct bq-num">${total.n ? Math.round(c.n / total.n * 100) : 0}% do CD</span></span>
+      <span class="qd-cartao-n">${qdN(c.n)}</span>
+      ${medidor(c, qdCor(e))}
+      <span class="qd-cartao-linha"><b>${qdN(c.d)}</b> disponíve${c.d === 1 ? 'l' : 'is'}${fora(c) ? ' · ' + fora(c) : ''}</span>
+      ${lideres && e !== 'ADM' ? `<span class="qd-cartao-linha">Liderança <b>${lideres}</b> · 1 para cada ${Math.round((c.n - lideres) / lideres)}</span>` : ''}
+      <span class="qd-cartao-linha">↓ ${qdPlural(sai90(desF.filter((d) => d.equipe === e)), 'saída', 'saídas')} em 90 dias</span>
+      ${k ? `<span class="qd-cartao-linha">${qdSelo('grave', qdPlural(k, 'desligado ainda ativo', 'desligados ainda ativos'))}</span>` : ''}
+    </button>`;
+  }).join('');
+  return `<div class="qd-regua">${cd}${turnos}</div>
+    <div class="qd-geral">
+      <div class="bq-card qd-mapa-card">${qdMapa()}</div>
+      <div class="qd-geral-lado">
+        <div class="bq-card">${qdForaDoPosto()}</div>
+        <div class="bq-card">${qdMov90()}</div>
+      </div>
+    </div>`;
+}
+
+/*
+ * MAPA DE CALOR Funcao × Turno (o que eles mais gostam). Uma rampa so (azul,
+ * mais = mais escuro); a escala vem do CD inteiro e nao muda com o filtro. A
+ * coluna Total leva a barrinha (era o grafico "Efetivo por funcao"); a linha
+ * Total, o efetivo de cada turno. Clique na celula: Pessoas daquele turno e
+ * funcao. Clique no nome da funcao ou no turno: filtro.
+ */
+function qdMapa() {
+  // Quem esta sem turno (EQUIPE fora do padrao) fica fora do mapa: e aviso da Conferencia, nao coluna.
+  const todos = qdNaEmpresa().filter((g) => g.equipe);
+  const semTurno = qdRecorte(qdNaEmpresa()).filter((g) => !g.equipe).length;
+  const recorte = qdRecorte(todos);                          // o que conta nas celulas
+  const colunas = QD_EQUIPES;
+  const cel = {}, celTodos = {}, totF = {}, totE = {};
+  todos.forEach((g) => { const k = (g.funcao || 'SEM FUNÇÃO') + '|' + (g.equipe || ''); celTodos[k] = (celTodos[k] || 0) + 1; });
+  const det = {};
+  recorte.forEach((g) => {
+    const f = g.funcao || 'SEM FUNÇÃO', k = f + '|' + (g.equipe || '');
+    cel[k] = (cel[k] || 0) + 1; totF[f] = (totF[f] || 0) + 1; totE[g.equipe || ''] = (totE[g.equipe || ''] || 0) + 1;
+    det[k] = det[k] || { d: 0, f: 0, a: 0 };
+    det[k][g.situacao === 'FERIAS' ? 'f' : (g.situacao === 'AFASTADO' ? 'a' : 'd')]++;
+  });
+  const max = Math.max(1, ...Object.keys(celTodos).filter((k) => !/\|$/.test(k)).map((k) => celTodos[k]));
+  const funcoes = Object.keys(totF);
+  const soAdm = (f) => !['1° TURNO', '2° TURNO', '3° TURNO'].some((e) => cel[f + '|' + e]);
+  const ordem = (a, b) => totF[b] - totF[a] || a.localeCompare(b);
+  const operacao = funcoes.filter((f) => !soAdm(f)).sort(ordem), administrativo = funcoes.filter(soAdm).sort(ordem);
+  const maxTot = Math.max(1, ...funcoes.map((f) => totF[f]));
+  const totalGeral = recorte.length;
+  const linha = (f) => `<tr class="${QD.funcao === f ? 'escolhida' : ''}">
+    <th scope="row"><button class="qd-link qd-mapa-funcao" onclick="qdFuncao(${jsArg(f)})">${esc(f)}</button></th>
+    ${colunas.map((e) => {
+      const v = cel[f + '|' + e] || 0, x = det[f + '|' + e];
+      const i = v ? Math.min(5, Math.ceil(v / max * 5)) : 0;
+      const dica = v ? `${v} na empresa · ${x.d} disponíve${x.d === 1 ? 'l' : 'is'}${x.f ? ', ' + x.f + ' de férias' : ''}${x.a ? ', ' + x.a + ' afastado' + (x.a > 1 ? 's' : '') : ''} — ${e || 'sem turno'} · ${f}${totE[e] ? ' · ' + Math.round(v / totE[e] * 100) + '% do turno' : ''}` : '';
+      const apagada = QD.equipe !== '*' && (e || '') !== QD.equipe;
+      return v ? `<td class="c q${i}${apagada ? ' apagada' : ''}"><button title="${esc(dica)}" aria-label="${esc(dica)}"
+          onclick="QD.equipe=${jsArg(e)};QD.funcao=${jsArg(f)};QD.aba='pessoas';QD.mostrar='empresa';qdDesenhar()">${v}${x.f + x.a ? '<sup aria-hidden="true">•</sup>' : ''}</button></td>`
+        : `<td class="c vazio${apagada ? ' apagada' : ''}">–</td>`;
+    }).join('')}
+    <td class="t"><span class="qd-mapa-tot"><i style="width:${Math.max(3, totF[f] / maxTot * 100)}%"></i></span><b class="bq-num">${totF[f]}</b></td></tr>`;
+  return `<h2>Função × Turno</h2>
+    <p class="bq-sub">Quantas pessoas de cada função em cada turno. Quanto mais escuro, mais gente. Toque num número para ver quem é; • = alguém de férias ou afastado.</p>
+    ${totalGeral ? `<div class="bq-rolagem"><table class="qd-mapa">
+      <thead><tr><th>Função</th>${colunas.map((e) => `<th class="n${QD.equipe === e ? ' escolhida' : ''}"><button class="qd-link" onclick="qdEquipe(${jsArg(e)})" title="${esc(e)}"><span class="qd-eq"><i style="background:${qdCor(e)}"></i>${e === 'ADM' ? 'ADM' : esc(e.slice(0, 2))}</span></button></th>`).join('')}<th class="n">Total</th></tr></thead>
+      <tbody>${operacao.map(linha).join('')}
+        ${administrativo.length && operacao.length ? `<tr class="qd-mapa-sep"><th colspan="${colunas.length + 2}">Administrativo</th></tr>` : ''}
+        ${administrativo.map(linha).join('')}</tbody>
+      <tfoot><tr><th scope="row">Total</th>${colunas.map((e) => `<td class="c">${totE[e] || '–'}</td>`).join('')}<td class="t"><b class="bq-num">${totalGeral}</b></td></tr></tfoot>
+    </table></div>
+    <div class="bq-escala"><span>menos</span><i class="q1"></i><i class="q2"></i><i class="q3"></i><i class="q4"></i><i class="q5"></i><span>mais</span></div>`
+    : '<p class="bq-vazio">Ninguém neste recorte.</p>'}
+    ${semTurno ? `<p class="qd-nota">${qdSelo('atencao', qdPlural(semTurno, 'pessoa sem turno definido', 'pessoas sem turno definido'))} fica${semTurno > 1 ? 'm' : ''} fora do mapa —
+      <button class="qd-link" onclick="qdAba('conf')">ver na Conferência</button>.</p>` : ''}`;
+}
+
+/*
+ * FORA DO POSTO HOJE (pela coluna STATUS, sem inventar meta): cada funcao de
+ * cada turno com alguem de ferias ou afastado. ■ quando ninguem da funcao
+ * esta disponivel; ▲ quando metade ou mais esta fora.
+ */
+function qdForaDoPosto() {
+  const recorte = qdRecorte(qdNaEmpresa());
+  const grupos = {};
+  recorte.forEach((g) => {
+    const k = (g.equipe || '') + '|' + (g.funcao || 'SEM FUNÇÃO');
+    const x = grupos[k] = grupos[k] || { e: g.equipe || '', f: g.funcao || 'SEM FUNÇÃO', c: 0, d: 0, fora: [] };
+    x.c++;
+    if (g.situacao === 'ATIVO') x.d++; else x.fora.push(g);
+  });
+  const lista = Object.keys(grupos).map((k) => grupos[k]).filter((x) => x.fora.length).map((x) =>
+    Object.assign(x, { grav: x.d === 0 ? 'grave' : (x.c >= 2 && x.d / x.c <= 0.5 ? 'atencao' : '') }))
+    .sort((a, b) => (a.grav === 'grave' ? 0 : a.grav === 'atencao' ? 1 : 2) - (b.grav === 'grave' ? 0 : b.grav === 'atencao' ? 1 : 2) ||
+      b.fora.length - a.fora.length || a.f.localeCompare(b.f));
+  const total = lista.reduce((s, x) => s + x.fora.length, 0);
+  const mostra = lista.slice(0, 6);
+  return `<h2>Fora do posto hoje</h2>
+    <p class="bq-sub">${total ? qdPlural(total, 'pessoa de férias ou afastada', 'pessoas de férias ou afastadas') + ' (coluna STATUS). Toque para ver quem.' : 'Ninguém de férias ou afastado neste recorte.'}</p>
+    ${mostra.length ? `<ul class="qd-fora">${mostra.map((x) => `<li><button class="qd-fora-linha" onclick="QD.equipe=${jsArg(x.e)};QD.funcao=${jsArg(x.f)};QD.aba='pessoas';QD.mostrar='empresa';qdDesenhar()">
+        <span class="qd-fora-quem">${x.grav ? qdSelo(x.grav, x.grav === 'grave' ? 'ninguém disponível' : 'metade ou mais fora') : ''}${qdEq(x.e)}<b>${esc(x.f)}</b></span>
+        <span class="qd-fora-n bq-num">${x.d} de ${x.c} disponíve${x.c === 1 ? 'l' : 'is'}</span>
+        <span class="qd-fora-nomes">${x.fora.slice(0, 3).map((g) => esc(g.nome || 'Sem nome') + ' — ' + QD_SITUACAO[g.situacao].toLowerCase()).join(' · ')}${x.fora.length > 3 ? ' · +' + (x.fora.length - 3) : ''}</span>
+      </button></li>`).join('')}</ul>
+      ${lista.length > mostra.length ? `<button class="qd-link" onclick="QD.aba='pessoas';QD.mostrar='ferias';qdDesenhar()">+ ${lista.length - mostra.length} funções com alguém fora</button>` : ''}` : ''}`;
+}
+
+/* MOVIMENTACAO · 90 DIAS: quanto mudou e para que lado, contra os 90 dias anteriores. */
+function qdMov90() {
+  const des = qdRecorte(DADOS.des || []), adm = qdRecorte(DADOS.adm || []);
+  const j = qdJanela(90), jAnt = qdJanela(90, true);
+  const s = des.filter((d) => qdDentro(d.data, j)), sAnt = des.filter((d) => qdDentro(d.data, jAnt)).length;
+  const e = adm.filter((a) => qdDentro(a.data, j)).length, semData = adm.filter((a) => !a.data).length;
+  const efetivo = qdRecorte(qdNaEmpresa()).length;
+  const t = efetivo ? s.length / efetivo / 3 * 100 : 0;
+  const motivos = {};
+  s.forEach((d) => { const k = String(d.motivo || '').trim(); if (k) motivos[k] = (motivos[k] || 0) + 1; });
+  const top = Object.keys(motivos).sort((a, b) => motivos[b] - motivos[a])[0];
+  const vol = s.filter((d) => /^VOL|PEDID/.test(qdChaveNome(d.tipo))).length;
+  const delta = s.length > sAnt ? `<span class="qd-delta pior">▲ ${s.length - sAnt} a mais</span>` : (s.length < sAnt ? `<span class="qd-delta melhor">▼ ${sAnt - s.length} a menos</span>` : '<span class="qd-delta">= igual</span>');
+  return `<h2>Movimentação · últimos 90 dias</h2>
+    <p class="bq-sub">Contra os 90 dias anteriores${qdRotuloRecorte() ? ' · ' + esc(qdRotuloRecorte()) : ''}.</p>
+    <div class="qd-mini-kpis">
+      <div><span class="bq-rot">Saídas</span><b>${s.length}</b>${delta}</div>
+      <div><span class="bq-rot">Entradas</span><b>${e}</b>${semData ? `<small>${qdPlural(semData, 'sem data', 'sem data')}</small>` : ''}</div>
+      <div><span class="bq-rot">Turnover de saída</span><b>${qdPct(t)}</b><small>ao mês</small></div>
+    </div>
+    ${s.length ? `<p class="qd-mov90-txt">${vol ? qdPlural(vol, 'pediu', 'pediram') + ' para sair' : 'Nenhuma saída voluntária'}${top ? ' · mais citado: <b>' + esc(top) + '</b> (' + motivos[top] + ')' : ''}.</p>` : '<p class="qd-mov90-txt">Nenhuma saída nos últimos 90 dias.</p>'}
+    <button class="qd-link" onclick="QD.periodo=90;QD.mes='';QD.motivo='';qdAba('mov')">Ver a movimentação →</button>`;
 }
 
 function bqTrocarFonte() {
   abrirJanela('Planilha do Quadro do CD', `
-    <div class="campo"><label>Link da planilha de apoio</label><input id="bq-link2" value="${esc(DADOS.fonte ? DADOS.fonte.url : '')}"></div>
+    <div class="campo"><label>Link da planilha (abas GERAL, CADMITIDOS e CDESLIGADOS)</label><input id="bq-link2" value="${esc(DADOS.fonte ? DADOS.fonte.url : '')}"></div>
     <p class="dica">A conta que implantou o GSL precisa ter acesso de leitura a essa planilha.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link2')}).catch(()=>{})">Salvar</button>`);
 }
-
-const BQ_CORES = { TA: 'var(--s1)', TB: 'var(--s2)', TC: 'var(--s3)' };
-const bqCor = (t) => BQ_CORES[t] || 'var(--bq-ink-2)';
-const bqUniq = (a) => { const s = {}, o = []; a.forEach((v) => { if (v && !s[v]) { s[v] = 1; o.push(v); } }); return o; };
-const bqContar = (arr, k) => { const m = {}; arr.forEach((r) => { m[r[k]] = (m[r[k]] || 0) + 1; }); return m; };
-const bqOrdenar = (m) => Object.keys(m).map((k) => [k, m[k]]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-function bqBase() {
-  return (DADOS.apoio || []).map((r) => ({ cod: String(r.cod || '').trim(), nome: (r.nome || '').trim(),
-    equipe: (r.equipe || '').trim().toUpperCase(), funcao: (r.funcao || '').trim().toUpperCase() })).filter((r) => r.nome || r.cod);
-}
-function bqBarras(pares, cor, clicavel, escolhido) {
-  const max = pares.length ? pares[0][1] : 1;
-  return pares.map((p) => `<div class="bq-barra ${clicavel ? 'clicavel' : ''} ${escolhido === p[0] ? 'escolhida' : ''}"
-      ${clicavel ? `onclick="${clicavel}(${jsArg(p[0])})"` : ''} title="${esc(p[0])}: ${p[1]}">
-    <span class="bq-nm">${esc(p[0])}</span><span class="bq-trilho"><span class="bq-fill" style="width:${Math.max(2, Math.round(p[1] / max * 100))}%;${cor ? 'background:' + cor : ''}"></span></span>
-    <span class="bq-vl bq-num">${p[1]}</span></div>`).join('');
-}
-
-function bqDesenhar() {
-  const alvo = el('bq-conteudo'); if (!alvo) return;
-  try {
-    if (BQ.aba === 'mov') alvo.innerHTML = bqMovimentacao();
-    else if (BQ.aba === 'desligados') alvo.innerHTML = bqDesligados();
-    else if (BQ.aba === 'admitidos') alvo.innerHTML = bqAdmitidos();
-    else { alvo.innerHTML = bqQuadroEstrutura(); bqRender(); }
-  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
-}
-
-/* ---------- QUADRO ATUAL (igual ao BI) ---------- */
-function bqQuadroEstrutura() {
-  const base = bqBase();
-  const turnos = bqUniq(base.map((r) => r.equipe)).sort();
-  const funcoes = bqUniq(base.map((r) => r.funcao)).sort();
-  return `
-    <div class="bq-filtros">
-      <div class="bq-campo"><span class="bq-rot">Turno / Equipe</span>
-        <div class="bq-pills">${[''].concat(turnos).map((t) => `<button class="bq-pill" aria-pressed="${BQ.turno === t}" onclick="BQ.turno=${jsArg(t)};bqDesenhar()">${t ? esc(t) : 'TODOS'}</button>`).join('')}</div></div>
-      <div class="bq-campo"><label class="bq-rot">Função</label>
-        <select onchange="BQ.funcao=this.value;bqRender()"><option value="">Todas as funções</option>
-          ${funcoes.map((f) => `<option value="${esc(f)}" ${BQ.funcao === f ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
-      <div class="bq-campo bq-busca"><label class="bq-rot">Buscar colaborador ou código</label>
-        <input type="search" value="${esc(BQ.busca)}" placeholder="Ex.: 48231 ou José Carlos" oninput="BQ.busca=this.value.toLowerCase().trim();bqRender()"></div>
-      <button class="bq-limpar" onclick="BQ.turno='';BQ.funcao='';BQ.busca='';bqDesenhar()">Limpar filtros</button>
-    </div>
-    <div class="bq-kpis">
-      <div class="bq-kpi"><span class="bq-rot">Colaboradores</span><b id="bqTotal">0</b><small id="bqTotalSub"></small></div>
-      <div class="bq-kpi"><span class="bq-rot">Funções distintas</span><b id="bqFun">0</b><small>no recorte atual</small></div>
-      <div class="bq-kpi"><span class="bq-rot">Maior função</span><b id="bqMaiorN">0</b><small id="bqMaior">—</small></div>
-      <div class="bq-kpi"><span class="bq-rot">Média por turno</span><b id="bqMedia">0</b><small id="bqMediaSub"></small></div>
-    </div>
-    <div class="bq-grade">
-      <div class="bq-card"><h2>Efetivo por função</h2><p class="bq-sub">Quantidade de colaboradores em cada função, do maior para o menor.</p>
-        <div id="bqBarrasFuncao"></div></div>
-      <div style="display:grid;gap:14px">
-        <div class="bq-card"><h2>Distribuição por turno</h2><p class="bq-sub">Participação de cada equipe no efetivo filtrado.</p>
-          <div class="bq-stack" id="bqStackTurno"></div><div class="bq-leg" id="bqLegTurno"></div></div>
-        <div class="bq-card"><h2>Função × Turno</h2><p class="bq-sub">Quantos de cada função existem em cada equipe. Quanto mais escuro, maior o número.</p>
-          <div class="bq-rolagem"><table class="bq-mtz"><thead id="bqMtzHead"></thead><tbody id="bqMtzBody"></tbody></table></div>
-          <div class="bq-escala"><span>menos</span><i style="background:var(--seq-1)"></i><i style="background:var(--seq-2)"></i><i style="background:var(--seq-3)"></i><i style="background:var(--seq-4)"></i><i style="background:var(--seq-5)"></i><span>mais</span></div></div>
-      </div>
-    </div>
-    <div class="bq-card" style="margin-top:14px">
-      <h2>Colaboradores <span class="bq-num" id="bqCount" style="color:var(--bq-ink-2);font-weight:500"></span></h2>
-      <p class="bq-sub">Clique no cabeçalho para ordenar.</p>
-      <div class="bq-rolagem" style="max-height:440px;overflow-y:auto">
-        <table><thead><tr>
-          <th class="n" onclick="bqOrdem('cod')">Cód. produtivo</th><th onclick="bqOrdem('nome')">Colaborador</th>
-          <th onclick="bqOrdem('equipe')">Equipe</th><th onclick="bqOrdem('funcao')">Função</th>
-        </tr></thead><tbody id="bqTbl"></tbody></table>
-      </div>
-      <p class="bq-vazio" id="bqTblVazio" hidden>Nenhum colaborador com esses filtros.</p>
-    </div>`;
-}
-
-function bqOrdem(k) { BQ.ordA = (BQ.ordK === k) ? -BQ.ordA : 1; BQ.ordK = k; bqRender(); }
-
-function bqRender() {
-  const base = bqBase();
-  const turnos = bqUniq(base.map((r) => r.equipe)).sort();
-  const d = base.filter((r) => (!BQ.turno || r.equipe === BQ.turno) && (!BQ.funcao || r.funcao === BQ.funcao) &&
-    (!BQ.busca || (r.nome + ' ' + r.cod).toLowerCase().indexOf(BQ.busca) >= 0));
-  el('bqTotal').textContent = d.length;
-  el('bqTotalSub').textContent = 'de ' + base.length + ' na base';
-  const porFun = bqOrdenar(bqContar(d, 'funcao'));
-  el('bqFun').textContent = porFun.length;
-  el('bqMaiorN').textContent = porFun.length ? porFun[0][1] : 0;
-  el('bqMaior').textContent = porFun.length ? porFun[0][0] : '—';
-  const porEq = bqContar(d, 'equipe'), nEq = Object.keys(porEq).length;
-  el('bqMedia').textContent = nEq ? Math.round(d.length / nEq) : 0;
-  el('bqMediaSub').textContent = nEq ? ('em ' + nEq + (nEq > 1 ? ' equipes' : ' equipe')) : 'sem equipe no recorte';
-  el('bqBarrasFuncao').innerHTML = porFun.length ? bqBarras(porFun) : '<p class="bq-vazio">Nenhum colaborador com esses filtros.</p>';
-  const eqs = turnos.filter((t) => porEq[t]);
-  el('bqStackTurno').innerHTML = eqs.map((t) => {
-    const pct = porEq[t] / d.length * 100;
-    return `<div style="flex:${porEq[t]};background:${bqCor(t)}">${pct > 9 ? esc(t) + ' ' + porEq[t] : ''}</div>`;
-  }).join('') || '<div style="flex:1;background:var(--bq-surface-2)"></div>';
-  el('bqLegTurno').innerHTML = eqs.map((t) => `<span><i style="background:${bqCor(t)}"></i>${esc(t)} — <b class="bq-num">${porEq[t]}</b> (${Math.round(porEq[t] / d.length * 100)}%)</span>`).join('')
-    || '<span>Sem dados no recorte.</span>';
-  el('bqMtzHead').innerHTML = '<tr><th>Função</th>' + turnos.map((t) => `<th class="n">${esc(t)}</th>`).join('') + '<th class="n">Total</th></tr>';
-  const cel = {}; let maxC = 0;
-  d.forEach((r) => { const k = r.funcao + '|' + r.equipe; cel[k] = (cel[k] || 0) + 1; if (cel[k] > maxC) maxC = cel[k]; });
-  el('bqMtzBody').innerHTML = porFun.map((p) => '<tr><td>' + esc(p[0]) + '</td>' + turnos.map((t) => {
-    const v = cel[p[0] + '|' + t] || 0;
-    const i = v === 0 ? 0 : Math.min(5, Math.ceil(v / maxC * 5));
-    return `<td class="c" style="background:${i === 0 ? 'transparent' : 'var(--seq-' + i + ')'};color:${v ? (i >= 4 ? '#fff' : 'var(--seq-ink)') : 'var(--bq-ink-3)'}">${v || '–'}</td>`;
-  }).join('') + `<td class="c" style="color:var(--bq-ink)">${p[1]}</td></tr>`).join('');
-  const k = BQ.ordK, a = BQ.ordA;
-  const lista = d.slice().sort((x, y) => k === 'cod' ? (Number(x[k]) - Number(y[k])) * a : String(x[k]).localeCompare(String(y[k])) * a);
-  el('bqCount').textContent = '(' + lista.length + ')';
-  el('bqTblVazio').hidden = lista.length > 0;
-  el('bqTbl').innerHTML = lista.map((r) => `<tr><td class="n">${esc(r.cod)}</td><td>${esc(r.nome)}</td>
-    <td><span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span></td><td>${esc(r.funcao)}</td></tr>`).join('');
-}
-
-/* ---------- MOVIMENTACAO (igual ao BI + motivos) ---------- */
-function bqMovimentacao() {
-  const adm = DADOS.adm || [], des = DADOS.des || [];
-  if (!adm.length && !des.length) return '<div class="bq-card"><p class="bq-vazio">Sem dados nas abas CADMITIDOS e CDESLIGADOS.</p></div>';
-  const m = (r) => String(r.mes || '').trim();
-  // Admitido sem data (a aba CADMITIDOS da filial nao tem data) conta no
-  // total, mas nao entra no grafico mes a mes.
-  const admSemData = adm.filter((r) => !m(r)).length;
-  const meses = bqUniq(adm.map(m).concat(des.map(m)).filter(Boolean)).sort();
-  const cAdm = {}, cDes = {};
-  adm.forEach((r) => { cAdm[m(r)] = (cAdm[m(r)] || 0) + 1; });
-  des.forEach((r) => { cDes[m(r)] = (cDes[m(r)] || 0) + 1; });
-  const saldo = adm.length - des.length;
-  const efetivo = bqBase().length || 1;
-  const turns = meses.map((k) => ((cAdm[k] || 0) + (cDes[k] || 0)) / 2 / efetivo * 100);
-  const media = turns.reduce((s, v) => s + v, 0) / (turns.length || 1);
-  const corT = (v) => v >= 4 ? 'var(--grave)' : (v >= 2.5 ? 'var(--atencao)' : 'var(--bom)');
-  const maxM = Math.max(...meses.map((k) => Math.max(cAdm[k] || 0, cDes[k] || 0)).concat([1]));
-  const porFun = bqOrdenar(bqContar(des, 'funcao'));
-  const tipos = bqContar(des, 'tipo'), tks = Object.keys(tipos).sort();
-  const corTipo = (t) => ({ 'VOLUNTARIO': 'var(--s1)', 'VOLUNTÁRIO': 'var(--s1)', 'INVOLUNTARIO': 'var(--s2)', 'INVOLUNTÁRIO': 'var(--s2)' })[t.toUpperCase()] || 'var(--bq-ink-2)';
-  const motivos = bqOrdenar(bqContar(des.map((r) => ({ motivo: r.motivo || 'Não informado' })), 'motivo'));
-
-  return `
-    <div class="bq-kpis" id="bqMov">
-      <div class="bq-kpi"><span class="bq-rot">Admitidos</span><b>${adm.length}</b><small>aba CADMITIDOS${admSemData ? ' · ' + admSemData + ' sem data' : ''}</small></div>
-      <div class="bq-kpi"><span class="bq-rot">Desligados no período</span><b>${des.length}</b><small>aba CDESLIGADOS</small></div>
-      <div class="bq-kpi"><span class="bq-rot">Saldo</span><b style="color:${saldo >= 0 ? 'var(--bom)' : 'var(--grave)'}">${(saldo > 0 ? '+' : '') + saldo}</b><small>admissões menos desligamentos</small></div>
-      <div class="bq-kpi"><span class="bq-rot">Turnover médio</span><b style="color:${corT(media)}">${media.toFixed(1).replace('.', ',')}%</b><small>média mensal do período</small></div>
-    </div>
-    <div class="bq-card">
-      <h2>Admissões e desligamentos por mês</h2><p class="bq-sub">Duas séries lado a lado. Valores acima de cada coluna.${admSemData ? ` ${admSemData} admitido(s) sem data de admissão na planilha não entram neste gráfico — veja a aba <b>Admitidos</b>.` : ''}</p>
-      <div class="bq-leg" style="margin-bottom:10px"><span><i style="background:var(--s1)"></i>Admitidos</span><span><i style="background:var(--s2)"></i>Desligados</span></div>
-      <div class="bq-meses">${meses.map((k) => { const a = cAdm[k] || 0, dd = cDes[k] || 0; return `<div class="bq-mes"><div class="bq-duplas">
-        <span style="height:${a / maxM * 100}%;background:var(--s1)" title="${k}: ${a} admitidos"><b>${a}</b></span>
-        <span style="height:${dd / maxM * 100}%;background:var(--s2)" title="${k}: ${dd} desligados"><b>${dd}</b></span></div></div>`; }).join('')}</div>
-      <div class="bq-meses" style="height:auto;border:none;padding:0">${meses.map((k) => `<div class="bq-rotmes">${pnRotuloMes(k)}</div>`).join('')}</div>
-    </div>
-    <div class="bq-grade" style="margin-top:14px">
-      <div style="display:grid;gap:14px">
-        <div class="bq-card"><h2>Desligamentos por função</h2><p class="bq-sub">Onde o quadro mais perde gente no período.</p>
-          ${porFun.length ? bqBarras(porFun, 'var(--s2)') : '<p class="bq-vazio">Sem desligamentos no período.</p>'}</div>
-        <div class="bq-card bq-compacto"><h2>Motivos de desligamento</h2><p class="bq-sub">Coluna MOTIVO da aba CDESLIGADOS. Clique num motivo para ver quem saiu por ele.</p>
-          ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS ainda não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome e preencha o motivo de cada demissão.</div>'}
-          ${motivos.length ? bqBarras(motivos, 'var(--s2)', 'bqVerMotivo') : '<p class="bq-vazio">Sem desligamentos no período.</p>'}</div>
-      </div>
-      <div style="display:grid;gap:14px">
-        <div class="bq-card"><h2>Tipo de desligamento</h2><p class="bq-sub">Voluntário = pedido do colaborador. Involuntário = decisão da empresa.</p>
-          <div class="bq-stack">${tks.map((t) => { const pct = tipos[t] / des.length * 100; return `<div style="flex:${tipos[t]};background:${corTipo(t)}">${pct > 12 ? tipos[t] : ''}</div>`; }).join('')}</div>
-          <div class="bq-leg">${tks.map((t) => `<span><i style="background:${corTipo(t)}"></i>${esc(t)} — <b class="bq-num">${tipos[t]}</b> (${Math.round(tipos[t] / des.length * 100)}%)</span>`).join('')}</div></div>
-        <div class="bq-card"><h2>Turnover mês a mês</h2><p class="bq-sub">((admitidos + desligados) ÷ 2) ÷ efetivo do mês.</p>
-          <div class="bq-rolagem"><table><thead><tr><th>Mês</th><th class="n">Adm.</th><th class="n">Des.</th><th class="n">Turnover</th></tr></thead>
-            <tbody>${meses.map((k, i) => `<tr><td>${pnRotuloMes(k)}</td><td class="n">${cAdm[k] || 0}</td><td class="n">${cDes[k] || 0}</td>
-              <td class="n" style="color:${corT(turns[i])};font-weight:600">${turns[i].toFixed(1).replace('.', ',')}%</td></tr>`).join('')}</tbody></table></div></div>
-      </div>
-    </div>`;
-}
-
-function bqVerMotivo(motivo) { BQ.motivo = motivo; bqAba('desligados'); }
-
-/* ---------- ADMITIDOS (aba CADMITIDOS: Produtiva / Colaborador / Equipe / Funcao / Status) ---------- */
-function bqAdmitidos() {
-  const adm = DADOS.adm || [];
-  if (!adm.length) return '<div class="bq-card"><p class="bq-vazio">Nenhum admitido na aba CADMITIDOS (ou a aba não foi encontrada na planilha).</p></div>';
-  const st = (r) => r.status || 'SEM STATUS';
-  const porStatus = bqOrdenar(bqContar(adm.map((r) => ({ s: st(r) })), 's'));
-  const porEquipe = bqOrdenar(bqContar(adm.map((r) => ({ e: r.equipe || 'SEM EQUIPE' })), 'e'));
-  const porFuncao = bqOrdenar(bqContar(adm.map((r) => ({ f: r.funcao || 'SEM FUNÇÃO' })), 'f'));
-  const busca = String(BQ.buscaAdm || '').toLowerCase();
-  const lista = adm.filter((r) => (!BQ.statusAdm || st(r) === BQ.statusAdm) &&
-      (!busca || (r.cod + ' ' + r.nome + ' ' + r.funcao + ' ' + r.equipe).toLowerCase().indexOf(busca) !== -1))
-    .sort((a, b) => a.nome.localeCompare(b.nome));
-  return `
-    <div class="bq-kpis">
-      <div class="bq-kpi"><span class="bq-rot">Admitidos</span><b>${adm.length}</b><small>aba CADMITIDOS</small></div>
-      ${porStatus.slice(0, 3).map(([k, n]) => `<div class="bq-kpi"><span class="bq-rot">${esc(k)}</span><b>${n}</b><small>${Math.round(n / adm.length * 100)}% dos admitidos</small></div>`).join('')}
-    </div>
-    <div class="bq-grade desligados">
-      <div style="display:grid;gap:14px">
-        <div class="bq-card bq-compacto"><h2>Status</h2><p class="bq-sub">Clique num status para filtrar a lista.</p>
-          ${bqBarras(porStatus, 'var(--s1)', 'bqFiltrarStatusAdm', BQ.statusAdm)}
-          ${BQ.statusAdm ? '<button class="bq-limpar" style="margin:8px 0 0" onclick="bqFiltrarStatusAdm(\'\')">Mostrar todos</button>' : ''}</div>
-        <div class="bq-card bq-compacto"><h2>Por equipe</h2>${bqBarras(porEquipe, 'var(--s3)')}</div>
-        <div class="bq-card bq-compacto"><h2>Por função</h2>${bqBarras(porFuncao, 'var(--s2)')}</div>
-      </div>
-      <div class="bq-card"><h2>Admitidos ${BQ.statusAdm ? '— ' + esc(BQ.statusAdm) : ''} <span class="bq-num" style="color:var(--bq-ink-2);font-weight:500">(${lista.length})</span></h2>
-        <input placeholder="Procurar nome, produtiva ou função…" value="${esc(BQ.buscaAdm || '')}" style="margin:6px 0 10px"
-          oninput="BQ.buscaAdm=this.value;clearTimeout(BQ.tAdm);BQ.tAdm=setTimeout(()=>{bqDesenhar();const c=document.querySelector('#bq-conteudo input');if(c){c.focus();c.setSelectionRange(c.value.length,c.value.length);}},250)">
-        <div class="bq-rolagem" style="max-height:560px;overflow-y:auto"><table>
-          <thead><tr><th>Produtiva</th><th>Colaborador</th><th>Equipe</th><th>Função</th><th>Status</th>${adm.some((r) => r.mes) ? '<th>Admissão</th>' : ''}</tr></thead>
-          <tbody>${lista.map((r) => `<tr><td class="bq-num">${esc(r.cod || '—')}</td><td>${esc(r.nome)}</td>
-            <td>${r.equipe ? `<span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span>` : '—'}</td>
-            <td>${esc(r.funcao || '—')}</td><td>${esc(r.status || '—')}</td>${adm.some((x) => x.mes) ? `<td>${r.mes ? pnRotuloMes(r.mes) : '—'}</td>` : ''}</tr>`).join('')}</tbody>
-        </table></div></div>
-    </div>`;
-}
-function bqFiltrarStatusAdm(s) { BQ.statusAdm = (BQ.statusAdm === s) ? '' : s; bqDesenhar(); }
-
-/* ---------- DESLIGADOS E MOTIVOS (novo) ---------- */
-function bqDesligados() {
-  const des = (DADOS.des || []).map((r) => Object.assign({}, r, { motivo: r.motivo || 'Não informado' }));
-  if (!des.length) return '<div class="bq-card"><p class="bq-vazio">Sem desligamentos na aba CDESLIGADOS.</p></div>';
-  const motivos = bqOrdenar(bqContar(des, 'motivo'));
-  const semMotivo = des.filter((r) => r.motivo === 'Não informado').length;
-  const lista = des.filter((r) => !BQ.motivo || r.motivo === BQ.motivo)
-    .sort((a, b) => BQ.ordDes === 'nome' ? a.nome.localeCompare(b.nome) : String(b.data || b.mes).localeCompare(String(a.data || a.mes)));
-  return `
-    ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS ainda não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome e preencha o motivo de cada demissão — ele aparece aqui automaticamente.</div>'}
-    <div class="bq-grade desligados">
-      <div class="bq-card bq-compacto"><h2>Motivos de desligamento</h2>
-        <p class="bq-sub">${des.length} desligado(s) · ${semMotivo ? semMotivo + ' sem motivo preenchido' : 'todos com motivo'}. Clique para filtrar a lista.</p>
-        ${bqBarras(motivos, 'var(--s2)', 'bqFiltrarMotivo', BQ.motivo)}
-        ${BQ.motivo ? '<button class="bq-limpar" style="margin:8px 0 0" onclick="bqFiltrarMotivo(\'\')">Mostrar todos os motivos</button>' : ''}</div>
-      <div class="bq-card"><h2>Desligados ${BQ.motivo ? '— ' + esc(BQ.motivo) : ''} <span class="bq-num" style="color:var(--bq-ink-2);font-weight:500">(${lista.length})</span></h2>
-        <p class="bq-sub">Do mais recente para o mais antigo.</p>
-        <div class="bq-rolagem" style="max-height:520px;overflow-y:auto"><table>
-          <thead><tr><th onclick="BQ.ordDes='data';bqDesenhar()">Data</th><th onclick="BQ.ordDes='nome';bqDesenhar()">Colaborador</th><th>Equipe</th><th>Função</th><th>Tipo</th><th>Motivo</th></tr></thead>
-          <tbody>${lista.map((r) => `<tr><td>${r.data ? pnDataLonga(r.data) : pnRotuloMes(r.mes)}</td><td>${esc(r.nome)}${r.cod ? `<div class="lp-sub">${esc(r.cod)}</div>` : ''}</td>
-            <td>${r.equipe ? `<span class="bq-chip" style="background:${bqCor(r.equipe)}">${esc(r.equipe)}</span>` : '—'}</td><td>${esc(r.funcao)}</td>
-            <td>${esc(r.tipo)}</td><td class="motivo">${r.motivo === 'Não informado' ? '<span style="color:var(--bq-ink-3)">não informado</span>' : esc(r.motivo)}</td></tr>`).join('')}</tbody>
-        </table></div></div>
-    </div>`;
-}
-
-function bqFiltrarMotivo(m) { BQ.motivo = (BQ.motivo === m) ? '' : m; bqDesenhar(); }
 
 /* =====================================================================
    ESTOQUE — o de TI (tela Estoque de TI) e o da limpeza (aba Estoque da

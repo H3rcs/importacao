@@ -1549,6 +1549,118 @@ async function rodar() {
     await s.fechar();
   });
 
+  /*
+   * QUADRO DO CD (13/10) — a planilha com a aba GERAL (nomes ficticios, com
+   * titulo em cima do cabecalho, como a de verdade): o nome aparece, a faixa
+   * do desligado ativo, o mapa de calor leva a lista, a ficha abre a linha da
+   * planilha e a Conferencia agrupa o que corrigir. No computador
+   * compartilhado, quem entra depois nao herda o recorte de quem saiu.
+   */
+  await cenario('quadro do CD: liga a GERAL pela tela; nomes, faixa do desligado ativo, mapa leva a lista, ficha e conferencia; no computador compartilhado cada um cai no seu turno', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const { abas, esperado: E } = require('./dados-quadro.js')(s.mundo.DataDoScript, new Date());
+    const pl = s.mundo.novaPlanilha('BI Quadro CD Feira');
+    const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+    Object.keys(abas).forEach((nome, i) => {
+      const a = i === 0 ? pl.abas[0] : new Aba(pl, nome, 1000, 26);
+      if (i === 0) a.nome = nome; else pl.abas.push(a);
+      abas[nome].forEach((linha, l) => { if (linha) a.dados[l] = linha.slice(); });
+    });
+    const nomeDoCod = (cod) => (abas['GERAL'].find((l) => l && l[1] === cod) || [])[2];
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => abrir('quadro'));
+    // sem planilha: pede o link e liga pela tela
+    await f.waitForSelector('#bq-link', { timeout: 15000 });
+    await f.fill('#bq-link', 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit#gid=0');
+    await f.click('#pagina button:has-text("Ligar planilha")');
+    await f.waitForSelector('.qd-faixa', { timeout: 20000 });
+    const sub = await texto(aba, 'subtitulo-pagina');
+    afirmar(/^Aba GERAL de «BI Quadro CD Feira» · 167 pessoas na empresa/.test(sub), 'subtitulo: ' + sub);
+    // a faixa: os desligados que continuam ATIVOS, com o nome de cada um
+    const faixa = await f.evaluate(() => document.querySelector('.qd-faixa').innerText.replace(/\s+/g, ' '));
+    afirmar(/3 desligados continuam ATIVOS na GERAL/.test(faixa) && faixa.includes(nomeDoCod(E.desligadoAtivo[0])) && /\+ 5 outros pontos/.test(faixa), 'faixa: ' + faixa);
+    const abasTela = await f.evaluate(() => Array.from(document.querySelectorAll('#qd-abas .aba')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(abasTela.join('|') === 'Visão geral|Pessoas|Movimentação|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
+    // cartoes: o CD e as quatro equipes, com o numero de cada uma
+    const cartoes = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-cartao')).map((c) => c.innerText.replace(/\s+/g, ' ')));
+    afirmar(cartoes.length === 5 && /167 pessoas na empresa/.test(cartoes[0]) && /1° TURNO .*60/.test(cartoes[1]) && /ADM .*14/.test(cartoes[4]), 'cartoes: ' + cartoes.join(' || '));
+    // mapa de calor: SEPARADOR x 1° TURNO = 18; tocar leva para a lista dessas 18 pessoas
+    const celula = await f.evaluate(() => {
+      const tr = Array.from(document.querySelectorAll('.qd-mapa tbody tr')).find((t) => /^SEPARADOR$/.test((t.querySelector('th') || {}).innerText || ''));
+      const b = tr && tr.querySelector('td.c button');
+      return b ? b.innerText.replace(/\D+/g, '') : '';
+    });
+    afirmar(celula === '18', 'mapa SEPARADOR x 1° TURNO: ' + celula);
+    await f.evaluate(() => Array.from(document.querySelectorAll('.qd-mapa tbody tr')).find((t) => /^SEPARADOR$/.test((t.querySelector('th') || {}).innerText || '')).querySelector('td.c button').click());
+    await f.waitForFunction(() => QD.aba === 'pessoas' && document.querySelectorAll('.qd-pessoa').length > 0, null, { timeout: 5000 });
+    const lista = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-pessoa .qd-pessoa-nome')).map((x) => x.innerText.trim()));
+    afirmar(lista.length === 18 && lista.every((n) => n && !/^\d+$/.test(n) && n !== 'COD'), 'as 18 pessoas, com nome: ' + lista.join(', '));
+    const filtros = await f.evaluate(() => [QD.equipe, QD.funcao, document.querySelector('.qd-pill[aria-pressed="true"]').innerText.replace(/\s+/g, ' ').trim()]);
+    afirmar(filtros[0] === '1° TURNO' && filtros[1] === 'SEPARADOR' && /^1° TURNO 18/.test(filtros[2]), 'filtros vindos do mapa (a contagem da equipe respeita a funcao): ' + filtros.join(' | '));
+    // ficha: nome, COD, RH e o link direto para a linha da GERAL
+    await f.click('.qd-pessoa >> nth=0');
+    await f.waitForSelector('#janela:not(.oculto) .qd-ficha', { timeout: 5000 });
+    const ficha = await f.evaluate(() => ({ nome: document.querySelector('.qd-ficha h3').innerText.trim(),
+      dados: document.querySelector('.qd-ficha-dados').innerText.replace(/\s+/g, ' '),
+      link: (document.querySelector('#janela-rodape a') || {}).href || '' }));
+    const linhaPlanilha = abas['GERAL'].findIndex((l) => l && l[2] === ficha.nome) + 1;
+    afirmar(ficha.nome === lista[0] && linhaPlanilha > 3, 'ficha de quem foi tocado: ' + JSON.stringify(ficha));
+    afirmar(new RegExp('Linha da GERAL ' + linhaPlanilha, 'i').test(ficha.dados) && ficha.link.endsWith('/edit#gid=0&range=A' + linhaPlanilha), 'linha e link da planilha: ' + JSON.stringify(ficha) + ' linha ' + linhaPlanilha);
+    await f.evaluate(() => fecharJanela());
+    // busca por COD acha a pessoa mesmo com o filtro de outra funcao
+    await f.evaluate(() => qdLimpar());
+    await f.fill('#qd-busca', '30001');
+    await f.waitForFunction(() => document.querySelectorAll('.qd-pessoa').length === 1, null, { timeout: 5000 });
+    afirmar(await f.evaluate(() => document.querySelector('.qd-pessoa .qd-pessoa-nome').innerText.trim()) === nomeDoCod('30001'), 'busca pelo COD');
+    await f.fill('#qd-busca', '');
+    // A–Z: ninguem sem nome alem da linha que esta sem nome na planilha
+    await f.evaluate(() => { QD.organizar = 'az'; QD.limite = 1000; qdDesenhar(); });
+    const nomesAZ = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-tabela tbody tr td:first-child .qd-pessoa-nome')).map((x) => x.innerText.trim()));
+    afirmar(nomesAZ.length === E.ativos && nomesAZ.filter((n) => /Sem nome/i.test(n)).length === 1 && !nomesAZ.some((n) => /^\d+$/.test(n)), 'lista A–Z: ' + nomesAZ.length + ' ' + nomesAZ.slice(-3).join(', '));
+    // Conferencia: os cinco tipos, cada um com como corrigir; e como o GSL leu a planilha
+    await f.evaluate(() => qdAba('conf'));
+    const grupos = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(grupos.join('|') === 'Desligados que continuam ativos 3|Linhas sem nome 1|EQUIPE fora do padrão 1|Produtivo (COD) repetido 1|Admitidos que não estão na GERAL 2', 'grupos: ' + grupos.join('|'));
+    afirmar(!(await f.$('.qd-faixa')), 'a faixa some na propria Conferencia');
+    const leitura = await f.evaluate(() => document.querySelector('.qd-leitura').textContent.replace(/\s+/g, ' '));
+    afirmar(/PROD/.test(leitura) && /TURNO 4/.test(leitura) && /cabeçalho na linha 3/.test(leitura), 'como leu: ' + leitura.slice(0, 300));
+    // Movimentacao abre sem erro, com os quatro numeros
+    await f.evaluate(() => qdAba('mov'));
+    afirmar(await f.evaluate(() => document.querySelectorAll('.qd-kpi').length === 4 && !document.querySelector('#qd-conteudo .erro-caixa')), 'movimentacao');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close();
+
+    // Computador compartilhado: o gerente olha o 3° TURNO e sai; a coordenadora (turno A) entra e cai no 1° TURNO.
+    // (O coordenador nao ve o Quadro por padrao: o administrador libera o modulo para ela.)
+    const cx = s.contexto(DONO); cx._porta = true;
+    const adminCx = { email: DONO, perfil: 'ADMIN', permissoes: cx.permissoesDe('ADMIN') };
+    cx.acaoDefinirModuloPessoa(adminCx, { id: cx.listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD).ID, modulo: 'quadro', modo: 'VER' });
+    const pc = await abrirAba(s, GERAL);
+    await entrar(pc, GERENTE, '2468', true);
+    await esperarTela(pc, ['aplicacao']);
+    const g = await frame(pc);
+    await g.evaluate(() => abrir('quadro'));
+    await g.waitForSelector('.qd-cartao', { timeout: 20000 });
+    afirmar(await g.evaluate(() => QD.equipe === '*'), 'gerente: todas as equipes');
+    await g.evaluate(() => { qdEquipe('3° TURNO'); qdAba('pessoas'); });
+    await g.evaluate(() => sair());
+    await esperarTela(pc, ['entrar']);
+    await entrar(pc, COORD, '1357', true);
+    await esperarTela(pc, ['aplicacao']);
+    const c = await frame(pc);
+    await c.evaluate(() => abrir('quadro'));
+    await c.waitForSelector('.qd-cartao', { timeout: 20000 });
+    const dela = await c.evaluate(() => [QD.equipe, QD.aba, document.querySelector('.qd-pill[aria-pressed="true"]').innerText.replace(/\s+/g, ' ').trim()]);
+    afirmar(dela[0] === '1° TURNO' && dela[1] === 'geral' && /^1° TURNO/.test(dela[2]), 'coordenadora do turno A cai no 1° TURNO, na visao geral: ' + dela.join(' | '));
+    afirmar(await c.evaluate(() => !document.querySelector('#acoes-topo').innerText.includes('Trocar planilha')), 'quem so ve nao troca a planilha');
+    afirmar(!pc.erros.length, 'erros: ' + pc.erros.join(' | '));
+    await pc.contexto.close();
+    await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

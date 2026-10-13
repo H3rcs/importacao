@@ -12,9 +12,10 @@
  * desligados (CDESLIGADOS) continuam vindo das mesmas abas.
  *
  * INCONSISTENCIAS: desligado (CDESLIGADOS) que continua ATIVO na GERAL — o
- * pedido da gerencia — e, do mesmo jeito, o que deixa o quadro errado:
- * linha sem nome, EQUIPE fora do padrao, produtivo ou matricula repetidos e
- * admitido que nao entrou na GERAL. Cada uma diz a linha da planilha.
+ * pedido da gerencia, a unica "grave" (a faixa vermelha da tela) — e, como
+ * "atencao", o que deixa o quadro errado: linha sem nome, EQUIPE fora do
+ * padrao, produtivo ou matricula repetidos e admitido que nao entrou na
+ * GERAL. Cada uma diz a linha da planilha.
  */
 const BUILD_QUADRO = '2026.10.13';   // carimbo da entrega — ver APP.build no Codigo.gs
 
@@ -210,7 +211,7 @@ function equipeQ_(v) {
 function situacaoQ_(v) {
   const t = normalizaQ_(v).replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t) return 'ATIVO';
-  if (/^(INATIV|DESLIG|DEMIT|DEMISS|RESCI|RESCIS|EX |SAIU|SAIDA|FORA|BAIXA|NAO|N$|FALSE|ENCERR|TERMIN|DISPENS|TRANSFERID)/.test(t)) return 'FORA';
+  if (/^(INATIV|DESATIV|DESLIG|DEMIT|DEMISS|RESCI|EX |SAIU|SAIDA|FORA|BAIXA|NAO|N$|FALSE|ENCERR|TERMIN|DISPENS|TRANSFERID)/.test(t)) return 'FORA';
   if (/FERIAS/.test(t)) return 'FERIAS';
   if (/(AFAST|LICEN|ATESTAD|INSS|AUXILIO|MATERNID|PATERNID|ACIDENT)/.test(t)) return 'AFASTADO';
   return 'ATIVO';
@@ -223,13 +224,15 @@ function situacaoQ_(v) {
 function lerPlanilhaQuadro_(id) {
   exigirPorta_();
   const ss = SpreadsheetApp.openById(id);
-  const leitura = { aba: '', linhas: 0, colunas: {}, faltam: [], status: {} };
+  const leitura = { aba: '', linhas: 0, colunas: {}, faltam: [], status: {}, equipes: {}, gid: null, linhaCabecalho: 0 };
   const geral = [];
 
   const abaGeral = abaQuadro_(ss, QUADRO_ABA_GERAL);
   if (abaGeral) {
     const t = lerTabelaQ_(abaGeral, QUADRO_COLUNAS);
     leitura.aba = abaGeral.getName();
+    leitura.linhaCabecalho = t.primeiraLinha - 1;
+    try { leitura.gid = abaGeral.getSheetId(); } catch (e) { leitura.gid = null; }   // "abrir na planilha" vai direto a linha
     Object.keys(t.col).forEach(function (k) { leitura.colunas[k] = t.cab[t.col[k]]; });
     leitura.faltam = ['equipe', 'cod', 'nome', 'funcao', 'rh', 'status'].filter(function (k) { return t.col[k] === undefined; });
     t.linhas.forEach(function (linha, i) {
@@ -254,7 +257,17 @@ function lerPlanilhaQuadro_(id) {
     leitura.layout = leitura.aba ? 'APOIO' : '';
   }
   leitura.linhas = geral.length;
-  geral.forEach(function (r) { const k = r.status || '(vazio)'; leitura.status[k] = (leitura.status[k] || 0) + 1; });
+  // Chave de cada pessoa na tela: no layout APOIO o numero da linha se repete entre as abas.
+  geral.forEach(function (r, i) { r.ref = i + 1; });
+  // Como cada valor escrito foi entendido (a aba Conferencia mostra): STATUS -> situacao; EQUIPE -> turno.
+  geral.forEach(function (r) {
+    const k = r.status || '(vazio)';
+    leitura.status[k] = leitura.status[k] || { n: 0, situacao: r.situacao };
+    leitura.status[k].n++;
+    const e = r.equipeBruta || '(vazio)';
+    leitura.equipes[e] = leitura.equipes[e] || { n: 0, equipe: r.equipe };
+    leitura.equipes[e].n++;
+  });
 
   const adm = [];
   const abaAdm = abaQuadro_(ss, QUADRO_ABA_ADMITIDOS);
@@ -361,7 +374,8 @@ function acharQ_(ix, r) {
 function inconsistenciasQ_(geral, adm, des) {
   const saida = [];
   const ix = indiceQ_(geral), ixAdm = indiceQ_(adm), ixDes = indiceQ_(des);
-  const quem = function (g) { return { cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta, linha: g.linha }; };
+  const quem = function (g) { return { cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta, linha: g.linha, ref: g.ref, aba: g.aba || '' }; };
+  const ondeQ = function (g) { return (g.aba ? g.aba + ' ' : '') + g.linha; };
 
   // 1. Desligado que continua ATIVO na GERAL (o pedido): um aviso por linha da GERAL, com o desligamento mais recente.
   const jaVisto = {};
@@ -385,7 +399,7 @@ function inconsistenciasQ_(geral, adm, des) {
 
   // 2. Linha sem nome (a coluna PROD vazia).
   geral.filter(function (g) { return !g.nome; }).forEach(function (g) {
-    saida.push(Object.assign(quem(g), { tipo: 'SEM_NOME', gravidade: 'grave', nome: '',
+    saida.push(Object.assign(quem(g), { tipo: 'SEM_NOME', gravidade: 'atencao', nome: '',
       detalhe: 'Sem o nome (coluna PROD)' + (g.cod ? ' — produtivo ' + g.cod : '') + (g.rh ? ', matrícula ' + g.rh : '') + '.' }));
   });
 
@@ -406,9 +420,8 @@ function inconsistenciasQ_(geral, adm, des) {
       const gs = grupos[k];
       saida.push(Object.assign(quem(gs[0]), { tipo: x[1], gravidade: 'atencao',
         nome: gs.map(function (g) { return g.nome || '(sem nome)'; }).join(' · '),
-        linhas: gs.map(function (g) { return g.linha; }),
-        detalhe: x[2] + ' ' + gs[0][x[0]] + ' está em ' + gs.length + ' linhas ativas (' +
-          gs.map(function (g) { return g.linha; }).join(', ') + ').' }));
+        linhas: gs.map(ondeQ), refs: gs.map(function (g) { return g.ref; }),
+        detalhe: x[2] + ' ' + gs[0][x[0]] + ' está em ' + gs.length + ' linhas ativas (' + gs.map(ondeQ).join(', ') + ').' }));
     });
   });
 

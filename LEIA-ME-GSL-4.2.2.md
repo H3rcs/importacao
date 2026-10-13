@@ -28,13 +28,87 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **− Saída** em cada linha: quantidade, data da saída, **setor** e **usuário que recebeu** (pelo menos um dos dois). Os setores e usuários já usados aparecem como sugestão.
   - As abas **Resumo**, **Movimentações** e **Inventário** continuam.
   - Em **Colar da planilha**, a última coluna é o estoque ideal. O esquema subiu para 8.4 e a coluna nova é criada sozinha.
-- **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas APOIO TA, APOIO TB, APOIO TC, CADMITIDOS (ou CDADMITIDOS) e CDESLIGADOS. O nome da aba pode variar em maiúsculas, acentos e espaços; o título acima do cabeçalho é ignorado; a data de admissão pode ser data, texto (02/09/2025) ou mês ("ago/2025"). Depois de mudar a planilha, clique em **Atualizar dados** no Quadro (a leitura fica guardada por 5 minutos). Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
+- **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas GERAL, CADMITIDOS (ou CDADMITIDOS) e CDESLIGADOS (veja o pedido de 13/10). O nome da aba pode variar em maiúsculas, acentos e espaços; o título acima do cabeçalho é ignorado; a data de admissão pode ser data, texto (02/09/2025) ou mês ("ago/2025"). Depois de mudar a planilha, clique em **Atualizar dados** no Quadro (a leitura fica guardada por 5 minutos). Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
 - **Nobreaks:**
   - **Hora só com números:** `0830` vira 08:30 e `14` vira 14:00 (não precisa dos dois pontos). Hora que não existe fica vermelha e não é gravada.
   - O **Histórico** tem a mesma cara da folha de lançamento: dia agrupado, entrada em azul, saída em verde, carga e alerta em vermelho. O mês pode ser "Todos (últimos 120 dias)".
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Pedido de 13/10 (Quadro do CD: uma aba só, a GERAL, e um painel novo)
+
+**A planilha: só a aba GERAL**
+
+O Quadro agora lê uma aba só, a **GERAL**, na mesma planilha, e separa os turnos sozinho. As abas APOIO TA, TB e TC podem continuar na planilha, mas o GSL não as lê mais. Ele só volta a elas se a planilha ficar sem a aba GERAL; assim o quadro nunca fica vazio na troca. Admitidos e desligados continuam vindo da CADMITIDOS e da CDESLIGADOS.
+
+| Coluna | O que é |
+|---|---|
+| **EQUIPE** | `1° TURNO`, `2° TURNO`, `3° TURNO` ou `ADM` |
+| **COD** | número do produtivo |
+| **PROD** | nome do colaborador |
+| **DESCRIÇÃO** | função |
+| **RH** | matrícula no RH |
+| **STATUS** | se a pessoa ainda está na empresa |
+
+- A ordem das colunas não importa, e um título acima do cabeçalho é ignorado.
+- **EQUIPE:** além do jeito do pedido, o GSL entende "1º" (com o "º"), "TURNO 1", "T1" e as letras antigas TA/TB/TC ou A/B/C (1°, 2° e 3° TURNO). Com outro valor (ex.: "TURNO 4"), a pessoa conta no CD, mas fica sem turno, e a Conferência aponta a linha.
+- **STATUS:** está **fora da empresa** quem tem INATIVO, DESATIVADO, DESLIGADO, DEMITIDO, DEMISSÃO, RESCISÃO, EX-…, SAIU, FORA, BAIXA, NÃO, ENCERRADO, DISPENSADO ou TRANSFERIDO.
+  - **FÉRIAS** e **AFASTADO** (também licença, atestado, INSS e auxílio) continuam na empresa, só que fora do posto.
+  - Qualquer outro valor (ATIVO, vazio, EM TREINAMENTO, EXPERIÊNCIA) conta como ativo.
+  - Na Conferência, "Como o GSL leu a planilha" mostra como cada valor escrito foi entendido.
+
+**Desligado com STATUS ativo**
+
+Quando alguém está na CDESLIGADOS e o STATUS na GERAL ainda é ativo, o GSL aponta a inconsistência em dois lugares:
+- uma **faixa vermelha** no alto do Quadro, com o nome, o turno e a data do desligamento;
+- a aba **Conferência**, com a linha da GERAL e o botão que abre a planilha nessa linha.
+
+O GSL procura a pessoa primeiro pelo COD, depois pela matrícula (RH). Se a CDESLIGADOS não tiver nenhum dos dois, procura pelo nome, sem diferenciar acento nem maiúscula. Se a pessoa também aparece na CADMITIDOS com data posterior ao desligamento, o aviso lembra que pode ser recontratação.
+
+A Conferência também aponta, como **atenção** (sem a faixa vermelha):
+- linha sem nome (PROD vazio);
+- EQUIPE fora do padrão;
+- COD repetido;
+- matrícula (RH) repetida;
+- admitido que não entrou na GERAL.
+
+**O nome que sumia**
+
+A causa estava em como o GSL achava o cabeçalho e a coluna do nome:
+- A coluna do nome se chama **PROD**. O GSL procurava "COLABORADOR" ou "NOME" e, sem achar, deixava o nome vazio.
+- Quando o título acima do cabeçalho tinha a palavra "COLABORADORES", o GSL tomava o título pelo cabeçalho. O nome virava "COD" ou um número.
+
+Agora o cabeçalho é a primeira linha, entre as 15 primeiras, com pelo menos dois nomes de coluna conhecidos. Cada coluna é procurada primeiro pelo nome exato e só depois por parte do nome. Uma leitura antiga guardada no cache é descartada e lida de novo.
+
+**O painel novo**
+
+São quatro abas. A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
+- **Visão geral:**
+  - o CD inteiro e um cartão por equipe: pessoas, disponíveis, de férias e afastados, liderança ("1 para cada N"), saídas em 90 dias e o alerta de desligado ainda ativo;
+  - o **mapa de calor Função × Turno**: tocar num número abre a lista daquelas pessoas, e • marca que alguém ali está de férias ou afastado;
+  - **Fora do posto hoje** e o resumo dos últimos 90 dias.
+- **Pessoas:**
+  - o quadro de cada turno, em blocos por função, com busca por nome, COD ou RH;
+  - os recortes Na empresa, Fora do posto, Novos, Com pendência e Fora da empresa, e a ordem A–Z;
+  - **Exportar Excel** (abas Quadro e Conferência) e **Imprimir quadro**;
+  - tocar num nome abre a **ficha**: COD, RH, STATUS, como o GSL entendeu, a linha da GERAL (o botão abre a planilha nessa linha), admissão, desligamento e pendências.
+- **Movimentação:**
+  - o período, de 30 dias até tudo;
+  - saídas, entradas, saldo e turnover de saída (% ao mês);
+  - entradas e saídas por mês, os motivos e onde as pessoas saem (por turno e por função);
+  - a lista de quem entrou e saiu, com o aviso "ainda ativo na GERAL".
+- **Conferência:** o que corrigir na planilha, agrupado, com "o que é" e "como corrigir"; e **Como o GSL leu a planilha** (as colunas achadas e como cada STATUS e EQUIPE foi entendido).
+
+O coordenador abre o Quadro já no turno dele (A = 1° TURNO, B = 2°, C = 3°). No computador compartilhado, quem entra depois não herda os filtros de quem saiu. **O nível COORDENADOR não vê o Quadro por padrão.** Para liberar para alguém: **Pessoas e acessos › Quem vê cada módulo**, coluna **Quadro do CD**, opção **Ver**.
+
+**Arquivos desta entrega:** `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, abra o Quadro e clique em **Atualizar dados**.
+
+**Para conferir:**
+1. Abra o Quadro do CD. O subtítulo diz "Aba GERAL de «…» · N pessoas na empresa".
+2. Compare o número de cada cartão com a planilha (filtro na coluna EQUIPE, só STATUS ativo, férias e afastados).
+3. Se aparecer a faixa vermelha, toque no nome. A ficha abre, e o botão leva à linha da GERAL.
+4. Em **Conferência › Como o GSL leu a planilha**, confira se cada STATUS foi entendido como você espera.
 
 ## Pedido de 10/10 (desempenho: computador que barra o Google, sessão que caía sozinha, bolinha das ações em aberto)
 

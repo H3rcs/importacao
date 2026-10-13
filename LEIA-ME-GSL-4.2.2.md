@@ -52,6 +52,7 @@ O Quadro agora lê uma aba só, a **GERAL**, na mesma planilha, e separa os turn
 | **STATUS** | se a pessoa ainda está na empresa |
 
 - A ordem das colunas não importa, e um título acima do cabeçalho é ignorado.
+- **Células mescladas** (por exemplo, "1° TURNO" mesclado no bloco do turno) valem para todas as linhas da mesclagem.
 - **EQUIPE:** além do jeito do pedido, o GSL entende "1º" (com o "º"), "TURNO 1", "T1" e as letras antigas TA/TB/TC ou A/B/C (1°, 2° e 3° TURNO). Com outro valor (ex.: "TURNO 4"), a pessoa conta no CD, mas fica sem turno, e a Conferência aponta a linha.
 - **STATUS:** está **fora da empresa** quem tem INATIVO, DESATIVADO, DESLIGADO, DEMITIDO, DEMISSÃO, RESCISÃO, EX-…, SAIU, FORA, BAIXA, NÃO, ENCERRADO, DISPENSADO ou TRANSFERIDO.
   - **FÉRIAS** e **AFASTADO** (também licença, atestado, INSS e auxílio) continuam na empresa, só que fora do posto.
@@ -61,10 +62,20 @@ O Quadro agora lê uma aba só, a **GERAL**, na mesma planilha, e separa os turn
 **Desligado com STATUS ativo**
 
 Quando alguém está na CDESLIGADOS e o STATUS na GERAL ainda é ativo, o GSL aponta a inconsistência em dois lugares:
-- uma **faixa vermelha** no alto do Quadro, com o nome, o turno e a data do desligamento;
+- uma **faixa vermelha** no alto do Quadro, com o nome, o turno, a data do desligamento e quantas pessoas o CD teria sem esses desligados;
 - a aba **Conferência**, com a linha da GERAL e o botão que abre a planilha nessa linha.
 
-O GSL procura a pessoa primeiro pelo COD, depois pela matrícula (RH). Se a CDESLIGADOS não tiver nenhum dos dois, procura pelo nome, sem diferenciar acento nem maiúscula. Se a pessoa também aparece na CADMITIDOS com data posterior ao desligamento, o aviso lembra que pode ser recontratação.
+Como o GSL acha a pessoa:
+- primeiro pelo COD, depois pela matrícula (RH);
+- se a CDESLIGADOS não tiver nenhum dos dois, pelo nome, sem diferenciar acento nem maiúscula. Nesse caso o aviso diz "Achado pelo nome — confira se é a mesma pessoa". Um homônimo com outro COD não é confundido;
+- valores de preenchimento no COD ou no RH ("-", "0", "#N/A") não contam como número.
+
+Casos especiais:
+- **Desligamento sem data** na CDESLIGADOS também é conferido. Ele só fica fora dos gráficos e das contas por período.
+- **Desligamento com data futura** (aviso prévio) ainda não é inconsistência: a pessoa ainda trabalha.
+- **Recontratação:** se a pessoa aparece de novo na CADMITIDOS com data posterior ao desligamento, o aviso vira **atenção** (sem a faixa vermelha) e lembra de tirar a linha antiga da CDESLIGADOS.
+
+A faixa vermelha também aparece se a GERAL estiver **sem a coluna PROD, EQUIPE ou STATUS**: ela explica o efeito ("por isso os nomes não aparecem", "por isso todos estão contando como ativos"). Se a planilha não tiver a aba GERAL, o Quadro diz isso, em vez de mostrar um quadro vazio.
 
 A Conferência também aponta, como **atenção** (sem a faixa vermelha):
 - linha sem nome (PROD vazio);
@@ -83,29 +94,31 @@ Agora o cabeçalho é a primeira linha, entre as 15 primeiras, com pelo menos do
 
 **O painel novo**
 
-São quatro abas. A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
+São quatro abas. A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela. Cor quer dizer equipe (azul 1°, laranja 2°, verde-água 3°, amarelo ADM), sempre com o nome escrito ao lado. Vermelho e âmbar só aparecem para problema, sempre com ícone e palavra.
 - **Visão geral:**
-  - o CD inteiro e um cartão por equipe: pessoas, disponíveis, de férias e afastados, liderança ("1 para cada N"), saídas em 90 dias e o alerta de desligado ainda ativo;
-  - o **mapa de calor Função × Turno**: tocar num número abre a lista daquelas pessoas, e • marca que alguém ali está de férias ou afastado;
-  - **Fora do posto hoje** e o resumo dos últimos 90 dias.
-- **Pessoas:**
-  - o quadro de cada turno, em blocos por função, com busca por nome, COD ou RH;
-  - os recortes Na empresa, Fora do posto, Novos, Com pendência e Fora da empresa, e a ordem A–Z;
-  - **Exportar Excel** (abas Quadro e Conferência) e **Imprimir quadro**;
+  - o CD inteiro e um cartão por equipe: pessoas, a fatia do CD, disponíveis, de férias e afastados, liderança ("1 para cada N", pelas funções de líder, supervisor, coordenador…), saídas em 90 dias e os alertas;
+  - o **mapa de calor Função × Turno**, com os grupos Liderança e Administrativo (este começa recolhido numa linha). Tocar num número abre a lista daquelas pessoas;
+  - **Desfalques de hoje**: funções com metade ou menos das pessoas disponíveis, segundo o STATUS;
+  - **Movimentação dos últimos 90 dias**, comparada com os 90 anteriores, com um mini-gráfico de 6 meses.
+- **Quadro por turno:**
+  - o quadro de parede de cada turno, em blocos por função, com busca por nome, COD ou RH (Enter com um resultado só abre a ficha);
+  - os recortes No quadro, Disponíveis, Fora do posto, Novos, Com pendência e Fora da empresa, e a ordem A–Z;
+  - **Imprimir quadro** (um turno por página) e **Exportar Excel** (abas Quadro e Conferência);
   - tocar num nome abre a **ficha**: COD, RH, STATUS, como o GSL entendeu, a linha da GERAL (o botão abre a planilha nessa linha), admissão, desligamento e pendências.
 - **Movimentação:**
   - o período, de 30 dias até tudo;
-  - saídas, entradas, saldo e turnover de saída (% ao mês);
-  - entradas e saídas por mês, os motivos e onde as pessoas saem (por turno e por função);
-  - a lista de quem entrou e saiu, com o aviso "ainda ativo na GERAL".
-- **Conferência:** o que corrigir na planilha, agrupado, com "o que é" e "como corrigir"; e **Como o GSL leu a planilha** (as colunas achadas e como cada STATUS e EQUIPE foi entendido).
+  - saídas (comparadas com o período anterior, só quando há histórico), entradas e turnover de saída (% ao mês). O saldo saiu: sem data de admissão ele enganava;
+  - entradas e saídas por mês (com "Ver em tabela"), os motivos agrupados por tipo (pedido do colaborador × decisão da empresa) e onde as pessoas saem (por turno e por função);
+  - a lista de quem entrou e saiu, por mês, com os avisos "ainda ativo na GERAL" e "não está na GERAL". Tocar num mês ou num motivo recorta tudo abaixo.
+- **Conferência:** o que corrigir na planilha, agrupado e na ordem das linhas, com "o que é" e "como corrigir"; **Baixar lista (Excel)**; e **Como o GSL leu a planilha** (as colunas achadas e como cada STATUS e EQUIPE foi entendido).
+- **Copiar resumo** (no alto da tela): copia 4 ou 5 linhas com o quadro do recorte, para colar no WhatsApp ou no e-mail.
 
 O coordenador abre o Quadro já no turno dele (A = 1° TURNO, B = 2°, C = 3°). No computador compartilhado, quem entra depois não herda os filtros de quem saiu. **O nível COORDENADOR não vê o Quadro por padrão.** Para liberar para alguém: **Pessoas e acessos › Quem vê cada módulo**, coluna **Quadro do CD**, opção **Ver**.
 
 **Arquivos desta entrega:** `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, abra o Quadro e clique em **Atualizar dados**.
 
 **Para conferir:**
-1. Abra o Quadro do CD. O subtítulo diz "Aba GERAL de «…» · N pessoas na empresa".
+1. Abra o Quadro do CD. O subtítulo diz "Aba GERAL de «…» · lida hoje às hh:mm", e o cartão CD inteiro mostra quantas pessoas estão no quadro.
 2. Compare o número de cada cartão com a planilha (filtro na coluna EQUIPE, só STATUS ativo, férias e afastados).
 3. Se aparecer a faixa vermelha, toque no nome. A ficha abre, e o botão leva à linha da GERAL.
 4. Em **Conferência › Como o GSL leu a planilha**, confira se cada STATUS foi entendido como você espera.
@@ -355,9 +368,9 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha (39 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD (46 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha (50 cenários)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD (51 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

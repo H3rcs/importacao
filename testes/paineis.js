@@ -753,6 +753,67 @@ caso('quadro do CD: recontratacao so cala o aviso quando a admissao casa por NUM
   afirmar(/readmissão/.test(d.inconsistencias.find((x) => x.cod === '30300').detalhe), 'a dica da DORA fala da readmissao');
 });
 
+caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e depois da saida; saida so com o mes; homonimo nao cala a pessoa; a dica diz o que conferir', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
+  const h = new Date();
+  const mesTexto = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][h.getMonth()].toLowerCase() + '/' + h.getFullYear();
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+      ['1° TURNO', '30010', 'JOSE SILVA', 'SEPARADOR', '100', 'ATIVO'],       // o COD dele foi dado a um novato na CADMITIDOS
+      ['1° TURNO', '30020', 'ANA LIMA', 'SEPARADOR', '200', 'ATIVO'],         // readmissao com o ano digitado errado (no futuro)
+      ['1° TURNO', '30030', 'CARLOS ROCHA', 'SEPARADOR', '300', 'ATIVO'],     // saida anotada so com o mes; admissao no mesmo mes
+      ['2° TURNO', '30040', 'DORA MELO', 'CONFERENTE', '400', 'ATIVO'],       // recontratada ha tempo, saiu de novo com o COD trocado
+      ['2° TURNO', '30050', 'EVA PRADO', 'CONFERENTE', '', 'ATIVO'],          // a outra EVA (RH 999) saiu e voltou; esta saiu
+      ['2° TURNO', '30060', 'FABIO ALVES', 'CONFERENTE', '600', 'ATIVO'],     // CADMITIDOS so com o nome
+      ['3° TURNO', '30070', 'GIL SANTOS', 'SEPARADOR', '700', 'ATIVO'],       // saida sem data, readmissao datada
+      ['3° TURNO', '30080', 'HELENA DIAS', 'SEPARADOR', '800', 'ATIVO']],     // recontratada com COD novo, CADMITIDOS sem data
+    'CADMITIDOS': [['PRODUTIVA', 'MATRÍCULA', 'COLABORADOR', 'STATUS', 'DATA ADMISSÃO'],
+      ['30010', '', 'PEDRO COSTA', 'ATIVO', D(-5)],
+      ['30020', '', 'ANA LIMA', 'ATIVO', D(200)],
+      ['30030', '', 'CARLOS ROCHA', 'ATIVO', D(0)],
+      ['30040', '', 'DORA MELO', 'ATIVO', D(-400)],
+      ['', '999', 'EVA PRADO', 'ATIVO', D(-3)],
+      ['', '', 'FABIO ALVES', 'ATIVO', D(-5)],
+      ['30070', '', 'GIL SANTOS', 'ATIVO', D(-10)],
+      ['30080', '', 'HELENA DIAS', 'ATIVO', '']],
+    'CDESLIGADOS': [['COD', 'MATRÍCULA', 'COLABORADOR', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'],
+      ['30010', '', 'JOSE SILVA', D(-30), 'INVOLUNTÁRIO', 'Faltas'],
+      ['30020', '', 'ANA LIMA', D(-10), 'VOLUNTÁRIO', ''],
+      ['30030', '', 'CARLOS ROCHA', mesTexto, 'VOLUNTÁRIO', ''],
+      ['30040', '', 'DORA MELO', D(-600), 'VOLUNTÁRIO', ''],
+      ['30400', '', 'DORA MELO', D(-20), 'INVOLUNTÁRIO', 'Faltas'],
+      ['30050', '', 'EVA PRADO', D(-40), 'INVOLUNTÁRIO', 'Faltas'],
+      ['', '999', 'EVA PRADO', D(-20), 'VOLUNTÁRIO', ''],
+      ['30060', '', 'FABIO ALVES', D(-30), 'VOLUNTÁRIO', ''],
+      ['30070', '', 'GIL SANTOS', '', 'VOLUNTÁRIO', ''],
+      ['28610', '', 'HELENA DIAS', D(-30), 'VOLUNTÁRIO', '']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro, 'erro: ' + d.erro);
+  const de = (cod) => d.inconsistencias.filter((x) => x.cod === cod && (x.tipo === 'DESLIGADO_ATIVO' || x.tipo === 'MESMO_NOME'));
+  const um = (cod, tipo, re, porque) => {
+    const l = de(cod);
+    afirmar(l.length === 1 && l[0].tipo === tipo && (!re || re.test(l[0].detalhe)), porque + ': ' + JSON.stringify(l));
+  };
+  um('30010', 'DESLIGADO_ATIVO', /O COD 30010 está na CADMITIDOS como PEDRO COSTA .*confira o número/, 'admissao pelo numero com OUTRO nome nao prova recontratacao');
+  um('30020', 'DESLIGADO_ATIVO', /data no futuro .*confira a data/, 'admissao com data no futuro nao conta');
+  um('30030', 'DESLIGADO_ATIVO', null, 'saida so com o mes e admissao no mesmo mes nao e recontratacao');
+  um('30040', 'MESMO_NOME', null, 'saida nova (COD trocado) depois da readmissao continua pedindo conferencia');
+  um('30050', 'DESLIGADO_ATIVO', null, 'a volta da outra EVA (achada so pelo nome) nao cala a saida desta');
+  afirmar(de('30050')[0].chave === 'produtivo', 'a EVA desligada e achada pelo produtivo');
+  um('30060', 'DESLIGADO_ATIVO', /mesmo nome, mas sem o COD\/RH desta pessoa.*ponha o COD ou o RH/, 'CADMITIDOS so com o nome: a dica pede o numero');
+  um('30070', 'DESLIGADO_ATIVO', /ponha a data desta saída/, 'saida sem data com readmissao datada: a dica pede a data da saida');
+  um('30080', 'MESMO_NOME', /sem data: se foi recontratação, ponha a data da nova admissão/, 'recontratada com COD novo sem data: a dica pede a data');
+  // a dica segue a regra: com a data da readmissao, o aviso da HELENA some
+  const pl = m.planilhas.get(link.split('/d/')[1].split('/')[0]);
+  pl.abas.find((a) => a.nome === 'CADMITIDOS').dados[8][4] = D(-5);
+  acao(m, s, 'atualizarQuadro', {});
+  const d2 = tela(m, s, 'quadro');
+  afirmar(!d2.inconsistencias.some((x) => x.cod === '30080'), 'com a data da readmissao, sem aviso: ' + JSON.stringify(d2.inconsistencias.filter((x) => x.cod === '30080')));
+});
+
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const link = planilhaAntiga(m, 'BI Quadro Feira', {

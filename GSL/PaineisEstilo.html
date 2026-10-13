@@ -296,7 +296,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-link { background: none; border: none; padding: 0; color: inherit; cursor: pointer; font: inherit; text-align: left;
   text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--tinta-fraca); }
 .qd-link:hover { text-decoration-color: currentColor; }
-.qd-fraca { color: var(--tinta-fraca); }
+.qd-fraca { color: var(--tinta-media); }
 .bi-quadro.qd-relendo { opacity: .6; pointer-events: none; transition: opacity .15s; }
 .qd-ico { flex: none; display: inline-block; vertical-align: -2px; }
 
@@ -500,7 +500,11 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   text-align: left; padding: 5px 6px; border: none; background: transparent; border-radius: 8px; cursor: pointer; min-height: 30px; }
 .qd-barra:hover { background: var(--bq-surface-2); }
 .qd-desf-item:focus-visible, .qd-esp-mes:focus-visible, .qd-barra:focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; }
-.qd-esp-mes.fora:focus-visible, .qd-barra.apagada:focus-visible { opacity: 1; }
+.qd-esp-mes.fora:focus-visible, .qd-barra.apagada:focus-visible, .qd-cartao.apagado:focus-visible,
+.qd-mapa tr.apagada > :focus-within, .qd-mapa td.apagada:focus-within, .qd-mapa th.apagada:focus-within { opacity: 1; }
+/* o teclado chega aqui pelo Mostrar mais / Ver todos / Ver e corrigir (tabindex=-1) */
+.qd-mov:focus-visible, .qd-item:focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; border-radius: 4px; }
+.qd-grupo-cab h3:focus-visible { outline: 2px solid var(--tinta); outline-offset: 3px; border-radius: 2px; }
 .qd-barra.escolhida { box-shadow: inset 0 0 0 1.5px var(--tinta); }
 .qd-barra.escolhida .qd-barra-nome { font-weight: 700; }
 .qd-barra.apagada { opacity: .35; }
@@ -510,7 +514,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-barra.cinza .qd-barra-trilho i { opacity: .4; }
 .qd-barra-n { font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 13px; text-align: right; white-space: nowrap; }
 .qd-barra-n small { font-weight: 500; color: var(--tinta-media); font-size: 11px; }
-.qd-outras { font-size: 12px; color: var(--tinta-fraca); margin: 6px 6px 0; }
+.qd-outras { font-size: 12px; color: var(--tinta-media); margin: 6px 6px 0; }
 .qd-onde-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 22px; }
 .qd-onde-grade h4, .qd-bloco h4, .qd-ficha h4, .qd-leitura h4 { font-family: 'Archivo', sans-serif; font-size: 10.5px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase; color: var(--tinta-media); margin: 0 0 6px; }
@@ -590,10 +594,10 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-leitura summary h3 { font-family: 'Archivo', sans-serif; font-size: 15px; margin: 0; }
 .qd-leitura-cols { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
 .qd-col.ok { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; background: var(--bq-surface-2); border: 1px solid var(--bq-linha); }
-.qd-col.ok small { font-weight: 500; color: var(--tinta-fraca); }
+.qd-col.ok small { font-weight: 500; color: var(--tinta-media); }
 .qd-leitura-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 8px 0 6px; }
 .qd-leitura-tabs table th { cursor: default; }
-.qd-leitura-tabs th, .qd-leitura-tabs td, .qd-leitura-cols .qd-selo { white-space: normal; }
+.qd-leitura-tabs th, .qd-leitura-tabs td, .qd-leitura-cols .qd-selo, .qd-leitura-tabs .qd-selo, .qd-leitura-tabs .qd-eq { white-space: normal; }
 .qd-leitura-mais { margin: 10px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--tinta-media); line-height: 1.7; }
 
 /* ficha (na janela) */
@@ -672,5 +676,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-pill[aria-pressed="true"], .qd-chip[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .qd-cartao.escolhido, .qd-esp-mes.escolhido, .qd-barra.escolhida, .qd-mapa th.escolhida .qd-eq { outline: 3px solid Highlight; }
   .qd-esp-mes.escolhido { outline-offset: -3px; }
+  /* escolhido E com o foco do teclado: o foco precisa de uma marca diferente da escolha */
+  .qd-cartao.escolhido:focus-visible, .qd-esp-mes.escolhido:focus-visible, .qd-barra.escolhida:focus-visible { outline: 3px dashed CanvasText; outline-offset: -6px; }
 }
 </style>

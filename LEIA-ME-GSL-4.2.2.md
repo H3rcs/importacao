@@ -68,13 +68,19 @@ Quando alguém está na CDESLIGADOS e o STATUS na GERAL ainda é ativo, o GSL ap
 Como o GSL acha a pessoa:
 - primeiro pelo COD, depois pela matrícula (RH);
 - se a CDESLIGADOS não tiver nenhum dos dois, pelo nome, sem diferenciar acento nem maiúscula. Nesse caso o aviso diz "Achado pelo nome — confira se é a mesma pessoa";
-- **mesmo nome, mas outro COD ou RH:** pode ser um homônimo ou um número digitado errado. O GSL não tem como saber, então aponta como **atenção** (sem a faixa vermelha), no grupo "Mesmo nome de um desligado", dizendo os dois números. Se for a mesma pessoa, acerte o número; se for um homônimo, não mude nada na GERAL;
+- **mesmo nome, mas outro COD ou RH:** pode ser um homônimo, um número digitado errado ou uma recontratação com número novo. O GSL não tem como saber, então aponta como **atenção** (sem a faixa vermelha), no grupo "Mesmo nome de um desligado", dizendo os dois números. Se foi recontratação, ponha a data da nova admissão na CADMITIDOS e o aviso some. Se o número foi digitado errado, acerte-o. Se for um homônimo, não mude nada na GERAL;
 - valores de preenchimento no COD ou no RH ("-", "0", "#N/A") não contam como número.
 
 Casos especiais:
 - **Desligamento sem data** na CDESLIGADOS também é conferido. Ele só fica fora dos gráficos e das contas por período. Uma data impossível (mês 13, ou 09/15/2026 colado no formato americano) conta como sem data.
 - **Desligamento com data futura** (aviso prévio) ainda não é inconsistência: a pessoa ainda trabalha.
-- **Recontratação:** se a pessoa aparece de novo na CADMITIDOS, com o mesmo COD ou RH (ou o número novo que está na GERAL) e data **posterior** ao desligamento, não há aviso: o quadro está certo. A saída antiga continua na CDESLIGADOS, porque conta no turnover. Uma admissão achada só pelo nome não basta, porque pode ser um homônimo. Se a CADMITIDOS não tiver a data, o aviso continua vermelho, com a dica de pôr a data da nova admissão.
+- **Recontratação:** se a pessoa aparece de novo na CADMITIDOS com o mesmo COD ou RH (ou o número novo que está na GERAL), **o mesmo nome** e data **posterior** ao desligamento, não há aviso: o quadro está certo. A saída antiga continua na CDESLIGADOS, porque conta no turnover. Não contam como recontratação:
+  - uma admissão achada só pelo nome, porque pode ser um homônimo;
+  - uma admissão com o mesmo número e **outro nome** (número reaproveitado ou digitado errado). O aviso diz "O COD … está na CADMITIDOS como …: confira o número";
+  - uma admissão com data **no futuro** (ano digitado errado ou pré-cadastro). O aviso pede para conferir a data;
+  - uma saída anotada só com o mês ("out/2026") e uma admissão no mesmo mês: a admissão precisa ser de um mês seguinte.
+
+  Em cada caso, o aviso continua vermelho e diz o que falta: a data da nova admissão, o COD ou o RH na linha da CADMITIDOS, ou a data da saída.
 
 A faixa vermelha também aparece se a GERAL estiver **sem a coluna PROD, EQUIPE ou STATUS**: ela explica o efeito ("por isso os nomes não aparecem", "por isso todos estão contando como ativos"). Se a planilha não tiver a aba GERAL, o Quadro diz isso, em vez de mostrar um quadro vazio.
 
@@ -116,7 +122,7 @@ São quatro abas. A linha de filtros (Equipe e Função) vale para tudo o que es
 
 O coordenador abre o Quadro já no turno dele (A = 1° TURNO, B = 2°, C = 3°). No computador compartilhado, quem entra depois não herda os filtros de quem saiu. **O nível COORDENADOR não vê o Quadro por padrão.** Para liberar para alguém: **Pessoas e acessos › Quem vê cada módulo**, coluna **Quadro do CD**, opção **Ver**.
 
-**Arquivos desta entrega** (carimbo `2026.10.13b`; se você já colou o pacote anterior de 13/10, cole estes cinco por cima): `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, **recarregue a página (F5)**, abra o Quadro e clique em **Atualizar dados**. As telas guardadas pela versão anterior são descartadas sozinhas na implantação nova.
+**Arquivos desta entrega** (carimbo `2026.10.13b`; se você já colou o pacote anterior de 13/10, cole estes cinco por cima): `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html`. Cole os cinco e crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Depois, **recarregue a página (F5)**, abra o Quadro e clique em **Atualizar dados**. As telas guardadas pela versão anterior são descartadas sozinhas na implantação nova. Quem estiver com o GSL aberto durante a implantação também precisa recarregar (F5): uma aba antiga pode mostrar "O Quadro.gs desta implantação é da versão anterior" ou "O GSL foi atualizado", e isso se resolve recarregando.
 
 **Para conferir:**
 1. Abra o Quadro do CD. O subtítulo diz "Aba GERAL de «…» · lida hoje às hh:mm", e o cartão CD inteiro mostra quantas pessoas estão no quadro.
@@ -369,7 +375,7 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD (46 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD (49 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
 node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD (51 cenários)
 ```

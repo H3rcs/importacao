@@ -1198,6 +1198,9 @@ function qdChaveNome(v) {
     .replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 const qdFuncaoDe = (r) => r.funcao || QD_SEM_FUNCAO;
+/* Funcao comparada sem acento e sem pontuacao, mas com os numeros (ANALISTA 1 e ANALISTA 2 sao funcoes diferentes). */
+const qdChaveFuncao = (v) => String(v == null ? '' : v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() || String(v == null ? '' : v);
 const qdLider = (f) => QD_LIDER.test(qdChaveNome(f));
 /* Funcao escrita na tela: DESCRICAO vazia vira "Sem funcao" em italico. */
 const qdRotFuncao = (f) => f === QD_SEM_FUNCAO ? '<em>Sem função</em>' : esc(f);
@@ -1288,9 +1291,9 @@ const qdGeral = () => (DADOS && DADOS.geral) || [];
 const qdNaEmpresa = () => qdGeral().filter((g) => g.ativo);
 /* Recorte da linha de filtros. `sem` = 'funcao' ou 'equipe': ignora aquele filtro (contagem de faceta). */
 function qdRecorte(lista, sem) {
-  const f = QD.funcao ? qdChaveNome(QD.funcao) : '';
+  const f = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
   return lista.filter((g) => (sem === 'equipe' || QD.equipe === '*' || (g.equipe || '') === QD.equipe) &&
-    (sem === 'funcao' || !f || qdChaveNome(qdFuncaoDe(g)) === f));
+    (sem === 'funcao' || !f || qdChaveFuncao(qdFuncaoDe(g)) === f));
 }
 const qdRotuloRecorte = () => [QD.equipe === '*' ? '' : (QD.equipe || 'Sem turno'), QD.funcao === QD_SEM_FUNCAO ? 'Sem função' : QD.funcao].filter(Boolean).join(' · ');
 /* Hoje, em aaaa-mm-dd (o fuso do navegador e o do CD). */
@@ -1338,11 +1341,14 @@ function pintarQuadro(r) {
     ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
   if (d.erro) { el('acoes-topo').innerHTML = acoes(false); el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
   if (d.formato !== 3) {
-    // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.
     el('acoes-topo').innerHTML = acoes(false);
     el('subtitulo-pagina').textContent = 'Atualização incompleta';
-    el('pagina').innerHTML = `<div class="cartao pn-vazio-grande"><strong>O Quadro.gs desta implantação é da versão anterior.</strong>
-      Cole o Quadro.gs desta entrega no Apps Script e crie uma Nova versão da implantação.</div>`;
+    el('pagina').innerHTML = d.formato > 3
+      // aba aberta antes de uma implantacao nova: o servidor ja e mais novo que esta pagina
+      ? `<div class="cartao pn-vazio-grande"><strong>O GSL foi atualizado.</strong> Recarregue a página (F5) para ver o Quadro do CD.</div>`
+      // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.
+      : `<div class="cartao pn-vazio-grande"><strong>O Quadro.gs desta implantação é da versão anterior.</strong>
+      Cole o Quadro.gs desta entrega no Apps Script e crie uma Nova versão da implantação. Se já fez isso, recarregue a página (F5).</div>`;
     return;
   }
   el('acoes-topo').innerHTML = acoes(true);
@@ -1388,16 +1394,17 @@ function qdAba(qual) { QD.aba = qual; qdDesenhar(); try { window.scrollTo({ top:
 function qdEquipe(e) {
   QD.equipe = (QD.equipe === e && e !== '*') ? '*' : e;
   // a funcao escolhida sai se nao existir na equipe nova
-  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => qdChaveNome(qdFuncaoDe(g)) === qdChaveNome(QD.funcao))) QD.funcao = '';
+  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => qdChaveFuncao(qdFuncaoDe(g)) === qdChaveFuncao(QD.funcao))) QD.funcao = '';
   QD.limite = 100; QD.desfalquesTodos = false; qdDesenhar();
 }
 function qdFuncao(f) {
   // a funcao fica com a grafia da GERAL (a CDESLIGADOS pode escrever sem acento)
   if (f && !qdNaEmpresa().some((x) => qdFuncaoDe(x) === f)) {
-    const g = qdNaEmpresa().find((x) => qdChaveNome(qdFuncaoDe(x)) === qdChaveNome(f));
+    const g = qdNaEmpresa().find((x) => qdChaveFuncao(qdFuncaoDe(x)) === qdChaveFuncao(f));
     if (g) f = qdFuncaoDe(g);
   }
-  QD.funcao = (QD.funcao === f) ? '' : f; QD.limite = 100; qdDesenhar();
+  // o filtro soma as grafias (compara pela chave): tocar de novo na mesma funcao, em qualquer grafia, desliga
+  QD.funcao = (QD.funcao && qdChaveFuncao(QD.funcao) === qdChaveFuncao(f)) ? '' : f; QD.limite = 100; qdDesenhar();
 }
 function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = ''; QD.limite = 100; QD.limiteMov = 30; qdDesenhar(); }
 /* Atalho para o Quadro por turno ja recortado (celula do mapa, desfalque, "ver quem"). */
@@ -1410,6 +1417,7 @@ function qdVerPessoas(equipe, funcao, mostrar) {
 /* A Conferencia ja rolada ate o grupo (ou com "Como o GSL leu a planilha" aberto). */
 function qdIrConferencia(alvo) {
   if (alvo === 'leitura') QD.leituraAberta = true;
+  if (alvo) QD.focoDepois = alvo === 'leitura' ? '#qd-leitura summary' : '#qd-grupo-' + alvo + ' h3';      // so com o teclado
   QD.aba = 'conf';
   qdDesenhar();
   const e = el(alvo === 'leitura' ? 'qd-leitura' : 'qd-grupo-' + alvo);
@@ -1421,29 +1429,44 @@ function qdIrConferencia(alvo) {
   } catch (x) {}
 }
 
-/* Depois de redesenhar, o foco do teclado volta ao mesmo controle (filtro, aba, ordenacao). */
+/*
+ * Depois de redesenhar, o foco volta ao mesmo controle (filtro, aba, ordenacao).
+ * So quem usa o TECLADO e levado a outro lugar (a 1a pessoa da lista aberta pelo
+ * mapa, o 1o item novo do Mostrar mais, a aba): com o mouse, um foco levado a
+ * outro controle faria a barra de espaco aciona-lo em vez de rolar a pagina.
+ */
 const qdChaveFoco = (x) => x.tagName + '|' + String(x.className).split(' ')[0] + '|' + (x.getAttribute('onclick') || x.getAttribute('onchange') || x.id || '');
 function qdGuardarFoco() {
   const a = document.activeElement;
-  return a && a !== document.body && a.closest && a.closest('.bi-quadro') ? qdChaveFoco(a) : '';
+  if (!(a && a !== document.body && a.closest && a.closest('.bi-quadro'))) return null;
+  let teclado = true;
+  try { teclado = a.matches(':focus-visible'); } catch (e) {}
+  return { k: qdChaveFoco(a), teclado: teclado };
 }
 function qdFocar(n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } }
-function qdDevolverFoco(k) {
-  // destino escolhido pelo proprio clique (ex.: a primeira pessoa da lista aberta pelo mapa)
-  if (QD.focoDepois) {
-    const alvo = document.querySelector(QD.focoDepois);
-    QD.focoDepois = '';
-    if (alvo) { qdFocar(alvo); return; }
+function qdDevolverFoco(f) {
+  const depois = QD.focoDepois;
+  QD.focoDepois = '';
+  if (!f) return;
+  const n = Array.from(document.querySelectorAll('.bi-quadro button, .bi-quadro select, .bi-quadro input, .bi-quadro summary')).find((x) => qdChaveFoco(x) === f.k);
+  if (!f.teclado) {
+    // mouse ou toque: o mesmo controle (se ainda existe); se sumiu, o foco fica na pagina
+    if (n) qdFocar(n); else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    return;
   }
-  if (!k) return;
-  const n = Array.from(document.querySelectorAll('.bi-quadro button, .bi-quadro select, .bi-quadro input, .bi-quadro summary')).find((x) => qdChaveFoco(x) === k);
+  // destino escolhido pelo proprio controle (ex.: a primeira pessoa da lista aberta pelo mapa)
+  const alvo = depois && document.querySelector(depois);
+  if (alvo) { qdFocar(alvo); return; }
   const aba = document.querySelector('#qd-abas .aba.ativa');
-  if (n || aba) qdFocar(n || aba);          // o controle sumiu (Limpar filtros, chip, Mostrar mais): volta para a aba
+  if (n || aba) qdFocar(n || aba);          // o controle sumiu (Limpar filtros, chip): volta para a aba
 }
 let QD_FAIXA_HTML = null;
 function qdDesenhar() {
   const alvo = el('qd-conteudo'); if (!alvo) return;
   const foco = qdGuardarFoco();
+  // a rolagem do grafico mes a mes (quem rolou ate um mes nao pode ver o grafico pular sob o dedo)
+  const grAntes = document.querySelector('.qd-grade2 .qd-espelho');
+  const rolagem = grAntes ? { x: grAntes.scrollLeft, n: grAntes.children.length } : null;
   // a faixa (role=alert) so e trocada quando muda: recriada a cada clique, o leitor de tela a leria de novo
   const fx = qdFaixa();
   if (fx !== QD_FAIXA_HTML) { el('qd-faixa').innerHTML = fx; QD_FAIXA_HTML = fx; }
@@ -1456,9 +1479,15 @@ function qdDesenhar() {
     else if (QD.aba === 'conf') alvo.innerHTML = qdConferencia();
     else alvo.innerHTML = qdVisaoGeral();
   } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
-  // o grafico mes a mes rola dentro do cartao: abre nos meses mais recentes (ou no mes escolhido)
+  // o grafico mes a mes rola dentro do cartao: abre nos meses mais recentes (ou no mes escolhido);
+  // com os mesmos meses, fica onde a pessoa deixou, e so rola se o mes escolhido estiver fora da vista
   const gr = document.querySelector('.qd-grade2 .qd-espelho');
-  if (gr) { const m = gr.querySelector('.qd-esp-mes.escolhido'); gr.scrollLeft = m ? m.offsetLeft - 40 : gr.scrollWidth; }
+  if (gr) {
+    const m = gr.querySelector('.qd-esp-mes.escolhido');
+    if (rolagem && rolagem.n === gr.children.length) gr.scrollLeft = rolagem.x;
+    else gr.scrollLeft = m ? m.offsetLeft - 40 : gr.scrollWidth;
+    if (m && (m.offsetLeft < gr.scrollLeft || m.offsetLeft + m.offsetWidth > gr.scrollLeft + gr.clientWidth)) gr.scrollLeft = m.offsetLeft - 40;
+  }
   qdDevolverFoco(foco);
 }
 
@@ -1520,17 +1549,24 @@ function qdFiltros() {
   const temSem = base.some((g) => !g.equipe);
   const opcoes = [['*', 'Todas', 'Todas']].concat(QD_EQUIPES.map((e) => [e, e, e === 'ADM' ? 'ADM' : e.slice(0, 2)]))
     .concat(temSem ? [['', 'Sem turno', 'Sem turno']] : []);
-  const funcoes = {};
-  qdRecorte(base, 'funcao').forEach((g) => { const f = qdFuncaoDe(g); funcoes[f] = (funcoes[f] || 0) + 1; });
-  const lista = Object.keys(funcoes).sort((a, b) => a.localeCompare(b));
-  if (QD.funcao && !funcoes[QD.funcao]) lista.unshift(QD.funcao);
+  // uma opcao por funcao: as grafias com e sem acento somam (o filtro compara pela chave); vale a grafia mais usada
+  const funcoes = {}, grafias = {};
+  qdRecorte(base, 'funcao').forEach((g) => {
+    const f = qdFuncaoDe(g), k = qdChaveFuncao(f);
+    funcoes[k] = (funcoes[k] || 0) + 1;
+    const gr = grafias[k] = grafias[k] || {}; gr[f] = (gr[f] || 0) + 1;
+  });
+  const grafia = (k) => Object.keys(grafias[k]).sort((a, b) => grafias[k][b] - grafias[k][a] || a.localeCompare(b))[0];
+  const kSel = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
+  const lista = Object.keys(funcoes).map((k) => [k, k === kSel ? QD.funcao : grafia(k)]).sort((a, b) => a[1].localeCompare(b[1]));
+  if (kSel && !funcoes[kSel]) lista.unshift([kSel, QD.funcao]);
   const ativo = QD.equipe !== '*' || QD.funcao || QD.motivo || QD.mes;
   return `<div class="qd-filtros" role="group" aria-label="Filtros do quadro">
     <div class="qd-seg" role="group" aria-label="Equipe">${opcoes.map(([e, longo, curto]) => `<button class="qd-pill" aria-pressed="${QD.equipe === e}"
         onclick="qdEquipe(${jsArg(e)})" title="${esc(longo)}">${e !== '*' ? `<i class="${e ? '' : 'sem'}" style="background:${qdCor(e)}"></i>` : ''}<span class="qd-pill-longo">${esc(longo)}</span><span class="qd-pill-curto">${esc(curto)}</span></button>`).join('')}</div>
     <label class="qd-funcao"><span class="bq-rot">Função</span>
       <select onchange="QD.funcao=this.value;QD.limite=100;qdDesenhar()"><option value="">Todas as funções</option>
-        ${lista.map((f) => `<option value="${esc(f)}" ${QD.funcao === f ? 'selected' : ''}>${f === QD_SEM_FUNCAO ? 'Sem função' : esc(f)} (${funcoes[f] || 0})</option>`).join('')}</select></label>
+        ${lista.map(([k, f]) => `<option value="${esc(f)}" ${k === kSel ? 'selected' : ''}>${f === QD_SEM_FUNCAO ? 'Sem função' : esc(f)} (${funcoes[k] || 0})</option>`).join('')}</select></label>
     ${ativo ? '<button class="bq-limpar" onclick="qdLimpar()">Limpar filtros</button>' : ''}
   </div>`;
 }
@@ -1611,10 +1647,10 @@ const QD_TIPOS = {
     corrigir: 'Escreva o nome da coluna exatamente assim no cabeçalho.' },
   DESLIGADO_ATIVO: { titulo: 'Desligados que continuam ATIVOS na GERAL', curto: 'desligado ainda ativo',
     oque: 'Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro.',
-    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se foi recontratação, ponha a data da nova admissão na CADMITIDOS — a saída antiga fica, porque conta no turnover.' },
+    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se foi recontratação, ponha na CADMITIDOS a data e o COD (ou o RH) da nova admissão — a saída antiga fica, porque conta no turnover.' },
   MESMO_NOME: { titulo: 'Mesmo nome de um desligado, outro COD ou RH', curto: 'mesmo nome de um desligado',
     oque: 'A pessoa está ativa na GERAL e tem o mesmo nome de alguém da CDESLIGADOS, mas o COD ou a matrícula não batem: pode ser um homônimo ou um número digitado errado.',
-    corrigir: 'Se for a mesma pessoa, acerte o COD ou o RH errado (aí o aviso vira o de desligado ativo). Se for outra pessoa (homônimo), não mude nada na GERAL.' },
+    corrigir: 'Se foi recontratação com COD ou matrícula nova, ponha a data da nova admissão na CADMITIDOS (o aviso some). Se o número foi digitado errado, acerte-o. Se for outra pessoa (homônimo), não mude nada na GERAL.' },
   SEM_NOME: { titulo: 'Linhas sem nome', curto: 'sem nome',
     oque: 'A coluna PROD está vazia: a pessoa conta no quadro, mas aparece como Sem nome.', corrigir: 'Preencha o PROD.' },
   EQUIPE: { titulo: 'EQUIPE fora do padrão', curto: 'sem turno',
@@ -1663,11 +1699,11 @@ function qdConferencia() {
     const ord = itens.slice().sort((a, b) => (a.linha || 1e9) - (b.linha || 1e9));
     const mostra = (ord.length > 8 && !QD.recolhidas['tudo' + tipo]) ? ord.slice(0, 8) : ord;
     return `<section class="bq-card qd-grupo ${grav}" id="qd-grupo-${esc(tipo)}">
-      <header class="qd-grupo-cab">${qdSelo(grav, grav === 'grave' ? 'grave' : 'atenção')}<h3>${esc(t.titulo)} <span class="bq-num">${itens.length}</span></h3></header>
+      <header class="qd-grupo-cab">${qdSelo(grav, grav === 'grave' ? 'grave' : 'atenção')}<h3 tabindex="-1">${esc(t.titulo)} <span class="bq-num">${itens.length}</span></h3></header>
       <p class="bq-sub">${esc(t.oque)} <b>Como corrigir:</b> ${esc(t.corrigir)}</p>
       <ul class="qd-itens">${mostra.map((x) => {
         const link = x.tipo !== 'COLUNA' && x.linha && !x.aba ? qdLinkLinha(x.linha) : '';
-        return `<li class="qd-item">
+        return `<li class="qd-item" tabindex="-1">
           <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(qdNomeTxt(x)) : '<em>Sem nome</em>'}</button>`
             : `<span class="qd-item-nome">${x.nome ? esc(x.tipo === 'COLUNA' ? x.nome : qdNomeTxt(x)) : '<em>Sem nome</em>'}</span>`}
             <span class="qd-item-ids bq-num">${x.cod ? 'COD ' + esc(x.cod) : ''}${x.cod && x.rh ? ' · ' : ''}${x.rh ? 'RH ' + esc(x.rh) : ''}</span>
@@ -1676,7 +1712,7 @@ function qdConferencia() {
           <div class="qd-item-acoes">${x.tipo === 'COLUNA' ? '' : qdLinhasItem(x)}
             ${link ? `<a class="icone-botao" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha ↗</a>` : ''}</div>
         </li>`; }).join('')}</ul>
-      ${ord.length > mostra.length ? `<button class="qd-link" onclick="QD.recolhidas['tudo${tipo}']=true;qdDesenhar()">Ver todos (${ord.length})</button>` : ''}
+      ${ord.length > mostra.length ? `<button class="qd-link" onclick="QD.focoDepois='#qd-grupo-${esc(tipo)} .qd-item:nth-child(${mostra.length + 1})';QD.recolhidas['tudo${tipo}']=true;qdDesenhar()">Ver todos (${ord.length})</button>` : ''}
     </section>`;
   }).join('') + qdLeitura();
 }
@@ -1853,7 +1889,7 @@ function qdListaAZ(lista) {
       <td>${qdEq(g.equipe, g.equipeBruta)}</td><td>${g.funcao ? esc(g.funcao) : '<em>Sem função</em>'}</td>
       <td class="n">${esc(g.cod || '—')}</td><td class="n">${esc(g.rh || '—')}</td><td>${esc(g.status || '—')}</td></tr>`).join('')}</tbody>
   </table></div>
-  ${ord.length > mostra.length ? `<button class="qd-mais" onclick="QD.limite+=100;qdRedesenharLista()">Mostrar mais (${qdN(ord.length - mostra.length)})</button>` : ''}</div>`;
+  ${ord.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='#qd-lista .qd-tabela tbody tr:nth-child(${mostra.length + 1})';QD.limite+=100;qdRedesenharLista()">Mostrar mais (${qdN(ord.length - mostra.length)})</button>` : ''}</div>`;
 }
 
 /* Excel: a GERAL organizada e recortada (o que esta na tela) e, havendo, a Conferencia. */
@@ -2087,12 +2123,12 @@ function qdOndeSaem(saidas, jan) {
   const eqs = QD_EQUIPES.concat(porEqTodas[''] ? [''] : []);
   const maxE = Math.max(1, ...eqs.map((e) => porEqTodas[e] || 0));
   const porF = {}, rotF = {};
-  lista.forEach((d) => { const k = qdChaveNome(qdFuncaoDe(d)); porF[k] = (porF[k] || 0) + 1; if (!rotF[k]) rotF[k] = qdFuncaoDe(d); });
+  lista.forEach((d) => { const k = qdChaveFuncao(qdFuncaoDe(d)); porF[k] = (porF[k] || 0) + 1; if (!rotF[k]) rotF[k] = qdFuncaoDe(d); });
   const fs = Object.keys(porF).sort((a, b) => porF[b] - porF[a] || a.localeCompare(b));
   const top = fs.slice(0, 6), resto = fs.slice(6);
   const maxF = top.length ? porF[top[0]] : 1;
   const cor = QD.equipe !== '*' && QD.equipe ? qdCor(QD.equipe) : 'var(--qd-cd)';
-  const naFuncao = (k) => hoje.filter((g) => (QD.equipe === '*' || (g.equipe || '') === QD.equipe) && qdChaveNome(qdFuncaoDe(g)) === k).length;
+  const naFuncao = (k) => hoje.filter((g) => (QD.equipe === '*' || (g.equipe || '') === QD.equipe) && qdChaveFuncao(qdFuncaoDe(g)) === k).length;
   return `<div class="qd-onde-grade"><div><h4>Por turno</h4>${eqs.map((e) => {
       const s = porEqTodas[e] || 0, n = hoje.filter((g) => (g.equipe || '') === e).length;
       const apagada = QD.equipe !== '*' && QD.equipe !== e;
@@ -2104,7 +2140,7 @@ function qdOndeSaem(saidas, jan) {
     <div style="--qd-cor:${cor}"><h4>Por função</h4>${top.map((f) => {
       const c = naFuncao(f);
       const rot = rotF[f];
-      return `<button class="qd-barra${QD.funcao && qdChaveNome(QD.funcao) === f ? ' escolhida' : ''}" onclick="qdFuncao(${jsArg(rot)})" title="${esc(rot)}: ${qdPlural(porF[f], 'saída', 'saídas')}">
+      return `<button class="qd-barra${QD.funcao && qdChaveFuncao(QD.funcao) === f ? ' escolhida' : ''}" onclick="qdFuncao(${jsArg(rot)})" title="${esc(rot)}: ${qdPlural(porF[f], 'saída', 'saídas')}">
         <span class="qd-barra-nome">${qdRotFuncao(rot)}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, porF[f] / maxF * 100)}%"></i></span>
         <span class="qd-barra-n bq-num">${porF[f]} <small>· ${c ? 'de ' + qdN(c) + ' hoje' : '—'}</small></span></button>`;
     }).join('')}${resto.length ? `<p class="qd-outras">Outras (${resto.length}): ${qdPlural(resto.reduce((t, f) => t + porF[f], 0), 'saída', 'saídas')}</p>` : ''}</div></div>`;
@@ -2127,7 +2163,7 @@ function qdListaMov(adm, des, j) {
   let mesAnt = null;
   const admFora = {};
   memo.inc.filter((x) => x.tipo === 'ADMITIDO_FORA').forEach((x) => { admFora[qdIdCod(x.cod) || ('N' + qdChaveNome(x.nome))] = true; });
-  const linha = (x) => {
+  const linha = (x, i) => {
     const r = x.r, naGeral = qdAchar(memo.ixGeral, r);
     const g = naGeral ? naGeral.find((y) => y.ativo) || naGeral[0] : null;
     const pend = x.s === 'saida' && g ? (memo.pend[g.ref] || []).find((q) => q.tipo === 'DESLIGADO_ATIVO') : null;
@@ -2141,7 +2177,7 @@ function qdListaMov(adm, des, j) {
         <span>${[c.s ? qdPlural(c.s, 'saída', 'saídas') : '', c.e ? qdPlural(c.e, 'entrada', 'entradas') : ''].filter(Boolean).join(' · ')}</span></li>`;
     }
     const tipo = qdTipo(r.tipo);
-    return div + `<li class="qd-mov ${x.s}">
+    return div + `<li class="qd-mov ${x.s}" id="qd-mov-${i}" tabindex="-1">
       <span class="qd-mov-data bq-num">${x.data ? pnDataLonga(x.data) : 'sem data'}</span>
       <span class="qd-mov-seta">${x.s === 'saida' ? '↓ saída' : '↑ entrada'}</span>
       <span class="qd-mov-quem">${g ? `<button class="qd-link" onclick="qdFicha(${g.ref})">${esc(qdNomeTxt(r) || 'Sem nome')}</button>` : esc(qdNomeTxt(r) || 'Sem nome')}
@@ -2157,7 +2193,7 @@ function qdListaMov(adm, des, j) {
       <div class="qd-seg pequeno" role="group" aria-label="Mostrar">${[['tudo', 'Tudo', nS + nE], ['saidas', 'Saídas', nS], ['entradas', 'Entradas', nE]].map(([k, rot, n]) =>
         `<button class="qd-pill" aria-pressed="${QD.sentido === k}" onclick="QD.sentido=${jsArg(k)};QD.limiteMov=30;qdDesenhar()">${rot} (${n})</button>`).join('')}</div></div>
     ${mostra.length ? `<ul class="qd-movs">${mostra.map(linha).join('')}</ul>` : '<p class="bq-vazio">Nada neste período.</p>'}
-    ${itens.length > mostra.length ? `<button class="qd-mais" onclick="QD.limiteMov+=30;qdDesenhar()">Mostrar mais (${itens.length - mostra.length})</button>` : ''}
+    ${itens.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='#qd-mov-${mostra.length}';QD.limiteMov+=30;qdDesenhar()">Mostrar mais (${itens.length - mostra.length})</button>` : ''}
   </div>`;
 }
 
@@ -2273,11 +2309,13 @@ function qdMapa() {
   const administrativo = funcoes.filter((f) => !temTurno(f)).sort(ordem);
   const eqEscolhida = QD.equipe !== '*' ? QD.equipe : null;
   const visivel = (f) => !eqEscolhida || eqEscolhida === '' || cel[f + '|' + eqEscolhida];
-  const admAberto = QD.admAberto || QD.equipe === 'ADM' || (QD.funcao && administrativo.indexOf(QD.funcao) !== -1);
+  // a funcao escolhida vale para as duas grafias (com e sem acento), como no filtro
+  const kSel = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
+  const admAberto = QD.admAberto || QD.equipe === 'ADM' || (kSel && administrativo.some((f) => qdChaveFuncao(f) === kSel));
   const maxTot = Math.max(1, ...funcoes.map((f) => totF[f]));
   const linha = (f, idBotao) => {
-    const apagadaLinha = QD.funcao && QD.funcao !== f;
-    return `<tr class="${QD.funcao === f ? 'escolhida' : ''}${apagadaLinha ? ' apagada' : ''}">
+    const escolhida = kSel && qdChaveFuncao(f) === kSel;
+    return `<tr class="${escolhida ? 'escolhida' : ''}${kSel && !escolhida ? ' apagada' : ''}">
     <th scope="row"><button${idBotao ? ' id="' + idBotao + '"' : ''} class="qd-link qd-mapa-funcao" onclick="qdFuncao(${jsArg(f)})">${qdRotFuncao(f)}</button></th>
     ${QD_EQUIPES.map((e) => {
       const v = cel[f + '|' + e] || 0, x = det[f + '|' + e];
@@ -2325,7 +2363,7 @@ function qdDesfalquesCard() {
         <span class="qd-desf-n bq-num">${x.d} de ${x.c} disponíve${x.c === 1 ? 'l' : 'is'}</span>
         <span class="qd-desf-nomes">${x.fora.slice(0, 3).map((g) => esc(qdNomeTxt(g) || 'Sem nome') + ' (' + QD_SITUACAO[g.situacao].toLowerCase() + ')').join(' · ')}${x.fora.length > 3 ? ' · +' + (x.fora.length - 3) : ''}</span>
       </button></li>`).join('')}</ul>
-      ${lista.length > mostra.length ? `<button class="qd-link" onclick="QD.desfalquesTodos=true;qdDesenhar()">ver mais ${lista.length - mostra.length}</button>` : ''}`)}
+      ${lista.length > mostra.length ? `<button class="qd-link" onclick="QD.focoDepois='.qd-desf li:nth-child(${mostra.length + 1}) .qd-desf-item';QD.desfalquesTodos=true;qdDesenhar()">ver mais ${lista.length - mostra.length}</button>` : ''}`)}
     ${resumo}`;
 }
 

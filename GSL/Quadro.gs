@@ -398,6 +398,11 @@ function codigoQ_(v) {
   const c = txtQ_(v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase();
   return /[1-9]/.test(c) ? c : '';          // "-", "0", "#N/A", "SEM" nao identificam ninguem
 }
+/* A linha r tem um COD ou um RH diferente do da linha g (os dois preenchidos): pode ser outra pessoa. */
+function numeroConflitaQ_(r, g) {
+  return !!((codigoQ_(r.cod) && codigoQ_(g.cod) && codigoQ_(r.cod) !== codigoQ_(g.cod)) ||
+    (codigoQ_(r.rh) && codigoQ_(g.rh) && codigoQ_(r.rh) !== codigoQ_(g.rh)));
+}
 function nomeChaveQ_(v) { return normalizaQ_(v).replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
 function dataCurtaQ_(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso || ''); }
 
@@ -450,60 +455,86 @@ function inconsistenciasQ_(geral, adm, des) {
   const depoisDe = function (a, d) {
     return !!a.data && a.data <= hoje && (d.dataSoMes ? a.data.slice(0, 7) > d.data.slice(0, 7) : a.data > d.data);
   };
-  // O que fazer quando ha uma admissao que quase prova a recontratacao, mas nao prova.
-  const dica = function (d, g) {
-    if (recontratado[g.ref]) return ' Há também uma saída antiga e uma readmissão: ponha a data desta saída para conferir.';
-    const nomes = [nomeChaveQ_(d.nome), nomeChaveQ_(g.nome)];
-    const porNumero = admPorNumero(d).concat(admPorNumero(g));
-    const outro = porNumero.filter(function (a) { return !nomeOk(a, nomes); })[0];
-    if (outro) return ' O ' + (codigoQ_(outro.cod) ? 'COD ' + outro.cod : 'RH ' + outro.rh) + ' está na CADMITIDOS como ' + outro.nome +
-      (outro.data ? ' (' + dataCurtaQ_(outro.data) + ')' : '') + ': confira o número.';
+  // Saida so com o mes e readmissao (ja feita) no mesmo mes: so o dia da saida decide.
+  const noMesmoMes = function (a, d) { return !!(d.dataSoMes && a.data && a.data <= hoje && a.data.slice(0, 7) === d.data.slice(0, 7)); };
+  // O numero pelo qual a admissao foi achada (COD ou RH), para a dica apontar o certo.
+  const numeroDe = function (a, rs) {
+    const c = codigoQ_(a.cod);
+    return c && rs.some(function (r) { return codigoQ_(r.cod) === c; }) ? 'COD ' + a.cod : 'RH ' + a.rh;
+  };
+  /*
+   * O que falta para a CADMITIDOS provar (ou descartar) uma recontratacao.
+   * porNumero: admissoes achadas pelo COD/RH de rs; nomes: os nomes aceitos;
+   * soNome: ha uma admissao achada so pelo nome (linha sem COD e sem RH).
+   */
+  const dica = function (d, porNumero, nomes, rs, soNome) {
+    // so interessa admissao que poderia ser a volta: sem data, ou depois da saida (ou no mesmo mes, se a saida so tem o mes)
+    const volta = function (a) { return !a.data || !d.data || a.data > d.data || noMesmoMes(a, d); };
+    const outro = porNumero.filter(function (a) { return !nomeOk(a, nomes) && volta(a); })[0];
+    if (outro) {
+      return ' A CADMITIDOS tem o ' + numeroDe(outro, rs) + ' com outro nome (' + (outro.nome || 'sem nome') + (outro.data ? ', ' + dataCurtaQ_(outro.data) : '') +
+        '): se for a mesma pessoa, escreva o nome como na ' + (rs[rs.length - 1].aba || 'GERAL') + '; se não for, confira o número.';
+    }
     const certos = porNumero.filter(function (a) { return nomeOk(a, nomes); });
     const futura = certos.filter(function (a) { return a.data && a.data > hoje; })[0];
     if (futura) return ' A CADMITIDOS tem uma admissão com data no futuro (' + dataCurtaQ_(futura.data) + '): confira a data.';
-    if (!d.data && certos.some(function (a) { return a.data; })) return ' Foi admitido(a) de novo: ponha a data desta saída para conferir se foi antes da readmissão.';
-    if (certos.length && certos.every(function (a) { return !a.data; })) return ' Está também na CADMITIDOS (pelo COD/RH), sem data: se foi recontratação, ponha a data da nova admissão.';
-    if ((acharQ_(ixAdm, d) || {}).chave === 'nome' || (acharQ_(ixAdm, g) || {}).chave === 'nome') {
-      return ' Há na CADMITIDOS uma admissão com o mesmo nome, mas sem o COD/RH desta pessoa: se for recontratação, ponha o COD ou o RH (e a data) nessa linha da CADMITIDOS.';
-    }
+    const mesmoMes = certos.filter(function (a) { return noMesmoMes(a, d); })[0];
+    if (mesmoMes) return ' A saída está só com o mês e a readmissão (' + dataCurtaQ_(mesmoMes.data) + ') é do mesmo mês: ponha o dia da saída para conferir.';
+    const datada = certos.filter(function (a) { return a.data; }).sort(function (a, b) { return b.data.localeCompare(a.data); })[0];
+    if (!d.data && datada) return ' Há uma admissão na CADMITIDOS (' + dataCurtaQ_(datada.data) + '): ponha a data desta saída para conferir se ela veio antes (recontratação).';
+    if (certos.some(function (a) { return !a.data; })) return ' Está na CADMITIDOS pelo COD/RH, sem data: se foi recontratação, ponha a data da nova admissão.';
+    if (soNome) return ' Há na CADMITIDOS uma admissão com o mesmo nome, mas sem o COD/RH desta pessoa: se for recontratação, ponha o COD ou o RH (e a data) nessa linha da CADMITIDOS.';
     return '';
   };
+  const soNomeAdm = function (r) { return (acharQ_(ixAdm, r) || {}).chave === 'nome'; };
   desAte.forEach(function (d) {
     const achou = acharQ_(ix, d);
     if (!achou) return;
     achou.lista.filter(function (g) { return g.ativo; }).forEach(function (g) {
       if (jaVisto[g.ref]) return;
-      // Ja calado por recontratacao: as saidas datadas mais antigas nao contam; uma saida SEM data ainda pode ser nova.
-      if (recontratado[g.ref] && d.data) return;
-      const nomes = [nomeChaveQ_(d.nome), nomeChaveQ_(g.nome)];
-      const adms = admPorNumero(d).concat(admPorNumero(g)).filter(function (a) { return nomeOk(a, nomes); });
-      if (d.data && adms.some(function (a) { return depoisDe(a, d); })) {
-        // recontratado(a). Saida achada so pelo nome (homonimo?) nao cala as outras saidas desta pessoa.
-        if (achou.chave !== 'nome') recontratado[g.ref] = true;
+      // Ja calado por recontratacao: as saidas datadas de antes da readmissao nao contam. Ainda contam a saida SEM data
+      // e a saida so com o mes do mes da readmissao em diante (na ordem, "set/2026" vem como dia 1).
+      const rec = recontratado[g.ref];
+      if (rec && d.data && !(d.dataSoMes && d.data.slice(0, 7) >= rec.slice(0, 7))) return;
+      const nomes = [nomeChaveQ_(d.nome), nomeChaveQ_(g.nome)], nomeG = [nomeChaveQ_(g.nome)];
+      const porNumero = admPorNumero(d).concat(admPorNumero(g));
+      const volta = function (aceitos) {
+        return d.data ? porNumero.filter(function (a) { return nomeOk(a, aceitos) && depoisDe(a, d); }).map(function (a) { return a.data; }).sort()[0] : '';
+      };
+      if (volta(nomes)) {
+        // Esta saida foi seguida de uma readmissao: sem aviso por ela. So a saida DESTA pessoa (pelo numero, sem outro
+        // nome nem outro numero) com a readmissao DELA cala as saidas mais antigas; a de um homonimo ou de outra linha
+        // com o mesmo numero, nao.
+        const dela = achou.chave !== 'nome' && nomeOk(d, nomeG) && !numeroConflitaQ_(d, g) ? volta(nomeG) : '';
+        if (dela && !rec) recontratado[g.ref] = dela;
         return;
       }
       jaVisto[g.ref] = true;
+      const extra = !rec ? dica(d, porNumero, nomes, [d, g], soNomeAdm(d) || soNomeAdm(g))
+        : (d.data ? ' Há também uma readmissão em ' + dataCurtaQ_(rec) + ' e esta saída está só com o mês: ponha o dia da saída para conferir.'
+          : ' Há também uma saída antiga e uma readmissão (' + dataCurtaQ_(rec) + '): ponha a data desta saída para conferir.');
       saida.push(Object.assign(quem(g), {
         tipo: 'DESLIGADO_ATIVO', gravidade: 'grave', data: d.data || '', chave: achou.chave,
         detalhe: (d.data ? 'Desligado em ' + dataCurtaQ_(d.data) : 'Está na CDESLIGADOS (sem data)') + (d.motivo ? ' (' + d.motivo + ')' : '') +
           ', mas está ' + (g.status || 'sem status') + ' na ' + (g.aba || 'GERAL') + '.' +
-          (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') + dica(d, g)
+          (achou.chave !== 'produtivo' ? ' Achado pelo ' + achou.chave + ' — confira se é a mesma pessoa.' : '') + extra
       }));
     });
   });
   /*
    * 1b. MESMO_NOME: alguem ativo tem o mesmo nome de um desligado, mas outro
-   * COD ou RH — homonimo ou numero digitado errado. Atencao, para conferir;
-   * nunca manda inativar ninguem. Quem foi admitido (pelo numero da GERAL)
-   * depois DESTA saida e recontratacao com numero novo: sem aviso.
+   * COD ou RH — homonimo, numero digitado errado ou recontratacao com numero
+   * novo. Atencao, para conferir; nunca manda inativar ninguem. Quem foi
+   * admitido (pelo numero da GERAL, com o mesmo nome) depois DESTA saida e
+   * recontratacao com numero novo: sem aviso.
    */
   const jaVistoNome = {};
   desAte.forEach(function (d) {
     if (acharQ_(ix, d)) return;
     const n = nomeChaveQ_(d.nome);
     ((n && ix.nome[n]) || []).filter(function (g) { return g.ativo && !jaVisto[g.ref] && !jaVistoNome[g.ref]; }).forEach(function (g) {
-      const admG = admPorNumero(g).filter(function (a) { return nomeOk(a, [nomeChaveQ_(g.nome)]); });
-      if (d.data && admG.some(function (a) { return depoisDe(a, d); })) return;
+      const porNumero = admPorNumero(g), nomes = [nomeChaveQ_(g.nome)];
+      if (d.data && porNumero.some(function (a) { return nomeOk(a, nomes) && depoisDe(a, d); })) return;
       jaVistoNome[g.ref] = true;
       const dif = [];
       if (codigoQ_(d.cod) && codigoQ_(g.cod) && codigoQ_(d.cod) !== codigoQ_(g.cod)) dif.push('o COD é ' + d.cod + ' na CDESLIGADOS e ' + g.cod + ' na ' + (g.aba || 'GERAL'));
@@ -512,8 +543,7 @@ function inconsistenciasQ_(geral, adm, des) {
         tipo: 'MESMO_NOME', gravidade: 'atencao', data: d.data || '', chave: 'nome',
         detalhe: 'Tem o mesmo nome de quem está na CDESLIGADOS' + (d.data ? ' (desligado em ' + dataCurtaQ_(d.data) + ')' : '') + ', mas ' +
           (dif.join(' e ') || 'os números não batem') + '. Confira se é a mesma pessoa (número digitado errado) ou um homônimo.' +
-          (admG.length && admG.every(function (a) { return !a.data; }) ? ' Está na CADMITIDOS pelo COD/RH da GERAL, sem data: se foi recontratação, ponha a data da nova admissão.' : '') +
-          (!d.data && admG.some(function (a) { return a.data; }) ? ' A saída não tem data: se foi antes da readmissão, ponha a data dela.' : '')
+          dica(d, porNumero, nomes, [g], soNomeAdm(g))
       }));
     });
   });
@@ -573,10 +603,15 @@ function txtQ_(v) {
 
 /* Mes escrito por extenso ou abreviado, sem o dia ("ago/2025", "Agosto de 2025", "AGO-25"). */
 const MES_TEXTO_Q = /^([A-Z]{3})[A-Z]*\s*(?:DE\s*)?[\/\-\s]?\s*(\d{2,4})$/;
-/* A data veio so com o mes (vira o dia 1 em dataQ_). */
+/* "aaaa-mm-dd", "aaaa/mm/dd" ou so "aaaa-mm" (sem o dia: vira o dia 1). */
+const DATA_ISO_Q = /^(\d{4})[\/\-](\d{1,2})(?:[\/\-](\d{1,2}))?/;
+/* A data veio so com o mes (vira o dia 1 em dataQ_): "ago/2025" ou "2025-08". */
 function soMesQ_(v) {
   if (v && typeof v.getTime === 'function') return false;
-  const mx = normalizaQ_(txtQ_(v)).match(MES_TEXTO_Q);
+  const s = txtQ_(v);
+  const iso = s.match(DATA_ISO_Q);
+  if (iso) return !iso[3];
+  const mx = normalizaQ_(s).match(MES_TEXTO_Q);
   return !!(mx && MESES_Q.indexOf(mx[1]) !== -1);
 }
 
@@ -604,7 +639,7 @@ function dataQ_(v) {
   const ok = function (ano, mes, dia) {
     return (mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31) ? ano + '-' + ('0' + mes).slice(-2) + '-' + ('0' + dia).slice(-2) : '';
   };
-  const iso = s.match(/^(\d{4})[\/\-](\d{1,2})(?:[\/\-](\d{1,2}))?/);
+  const iso = s.match(DATA_ISO_Q);
   if (iso) return ok(iso[1], Number(iso[2]), Number(iso[3] || 1));
   const br = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if (br) return ok(br[3].length === 2 ? '20' + br[3] : br[3], Number(br[2]), Number(br[1]));

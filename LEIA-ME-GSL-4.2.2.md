@@ -53,6 +53,7 @@ O Quadro agora lê uma aba só, a **GERAL**, na mesma planilha, e separa os turn
 
 - A ordem das colunas não importa, e um título acima do cabeçalho é ignorado.
 - **Células mescladas** (por exemplo, "1° TURNO" mesclado no bloco do turno) valem para todas as linhas da mesclagem.
+- **DESCRIÇÃO** escrita de dois jeitos (com e sem acento, ou com espaço a mais) conta como uma função só, com a grafia mais usada na GERAL. Números contam: "ANALISTA 1" e "ANALISTA 2" são funções diferentes.
 - **EQUIPE:** além do jeito do pedido, o GSL entende "1º" (com o "º"), "TURNO 1", "T1" e as letras antigas TA/TB/TC ou A/B/C (1°, 2° e 3° TURNO). Com outro valor (ex.: "TURNO 4"), a pessoa conta no CD, mas fica sem turno, e a Conferência aponta a linha.
 - **STATUS:** está **fora da empresa** quem tem INATIVO, DESATIVADO, DESLIGADO, DEMITIDO, DEMISSÃO, RESCISÃO, EX-…, SAIU, FORA, BAIXA, NÃO, ENCERRADO, DISPENSADO ou TRANSFERIDO.
   - **FÉRIAS** e **AFASTADO** (também licença, atestado, INSS e auxílio) continuam na empresa, só que fora do posto.
@@ -68,7 +69,7 @@ Quando alguém está na CDESLIGADOS e o STATUS na GERAL ainda é ativo, o GSL ap
 Como o GSL acha a pessoa:
 - primeiro pelo COD, depois pela matrícula (RH);
 - se a CDESLIGADOS não tiver nenhum dos dois, pelo nome, sem diferenciar acento nem maiúscula. Nesse caso o aviso diz "Achado pelo nome — confira se é a mesma pessoa";
-- **mesmo nome, mas outro COD ou RH:** pode ser um homônimo, um número digitado errado ou uma recontratação com número novo. O GSL não tem como saber, então aponta como **atenção** (sem a faixa vermelha), no grupo "Mesmo nome de um desligado", dizendo os dois números. Se foi recontratação, ponha a data da nova admissão na CADMITIDOS e o aviso some. Se o número foi digitado errado, acerte-o. Se for um homônimo, não mude nada na GERAL;
+- **mesmo nome, mas outro COD ou RH:** pode ser um homônimo, um número digitado errado ou uma recontratação com número novo. O GSL não tem como saber, então aponta como **atenção** (sem a faixa vermelha), no grupo "Mesmo nome de um desligado", dizendo os dois números. Se foi recontratação, ponha na CADMITIDOS a data da nova admissão, com o COD (ou o RH) e o nome como estão na GERAL, e o aviso some. Se o número foi digitado errado, acerte-o. Se for um homônimo, não mude nada na GERAL;
 - valores de preenchimento no COD ou no RH ("-", "0", "#N/A") não contam como número.
 
 Casos especiais:
@@ -76,11 +77,11 @@ Casos especiais:
 - **Desligamento com data futura** (aviso prévio) ainda não é inconsistência: a pessoa ainda trabalha.
 - **Recontratação:** se a pessoa aparece de novo na CADMITIDOS com o mesmo COD ou RH (ou o número novo que está na GERAL), **o mesmo nome** e data **posterior** ao desligamento, não há aviso: o quadro está certo. A saída antiga continua na CDESLIGADOS, porque conta no turnover. Não contam como recontratação:
   - uma admissão achada só pelo nome, porque pode ser um homônimo;
-  - uma admissão com o mesmo número e **outro nome** (número reaproveitado ou digitado errado). O aviso diz "O COD … está na CADMITIDOS como …: confira o número";
+  - uma admissão com o mesmo número e **outro nome** (número reaproveitado, digitado errado, ou o nome escrito de outro jeito). O aviso diz "A CADMITIDOS tem o COD … com outro nome (…): se for a mesma pessoa, escreva o nome como na GERAL; se não for, confira o número";
   - uma admissão com data **no futuro** (ano digitado errado ou pré-cadastro). O aviso pede para conferir a data;
-  - uma saída anotada só com o mês ("out/2026") e uma admissão no mesmo mês: a admissão precisa ser de um mês seguinte.
+  - uma saída anotada só com o mês ("out/2026" ou "2026-10") e uma admissão no mesmo mês: a admissão precisa ser de um mês seguinte. O aviso pede o dia da saída.
 
-  Em cada caso, o aviso continua vermelho e diz o que falta: a data da nova admissão, o COD ou o RH na linha da CADMITIDOS, ou a data da saída.
+  Em cada caso, o aviso continua vermelho e diz o que falta: a data da nova admissão, o COD ou o RH na linha da CADMITIDOS, o nome como na GERAL, ou a data (ou o dia) da saída. Uma saída mais antiga que a readmissão não gera aviso, porque vale a mais recente.
 
 A faixa vermelha também aparece se a GERAL estiver **sem a coluna PROD, EQUIPE ou STATUS**: ela explica o efeito ("por isso os nomes não aparecem", "por isso todos estão contando como ativos"). Se a planilha não tiver a aba GERAL, o Quadro diz isso, em vez de mostrar um quadro vazio.
 

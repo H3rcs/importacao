@@ -503,7 +503,8 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-esp-mes.fora:focus-visible, .qd-barra.apagada:focus-visible, .qd-cartao.apagado:focus-visible,
 .qd-mapa tr.apagada > :focus-within, .qd-mapa td.apagada:focus-within, .qd-mapa th.apagada:focus-within { opacity: 1; }
 /* o teclado chega aqui pelo Mostrar mais / Ver todos / Ver e corrigir (tabindex=-1) */
-.qd-mov:focus-visible, .qd-item:focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; border-radius: 4px; }
+.qd-mov:focus-visible, .qd-item:focus-visible, .qd-desf > li:focus-visible { outline: 2px solid var(--tinta); outline-offset: -2px; border-radius: 4px; }
+.qd-leitura:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
 .qd-grupo-cab h3:focus-visible { outline: 2px solid var(--tinta); outline-offset: 3px; border-radius: 2px; }
 .qd-barra.escolhida { box-shadow: inset 0 0 0 1.5px var(--tinta); }
 .qd-barra.escolhida .qd-barra-nome { font-weight: 700; }
@@ -676,7 +677,9 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-pill[aria-pressed="true"], .qd-chip[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .qd-cartao.escolhido, .qd-esp-mes.escolhido, .qd-barra.escolhida, .qd-mapa th.escolhida .qd-eq { outline: 3px solid Highlight; }
   .qd-esp-mes.escolhido { outline-offset: -3px; }
-  /* escolhido E com o foco do teclado: o foco precisa de uma marca diferente da escolha */
-  .qd-cartao.escolhido:focus-visible, .qd-esp-mes.escolhido:focus-visible, .qd-barra.escolhida:focus-visible { outline: 3px dashed CanvasText; outline-offset: -6px; }
+  /* o foco do teclado e tracejado; a escolha, o contorno cheio em Highlight; escolhido com foco: tracejado em Highlight */
+  .qd-cartao:focus-visible, .qd-esp-mes:focus-visible, .qd-barra:focus-visible { outline: 3px dashed CanvasText; outline-offset: -6px; }
+  .qd-cartao.escolhido:focus-visible, .qd-esp-mes.escolhido:focus-visible, .qd-barra.escolhida:focus-visible { outline-color: Highlight; }
+  .qd-esp-mes { padding-bottom: 7px; }       /* o tracejado (6px para dentro) passa abaixo do rotulo do mes */
 }
 </style>

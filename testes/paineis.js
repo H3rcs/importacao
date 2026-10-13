@@ -757,7 +757,12 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
   const h = new Date();
-  const mesTexto = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][h.getMonth()].toLowerCase() + '/' + h.getFullYear();
+  const MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const mesTexto = MESES[h.getMonth()].toLowerCase() + '/' + h.getFullYear();
+  const mesIso = h.getFullYear() + '-' + ('0' + (h.getMonth() + 1)).slice(-2);           // "aaaa-mm", tambem so com o mes
+  const M = new Date(h.getFullYear(), h.getMonth() - 2, 1);                                 // um mes de dois meses atras
+  const DM = (dia) => new m.DataDoScript(M.getFullYear(), M.getMonth(), dia, 12, 0, 0);
+  const mTexto = MESES[M.getMonth()].toLowerCase() + '/' + M.getFullYear();
   const link = planilhaAntiga(m, 'BI Quadro Feira', {
     'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
       ['1° TURNO', '30010', 'JOSE SILVA', 'SEPARADOR', '100', 'ATIVO'],       // o COD dele foi dado a um novato na CADMITIDOS
@@ -767,7 +772,13 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
       ['2° TURNO', '30050', 'EVA PRADO', 'CONFERENTE', '', 'ATIVO'],          // a outra EVA (RH 999) saiu e voltou; esta saiu
       ['2° TURNO', '30060', 'FABIO ALVES', 'CONFERENTE', '600', 'ATIVO'],     // CADMITIDOS so com o nome
       ['3° TURNO', '30070', 'GIL SANTOS', 'SEPARADOR', '700', 'ATIVO'],       // saida sem data, readmissao datada
-      ['3° TURNO', '30080', 'HELENA DIAS', 'SEPARADOR', '800', 'ATIVO']],     // recontratada com COD novo, CADMITIDOS sem data
+      ['3° TURNO', '30080', 'HELENA DIAS', 'SEPARADOR', '800', 'ATIVO'],      // recontratada com COD novo, CADMITIDOS sem data
+      ['3° TURNO', '30090', 'IVO NUNES', 'SEPARADOR', '900', 'ATIVO'],        // o RH dele foi dado a outro na CADMITIDOS
+      ['3° TURNO', '30100', 'JULIA MOTA', 'SEPARADOR', '1000', 'ATIVO'],      // admissao original datada, readmissao sem data
+      ['3° TURNO', '30120', 'LUIZ PAES', 'SEPARADOR', '1200', 'ATIVO'],       // saida "aaaa-mm" e admissao no mesmo mes
+      ['ADM', '30130', 'MARTA REGO', 'ANALISTA', '1300', 'ATIVO'],            // saiu, voltou e saiu de novo no mesmo mes (so com o mes)
+      ['ADM', '30140', 'NINA ROCHA', 'ANALISTA', '1400', 'ATIVO'],            // a admissao original tem o nome escrito de outro jeito
+      ['ADM', '30150', 'OTTO LIMA', 'ANALISTA', '1500', 'ATIVO']],            // recontratado com COD novo e nome abreviado na CADMITIDOS
     'CADMITIDOS': [['PRODUTIVA', 'MATRÍCULA', 'COLABORADOR', 'STATUS', 'DATA ADMISSÃO'],
       ['30010', '', 'PEDRO COSTA', 'ATIVO', D(-5)],
       ['30020', '', 'ANA LIMA', 'ATIVO', D(200)],
@@ -776,7 +787,14 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
       ['', '999', 'EVA PRADO', 'ATIVO', D(-3)],
       ['', '', 'FABIO ALVES', 'ATIVO', D(-5)],
       ['30070', '', 'GIL SANTOS', 'ATIVO', D(-10)],
-      ['30080', '', 'HELENA DIAS', 'ATIVO', '']],
+      ['30080', '', 'HELENA DIAS', 'ATIVO', ''],
+      ['40999', '900', 'MARCOS REIS', 'ATIVO', D(-5)],
+      ['30100', '1000', 'JULIA MOTA', 'ATIVO', D(-700)],
+      ['30100', '1000', 'JULIA MOTA', 'ATIVO', ''],
+      ['30120', '1200', 'LUIZ PAES', 'ATIVO', D(0)],
+      ['30130', '1300', 'MARTA REGO', 'ATIVO', DM(10)],
+      ['30140', '1400', 'NINA S. ROCHA', 'ATIVO', D(-900)],
+      ['30150', '1500', 'OTTO M LIMA', 'ATIVO', D(-5)]],
     'CDESLIGADOS': [['COD', 'MATRÍCULA', 'COLABORADOR', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO'],
       ['30010', '', 'JOSE SILVA', D(-30), 'INVOLUNTÁRIO', 'Faltas'],
       ['30020', '', 'ANA LIMA', D(-10), 'VOLUNTÁRIO', ''],
@@ -787,7 +805,14 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
       ['', '999', 'EVA PRADO', D(-20), 'VOLUNTÁRIO', ''],
       ['30060', '', 'FABIO ALVES', D(-30), 'VOLUNTÁRIO', ''],
       ['30070', '', 'GIL SANTOS', '', 'VOLUNTÁRIO', ''],
-      ['28610', '', 'HELENA DIAS', D(-30), 'VOLUNTÁRIO', '']]
+      ['28610', '', 'HELENA DIAS', D(-30), 'VOLUNTÁRIO', ''],
+      ['30090', '900', 'IVO NUNES', D(-30), 'INVOLUNTÁRIO', 'Faltas'],
+      ['30100', '1000', 'JULIA MOTA', D(-30), 'VOLUNTÁRIO', ''],
+      ['30120', '1200', 'LUIZ PAES', mesIso, 'VOLUNTÁRIO', ''],
+      ['30130', '1300', 'MARTA REGO', DM(3), 'VOLUNTÁRIO', ''],
+      ['30130', '1300', 'MARTA REGO', mTexto, 'INVOLUNTÁRIO', 'Faltas'],
+      ['30140', '1400', 'NINA ROCHA', D(-30), 'INVOLUNTÁRIO', 'Faltas'],
+      ['28000', '', 'OTTO LIMA', D(-30), 'VOLUNTÁRIO', '']]
   });
   acao(m, s, 'salvarFonteQuadro', { link });
   const d = tela(m, s, 'quadro');
@@ -797,9 +822,16 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
     const l = de(cod);
     afirmar(l.length === 1 && l[0].tipo === tipo && (!re || re.test(l[0].detalhe)), porque + ': ' + JSON.stringify(l));
   };
-  um('30010', 'DESLIGADO_ATIVO', /O COD 30010 está na CADMITIDOS como PEDRO COSTA .*confira o número/, 'admissao pelo numero com OUTRO nome nao prova recontratacao');
+  um('30010', 'DESLIGADO_ATIVO', /A CADMITIDOS tem o COD 30010 com outro nome \(PEDRO COSTA.*escreva o nome como na GERAL; se não for, confira o número/, 'admissao pelo numero com OUTRO nome nao prova recontratacao');
   um('30020', 'DESLIGADO_ATIVO', /data no futuro .*confira a data/, 'admissao com data no futuro nao conta');
-  um('30030', 'DESLIGADO_ATIVO', null, 'saida so com o mes e admissao no mesmo mes nao e recontratacao');
+  um('30030', 'DESLIGADO_ATIVO', /só com o mês e a readmissão .* é do mesmo mês: ponha o dia da saída/, 'saida so com o mes e admissao no mesmo mes nao e recontratacao (a dica pede o dia)');
+  um('30120', 'DESLIGADO_ATIVO', /ponha o dia da saída/, 'saida "aaaa-mm" tambem e so com o mes');
+  um('30090', 'DESLIGADO_ATIVO', /A CADMITIDOS tem o RH 900 com outro nome \(MARCOS REIS/, 'achada pelo RH: a dica aponta o RH, nao o COD do outro');
+  um('30100', 'DESLIGADO_ATIVO', /sem data: se foi recontratação, ponha a data da nova admissão/, 'readmissao sem data ao lado da admissao original datada: a dica pede a data');
+  um('30130', 'DESLIGADO_ATIVO', /readmissão em 10\/.* só com o mês: ponha o dia da saída/, 'saida so com o mes no mes da readmissao nao e calada pela saida anterior');
+  um('30140', 'DESLIGADO_ATIVO', null, 'desligada de verdade');
+  afirmar(!/outro nome/.test(de('30140')[0].detalhe), 'a admissao ORIGINAL (antes da saida) com outro nome nao vira dica: ' + de('30140')[0].detalhe);
+  um('30150', 'MESMO_NOME', /com outro nome \(OTTO M LIMA.*escreva o nome como na GERAL/, 'recontratado com o nome abreviado: a dica pede o nome como na GERAL');
   um('30040', 'MESMO_NOME', null, 'saida nova (COD trocado) depois da readmissao continua pedindo conferencia');
   um('30050', 'DESLIGADO_ATIVO', null, 'a volta da outra EVA (achada so pelo nome) nao cala a saida desta');
   afirmar(de('30050')[0].chave === 'produtivo', 'a EVA desligada e achada pelo produtivo');

@@ -67,8 +67,9 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
   Se for outro nome, o GSL não liga as férias e aponta na Conferência: elas seriam de outra pessoa. Só o sobrenome em comum não basta.
 - Mais de uma pessoa com o mesmo final de RH (100123 e 109123):
   - vale primeiro quem bate mais números da matrícula: a matrícula 1456 é do RH 101456, e a 456 não é dele;
-  - depois, o nome mais parecido: o nome igual vem antes do só parecido;
-  - uma pessoa da GERAL fica com uma matrícula só: quem já tem a sua linha não recebe a de outra matrícula.
+  - depois, quem está ativo (quem já saiu só fica com a linha se nenhuma pessoa ativa servir);
+  - depois, o nome mais parecido: o nome igual vem antes do só parecido, e um nome que contradiz o outro (cada lado com um nome que o outro não tem) vale pouco;
+  - uma pessoa da GERAL fica com uma matrícula só, e a mesma matrícula com outro nome é outra pessoa.
   
   Se ainda empatar, a Conferência aponta "linha que serve a mais de uma pessoa".
 - Quem está **sem RH** na GERAL é achado pelo nome exato, se for a única pessoa ativa com esse nome.
@@ -505,7 +506,7 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias (52 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias (53 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
 node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral (51 cenários)
 ```

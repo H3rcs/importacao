@@ -1702,6 +1702,12 @@ async function rodar() {
         DADOS = com({ linhas: [] }, { linhas: 0 }); r.vazia = tela();
         r.vazia.conf = qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join(); r.vazia.selo = qdSeloAba();
         DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { limiteMax: '' })) }, { faltam: ['limiteMax'] }); r.semColuna = tela();
+        // sem a coluna pa_fim: a ficha usa o DTA_LIMITE (como a situacao); colada sem o cabecalho: um aviso so, sem efeitos que se contradizem
+        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { paFim: '' })) }, { faltam: ['paFim'] });
+        const refFicha = qdFeriasDados().lista.find((p) => p.pior.k === 'avisar').g.ref;
+        r.semPaFim = { ficha: qdFeFichaSecao(refFicha).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '), conf: qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join() };
+        DADOS = com({ linhas: [] }, { linhas: 0, faltam: ['matricula', 'nome', 'paFim', 'limiteMax'] });
+        r.semCabecalho = qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join();
         // a pessoa mais urgente ganha um periodo antigo sem DTA_LIMITEMAX: continua na faixa dela e aparece como "sem prazo"
         const p0 = qdFeriasDados().lista.find((p) => p.pior.k === 'planejar');
         DADOS = orig;
@@ -1736,6 +1742,10 @@ async function rodar() {
       /e um período sem DTA_LIMITEMAX na aba FÉRIAS/.test(semPrazo.semData.item) && /, 3 sem prazo conhecido$/.test(semPrazo.semData.linha),
       'periodo sem data atras de outro: ' + JSON.stringify(semPrazo.semData));
     afirmar(semPrazo.bordas === 'avisar,critica,critica,vencida,avisar,planejar,aquisicao,liberada,aquisicao,semdata', 'bordas das faixas: ' + semPrazo.bordas);
+    afirmar(/Pode tirar desde \d\d\/\d\d\/\d{4}/.test(semPrazo.semPaFim.ficha) && /Limite \(antes da multa\)/.test(semPrazo.semPaFim.ficha) &&
+      /^Não achei a coluna pa_fim: "pode tirar desde" e "em aquisição" usam o DTA_LIMITE/.test(semPrazo.semPaFim.conf), 'sem pa_fim: ' + JSON.stringify(semPrazo.semPaFim));
+    afirmar(semPrazo.semCabecalho === 'Não achei as colunas Matricula, Nome, pa_fim, DTA_LIMITEMAX no cabeçalho da aba FÉRIAS, e nenhuma linha foi lida (sem Matricula e sem Nome, nenhuma linha serve): o GSL não sabe o prazo de ninguém.',
+      'colada sem o cabecalho: ' + semPrazo.semCabecalho);
     afirmar(semPrazo.resumoSemNome.join('|') === '- Sem nome, COD 39002, RH 109002 (2° TURNO) — sem linha na aba FÉRIAS', 'sem nome no texto copiado: ' + semPrazo.resumoSemNome.join('|'));
     // a barra lateral recolhe e volta; quem desenha pela largura da caixa (graficos do Aprendiz) recebe um "resize"
     await f.evaluate(() => { window.__redim = 0; window.addEventListener('resize', () => { window.__redim++; }); });

@@ -1267,11 +1267,17 @@ function qdMemo() {
   // a aba FÉRIAS que nao serve para os avisos (so o cabecalho, ou sem coluna essencial): nada de "planilha conferida"
   const lf = l.ferias, lfFaltam = (lf && lf.faltam) || [];
   const rotFe = { matricula: 'Matricula', nome: 'Nome', paFim: 'pa_fim', limiteMax: 'DTA_LIMITEMAX' };
-  const efeito = { limiteMax: 'sem ela, o GSL não sabe o prazo de ninguém', matricula: 'as linhas só se ligam à GERAL pelo nome exato',
-    nome: 'a matrícula liga as linhas sem conferir o nome', paFim: '"pode tirar desde" e "em aquisição" usam o DTA_LIMITE (sem ele, ficam sem base)' };
+  const efeito = { limiteMax: 'sem ela, o GSL não sabe o prazo de ninguém',
+    matricula: 'só as linhas do centro de custo do CD se ligam à GERAL, pelo nome exato; as dos outros centros de custo ficam de fora',
+    nome: 'a matrícula liga as linhas do CD sem conferir o nome; o final de RH que é de mais de uma pessoa ativa fica sem dono, e as linhas dos outros centros de custo ficam de fora',
+    paFim: '"pode tirar desde" e "em aquisição" usam o DTA_LIMITE (sem ele, ficam sem base)' };
   const feAba = lf && (lfFaltam.length || lf.linhas === 0) ? [{ tipo: 'FERIAS_ABA', nome: 'Aba ' + (lf.aba || 'FÉRIAS'), gravidade: 'atencao',
     linha: 1, aba: lf.aba, gid: (DADOS.ferias || {}).gid,
-    detalhe: lfFaltam.length ? lfFaltam.map((k) => 'Não achei a coluna ' + (rotFe[k] || k) + ': ' + (efeito[k] || 'falta no cabeçalho') + '.').join(' ')
+    detalhe: lfFaltam.length && lf.linhas === 0
+      ? 'Não achei ' + (lfFaltam.length === 1 ? 'a coluna ' : 'as colunas ') + lfFaltam.map((k) => rotFe[k] || k).join(', ') + ' no cabeçalho da aba ' + (lf.aba || 'FÉRIAS') +
+        ', e nenhuma linha foi lida' + (lfFaltam.indexOf('matricula') !== -1 && lfFaltam.indexOf('nome') !== -1 ? ' (sem Matricula e sem Nome, nenhuma linha serve)' : '') +
+        ': o GSL não sabe o prazo de ninguém.'
+      : lfFaltam.length ? lfFaltam.map((k) => 'Não achei a coluna ' + (rotFe[k] || k) + ': ' + (efeito[k] || 'falta no cabeçalho') + '.').join(' ')
       : 'A aba ' + (lf.aba || 'FÉRIAS') + ' está vazia: só tem o cabeçalho. Sem as linhas, o GSL não sabe o prazo de ninguém.' }] : [];
   const inc = colunas.concat(feAba, (DADOS.inconsistencias || []).filter((x) =>
     !(x.tipo === 'EQUIPE' && faltam.indexOf('equipe') !== -1) && !(x.tipo === 'SEM_NOME' && faltam.indexOf('nome') !== -1)));
@@ -2288,7 +2294,7 @@ function qdSomarDias(iso, n) {
 }
 function qdFeriasSituacao(f, hoje, P) {
   P = P || qdFeP();
-  const libera = f.limite || f.paFim;
+  const libera = f.paFim || f.limite;                            // o DTA_LIMITE repete o pa_fim
   if (!f.limiteMax) return { k: libera && libera >= hoje ? 'aquisicao' : 'semdata', dias: null };
   const dias = qdDias(hoje, f.limiteMax);
   if (dias < 0) return { k: 'vencida', dias };
@@ -2549,7 +2555,7 @@ function qdFeLinha(p) {
   if (per.k === 'vencida') quando = ['venceu há ' + qdPlural(-per.dias, 'dia', 'dias'), 'limite era ' + qdFeDMS(f.limiteMax) + ' · férias em dobro'];
   else if (per.k === 'critica') quando = ['começar até ' + qdFeDMS(f.limiteMax), qdFeFalta(per.dias) + (per.avisar >= qdHoje() ? ' · o aviso é ' + qdFeEm(per.avisar) : ' · o aviso era até ' + qdFeDM(per.avisar))];
   else quando = ['avisar até ' + qdFeDMS(per.avisar), qdFeEm(per.avisar) + ' · limite ' + qdFeDMS(f.limiteMax)];
-  const completos = p.periodos.filter((x) => x.f.paFim && x.f.paFim < qdHoje()).length;
+  const completos = p.periodos.filter((x) => (x.f.paFim || x.f.limite) && (x.f.paFim || x.f.limite) < qdHoje()).length;
   const notas = [], notasTxt = [];
   const nota = (html, txt) => { notas.push(html); notasTxt.push(txt); };
   if (g.situacao === 'FERIAS') nota(`<span class="qd-fe-item-nota">${QD_FE_ICO.sol}<span>de férias agora (STATUS da GERAL) — se for este período, está resolvido</span></span>`,
@@ -2878,9 +2884,9 @@ function qdFeBaixar() {
   todos.sort((a, b) => rank(a.per) - rank(b.per) || (a.per.dias === null ? 1e9 : a.per.dias) - (b.per.dias === null ? 1e9 : b.per.dias));
   const dt = (iso) => iso ? pnDataLonga(iso) : '';
   todos.forEach(({ p, per }) => {
-    const f = per.f, g = p.g;
+    const f = per.f, g = p.g, paFim = f.paFim || f.limite;      // sem o pa_fim, o DTA_LIMITE (que repete a data), como na situacao
     linhas.push([qdFeSitTexto(per.k).toUpperCase(), qdFeNomeOuId(g), g.equipe || g.equipeBruta || '', qdFuncaoTela(g), f.matricula || '', g.rh || '',
-      dt(f.paInicio), dt(f.paFim), dt(f.paFim ? qdSomarDias(f.paFim, 1) : ''), dt(per.avisar), dt(f.limiteMax), per.dias === null ? '' : per.dias, g.status || '']);
+      dt(f.paInicio), dt(paFim), dt(paFim ? qdSomarDias(paFim, 1) : ''), dt(per.avisar), dt(f.limiteMax), per.dias === null ? '' : per.dias, g.status || '']);
   });
   const sufixo = qdChaveFuncao(qdRotuloRecorte()).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   pnBaixarXlsx('ferias-quadro-cd-' + qdHoje() + (sufixo ? '-' + sufixo : '') + '.xlsx', [{ nome: 'Férias', linhas }]);
@@ -2927,26 +2933,26 @@ function qdFeFichaSecao(ref) {
   return `<h4>Férias · ${qdPlural(p.periodos.length, 'período em aberto', 'períodos em aberto')}</h4>
     ${g.situacao === 'FERIAS' ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}De férias agora pelo STATUS da GERAL: se forem as do período mais antigo, o prazo está sendo cumprido (a linha sai da extração quando o sistema fechar o período).</p>` : ''}
     <ul class="qd-fe-ficha">${p.periodos.map((per) => {
-      const f = per.f, nv = QD_FE_NIVEL[per.k];
-      if (!f.limiteMax || !f.paFim) {
+      const f = per.f, nv = QD_FE_NIVEL[per.k], paFim = f.paFim || f.limite;   // sem o pa_fim, o DTA_LIMITE
+      if (!f.limiteMax || !paFim) {
         return `<li class="${nv}"><div class="qd-fe-ficha-cab">${qdFeIcoNivel(nv)}<b>${esc(qdFeSitMaiuscula(per.k))}</b>
-          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${f.paFim ? pnDataLonga(f.paFim) : '—'} · linha ${f.linha} da aba FÉRIAS</span></div></li>`;
+          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${paFim ? pnDataLonga(paFim) : '—'} · linha ${f.linha} da aba FÉRIAS</span></div></li>`;
       }
-      const ini = f.paInicio || qdSomarDias(f.paFim, -364), fim = f.limiteMax;
+      const ini = f.paInicio || qdSomarDias(paFim, -364), fim = f.limiteMax;
       const total = Math.max(1, qdDias(ini, fim));
       const pos = (d) => Math.max(0, Math.min(100, qdDias(ini, d) / total * 100));
       const hojePos = qdDias(ini, hoje) / total * 100;
       return `<li class="${nv}">
         <div class="qd-fe-ficha-cab">${qdFeIcoNivel(nv)}<b>${esc(qdFeSitMaiuscula(per.k))}</b>
-          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${pnDataLonga(f.paFim)}</span></div>
-        <div class="qd-fe-tempo" role="img" aria-label="${esc('Período aquisitivo até ' + pnDataLonga(f.paFim) + '; pode tirar desde ' + pnDataLonga(qdSomarDias(f.paFim, 1)) + '; avisar até ' + pnDataLonga(per.avisar) + '; limite ' + pnDataLonga(fim) + '.')}">
-          <i class="aq" style="left:0;width:${pos(f.paFim)}%"></i>
-          <i class="livre" style="left:${pos(f.paFim)}%;width:${Math.max(0, pos(per.avisar) - pos(f.paFim))}%"></i>
+          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${pnDataLonga(paFim)}</span></div>
+        <div class="qd-fe-tempo" role="img" aria-label="${esc('Período aquisitivo até ' + pnDataLonga(paFim) + '; pode tirar desde ' + pnDataLonga(qdSomarDias(paFim, 1)) + '; avisar até ' + pnDataLonga(per.avisar) + '; limite ' + pnDataLonga(fim) + '.')}">
+          <i class="aq" style="left:0;width:${pos(paFim)}%"></i>
+          <i class="livre" style="left:${pos(paFim)}%;width:${Math.max(0, pos(per.avisar) - pos(paFim))}%"></i>
           <i class="aviso ${nv}" style="left:${pos(per.avisar)}%;width:${100 - pos(per.avisar)}%"></i>
           ${hojePos >= 0 && hojePos <= 100 ? `<b class="qd-fe-tempo-hoje" style="left:${hojePos}%"><span>hoje</span></b>` : ''}
         </div>
         <dl class="qd-fe-ficha-datas">
-          <div><dt>Pode tirar desde</dt><dd>${qdFeDMAS(qdSomarDias(f.paFim, 1))}</dd></div>
+          <div><dt>Pode tirar desde</dt><dd>${qdFeDMAS(qdSomarDias(paFim, 1))}</dd></div>
           <div><dt>Avisar até</dt><dd>${qdFeDMAS(per.avisar)}</dd></div>
           <div><dt>Limite (antes da multa)</dt><dd><b>${qdFeDMAS(fim)}</b> · ${qdFeFalta(per.dias)}</dd></div>
         </dl></li>`;

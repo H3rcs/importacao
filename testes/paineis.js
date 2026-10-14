@@ -898,7 +898,7 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
   afirmar(!conf('FERIAS_DUPLA').length, 'ninguem em duas pessoas: ' + JSON.stringify(conf('FERIAS_DUPLA')));
   const fora = conf('FERIAS_FORA_GERAL');
   afirmar(fora.map((x) => x.matricula + '@' + x.linha).join() === '999@8,555@10' && fora.every((x) => x.aba === 'Férias' && !x.ref) &&
-    /não é de ninguém da GERAL nem esse nome\. O final 999 é de DORA MELO \(RH 100999\); EVA PRADO \(RH 109999\), que já têm as suas linhas, com outro nome\./.test(fora[0].detalhe),
+    /não é de ninguém da GERAL\. O final 999 é de DORA MELO \(RH 100999\); EVA PRADO \(RH 109999\), que já têm as suas linhas, com outro nome\.$/.test(fora[0].detalhe),
     'CC 655 sem par na GERAL: ' + JSON.stringify(fora));
   afirmar(conf('FERIAS_SEM_DADOS').map((x) => x.cod).sort().join() === '30002,30007', 'quem esta no quadro sem linha na FÉRIAS: ' + JSON.stringify(conf('FERIAS_SEM_DADOS')));
   afirmar(d.inconsistencias.filter((x) => /^FERIAS_/.test(x.tipo)).every((x) => x.gravidade === 'atencao'), 'conferencias das ferias sao de atencao');
@@ -1059,7 +1059,7 @@ caso('quadro do CD: ferias — par mais forte primeiro (mais numeros da matricul
   const fora = conf('FERIAS_FORA_GERAL');
   afirmar(fora.map((x) => x.linha).join() === '12,15,18', 'fora da GERAL: ' + JSON.stringify(fora));
   afirmar(/nenhuma pessoa ativa da GERAL tem esse final de RH nem esse nome\. O final 777 também é de uma linha sem nome \(RH 100777\), que já saiu da empresa\./.test(fora[0].detalhe), fora[0].detalhe);
-  afirmar(/matrícula 999, mas não é de ninguém da GERAL\. JOSE CARLOS SILVA \(RH 100222\) tem o mesmo nome: .* O final 999 é de DORA MELO \(RH 101999\), que já tem a sua linha, com outro nome\./.test(fora[1].detalhe), fora[1].detalhe);
+  afirmar(/matrícula 999, mas não é de ninguém da GERAL\. JOSE CARLOS SILVA \(RH 100222\) tem o mesmo nome: .* O final 999 é de DORA MELO \(RH 101999\), que já tem a sua linha, com outro nome \(uma pessoa da GERAL fica com uma matrícula só\)\.$/.test(fora[1].detalhe), fora[1].detalhe);
   afirmar(/sem matrícula, e ninguém ativo da GERAL sem linha tem esse nome\./.test(fora[2].detalhe), fora[2].detalhe);
   const sem = conf('FERIAS_SEM_DADOS');
   afirmar(sem.map((x) => x.cod).join() === '50007' && /^A matrícula 654 \(o final do RH 100654\) não está na aba FÉRIAS\./.test(sem[0].detalhe), 'sem linha: ' + JSON.stringify(sem));
@@ -1069,6 +1069,58 @@ caso('quadro do CD: ferias — par mais forte primeiro (mais numeros da matricul
   afirmar([n('M APARECIDA SOUZA', 'MARIA APARECIDA SOUZA'), n('M SILVA', 'NATALIA SILVA'), n('H COSTA LIMA', 'HELENA COSTA LIMA'), n('PEDRO FERREIRA SILVA', 'MARCOS PEDRO SILVA ROCHA'),
     n('JOSE CARLOS SANTOS', 'MARIA JOSE DA SILVA SANTOS'), n('PAULA SOUZA', 'ANA PAULA DE SOUZA'), n('THIAGO DOS SANTOS', 'TIAGO SANTOS'), n('ANA', 'ANA LIMA'), n('', 'ANA')].join() === '1,0,1,0,0,1,3,2,-1',
     'niveis do nome');
+});
+
+caso('quadro do CD: ferias — ativo antes de quem saiu; nome sem contradicao antes do so parecido; mesma matricula com outro nome e outra pessoa; os motivos certos', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
+  const L = (mat, nome, cc, lim) => ['Bartofil', 21, mat, 'SEPARADOR', nome, cc, 'A', D(-900), D(-500), D(-135), D(-135), D(lim), 0, 101, 'OPERACIONAL'];
+  const link = planilhaAntiga(m, 'BI Quadro Motivos', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+      ['1° TURNO', '60001', 'BRUNO DOS MARTINS SILVA', 'SEPARADOR', '200901', 'ATIVO'],
+      ['1° TURNO', '60002', 'ANTONIO DA SILVA', 'SEPARADOR', '300901', 'ATIVO'],
+      ['1° TURNO', '60003', 'ANTONIO DE SOUZA', 'SEPARADOR', '100492', 'ATIVO'],
+      ['1° TURNO', '60004', 'DANIEL LUIZ SOUZA', 'SEPARADOR', '102492', 'INATIVO'],
+      ['2° TURNO', '60005', 'MARCOS ROCHA', 'CONFERENTE', '101456', 'ATIVO'],
+      ['2° TURNO', '60006', 'MARIA LIMA', 'CONFERENTE', '100321', 'ATIVO'],
+      ['2° TURNO', '60007', 'HELENA COSTA', 'CONFERENTE', '', 'ATIVO'],
+      ['2° TURNO', '60008', 'HELENA COSTA', 'CONFERENTE', '', 'ATIVO'],
+      ['3° TURNO', '60009', 'J CARLOS SILVA', 'SEPARADOR', '100654', 'ATIVO'],
+      ['3° TURNO', '60010', 'JOSE SILVA', 'SEPARADOR', '100777', 'ATIVO'],
+      ['3° TURNO', '60011', 'JOSE SILVA', 'SEPARADOR', '200777', 'ATIVO']],
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR']], 'CDESLIGADOS': [['COD', 'COLABORADOR']],
+    'FÉRIAS': [['Empresa', 'Filial', 'Matricula', 'Descrição', 'Nome', 'cc', 'turno', 'admissão', 'pa_inicio', 'pa_fim', 'DTA_LIMITE', 'DTA_LIMITEMAX', 'dias vencidos', 'codfuc', 'tipfuncao'],
+      L(901, 'BRUNO DOS MARTINS SILVA', 655, 200),   // 2: a do BRUNO
+      L(901, 'BRUNO ANTONIO DA SILVA', 655, -5),     // 3: a mesma matricula com outro nome e outra pessoa: o ANTONIO DA SILVA (sem o 1o nome)
+      L(492, 'DANIEL ANTONIO DE SOUZA', 655, 10),    // 4: o ANTONIO DE SOUZA (ativo), nao o DANIEL LUIZ (que saiu, e com um nome que contradiz)
+      L(1456, 'MARCOS ROCHA', 655, 100),             // 5
+      L(456, 'MARCOS ROCHA', 655, 20),               // 6: homonimo com outra matricula: o MARCOS ja tem a 1456
+      L(321, 'HELENA COSTA', 655, 30),               // 7: duas HELENA sem RH; o final 321 e da MARIA (outro nome)
+      L(654, 'JOSE CARLOS SILVA', 700, 40),          // 8: outro setor, o nome so em parte (a GERAL tem a inicial)
+      L(777, 'JOSE SILVA', 700, 50),                 // 9: outro setor, dois JOSE SILVA com o final 777
+      L(777, 'PEDRO ROCHA', 655, 60)]                // 10: do CD, o final 777 e dos dois JOSE (outro nome)
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro && d.ferias, 'leu a aba: ' + d.erro);
+  const ref = (cod) => d.geral.find((g) => g.cod === cod).ref;
+  const de = (cod) => d.ferias.linhas.filter((f) => f.ref === ref(cod)).map((f) => f.linha + ':' + f.chave).join();
+  afirmar(de('60001') === '2:matricula' && de('60002') === '3:matricula' && de('60003') === '4:matricula' && de('60004') === '' && de('60005') === '5:matricula',
+    'quem ficou com cada linha: ' + ['60001', '60002', '60003', '60004', '60005'].map((c) => c + '=' + de(c)).join(' '));
+  const conf = (tipo) => d.inconsistencias.filter((x) => x.tipo === tipo);
+  afirmar(conf('FERIAS_FORA_GERAL').map((x) => x.linha).join() === '6' &&
+    /matrícula 456, mas não é de ninguém da GERAL\. O final 456 é de MARCOS ROCHA \(RH 101456\), que já tem a sua linha \(uma pessoa da GERAL fica com uma matrícula só\)\.$/.test(conf('FERIAS_FORA_GERAL')[0].detalhe),
+    'homonimo com outra matricula: ' + JSON.stringify(conf('FERIAS_FORA_GERAL')));
+  afirmar(conf('FERIAS_DUPLA').map((x) => x.linha).join() === '7' && conf('FERIAS_NOME').map((x) => x.linha).join() === '10', 'duas HELENA e o final dos dois JOSE: ' + JSON.stringify(conf('FERIAS_DUPLA').concat(conf('FERIAS_NOME'))));
+  afirmar(d.leitura.ferias.foraDoCd === 2, 'outro setor: ' + d.leitura.ferias.foraDoCd);
+  const sem = {};
+  conf('FERIAS_SEM_DADOS').forEach((x) => { sem[x.cod] = x.detalhe; });
+  afirmar(Object.keys(sem).sort().join() === '60006,60007,60008,60009,60010,60011', 'sem linha: ' + Object.keys(sem).sort().join());
+  afirmar(/^A aba FÉRIAS tem a matrícula 321, mas de HELENA COSTA \(linha 7\), outro nome\./.test(sem['60006']), 'MARIA: ' + sem['60006']);
+  afirmar(/serve a mais de uma pessoa: veja "Férias: linha que serve a mais de uma pessoa"/.test(sem['60007']) && /serve a mais de uma pessoa/.test(sem['60008']), 'HELENA: ' + sem['60007']);
+  afirmar(/^A aba FÉRIAS tem a matrícula 654, de JOSE CARLOS SILVA \(linha 8, centro de custo 700\): o nome bate só em parte, .* inclua o centro de custo 700 nos parâmetros da aba Férias\./.test(sem['60009']), 'J CARLOS: ' + sem['60009']);
+  afirmar(/^A aba FÉRIAS tem a matrícula 777, mas de PEDRO ROCHA \(linha 10\), outro nome: veja "Férias: matrícula de outra pessoa"\./.test(sem['60010']) && sem['60010'] === sem['60011'],
+    'os dois JOSE (o motivo da linha do CD primeiro): ' + sem['60010']);
 });
 
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {

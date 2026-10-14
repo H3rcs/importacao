@@ -53,7 +53,7 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
 | **pa_inicio** e **pa_fim** | o período aquisitivo: depois do pa_fim (ou do DTA_LIMITE, que repete a data), a pessoa já pode tirar as férias |
 | **DTA_LIMITEMAX** | a data limite para sair de férias: todos os prazos contam a partir dela |
 
-- **Matricula, Nome, pa_fim e DTA_LIMITEMAX são obrigatórias.** Sem o DTA_LIMITEMAX, a aba Férias diz que falta a coluna (ninguém tem prazo). Sem Matricula, Nome ou pa_fim, um aviso no alto da aba diz qual coluna falta, e a Conferência explica o efeito.
+- **Matricula, Nome, pa_fim e DTA_LIMITEMAX são obrigatórias.** Sem o DTA_LIMITEMAX, a aba Férias diz que falta a coluna e que o GSL não sabe o prazo de ninguém. Sem Matricula, Nome ou pa_fim, um aviso no alto da aba diz qual coluna falta, e a Conferência explica o efeito. Sem Matricula e Nome juntas, nenhuma linha é lida, e a aba mostra só esse aviso no lugar da lista.
 - As outras colunas (Empresa, Filial, Descrição, turno, admissão, dias vencidos, codfuc, tipfuncao) podem vir na extração. A equipe e a função que aparecem na tela são as da GERAL.
 - Datas podem ser data do Sheets ou texto (10/06/2026).
 - Uma pessoa com dois períodos em aberto tem duas linhas: a ficha mostra os dois, e a lista mostra a pessoa pelo mais urgente.
@@ -105,7 +105,7 @@ Os prazos contam os dias até o DTA_LIMITEMAX (a data limite para sair de féria
 - **Ninguém para avisar nem para sair:** a linha diz quem é o próximo aviso e até quando.
 - **Rodapé:**
   - quantos estão **em dia**;
-  - quantos estão **sem dados de férias** (tocar abre a lista, com o motivo de cada um) e o link **ver na Conferência**;
+  - quantos estão **sem dados de férias** (tocar abre a lista, com o motivo de cada um) e, se alguém está sem linha na aba FÉRIAS, o link **ver na Conferência**. Sem ninguém assim, linhas da aba FÉRIAS que não fecham com a GERAL aparecem como "N linhas da aba FÉRIAS para conferir";
   - **Baixar Excel** e **Parâmetros** (este, só para quem pode trocar a planilha);
   - embaixo, a frase: "Marcou férias no sistema? Cole a extração nova na aba FÉRIAS e use Atualizar dados."
 - **Cada pessoa conta num lugar só.** Os grupos, "em dia" e "sem dados" somam as pessoas do filtro.

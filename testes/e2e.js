@@ -1692,6 +1692,9 @@ async function rodar() {
     afirmar(/^\d+ em dia 2 sem dados de férias · ver na Conferência Baixar Excel Parâmetros Marcou férias no sistema\? Cole a extração nova na aba FÉRIAS e use Atualizar dados\.$/.test(fe.rodape),
       'rodape: ' + fe.rodape);
     afirmar(!PROIBIDAS.test(fe.html), 'lista das ferias sem palavra de multa');
+    const naTela = fe.grupos.map((g) => Number(g.replace(/\D+/g, ''))).concat((/^(\d+) em dia (\d+) sem dados/.exec(fe.rodape) || []).slice(1).map(Number));
+    const doQuadro = await f.evaluate(() => qdRecorte(qdNaEmpresa()).length);
+    afirmar(naTela.length === 5 && naTela.reduce((a, b) => a + b, 0) === doQuadro, 'os numeros da tela somam o quadro (cada pessoa num lugar so): ' + naTela.join('+') + ' x ' + doQuadro);
     // Programar abre com um toque; quem esta sem dados abre no rodape
     await f.click('.qd-fe-grupo.prog .qd-fe-grupo-bt');
     await f.waitForFunction(() => document.querySelectorAll('.qd-fe-grupo.prog .qd-fe-item').length === 10, null, { timeout: 5000 });
@@ -1708,13 +1711,13 @@ async function rodar() {
     // nos ultimos dias do mes, as datas de agir podem estar todas no mes seguinte: anda ate um mes com gente
     await f.evaluate(() => { for (let i = 0; i < 3 && !document.querySelector('.qd-fe-mes .qd-fe-pil'); i++) qdFeMesRel(1); });
     const cal = await f.evaluate(() => ({ tit: document.querySelector('#qd-fe-mes-tit').innerText.trim(),
-      rot: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => b.getAttribute('title')),
-      nomes: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => [b.getAttribute('aria-label'), b.innerText.trim()]),
+      rot: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => { const t = b.getAttribute('title'); return t.slice(t.indexOf(' — ') + 3); }),
+      nomes: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => [b.getAttribute('aria-label'), b.innerText.trim(), b.getAttribute('title')]),
       dias: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-dia-bt')).map((b) => b.getAttribute('data-dia')),
       venc: (document.querySelector('.qd-fe-vencidos') || { innerText: '' }).innerText.replace(/\s+/g, ' ').trim(),
       leg: document.querySelector('.qd-fe-legenda').innerText.replace(/\s+/g, ' ').trim(), html: document.querySelector('.qd-fe').innerHTML }));
     afirmar(cal.rot.length > 0 && cal.rot.every((r) => /^(Sair|Avisar) até \d\d\/\d\d\/\d{4}: .+\.$/.test(r)) && new Set(cal.rot.map((r) => r.split(': ')[1])).size === cal.rot.length &&
-      cal.nomes.every(([rot, nome]) => rot.indexOf(nome + ' — ') === 0), 'calendario (uma pilula por pessoa; o nome que aparece comeca o nome acessivel): ' + JSON.stringify(cal).slice(0, 700));
+      cal.nomes.every(([rot, nome, dica]) => rot.indexOf(nome + ' — ') === 0 && rot === dica), 'calendario (uma pilula por pessoa; o nome que aparece comeca o nome acessivel, igual a dica): ' + JSON.stringify(cal).slice(0, 700));
     afirmar(/^Prazo vencido /.test(cal.venc) && (cal.venc.match(/\(\d\d\/\d\d\)/g) || []).length === 2, 'faixa do prazo vencido: ' + cal.venc);
     afirmar(cal.leg === 'sair até avisar até programar em dia · toque no nome para abrir a ficha' && !PROIBIDAS.test(cal.html), 'legenda: ' + cal.leg);
     // o dia com gente abre a lista dele embaixo da grade (no celular e o toque no dia; no computador, o "+N no dia")

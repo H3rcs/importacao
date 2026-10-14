@@ -744,7 +744,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-quem { grid-area: quem; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; }
 .qd-fe-nome { font-size: 13.5px; font-weight: 600; }
 .qd-fe-funcao { font-size: 12px; color: var(--tinta-media); }
-.qd-fe-quem .qd-eq, .qd-fe-semdados .qd-eq, .qd-fe-geral-prox .qd-eq { white-space: normal; }
+.qd-fe-quem .qd-eq, .qd-fe-semdados .qd-eq, .qd-fe-geral-prox .qd-eq { white-space: normal; overflow-wrap: anywhere; }
 .qd-fe-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap;
   background: var(--bq-surface-2); border: 1px solid var(--bq-linha); color: var(--tinta-media); }
 .qd-fe-quando { grid-area: quando; display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; font-size: 12.5px; color: var(--tinta-media); }
@@ -784,10 +784,10 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 
 /* o calendário: no desenho da tela Calendário; cada pessoa uma vez, no dia de agir */
 .qd-fe-cal-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 14px 0 10px; }
-.qd-fe-cal-tit { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.qd-fe-cal-tit { flex: 1 1 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .bi-quadro .qd-fe-cal-tit h3 { margin: 0; font-family: 'Archivo', sans-serif; font-size: 17px; font-weight: 700; }
 .qd-fe-cal-tit > span { font-size: 12.5px; color: var(--tinta-media); }
-.qd-fe-setas { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.qd-fe-setas { flex: none; align-self: flex-start; display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .qd-fe-seta, .qd-fe-hoje-bt { min-height: 36px; min-width: 36px; border-radius: 9px; border: 1.5px solid var(--bq-linha); background: var(--bq-surface-2);
   color: var(--tinta); cursor: pointer; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 18px; line-height: 1; padding: 0 10px; }
 .qd-fe-hoje-bt { font-size: 13px; padding: 0 14px; }
@@ -916,7 +916,8 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-fe-abrir { display: none; }
   .qd-fe-nome { width: 100%; }
   .qd-fe-rod-acoes { margin-left: 0; width: 100%; }
-  .qd-fe-rodape .qd-link, .qd-fe-vencidos .qd-link, .qd-fe-dia-lista h4 .qd-link, .qd-fe-grupo-bt, .qd-fe-ninguem .qd-link { display: inline-block; padding: 7px 0; }
+  .qd-fe-rodape .qd-link, .qd-fe-vencidos .qd-link, .qd-fe-dia-lista h4 .qd-link, .qd-fe-grupo-bt, .qd-fe-ninguem .qd-link, .qd-fe-aviso .qd-link,
+  .qd-fe-vazio .qd-link { display: inline-block; padding: 7px 0; }
   .qd-fe-cal-tit > span { width: 100%; }
   .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
 }

@@ -904,19 +904,21 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
   afirmar(d.inconsistencias.filter((x) => /^FERIAS_/.test(x.tipo)).every((x) => x.gravidade === 'atencao'), 'conferencias das ferias sao de atencao');
   // PARAMETROS (editaveis na aba Ferias): o padrao vem na tela; o servidor confere o que chega
   const P0 = d.parametrosFerias;
-  afirmar(P0 && P0.cc.join() === '655' && P0.digitos === 3 && P0.aviso === 30 && P0.avisar === 60 && P0.planejar === 90 && P0.janela === 30 && P0.meses === 6,
-    'parametros padrao: ' + JSON.stringify(P0));
-  const ok = { cc: '700', digitos: '4', aviso: '45', avisar: '75', planejar: '120', janela: '20', meses: '4' };
+  afirmar(P0 && Object.keys(P0).sort().join() === 'avisar,aviso,cc,digitos,planejar' && P0.cc.join() === '655' && P0.digitos === 3 && P0.aviso === 30 && P0.avisar === 60 && P0.planejar === 90,
+    'parametros padrao (sem os do escalonar): ' + JSON.stringify(P0));
+  const ok = { cc: '700', digitos: '4', aviso: '45', avisar: '75', planejar: '120' };
   afirmar(/pelo menos um centro de custo/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { cc: 'abc' })))), 'centro de custo sem numero');
-  afirmar(/Avisar já" precisa ser maior/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { avisar: '40' })))), 'avisar ja menor que o aviso');
+  afirmar(/: "Avisar" precisa ser maior que o aviso de férias \(45 dias\)\.$/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { avisar: '40' })))), 'avisar menor que o aviso');
+  afirmar(/: "Programar" precisa ser maior que "Avisar" \(75 dias\)\.$/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { planejar: '75' })))), 'programar menor que o avisar');
   afirmar(/Números da matrícula: use um número inteiro de 1 a 8/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { digitos: '0' })))), 'digitos fora da faixa');
   const coord = entrar(m, COORD, '1234');
   afirmar(erroDe(() => acao(m, coord, 'salvarParametrosFerias', ok)) !== '', 'coordenador nao muda os parametros');
   acao(m, s, 'salvarParametrosFerias', ok);
   const d3 = tela(m, s, 'quadro');
   const P1 = d3.parametrosFerias;
-  afirmar(P1.cc.join() === '700' && P1.digitos === 4 && P1.aviso === 45 && P1.avisar === 75 && P1.planejar === 120 && P1.janela === 20 && P1.meses === 4,
+  afirmar(P1.cc.join() === '700' && P1.digitos === 4 && P1.aviso === 45 && P1.avisar === 75 && P1.planejar === 120 && P1.janela === undefined,
     'parametros salvos: ' + JSON.stringify(P1));
+  afirmar(!ctx(m).listar('PARAMETROS').some((x) => /^FERIAS_ESCALONAR/.test(x.CHAVE)), 'o escalonar nao grava mais parametro');
   const conf3 = (tipo) => d3.inconsistencias.filter((x) => x.tipo === tipo);
   // CC 700: a linha da IRIS (700) e do CD e esta fora da GERAL; as do 655 passam a ser de outro setor: so entram pela matricula com o nome certo
   // (CARLOS, sem RH, nao e mais achado pelo nome; HELIO, JOAO, EVA e a do CARLOS ficam de fora, sem conferencia)
@@ -929,7 +931,7 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
     'numeros da matricula do parametro: ' + JSON.stringify(conf3('FERIAS_SEM_DADOS')));
   acao(m, s, 'salvarParametrosFerias', { padrao: true });
   const P2 = tela(m, s, 'quadro').parametrosFerias;
-  afirmar(P2.cc.join() === '655' && P2.digitos === 3 && P2.aviso === 30 && P2.meses === 6, 'de volta ao padrao: ' + JSON.stringify(P2));
+  afirmar(P2.cc.join() === '655' && P2.digitos === 3 && P2.aviso === 30 && P2.avisar === 60 && P2.planejar === 90, 'de volta ao padrao: ' + JSON.stringify(P2));
   // extracao nova colada na aba: a copia guardada (5 min) segue ate o "Atualizar dados" — o da barra lateral tambem rele
   const idQ = /\/d\/([\w-]+)/.exec(link)[1];
   const abaF = m.planilhas.get(idQ).abas.find((a) => a.nome === 'Férias');

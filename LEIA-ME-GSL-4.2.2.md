@@ -51,12 +51,12 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
 | **Nome** | confirma a ligação; se a matrícula não servir, liga pelo nome |
 | **cc** | só as linhas do centro de custo do CD (655) entram; as outras são de outros setores |
 | **pa_inicio** e **pa_fim** | o período aquisitivo: depois do pa_fim (ou do DTA_LIMITE, que repete a data), a pessoa já pode tirar as férias |
-| **DTA_LIMITEMAX** | o limite antes da multa: todos os prazos e alertas contam a partir dele |
+| **DTA_LIMITEMAX** | a data limite para sair de férias: todos os prazos contam a partir dela |
 
-- **Matricula, Nome, pa_fim e DTA_LIMITEMAX são obrigatórias.** Se faltar uma delas, uma faixa vermelha na aba Férias diz qual.
+- **Matricula, Nome, pa_fim e DTA_LIMITEMAX são obrigatórias.** Sem o DTA_LIMITEMAX, a aba Férias diz que falta a coluna (ninguém tem prazo). Sem Matricula, Nome ou pa_fim, um aviso no alto da aba diz qual coluna falta, e a Conferência explica o efeito.
 - As outras colunas (Empresa, Filial, Descrição, turno, admissão, dias vencidos, codfuc, tipfuncao) podem vir na extração. A equipe e a função que aparecem na tela são as da GERAL.
 - Datas podem ser data do Sheets ou texto (10/06/2026).
-- Uma pessoa com dois períodos em aberto tem duas linhas: o GSL mostra os dois e alerta pelo mais urgente.
+- Uma pessoa com dois períodos em aberto tem duas linhas: a ficha mostra os dois, e a lista mostra a pessoa pelo mais urgente.
 
 **Como o GSL liga a FÉRIAS à GERAL**
 - Pelos 3 últimos números do RH: o RH 100123 da GERAL é a matrícula 123 da FÉRIAS. Zeros à esquerda não contam ("0123" = "123").
@@ -83,69 +83,71 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
 
 **A aba Férias**
 
-A aba fica entre Movimentação e Conferência. O número ao lado do nome da aba conta quem tem o limite vencido ou a menos de 30 dias (■). Sem nenhum caso desses, conta quem é para avisar já (▲). A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
+A aba fica entre Movimentação e Conferência. A primeira versão desta aba (régua, duas colunas, escalonar, tira de meses, calendário com duas marcas por pessoa, mapa por turno) ficou cheia demais. Ela foi refeita no mesmo dia: agora é **um cartão só, "O que fazer e até quando"**. Cada pessoa aparece uma vez, com um verbo e uma data. A data é a de agir e fica numa folhinha de calendário no começo da linha.
 
-Os prazos contam os dias até o DTA_LIMITEMAX, com a data de hoje:
+Os prazos contam os dias até o DTA_LIMITEMAX (a data limite para sair de férias), com a data de hoje:
 
-| Situação | Quando |
-|---|---|
-| **Limite vencido** (vermelho) | o DTA_LIMITEMAX já passou: férias em dobro |
-| **Limite a menos de 30 dias** (vermelho) | não dá mais para dar os 30 dias de aviso |
-| **Avisar já** (âmbar) | o limite está entre 30 e 60 dias. "Avisar até" = limite menos 30 dias (com o limite a 30 dias, o aviso é hoje) |
-| **Planejar** | o limite está entre 61 e 90 dias |
-| **Sem urgência** | período completo sem prazo perto, ou ainda em aquisição (até o pa_fim) |
+| Grupo | Quem | O que fazer |
+|---|---|---|
+| **Precisam sair de férias** (■ vermelho) | prazo vencido, ou data limite a menos de 30 dias (o aviso de 30 dias já não cabe) | combinar a data com a pessoa e com o RH. A folhinha mostra a data limite: "Prazo vencido · há 35 dias" ou "Sair até · em 13 dias" |
+| **Avisar** (▲ âmbar) | data limite entre 30 e 60 dias | entregar o aviso de férias até a data da folhinha ("avisar até" = data limite menos 30; com a data limite a 30 dias, o aviso é hoje). A linha também diz o "sair até" |
+| **Programar** (relógio azul; fechado, abre em **Mostrar**) | data limite entre 61 e 90 dias | ainda há tempo: escolher o mês |
+| **Em dia** (só o número, no rodapé) | data limite a mais de 90 dias, ou período ainda em aquisição | nada por agora |
 
-O GSL nunca diz "nada vence" sem saber. Ele avisa na aba, no cartão da Visão geral e no Copiar resumo quando:
-- a aba FÉRIAS está vazia ou sem a coluna DTA_LIMITEMAX (faixa vermelha: nenhum prazo é conhecido);
-- alguém do quadro não tem linha na aba FÉRIAS;
-- alguém tem um período sem DTA_LIMITEMAX, mesmo que outro período dele tenha prazo.
+- **Ordem:** o prazo vencido há mais tempo vem primeiro; depois, pela data.
+- **Etiquetas**, só quando valem:
+  - **de férias agora**: pelo STATUS da GERAL. Se as férias forem deste período, está resolvido;
+  - **afastado**: as férias ficam para depois da volta;
+  - **2 períodos completos**;
+  - **período sem data**: outro período da pessoa veio sem DTA_LIMITEMAX. Veja a ficha.
+- **Tocar na linha** abre a ficha da pessoa.
+- **Ninguém para avisar nem para sair:** a linha diz quem é o próximo aviso e até quando.
+- **Rodapé:**
+  - quantos estão **em dia**;
+  - quantos estão **sem dados de férias** (tocar abre a lista, com o motivo de cada um) e o link **ver na Conferência**;
+  - **Baixar Excel** e **Parâmetros** (este, só para quem pode trocar a planilha);
+  - embaixo, a frase: "Marcou férias no sistema? Cole a extração nova na aba FÉRIAS e use Atualizar dados."
+- **Cada pessoa conta num lugar só.** Os grupos, "em dia" e "sem dados" somam as pessoas do filtro.
+- **Calendário** (botão ao lado de **Lista**; o GSL lembra a escolha naquele computador):
+  - o mês no desenho da tela Calendário, com cada pessoa uma vez, no dia de agir: vermelho = sair até, âmbar = avisar até, azul = programar, cinza = em dia;
+  - quem está com o prazo vencido fica numa faixa vermelha acima da grade;
+  - até 3 nomes por dia; com mais, **+N no dia** abre a lista daquele dia;
+  - **‹ ›** troca de mês, e **Hoje** volta ao mês atual.
+- **Tela estreita** (celular, tablet, notebook com zoom): a linha vira três andares, e o calendário mostra só os símbolos de cada dia. Tocar no dia abre a lista dele.
+- **O número na aba** (visto das outras abas) conta quem precisa sair de férias (■). Se não houver ninguém, conta quem é para avisar (▲). Com a aba Férias aberta, o número some, porque já está na lista.
+- **O GSL nunca diz "ninguém para avisar" sem saber.** Com a aba FÉRIAS vazia ou sem a coluna DTA_LIMITEMAX, a aba e o cartão da Visão geral dizem que ninguém tem prazo. Quem não tem linha na aba FÉRIAS, ou tem como período mais urgente um sem DTA_LIMITEMAX, entra em "sem dados de férias", e o texto passa a dizer "entre quem tem prazo".
 
-Nesses casos, aparece "N sem prazo conhecido" (no Risco de multa, no cartão e no resumo). Quem não tem prazo conhecido nunca conta como "sem urgência".
-
-O que a aba mostra:
-- **A régua:** quantas pessoas em cada situação. Tocar numa faixa destaca essas pessoas no calendário.
-- **O que fazer agora:**
-  - a lista de quem chamar, do mais urgente ao menos urgente, com a data do aviso e a do limite;
-  - **Escalonar:** metade ou mais das pessoas de uma função, no mesmo turno, com o limite a menos de 30 dias uma da outra. Não dá para dar férias a todas ao mesmo tempo, então é preciso começar antes;
-  - os botões **Parâmetros** e **Baixar Excel**.
-- **Calendário dos prazos:**
-  - o mês no mesmo desenho da tela Calendário: cada limite e cada "avisar até" no seu dia;
-  - **‹ Hoje ›** para trocar de mês e os botões **Limites** e **Avisos** para mostrar um ou os dois;
-  - tocar num dia mostra a lista daquele dia.
-- **Limites por turno:** um mapa com os vencidos e os próximos 6 meses.
-- **De férias agora:** quem está de férias pelo STATUS da GERAL.
-- Na **ficha** da pessoa (tocar no nome), uma seção **Férias**. Cada período em aberto aparece numa linha do tempo (aquisição → pode tirar → aviso → limite), com três datas: pode tirar desde, avisar até e limite.
-- Na **Visão geral**, um cartão **Férias** com os vencidos, os de menos de 30 dias e os de avisar já, e o próximo aviso.
+Fora da aba:
+- **Ficha da pessoa:** a seção Férias mostra cada período em aberto numa linha do tempo (aquisição → pode tirar → aviso → data limite), com três datas: pode tirar desde, avisar até e **sair até (data limite)**. A situação de cada período é Prazo vencido, Urgente: sair até a data, Avisar, Programar, Em dia ou Sem data limite na aba FÉRIAS.
+- **Visão geral:** o cartão Férias mostra quantos precisam sair de férias, quantos são para avisar, o próximo aviso e quantos estão sem dados.
 - **Copiar resumo:**
-  - na aba Férias, copia a lista de quem chamar, para o WhatsApp;
-  - nas outras abas, o resumo ganha uma linha de férias.
-- **Baixar Excel** gera a planilha com todos os períodos: situação, nome, equipe, função, matrícula, RH, as datas e os dias até o limite.
+  - na aba Férias, copia as listas PRECISAM SAIR DE FÉRIAS, AVISAR e SEM DADOS DE FÉRIAS, para o WhatsApp;
+  - nas outras abas, o resumo ganha a linha "Férias: 6 precisam sair de férias, 11 para avisar, 2 sem dados de férias".
+- **Baixar Excel:** todos os períodos do filtro, com a situação (PRAZO VENCIDO, URGENTE, AVISAR, PROGRAMAR, EM DIA, SEM DATA LIMITE), as datas, a coluna "SAIR ATÉ (DATA LIMITE)" e os dias até a data limite.
 
-Se a planilha não tiver a aba FÉRIAS, a aba Férias explica como criar. O resto do Quadro continua igual.
+**Palavras da tela.** Quem vê o Quadro pode ser o próprio colaborador, então a tela usa só palavras neutras: prazo, data limite, sair até, avisar até, programar, em dia. Nenhum texto fala em multa ou em férias em dobro: nem a aba, nem a ficha, nem a Visão geral, nem o Excel, o Copiar resumo, os Parâmetros ou as mensagens do servidor. Um teste confere.
 
-A aba se ajusta à largura que tem, com ou sem a barra lateral: num tablet, ou num notebook com zoom, a lista vira uma coluna só e o calendário mostra cada dia em resumo (o pior nível e quantos prazos; tocar abre a lista do dia).
+Se a planilha não tiver a aba FÉRIAS, o cartão diz como criar. O resto do Quadro continua igual.
 
 **Parâmetros (editáveis na própria tela)**
 
-Botão **Parâmetros** na aba Férias, ou o link **editar** no rodapé da aba. Só aparece para quem pode trocar a planilha do Quadro (nível com a permissão de programar, como o ADMIN). Os parâmetros valem para a filial e para todo mundo que vê o Quadro.
+Link **Parâmetros** no rodapé da aba Férias (ou no cartão "Falta a aba FÉRIAS"). Só aparece para quem pode trocar a planilha do Quadro (nível com a permissão de programar, como o ADMIN). Os parâmetros valem para a filial e para todo mundo que vê o Quadro.
 
 | Parâmetro | Padrão | Faixa |
 |---|---|---|
 | Centro(s) de custo do CD | 655 | um ou mais, separados por vírgula |
 | Quantos números do fim do RH formam a matrícula | 3 | 1 a 8 |
-| Aviso de férias: dias antes do início | 30 | 0 a 120 |
-| "Avisar já": limite em até quantos dias | 60 | maior que o aviso |
-| "Planejar": limite em até quantos dias | 90 | maior que o "avisar já" |
-| Escalonar: limites a menos de quantos dias um do outro | 30 | 1 a 120 |
-| Escalonar: olhar os próximos quantos meses (também o tamanho do mapa) | 6 | 1 a 24 |
+| Aviso de férias: dias antes da saída | 30 | 0 a 120 |
+| "Avisar": data limite em até quantos dias | 60 | maior que o aviso |
+| "Programar": data limite em até quantos dias | 90 | maior que o "Avisar" |
 
-**Salvar** relê a planilha com os parâmetros novos. **Voltar ao padrão** devolve todos os valores da tabela.
+**Salvar** relê a planilha com os parâmetros novos. **Voltar ao padrão** devolve todos os valores da tabela. Os dois parâmetros do escalonar saíram junto com ele. Se você chegou a salvar os parâmetros na primeira versão da aba, a tabela PARAMETROS pode ter as linhas FERIAS_ESCALONAR_DIAS e FERIAS_ESCALONAR_MESES. Elas não são mais lidas e podem ser apagadas.
 
 **Barra lateral que recolhe**
 
 Antes do título de cada tela há um botão (o ícone de painel) que **esconde a barra lateral**: a tela ocupa a largura toda. Clicar de novo traz a barra de volta. O GSL lembra a escolha naquele computador. No celular, a barra é a faixa de cima da tela, e o botão a esconde do mesmo jeito.
 
-**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10:
+**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10. A aba refeita substitui a primeira versão: use este pacote, não o anterior.
 - `Quadro.gs`;
 - `Paineis.html`;
 - `PaineisEstilo.html`;
@@ -162,9 +164,10 @@ Como publicar:
 
 **Para conferir:**
 1. Cole a extração na aba FÉRIAS, abra o Quadro do CD e clique em **Atualizar dados**. A aba **Férias** aparece entre Movimentação e Conferência.
-2. Escolha uma pessoa da lista "O que fazer agora" e compare o limite com o DTA_LIMITEMAX da linha dela na aba FÉRIAS. O "avisar até" é 30 dias antes.
-3. Em **Conferência**, veja os grupos que começam com "Férias:". "Sem linha na aba FÉRIAS" lista quem está ativo na GERAL e não veio na extração.
-4. Clique no botão à esquerda do título: a barra lateral some e a tela se alarga. Clique de novo para trazer a barra.
+2. Escolha uma pessoa do grupo **Avisar**. A folhinha é o "avisar até", 30 dias antes da data limite; o "sair até" da linha é o DTA_LIMITEMAX da linha dela na aba FÉRIAS.
+3. Toque em **Calendário**: a mesma pessoa aparece no dia do "avisar até".
+4. Em **Conferência**, veja os grupos que começam com "Férias:". "Sem linha na aba FÉRIAS" lista quem está ativo na GERAL e não veio na extração.
+5. Clique no botão à esquerda do título: a barra lateral some e a tela se alarga. Clique de novo para trazer a barra.
 
 ## Pedido de 13/10 (Quadro do CD: uma aba só, a GERAL, e um painel novo)
 

@@ -14,7 +14,8 @@
  * 14/10 — FÉRIAS. A aba FÉRIAS da mesma planilha (a extracao do sistema de
  * RH: matricula, nome, centro de custo, periodo aquisitivo e as datas
  * limite) e cruzada com a GERAL pela matricula — os ultimos numeros do RH.
- * A tela mostra quem esta perto do limite antes da multa.
+ * A tela mostra quem precisa sair de ferias, quem avisar e ate quando (pela
+ * data limite para sair, o DTA_LIMITEMAX), com palavras neutras.
  *
  * INCONSISTENCIAS: desligado (CDESLIGADOS) que continua ATIVO na GERAL — o
  * pedido da gerencia, a unica "grave" (a faixa vermelha da tela) — e, como
@@ -35,18 +36,19 @@ const QUADRO_ABA_FERIAS = 'FÉRIAS';
  *   cc       centro(s) de custo do CD: linha da FÉRIAS dele sem par na GERAL
  *            vira conferencia (as dos outros centros sao de outros setores)
  *   digitos  quantos numeros do fim do RH formam a matricula da FÉRIAS
- *   aviso    antecedencia do aviso de ferias (dias): o "avisar ate" e o
- *            limite menos isso; limite a menos disso e critico
- *   avisar   limite em ate N dias: "avisar ja"
- *   planejar limite em ate N dias: "planejar"
- *   janela   escalonar: limites a menos de N dias um do outro
- *   meses    escalonar e o mapa por turno olham os proximos N meses
- * Valor vazio (ou invalido, editado a mao na Configuracao) = o padrao.
+ *   aviso    antecedencia do aviso de ferias (dias): o "avisar ate" e a
+ *            data limite menos isso; data limite mais perto que isso:
+ *            "precisam sair de ferias"
+ *   avisar   data limite em ate N dias: grupo "Avisar"
+ *   planejar data limite em ate N dias: grupo "Programar"
+ * Valor vazio (ou invalido, editado a mao na Configuracao) = o padrao. As
+ * chaves FERIAS_ESCALONAR_DIAS e FERIAS_ESCALONAR_MESES (da primeira versao
+ * da aba) nao sao mais lidas: se existirem, podem ser apagadas.
  */
-const FERIAS_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, avisar: 60, planejar: 90, janela: 30, meses: 6 };
+const FERIAS_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, avisar: 60, planejar: 90 };
 const FERIAS_CHAVES = { cc: 'FERIAS_CC', digitos: 'FERIAS_DIGITOS_RH', aviso: 'FERIAS_AVISO_DIAS', avisar: 'FERIAS_AVISAR_DIAS',
-  planejar: 'FERIAS_PLANEJAR_DIAS', janela: 'FERIAS_ESCALONAR_DIAS', meses: 'FERIAS_ESCALONAR_MESES' };
-const FERIAS_LIMITES = { digitos: [1, 8], aviso: [0, 120], avisar: [1, 400], planejar: [2, 400], janela: [1, 120], meses: [1, 24] };
+  planejar: 'FERIAS_PLANEJAR_DIAS' };
+const FERIAS_LIMITES = { digitos: [1, 8], aviso: [0, 120], avisar: [1, 400], planejar: [2, 400] };
 function parametrosFeriasQ_() {
   const ler = function (k) { const v = parametro(FERIAS_CHAVES[k], ''); return v == null ? '' : String(v).trim(); };
   const n = function (k) {
@@ -55,8 +57,7 @@ function parametrosFeriasQ_() {
   };
   const cc = ler('cc').split(/[^0-9]+/)
     .map(function (x) { return x.replace(/^0+(?=\d)/, ''); }).filter(function (x) { return /[1-9]/.test(x); });
-  const p = { cc: cc.length ? cc : FERIAS_PADRAO.cc.slice(), digitos: n('digitos'), aviso: n('aviso'), avisar: n('avisar'), planejar: n('planejar'),
-    janela: n('janela'), meses: n('meses') };
+  const p = { cc: cc.length ? cc : FERIAS_PADRAO.cc.slice(), digitos: n('digitos'), aviso: n('aviso'), avisar: n('avisar'), planejar: n('planejar') };
   // as faixas em ordem: aviso < avisar < planejar (editado fora de ordem a mao: volta ao padrao)
   if (p.avisar <= p.aviso || p.planejar <= p.avisar) { p.aviso = FERIAS_PADRAO.aviso; p.avisar = FERIAS_PADRAO.avisar; p.planejar = FERIAS_PADRAO.planejar; }
   return p;
@@ -1085,7 +1086,7 @@ function acaoSalvarParametrosFerias(usuario, params) {
     if (!cc.length) throw new Error('Informe pelo menos um centro de custo do CD (só números, ex.: 655).');
     if (cc.some(function (x) { return x.length > 10; })) throw new Error('Centro de custo com número grande demais.');
     valores.cc = cc.filter(function (x, i) { return cc.indexOf(x) === i; }).join(', ');
-    const rot = { digitos: 'Números da matrícula', aviso: 'Aviso de férias', avisar: 'Avisar já', planejar: 'Planejar', janela: 'Janela do escalonar', meses: 'Meses à frente' };
+    const rot = { digitos: 'Números da matrícula', aviso: 'Aviso de férias', avisar: 'Avisar', planejar: 'Programar' };
     Object.keys(FERIAS_LIMITES).forEach(function (k) {
       const t = String(params[k] == null ? '' : params[k]).trim(), v = Number(t), lim = FERIAS_LIMITES[k];
       if (t === '' || !isFinite(v) || Math.round(v) !== v || v < lim[0] || v > lim[1]) {
@@ -1093,13 +1094,12 @@ function acaoSalvarParametrosFerias(usuario, params) {
       }
       valores[k] = v;
     });
-    if (valores.avisar <= valores.aviso) throw new Error('"Avisar já" precisa ser maior que o aviso de férias (' + valores.aviso + ' dias).');
-    if (valores.planejar <= valores.avisar) throw new Error('"Planejar" precisa ser maior que "Avisar já" (' + valores.avisar + ' dias).');
+    if (valores.avisar <= valores.aviso) throw new Error('"Avisar" precisa ser maior que o aviso de férias (' + valores.aviso + ' dias).');
+    if (valores.planejar <= valores.avisar) throw new Error('"Programar" precisa ser maior que "Avisar" (' + valores.avisar + ' dias).');
   }
   const desc = { cc: 'Férias (Quadro do CD): centro(s) de custo do CD', digitos: 'Férias (Quadro do CD): números do fim do RH que formam a matrícula',
-    aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', avisar: 'Férias (Quadro do CD): avisar já — limite em até N dias',
-    planejar: 'Férias (Quadro do CD): planejar — limite em até N dias', janela: 'Férias (Quadro do CD): escalonar — limites a menos de N dias',
-    meses: 'Férias (Quadro do CD): escalonar e mapa — próximos N meses' };
+    aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', avisar: 'Férias (Quadro do CD): avisar — data limite em até N dias',
+    planejar: 'Férias (Quadro do CD): programar — data limite em até N dias' };
   const id = idPlanilhaQuadro_();
   Object.keys(FERIAS_CHAVES).forEach(function (k) {
     acaoSalvarParametro(usuario, { chave: FERIAS_CHAVES[k], valor: params.padrao ? '' : String(valores[k]), descricao: desc[k] });

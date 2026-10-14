@@ -1315,13 +1315,16 @@ function qdAdmissao(g) {
   return (!a.data || a.data >= pnSomarDias(qdHoje(), -89)) ? a : null;
 }
 /* Link da planilha: a aba GERAL (gid) e a linha; sem o gid, so a planilha. */
-function qdLinkLinha(linha) {
+function qdLinkLinha(linha, gid) {
   const f = DADOS.fonte, l = DADOS.leitura || {};
   if (!f || !f.url) return '';
   const base = String(f.url).replace(/#.*$/, '');
-  if (l.gid === null || l.gid === undefined) return base;
-  return base + '#gid=' + l.gid + (linha ? '&range=A' + linha : '');
+  const g = gid === undefined ? l.gid : gid;                  // sem gid: a GERAL
+  if (g === null || g === undefined) return base;
+  return base + '#gid=' + g + (linha ? '&range=A' + linha : '');
 }
+/* Link da linha de um item da Conferencia: da GERAL, ou da aba que o item diz (a FÉRIAS tem o seu gid). */
+const qdLinkItem = (x, linha) => x.gid !== undefined && x.gid !== null ? qdLinkLinha(linha, x.gid) : (!x.aba ? qdLinkLinha(linha) : '');
 
 /* ------------------------------------------------------------------ */
 /* A TELA                                                              */
@@ -1683,15 +1686,29 @@ const QD_TIPOS = {
     corrigir: 'Confira cada linha e apague a duplicada.' },
   ADMITIDO_FORA: { titulo: 'Admitidos que não estão na GERAL', curto: 'não está na GERAL',
     oque: 'Estão na CADMITIDOS, mas não na GERAL: o quadro conta gente a menos.',
-    corrigir: 'Inclua a pessoa na GERAL com EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS.' }
+    corrigir: 'Inclua a pessoa na GERAL com EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS.' },
+  // FÉRIAS (14/10): a extracao do sistema cruzada com a GERAL pela matricula (os ultimos numeros do RH)
+  FERIAS_NOME: { titulo: 'Férias: matrícula de outra pessoa', curto: 'férias: matrícula de outro nome',
+    oque: 'A matrícula da aba FÉRIAS (os últimos números do RH) bate com alguém da GERAL de outro nome: as férias seriam de outra pessoa, e o GSL não as liga a ela.',
+    corrigir: 'Confira o RH na GERAL: os últimos números precisam ser a matrícula do sistema.' },
+  FERIAS_DUPLA: { titulo: 'Férias: linha que serve a mais de uma pessoa', curto: 'férias: duas pessoas',
+    oque: 'A matrícula (ou o nome) da aba FÉRIAS bate com mais de uma pessoa ativa da GERAL, e o nome não desempata.',
+    corrigir: 'Confira o RH e o nome dessas pessoas na GERAL.' },
+  FERIAS_FORA_GERAL: { titulo: 'Férias: do CD, mas fora da GERAL', curto: 'férias: fora da GERAL',
+    oque: 'Está na extração de férias com o centro de custo do CD (655), mas ninguém da GERAL tem essa matrícula nem esse nome.',
+    corrigir: 'Inclua a pessoa na GERAL (com o RH) ou confira se ela ainda é do CD.' },
+  FERIAS_SEM_DADOS: { titulo: 'Férias: sem linha na aba FÉRIAS', curto: 'sem dados de férias',
+    oque: 'Está ativo(a) na GERAL, mas a extração de férias não tem a matrícula dele(a): o GSL não avisa o prazo.',
+    corrigir: 'Confira o RH na GERAL e se a extração saiu completa (todos os centros de custo do CD).' }
 };
-const QD_ORDEM_TIPOS = ['COLUNA', 'DESLIGADO_ATIVO', 'MESMO_NOME', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA'];
+const QD_ORDEM_TIPOS = ['COLUNA', 'DESLIGADO_ATIVO', 'MESMO_NOME', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA',
+  'FERIAS_NOME', 'FERIAS_DUPLA', 'FERIAS_FORA_GERAL', 'FERIAS_SEM_DADOS'];
 /* "linha 14" ou "linhas 14 e 174", cada uma com o link para a linha (so na GERAL). */
 function qdLinhasItem(x) {
   const ls = x.linhas && x.linhas.length > 1 ? x.linhas : (x.linha ? [String(x.linha) + (x.aba ? ' (' + x.aba + ')' : '')] : []);
   if (!ls.length) return '';
-  const um = (t) => (!x.aba && /^\d+$/.test(String(t)) && DADOS.fonte)
-    ? `<a href="${esc(qdLinkLinha(Number(t)))}" target="_blank" rel="noopener">${esc(t)}</a>` : esc(t);
+  const um = (t) => (/^\d+$/.test(String(t)) && DADOS.fonte && qdLinkItem(x, Number(t)))
+    ? `<a href="${esc(qdLinkItem(x, Number(t)))}" target="_blank" rel="noopener">${esc(t)}</a>` : esc(t);
   return `<span class="bq-num">${ls.length > 1 ? 'linhas ' : 'linha '}${ls.length > 1 ? ls.slice(0, -1).map(um).join(', ') + ' e ' + um(ls[ls.length - 1]) : um(ls[0])}</span>`;
 }
 
@@ -1711,7 +1728,7 @@ function qdConferencia() {
       <div class="qd-conf-acoes">${geral ? `<a class="icone-botao" href="${esc(geral)}" target="_blank" rel="noopener">Abrir a GERAL ↗</a>` : ''}
         <button class="icone-botao" onclick="qdBaixarConferencia()">Baixar lista (Excel)</button></div>`
     : `<div class="qd-conf-resumo ok">${QD_ICONES.ok}<h2>Planilha conferida — nenhuma inconsistência</h2></div>
-      <p class="qd-conf-sub">Conferido: desligados que continuam ativos, linhas sem nome, EQUIPE fora do padrão, COD e RH repetidos e admitidos fora da GERAL.</p>`;
+      <p class="qd-conf-sub">Conferido: desligados que continuam ativos, linhas sem nome, EQUIPE fora do padrão, COD e RH repetidos, admitidos fora da GERAL${DADOS.ferias ? ' e as matrículas da aba FÉRIAS' : ''}.</p>`;
   return cabeca + grupos.map(([tipo, itens]) => {
     const t = QD_TIPOS[tipo] || { titulo: 'Outros', oque: '', corrigir: '' };
     const grav = itens.some((x) => x.gravidade === 'grave') ? 'grave' : 'atencao';
@@ -1721,7 +1738,7 @@ function qdConferencia() {
       <header class="qd-grupo-cab">${qdSelo(grav, grav === 'grave' ? 'grave' : 'atenção')}<h3>${esc(t.titulo)} <span class="bq-num">${itens.length}</span></h3></header>
       <p class="bq-sub">${esc(t.oque)} <b>Como corrigir:</b> ${esc(t.corrigir)}</p>
       <ul class="qd-itens">${mostra.map((x) => {
-        const link = x.tipo !== 'COLUNA' && x.linha && !x.aba ? qdLinkLinha(x.linha) : '';
+        const link = x.tipo !== 'COLUNA' && x.linha ? qdLinkItem(x, x.linha) : '';
         return `<li class="qd-item">
           <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(qdNomeTxt(x)) : '<em>Sem nome</em>'}</button>`
             : `<span class="qd-item-nome">${x.nome ? esc(x.tipo === 'COLUNA' ? x.nome : qdNomeTxt(x)) : '<em>Sem nome</em>'}</span>`}
@@ -2217,6 +2234,67 @@ function qdListaMov(adm, des, j) {
     ${mostra.length ? `<ul class="qd-movs">${mostra.map(linha).join('')}</ul>` : '<p class="bq-vazio">Nada neste período.</p>'}
     ${itens.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='${itens.length - mostra.length > 30 ? '.qd-movlista .qd-mais' : '#qd-mov-' + mostra.length}';QD.limiteMov+=30;qdDesenhar()">Mostrar mais (${itens.length - mostra.length})</button>` : ''}
   </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* FERIAS (14/10) — dados                                              */
+/* ------------------------------------------------------------------ */
+/*
+ * A aba FÉRIAS (extracao do sistema de RH) chega casada com a GERAL
+ * (f.ref, pela matricula = os ultimos numeros do RH). A situacao de cada
+ * periodo aquisitivo e calculada aqui, com a data de hoje, pelos dias ate
+ * o DTA_LIMITEMAX (o limite antes da multa): VENCIDA, ATE 30 dias (ja nao
+ * da para dar o aviso de 30 dias e comecar ate o limite), 31-60 (programar:
+ * o aviso sai ate limite - 30), 61-90 (planejar), LIBERADA (ja completou o
+ * periodo aquisitivo) ou EM AQUISICAO. A da pessoa e a do periodo mais urgente.
+ */
+const QD_FERIAS_ORDEM = ['vencida', 'ate30', 'ate60', 'ate90', 'liberada', 'aquisicao', 'semdata'];
+/* Dias de uma data ISO (aaaa-mm-dd) a outra, sem fuso. */
+function qdDias(de, ate) {
+  const u = (s) => { const x = String(s).split('-'); return Date.UTC(Number(x[0]), Number(x[1]) - 1, Number(x[2])); };
+  return Math.round((u(ate) - u(de)) / 86400000);
+}
+function qdSomarDias(iso, n) {
+  const x = String(iso).split('-');
+  return new Date(Date.UTC(Number(x[0]), Number(x[1]) - 1, Number(x[2]) + n)).toISOString().slice(0, 10);
+}
+function qdFeriasSituacao(f, hoje) {
+  const libera = f.limite || f.paFim;
+  if (!f.limiteMax) return { k: libera && libera > hoje ? 'aquisicao' : 'semdata', dias: null };
+  const dias = qdDias(hoje, f.limiteMax);
+  if (dias < 0) return { k: 'vencida', dias };
+  if (dias <= 30) return { k: 'ate30', dias };
+  if (dias <= 60) return { k: 'ate60', dias };
+  if (dias <= 90) return { k: 'ate90', dias };
+  return { k: libera && libera > hoje ? 'aquisicao' : 'liberada', dias };
+}
+/*
+ * Uma entrada por pessoa ATIVA da GERAL com ferias: { g, periodos: [{ f, k, dias, avisar }], pior }.
+ * Linhas do CD sem par na GERAL ficam em foraGeral (a Conferencia aponta). Guardado por dia.
+ */
+function qdFeriasDados() {
+  const memo = qdMemo(), hoje = qdHoje();
+  if (memo.ferias && memo.ferias.hoje === hoje) return memo.ferias;
+  const porRef = {};
+  qdGeral().forEach((g) => { porRef[g.ref] = g; });
+  const pessoas = {}, foraGeral = [];
+  ((DADOS.ferias || {}).linhas || []).forEach((f) => {
+    const g = f.ref ? porRef[f.ref] : null;
+    if (!g) { foraGeral.push(f); return; }
+    if (!g.ativo) return;                                     // ja saiu da empresa
+    const sit = qdFeriasSituacao(f, hoje);
+    const p = pessoas[g.ref] = pessoas[g.ref] || { g, periodos: [] };
+    p.periodos.push({ f, k: sit.k, dias: sit.dias, avisar: f.limiteMax ? qdSomarDias(f.limiteMax, -30) : '' });
+  });
+  const rank = (x) => QD_FERIAS_ORDEM.indexOf(x.k);
+  const lista = Object.keys(pessoas).map((r) => {
+    const p = pessoas[r];
+    p.periodos.sort((a, b) => rank(a) - rank(b) || (a.dias === null ? 1e9 : a.dias) - (b.dias === null ? 1e9 : b.dias));
+    p.pior = p.periodos[0];
+    return p;
+  });
+  memo.ferias = { hoje, lista, porRef: pessoas, foraGeral, tem: !!DADOS.ferias };
+  return memo.ferias;
 }
 
 /* ------------------------------------------------------------------ */

@@ -1589,9 +1589,9 @@ async function rodar() {
     // a faixa: os desligados que continuam ATIVOS, com o nome de cada um
     const faixa = await f.evaluate(() => document.querySelector('.qd-faixa').innerText.replace(/\s+/g, ' '));
     afirmar(/3 desligados continuam ATIVOS na GERAL/.test(faixa) && /Sem eles, o CD teria 164 pessoas/.test(faixa) && faixa.includes(nomeDoCod(E.desligadoAtivo[0])) &&
-      /\+ 5 pontos de atenção na planilha/.test(faixa), 'faixa: ' + faixa);
+      /\+ 8 pontos de atenção na planilha/.test(faixa), 'faixa: ' + faixa);
     const abasTela = await f.evaluate(() => Array.from(document.querySelectorAll('#qd-abas .aba')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(abasTela.join('|') === 'Visão geral|Quadro por turno|Movimentação|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
+    afirmar(abasTela.join('|') === 'Visão geral|Quadro por turno|Movimentação|Férias ■ 6|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
     // cartoes: o CD e as quatro equipes, com o numero de cada uma
     const cartoes = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-cartao')).map((c) => c.innerText.replace(/\s+/g, ' ')));
     afirmar(cartoes.length === 5 && /167 pessoas no quadro/.test(cartoes[0]) && /inclui 3 desligados ainda ativos/.test(cartoes[0]) &&
@@ -1615,7 +1615,7 @@ async function rodar() {
     }, nomeDoCod('30001'));
     afirmar(casa[0] === '' && casa[1] === '' && casa[2] === '30001' && casa[3] === null && casa[4] === null && casa[5] === 1, 'casamento na tela: ' + JSON.stringify(casa));
     const resumo = await f.evaluate(() => qdResumoTexto());
-    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL$/.test(resumo),
+    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL\nFérias: 2 com limite vencido, 4 em até 30 dias, 11 para avisar nos próximos 30 dias$/.test(resumo),
       'copiar resumo: ' + resumo);
     // mapa de calor: SEPARADOR x 1° TURNO = 18; tocar leva para a lista dessas 18 pessoas
     const celula = await f.evaluate(() => {
@@ -1653,7 +1653,8 @@ async function rodar() {
     // Conferencia: os cinco tipos, cada um com como corrigir; e como o GSL leu a planilha
     await f.evaluate(() => qdAba('conf'));
     const grupos = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(grupos.join('|') === 'Desligados que continuam ATIVOS na GERAL 3|Linhas sem nome 1|EQUIPE fora do padrão 1|Produtivo (COD) repetido 1|Admitidos que não estão na GERAL 2', 'grupos: ' + grupos.join('|'));
+    afirmar(grupos.join('|') === 'Desligados que continuam ATIVOS na GERAL 3|Linhas sem nome 1|EQUIPE fora do padrão 1|Produtivo (COD) repetido 1|Admitidos que não estão na GERAL 2|' +
+      'Férias: do CD, mas fora da GERAL 1|Férias: sem linha na aba FÉRIAS 2', 'grupos: ' + grupos.join('|'));
     afirmar(/Achado pelo nome — confira se é a mesma pessoa/.test(await f.evaluate(() => document.querySelector('#qd-grupo-DESLIGADO_ATIVO').innerText)), 'o achado pelo nome pede conferencia');
     afirmar(!(await f.$('.qd-faixa')), 'a faixa some na propria Conferencia');
     const leitura = await f.evaluate(() => document.querySelector('.qd-leitura').textContent.replace(/\s+/g, ' '));
@@ -1663,6 +1664,39 @@ async function rodar() {
     const kpis = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-kpi')).map((k) => k.innerText.replace(/\s+/g, ' ')));
     afirmar(kpis.length === 3 && /SAÍDAS 24 sem histórico anterior para comparar 12 voluntárias · 12 involuntárias/.test(kpis[0]) && /ENTRADAS 12/.test(kpis[1]) &&
       /2,4% ao mês/.test(kpis[2]) && !(await f.$('#qd-conteudo .erro-caixa')), 'movimentacao: ' + kpis.join(' || '));
+    // FÉRIAS (14/10): a regua, o que fazer agora, o calendario dos prazos, a ficha e os parametros
+    await f.evaluate(() => qdAba('ferias'));
+    await f.waitForSelector('.qd-fe-regua', { timeout: 5000 });
+    const regua = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-sit')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(regua.length === 4 && /^RISCO DE MULTA 6 pessoas 2 limites vencidos 4 em até 30 dias ONDE 1° TURNO 6$/.test(regua[0]) && /^AVISAR JÁ 11 pessoas limite em 31 a 60 dias/.test(regua[1]) &&
+      /^PLANEJAR 10 pessoas limite em 61 a 90 dias/.test(regua[2]) && /^SEM URGÊNCIA \d+ pessoas/.test(regua[3]), 'regua das ferias: ' + regua.join(' || '));
+    const gruposFe = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-grupo-tit')).map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(gruposFe.join('|') === 'LIMITE VENCIDO 2|LIMITE EM ATÉ 30 DIAS 4|AVISAR NOS PRÓXIMOS 30 DIAS 11', 'o que fazer agora: ' + gruposFe.join('|'));
+    const cal = await f.evaluate(() => ({ cap: !!document.querySelector('.qd-fe-mes caption'), hoje: !!document.querySelector('.qd-fe-mes td[aria-current="date"]'),
+      pil: document.querySelectorAll('.qd-fe-mes .qd-fe-pil').length, rot: (document.querySelector('.qd-fe-mes .qd-fe-pil') || {}).getAttribute('aria-label') || '' }));
+    afirmar(cal.cap && cal.hoje && cal.pil > 0 && /^(Limite das férias de|Avisar até) /.test(cal.rot), 'calendario dos prazos: ' + JSON.stringify(cal));
+    await f.evaluate(() => document.querySelector('.qd-fe-item').click());
+    await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha', { timeout: 5000 });
+    afirmar(/Férias · \d período/.test(await f.evaluate(() => document.querySelector('.qd-ficha').textContent)), 'a ficha mostra os periodos de ferias');
+    await f.evaluate(() => fecharJanela());
+    afirmar(/^Férias — Quadro do CD — CD Feira de Santana — .*\nLIMITE VENCIDO \(férias em dobro\) \(2\)\n/.test(await f.evaluate(() => qdFeResumoTexto())), 'copiar resumo na aba Ferias');
+    // parametros: o aviso passa a 45 dias e o "avisar ja" a 75 — a regua recalcula; depois volta ao padrao
+    await f.click('.qd-fe-agir-acoes button:has-text("Parâmetros")');
+    await f.waitForSelector('#fp-aviso', { timeout: 5000 });
+    await f.fill('#fp-aviso', '45'); await f.fill('#fp-avisar', '75');
+    await f.click('#janela-rodape button:has-text("Salvar")');
+    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 45 && document.querySelector('.qd-fe-sit'), null, { timeout: 15000 });
+    const regua45 = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-sit')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
+    afirmar(/em até 45 dias/.test(regua45[0]) && /limite em 46 a 75 dias/.test(regua45[1]), 'parametros mudam a regua: ' + regua45.join(' || '));
+    await f.click('.qd-fe-agir-acoes button:has-text("Parâmetros")');
+    await f.waitForSelector('#fp-aviso', { timeout: 5000 });
+    await f.click('#janela-rodape button:has-text("Voltar ao padrão")');
+    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 30, null, { timeout: 15000 });
+    // a barra lateral recolhe e volta
+    await f.click('#lateral-alternar');
+    afirmar(await f.evaluate(() => document.getElementById('aplicacao').classList.contains('lateral-oculta') && el('lateral-alternar').getAttribute('aria-expanded') === 'false'), 'barra lateral recolhida');
+    await f.click('#lateral-alternar');
+    afirmar(await f.evaluate(() => !document.getElementById('aplicacao').classList.contains('lateral-oculta')), 'barra lateral de volta');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close();
 
@@ -1690,6 +1724,8 @@ async function rodar() {
     const dela = await c.evaluate(() => [QD.equipe, QD.aba, document.querySelector('.qd-pill[aria-pressed="true"]').innerText.replace(/\s+/g, ' ').trim()]);
     afirmar(dela[0] === '1° TURNO' && dela[1] === 'geral' && /^1° TURNO/.test(dela[2]), 'coordenadora do turno A cai no 1° TURNO, na visao geral: ' + dela.join(' | '));
     afirmar(await c.evaluate(() => !document.querySelector('#acoes-topo').innerText.includes('Trocar planilha')), 'quem so ve nao troca a planilha');
+    await c.evaluate(() => qdAba('ferias'));
+    afirmar(await c.evaluate(() => !!document.querySelector('.qd-fe-regua') && !document.querySelector('.qd-fe-agir-acoes').innerText.includes('Parâmetros')), 'quem so ve nao muda os parametros das ferias');
     afirmar(!pc.erros.length, 'erros: ' + pc.erros.join(' | '));
     await pc.contexto.close();
     await s.fechar();

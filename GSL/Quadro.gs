@@ -29,8 +29,38 @@ const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];
 const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
 const QUADRO_ABA_FERIAS = 'FÉRIAS';
-// Centro de custo do CD: linha da FÉRIAS dele sem par na GERAL vira conferencia (as dos outros centros sao de outros setores).
-const QUADRO_CC_CD = ['655'];
+/*
+ * PARAMETROS DAS FERIAS (14/10): editaveis na propria aba Ferias (botao
+ * Parametros, para quem pode trocar a planilha); cada filial tem os seus.
+ *   cc       centro(s) de custo do CD: linha da FÉRIAS dele sem par na GERAL
+ *            vira conferencia (as dos outros centros sao de outros setores)
+ *   digitos  quantos numeros do fim do RH formam a matricula da FÉRIAS
+ *   aviso    antecedencia do aviso de ferias (dias): o "avisar ate" e o
+ *            limite menos isso; limite a menos disso e critico
+ *   avisar   limite em ate N dias: "avisar ja"
+ *   planejar limite em ate N dias: "planejar"
+ *   janela   escalonar: limites a menos de N dias um do outro
+ *   meses    escalonar e o mapa por turno olham os proximos N meses
+ * Valor vazio (ou invalido, editado a mao na Configuracao) = o padrao.
+ */
+const FERIAS_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, avisar: 60, planejar: 90, janela: 30, meses: 6 };
+const FERIAS_CHAVES = { cc: 'FERIAS_CC', digitos: 'FERIAS_DIGITOS_RH', aviso: 'FERIAS_AVISO_DIAS', avisar: 'FERIAS_AVISAR_DIAS',
+  planejar: 'FERIAS_PLANEJAR_DIAS', janela: 'FERIAS_ESCALONAR_DIAS', meses: 'FERIAS_ESCALONAR_MESES' };
+const FERIAS_LIMITES = { digitos: [1, 8], aviso: [0, 120], avisar: [1, 400], planejar: [2, 400], janela: [1, 120], meses: [1, 24] };
+function parametrosFeriasQ_() {
+  const ler = function (k) { const v = parametro(FERIAS_CHAVES[k], ''); return v == null ? '' : String(v).trim(); };
+  const n = function (k) {
+    const t = ler(k), v = Number(t.replace(',', '.')), lim = FERIAS_LIMITES[k];
+    return t !== '' && isFinite(v) && Math.round(v) === v && v >= lim[0] && v <= lim[1] ? v : FERIAS_PADRAO[k];
+  };
+  const cc = ler('cc').split(/[^0-9]+/)
+    .map(function (x) { return x.replace(/^0+(?=\d)/, ''); }).filter(function (x) { return /[1-9]/.test(x); });
+  const p = { cc: cc.length ? cc : FERIAS_PADRAO.cc.slice(), digitos: n('digitos'), aviso: n('aviso'), avisar: n('avisar'), planejar: n('planejar'),
+    janela: n('janela'), meses: n('meses') };
+  // as faixas em ordem: aviso < avisar < planejar (editado fora de ordem a mao: volta ao padrao)
+  if (p.avisar <= p.aviso || p.planejar <= p.avisar) { p.aviso = FERIAS_PADRAO.aviso; p.avisar = FERIAS_PADRAO.avisar; p.planejar = FERIAS_PADRAO.planejar; }
+  return p;
+}
 const QUADRO_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
 // O formato do que vai para o cache: copia de outro formato (versao anterior do Quadro.gs) e relida.
 // 4 (14/10): com as ferias.
@@ -76,14 +106,16 @@ function idPlanilhaQuadro_() {
 
 function dadosQuadro(usuario) {
   const id = idPlanilhaQuadro_();
+  const pf = parametrosFeriasQ_();
   const base = {
     configurado: !!id,
     podeConfigurar: podeFazer(usuario, 'PROGRAMAR'),
-    filial: filialAtual().nome
+    filial: filialAtual().nome,
+    parametrosFerias: pf
   };
   if (!id) return base;
 
-  const chave = chaveNoEspaco('quadro|' + id);
+  const chave = chaveQuadroQ_(id, pf);
   const guardado = lerTextoCache(chave);
   if (guardado) {
     try {
@@ -92,7 +124,7 @@ function dadosQuadro(usuario) {
     } catch (e) { /* le de novo */ }
   }
   try {
-    const dados = lerPlanilhaQuadro_(id);
+    const dados = lerPlanilhaQuadro_(id, pf);
     gravarTextoCache(chave, JSON.stringify(dados), QUADRO_CACHE_SEGUNDOS);
     return Object.assign(base, dados);
   } catch (e) {
@@ -284,7 +316,11 @@ function situacaoQ_(v) {
 /* LEITURA                                                             */
 /* ------------------------------------------------------------------ */
 
-function lerPlanilhaQuadro_(id) {
+/* O centro de custo e os numeros da matricula mudam o casamento das ferias: entram na chave do que fica guardado. */
+function chaveQuadroQ_(id, pf) { return chaveNoEspaco('quadro|' + id + '|' + pf.cc.join(',') + '|' + pf.digitos); }
+
+function lerPlanilhaQuadro_(id, pf) {
+  pf = pf || parametrosFeriasQ_();
   exigirPorta_();
   const ss = SpreadsheetApp.openById(id);
   const leitura = { aba: '', linhas: 0, colunas: {}, faltam: [], status: {}, equipes: {}, gid: null, linhaCabecalho: 0 };
@@ -394,8 +430,8 @@ function lerPlanilhaQuadro_(id) {
   }
 
   // Ferias (14/10): a extracao do sistema de RH, cruzada com a GERAL. Sem a aba, a tela diz como carregar.
-  const ferias = lerFeriasQ_(ss);
-  const confFerias = casarFeriasQ_(geral, ferias);
+  const ferias = lerFeriasQ_(ss, pf);
+  const confFerias = casarFeriasQ_(geral, ferias, pf);
   if (ferias) {
     const ccs = {};
     ferias.linhas.forEach(function (f) { const k = f.cc || '(vazio)'; ccs[k] = (ccs[k] || 0) + 1; });
@@ -447,7 +483,7 @@ function linhaGeralQ_(linha, col, numeroLinha, turnoDaAba) {
  * situacao de cada uma com a data de hoje. Linha sem matricula e sem nome
  * (vazia, total, rodape) nao conta. Sem a aba: null.
  */
-function lerFeriasQ_(ss) {
+function lerFeriasQ_(ss, pf) {
   const aba = abaQuadro_(ss, QUADRO_ABA_FERIAS);
   if (!aba) return null;
   const t = lerTabelaQ_(aba, QUADRO_COLUNAS_FERIAS);
@@ -475,7 +511,7 @@ function lerFeriasQ_(ss) {
     };
     if (!f.matricula && !f.nome) return;
     f.equipe = equipeQ_(f.equipeBruta);
-    f.doCd = r.semCc || ccDoCdQ_(f.cc);
+    f.doCd = r.semCc || ccDoCdQ_(f.cc, (pf || FERIAS_PADRAO).cc);
     r.linhas.push(f);
   });
   return r;
@@ -494,11 +530,11 @@ function numeroQ_(v) {
   return s !== '' && isFinite(n) ? n : '';
 }
 /* Centro de custo do CD (655, "655 - CD", "0655"). Vazio: nao da para saber — conta como do CD. */
-function ccDoCdQ_(cc) {
+function ccDoCdQ_(cc, lista) {
   const t = txtQ_(cc);
   if (!t) return true;
   const m = t.match(/\d+/);
-  return !!m && QUADRO_CC_CD.indexOf(m[0].replace(/^0+(?=\d)/, '')) !== -1;
+  return !!m && lista.indexOf(m[0].replace(/^0+(?=\d)/, '')) !== -1;
 }
 
 /* Nomes da mesma pessoa? O mesmo primeiro nome e mais um nome em comum ("JOSE DA SILVA" = "JOSE SILVA SANTOS"). */
@@ -522,14 +558,16 @@ function nomeParecidoQ_(a, b) {
  * pelo nome, se so uma pessoa ativa tiver aquele nome. Devolve as
  * conferencias (todas "atencao").
  */
-function casarFeriasQ_(geral, ferias) {
+function casarFeriasQ_(geral, ferias, pf) {
   const saida = [];
   if (!ferias) return saida;
-  const fimRh = function (g) { const d = digitosQ_(g.rh); return d && d.length < 3 ? ('000' + d).slice(-3) : d; };
+  const N = (pf || FERIAS_PADRAO).digitos;                         // quantos numeros do fim do RH formam a matricula
+  const zeros = new Array(N + 1).join('0');
+  const fimRh = function (g) { const d = digitosQ_(g.rh); return d && d.length < N ? (zeros + d).slice(-N) : d; };
   const porFim = {}, porNome = {};
   geral.forEach(function (g) {
     const d = fimRh(g);
-    if (d) (porFim[d.slice(-3)] = porFim[d.slice(-3)] || []).push(g);
+    if (d) (porFim[d.slice(-N)] = porFim[d.slice(-N)] || []).push(g);
     const n = nomeChaveQ_(g.nome);
     if (n && g.ativo) (porNome[n] = porNome[n] || []).push(g);
   });
@@ -543,8 +581,8 @@ function casarFeriasQ_(geral, ferias) {
     f.ref = 0; f.chave = '';
     let cands = [];
     if (f.matricula) {
-      const m = f.matricula.length < 3 ? ('000' + f.matricula).slice(-3) : f.matricula;
-      cands = (porFim[m.slice(-3)] || []).filter(function (g) { return fimRh(g).slice(-m.length) === m; });
+      const m = f.matricula.length < N ? (zeros + f.matricula).slice(-N) : f.matricula;
+      cands = (porFim[m.slice(-N)] || []).filter(function (g) { return fimRh(g).slice(-m.length) === m; });
     }
     const ativos = cands.filter(function (g) { return g.ativo; });
     let g = null, outroNome = null;
@@ -885,9 +923,47 @@ function acaoSalvarFonteQuadro(usuario, params) {
   return { ok: true, invalidarTudo: true, recado: 'Quadro ligado à planilha "' + nome + '".' };
 }
 
+/*
+ * Parametros das ferias (botao Parametros da aba Ferias). Confere tudo
+ * antes de gravar; "padrao: true" volta todos ao padrao (valor vazio).
+ */
+function acaoSalvarParametrosFerias(usuario, params) {
+  exigirCapacidade(usuario, 'PROGRAMAR');
+  params = params || {};
+  const valores = {};
+  if (!params.padrao) {
+    const cc = String(params.cc == null ? '' : params.cc).split(/[^0-9]+/).map(function (x) { return x.replace(/^0+(?=\d)/, ''); })
+      .filter(function (x) { return /[1-9]/.test(x); });
+    if (!cc.length) throw new Error('Informe pelo menos um centro de custo do CD (só números, ex.: 655).');
+    if (cc.some(function (x) { return x.length > 10; })) throw new Error('Centro de custo com número grande demais.');
+    valores.cc = cc.filter(function (x, i) { return cc.indexOf(x) === i; }).join(', ');
+    const rot = { digitos: 'Números da matrícula', aviso: 'Aviso de férias', avisar: 'Avisar já', planejar: 'Planejar', janela: 'Janela do escalonar', meses: 'Meses à frente' };
+    Object.keys(FERIAS_LIMITES).forEach(function (k) {
+      const t = String(params[k] == null ? '' : params[k]).trim(), v = Number(t), lim = FERIAS_LIMITES[k];
+      if (t === '' || !isFinite(v) || Math.round(v) !== v || v < lim[0] || v > lim[1]) {
+        throw new Error(rot[k] + ': use um número inteiro de ' + lim[0] + ' a ' + lim[1] + '.');
+      }
+      valores[k] = v;
+    });
+    if (valores.avisar <= valores.aviso) throw new Error('"Avisar já" precisa ser maior que o aviso de férias (' + valores.aviso + ' dias).');
+    if (valores.planejar <= valores.avisar) throw new Error('"Planejar" precisa ser maior que "Avisar já" (' + valores.avisar + ' dias).');
+  }
+  const desc = { cc: 'Férias (Quadro do CD): centro(s) de custo do CD', digitos: 'Férias (Quadro do CD): números do fim do RH que formam a matrícula',
+    aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', avisar: 'Férias (Quadro do CD): avisar já — limite em até N dias',
+    planejar: 'Férias (Quadro do CD): planejar — limite em até N dias', janela: 'Férias (Quadro do CD): escalonar — limites a menos de N dias',
+    meses: 'Férias (Quadro do CD): escalonar e mapa — próximos N meses' };
+  const antes = parametrosFeriasQ_(), id = idPlanilhaQuadro_();
+  Object.keys(FERIAS_CHAVES).forEach(function (k) {
+    acaoSalvarParametro(usuario, { chave: FERIAS_CHAVES[k], valor: params.padrao ? '' : String(valores[k]), descricao: desc[k] });
+  });
+  // a leitura guardada com o casamento antigo (centro de custo, matricula) nao serve mais
+  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id, antes)); } catch (e) {} }
+  return { ok: true, invalidarTudo: true, recado: params.padrao ? 'Parâmetros das férias de volta ao padrão.' : 'Parâmetros das férias salvos.' };
+}
+
 function acaoAtualizarQuadro(usuario) {
   const id = idPlanilhaQuadro_();
-  if (id) { try { CacheService.getScriptCache().remove(chaveNoEspaco('quadro|' + id)); } catch (e) {} }
+  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id, parametrosFeriasQ_())); } catch (e) {} }
   // A chave e fatiada (gravarTextoCache): sem o numero de fatias, a leitura
   // volta vazia e a planilha e relida.
   limparCache('PARAMETROS');

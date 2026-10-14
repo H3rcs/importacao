@@ -900,6 +900,29 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
     conf('FERIAS_FORA_GERAL')[0].aba === 'Férias', 'CC 655 sem par na GERAL: ' + JSON.stringify(conf('FERIAS_FORA_GERAL')));
   afirmar(conf('FERIAS_SEM_DADOS').map((x) => x.cod).sort().join() === '30002,30007', 'quem esta no quadro sem linha na FÉRIAS: ' + JSON.stringify(conf('FERIAS_SEM_DADOS')));
   afirmar(d.inconsistencias.filter((x) => /^FERIAS_/.test(x.tipo)).every((x) => x.gravidade === 'atencao'), 'conferencias das ferias sao de atencao');
+  // PARAMETROS (editaveis na aba Ferias): o padrao vem na tela; o servidor confere o que chega
+  const P0 = d.parametrosFerias;
+  afirmar(P0 && P0.cc.join() === '655' && P0.digitos === 3 && P0.aviso === 30 && P0.avisar === 60 && P0.planejar === 90 && P0.janela === 30 && P0.meses === 6,
+    'parametros padrao: ' + JSON.stringify(P0));
+  const ok = { cc: '700', digitos: '4', aviso: '45', avisar: '75', planejar: '120', janela: '20', meses: '4' };
+  afirmar(/pelo menos um centro de custo/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { cc: 'abc' })))), 'centro de custo sem numero');
+  afirmar(/Avisar já" precisa ser maior/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { avisar: '40' })))), 'avisar ja menor que o aviso');
+  afirmar(/Números da matrícula: use um número inteiro de 1 a 8/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { digitos: '0' })))), 'digitos fora da faixa');
+  const coord = entrar(m, COORD, '1234');
+  afirmar(erroDe(() => acao(m, coord, 'salvarParametrosFerias', ok)) !== '', 'coordenador nao muda os parametros');
+  acao(m, s, 'salvarParametrosFerias', ok);
+  const d3 = tela(m, s, 'quadro');
+  const P1 = d3.parametrosFerias;
+  afirmar(P1.cc.join() === '700' && P1.digitos === 4 && P1.aviso === 45 && P1.avisar === 75 && P1.planejar === 120 && P1.janela === 20 && P1.meses === 4,
+    'parametros salvos: ' + JSON.stringify(P1));
+  const conf3 = (tipo) => d3.inconsistencias.filter((x) => x.tipo === tipo);
+  // CC 700: a linha da IRIS (700) e do CD e esta fora da GERAL; a do HELIO (655) passa a ser de outro setor
+  afirmar(conf3('FERIAS_FORA_GERAL').map((x) => x.matricula).join() === '444' && d3.leitura.ferias.foraDoCd === 1, 'centro de custo do parametro: ' + JSON.stringify(conf3('FERIAS_FORA_GERAL')));
+  // 4 numeros: o final 999 da matricula vira 0999 e so bate com o RH 100999 (DORA): o JOAO NINGUEM vira "outro nome", nao "duas pessoas"
+  afirmar(!conf3('FERIAS_DUPLA').length && conf3('FERIAS_NOME').some((x) => /JOAO NINGUEM/.test(x.detalhe)), 'numeros da matricula do parametro: ' + JSON.stringify(conf3('FERIAS_NOME')));
+  acao(m, s, 'salvarParametrosFerias', { padrao: true });
+  const P2 = tela(m, s, 'quadro').parametrosFerias;
+  afirmar(P2.cc.join() === '655' && P2.digitos === 3 && P2.aviso === 30 && P2.meses === 6, 'de volta ao padrao: ' + JSON.stringify(P2));
 });
 
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {

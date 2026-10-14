@@ -682,4 +682,335 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-cartao.escolhido:focus-visible, .qd-esp-mes.escolhido:focus-visible, .qd-barra.escolhida:focus-visible { outline-color: Highlight; }
   .qd-esp-mes { padding-bottom: 7px; }       /* o tracejado (6px para dentro) passa abaixo do rotulo do mes */
 }
+/* =========================================================
+   FÉRIAS (14/10) — a aba do Quadro do CD (prefixo qd-fe-).
+   Estado com os hex fixos do Quadro e sempre com forma (quadrado =
+   crítico, triângulo = avisar já, relógio = planejar, círculo = sem
+   urgência). O turno vem escrito (a cor dele só no quadradinho do
+   qdEq); a carga dos meses em ardósia; o mapa na rampa azul do Quadro.
+   O calendário copia o desenho da tela Calendário em classes próprias
+   (as de lá usam color-mix e o hover 3D). Sem color-mix, :has nem CSS
+   aninhado (Chrome 109). Nada de opacidade em texto.
+   ========================================================= */
+.qd-fe, .qd-ficha { --fe-critico: #d03b3b; --fe-atencao: #fab219; --fe-atencao-borda: #b07400; --fe-planejar: var(--qd-cd); --fe-planejar-tinta: #ffffff; }
+[data-tema="escuro"] .qd-fe, [data-tema="escuro"] .qd-ficha { --fe-atencao-borda: #fab219; --fe-planejar-tinta: #0b1220; }
+.qd-fe-ico { flex: none; display: inline-block; vertical-align: -2px; }
+.qd-fe-ico-tinta { display: inline-flex; color: var(--tinta-media); }
+.qd-fe-ico-tinta.planejar { color: var(--fe-planejar); }
+.qd-fe-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.qd-fe-curto { display: none; }
+.qd-fe-vazio { font-size: 13px; color: var(--tinta-media); display: flex; gap: 6px; align-items: center; margin: 4px 0 0; list-style: none; }
+.qd-fe-card-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.qd-fe-cont { font-size: 12.5px; color: var(--tinta-media); font-weight: 600; white-space: nowrap; }
+
+/* régua: risco de multa (o principal) + avisar já + planejar + sem urgência; toque = destaca no calendário */
+.qd-fe-regua { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.qd-fe-sit { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; cursor: pointer;
+  background: var(--bq-surface); border: 1px solid var(--bq-linha); border-radius: var(--bq-r); padding: 13px 15px 14px;
+  box-shadow: var(--sombra); border-top: 3px solid var(--fe-cor, var(--bq-linha)); color: var(--tinta); transition: opacity .15s; }
+.qd-fe-sit.critico { --fe-cor: var(--fe-critico); }
+.qd-fe-sit.atencao { --fe-cor: var(--fe-atencao); }
+.qd-fe-sit.planejar { --fe-cor: var(--fe-planejar); }
+.qd-fe-sit.neutro { --fe-cor: var(--linha-forte); }
+.qd-fe-sit:hover { border-color: var(--tinta-fraca); border-top-color: var(--fe-cor); }
+.qd-fe-sit[aria-pressed="true"] { box-shadow: var(--sombra), 0 0 0 2px var(--tinta); }
+.qd-fe-sit.apagado { opacity: .5; }
+.qd-fe-sit.apagado:focus-visible { opacity: 1; }
+.qd-fe-sit-rot { display: flex; align-items: center; gap: 6px; font-family: 'Archivo', sans-serif; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--tinta-media); }
+.qd-fe-sit-linha { display: flex; align-items: baseline; gap: 7px; }
+.qd-fe-sit-n { font-family: 'Archivo', sans-serif; font-size: 30px; font-weight: 800; line-height: 1.05; }
+.qd-fe-sit.heroi .qd-fe-sit-n { font-size: 40px; }
+.qd-fe-sit.zero .qd-fe-sit-n { color: var(--tinta-media); }
+.qd-fe-sit-txt { font-size: 12.5px; color: var(--tinta-media); line-height: 1.45; }
+.qd-fe-sit-txt b { color: var(--tinta); }
+.qd-fe-sit-selos { display: flex; flex-wrap: wrap; gap: 5px; }
+.qd-fe-sit-onde { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; padding-top: 7px; border-top: 1px solid var(--bq-linha); }
+.qd-fe-sit-onde > span { display: inline-flex; align-items: center; gap: 5px; }
+.qd-fe-sit-onde b { font-family: 'Archivo', sans-serif; font-size: 14px; }
+.qd-fe-sit-onde em { font-size: 12px; color: var(--tinta-media); }
+.qd-fe-sit-ok { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--tinta-media); }
+
+/* o que fazer agora: duas colunas (o que dá multa | avisos, planejar, escalonar) */
+.qd-fe-agir { margin-bottom: 14px; }
+.qd-fe-agir-cab { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.qd-fe-agir-cab .bq-sub { margin-bottom: 4px; }
+.qd-fe-agir-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.qd-fe-param h4 { font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--tinta-media); margin: 16px 0 8px; }
+.qd-fe-param .campo input[type="number"] { max-width: 140px; }
+.qd-fe-colunas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 28px; }
+.qd-fe-col { min-width: 0; }
+.qd-fe-col.dir { border-left: 1px solid var(--bq-linha); padding-left: 28px; }
+.qd-fe-itens { list-style: none; margin: 0; padding: 0; }
+.qd-fe-grupo { display: flex; flex-direction: column; gap: 2px; padding: 14px 2px 7px; border-bottom: 1px solid var(--bq-linha); }
+.qd-fe-itens > .qd-fe-grupo:first-child { padding-top: 6px; }
+.qd-fe-grupo-tit { display: flex; align-items: center; gap: 7px; font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--tinta); }
+.qd-fe-grupo-tit b { font-size: 13px; letter-spacing: 0; }
+.qd-fe-grupo-frase { font-size: 12.5px; color: var(--tinta-media); line-height: 1.45; }
+.qd-fe-item { width: 100%; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; text-align: left;
+  padding: 9px 6px 9px 10px; border: none; border-bottom: 1px solid var(--bq-linha); background: transparent; cursor: pointer; color: var(--tinta);
+  min-height: 44px; box-shadow: inset 3px 0 0 var(--fe-cor, transparent); }
+.qd-fe-item.critico { --fe-cor: var(--fe-critico); }
+.qd-fe-item.atencao { --fe-cor: var(--fe-atencao); }
+.qd-fe-item.planejar { --fe-cor: var(--fe-planejar); }
+.qd-fe-item:hover { background: var(--bq-surface-2); }
+.qd-fe-item-ico { padding-top: 2px; display: flex; }
+.qd-fe-item-quem { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.qd-fe-item-nome { font-size: 13.5px; font-weight: 600; text-decoration: underline; text-decoration-color: var(--tinta-fraca); text-underline-offset: 3px; }
+.qd-fe-item:hover .qd-fe-item-nome { text-decoration-color: currentColor; }
+.qd-fe-item-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--tinta-media); }
+.qd-fe-item-nota { display: flex; align-items: flex-start; gap: 5px; font-size: 11.5px; line-height: 1.45; color: var(--tinta-media); }
+.qd-fe-item-nota > .qd-fe-ico { margin-top: 1px; }
+.qd-fe-item-nota > .qd-selo { flex: none; }
+.qd-fe-item-quando { display: flex; flex-direction: column; align-items: flex-end; text-align: right; gap: 2px; white-space: nowrap; }
+.qd-fe-item-quando b { font-family: 'Archivo', sans-serif; font-size: 13px; font-weight: 700; }
+.qd-fe-item-quando small { font-size: 11.5px; color: var(--tinta-media); }
+.qd-fe-ver-mais { margin-top: 8px; font-size: 12.5px; }
+.qd-fe-planejar { margin-top: 12px; }
+.qd-fe-planejar-bt { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; text-align: left; }
+.qd-fe-planejar-bt b { color: var(--tinta); }
+.qd-fe-escalonar { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--bq-linha); }
+.qd-fe-escalonar h3 { display: flex; align-items: center; gap: 7px; font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; margin: 0 0 2px; }
+.qd-fe-escalonar h3 b { font-size: 13px; letter-spacing: 0; }
+.qd-fe-escalonar ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.qd-fe-esc { width: 100%; display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid rgba(250, 178, 25, .45); background: var(--qd-atencao-fundo); color: var(--tinta); font-size: 12.5px; line-height: 1.45; }
+.qd-fe-esc:hover { border-color: var(--fe-atencao-borda); }
+.qd-fe-esc-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.qd-fe-esc-cab b { font-size: 12.5px; }
+.qd-fe-esc-cab .bq-num { color: var(--tinta-media); font-size: 12px; }
+.qd-fe-esc-nomes { color: var(--tinta-media); font-size: 12px; }
+.qd-fe-nota-conf { margin: 14px 0 0; align-items: flex-start; flex-wrap: nowrap; line-height: 1.5; }
+.qd-fe-nota-conf > .qd-selo { flex: none; }
+
+/* tira de meses: o mês, quantos limites caem nele e um medidor de carga */
+.qd-fe-tira-cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 2px 8px; }
+.qd-fe-tira-sub { font-size: 12px; color: var(--tinta-media); }
+.qd-fe-tira { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; margin: 0 0 12px; align-items: stretch; }
+.qd-fe-chip { flex: 1 0 74px; min-width: 74px; display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer;
+  padding: 8px 10px 10px; border-radius: 11px; border: 1.5px solid var(--bq-linha); background: var(--bq-surface); box-shadow: var(--sombra);
+  color: var(--tinta); font: inherit; }
+.qd-fe-chip:hover { border-color: var(--tinta-fraca); }
+.qd-fe-chip-rot { font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--tinta-media); white-space: nowrap; }
+.qd-fe-chip.atual .qd-fe-chip-rot { color: var(--tinta); }
+.qd-fe-chip-n { display: flex; align-items: center; gap: 5px; font-family: 'Archivo', sans-serif; font-size: 20px; font-weight: 800; line-height: 1; }
+.qd-fe-chip-med { display: block; height: 5px; border-radius: 99px; background: var(--bq-surface-2); overflow: hidden; }
+.qd-fe-chip-med i { display: block; height: 100%; background: var(--qd-cd); border-radius: 0 99px 99px 0; }
+.qd-fe-chip[aria-pressed="true"] { background: var(--tinta); border-color: var(--tinta); color: var(--vidro-alto); }
+.qd-fe-chip[aria-pressed="true"] .qd-fe-chip-rot { color: inherit; }
+.qd-fe-chip[aria-pressed="true"] .qd-fe-chip-med { background: rgba(255, 255, 255, .22); }
+.qd-fe-chip[aria-pressed="true"] .qd-fe-chip-med i { background: var(--vidro-alto); }
+[data-tema="escuro"] .qd-fe-chip[aria-pressed="true"] .qd-fe-chip-med { background: rgba(15, 23, 42, .18); }
+.qd-fe-chip.passado { border-style: dashed; background: transparent; box-shadow: none; }
+.qd-fe-divisor { flex: 0 0 1px; align-self: stretch; margin: 4px 3px; background: var(--linha-forte); }
+.qd-fe-depois { margin-left: auto; font-size: 12px; color: var(--tinta-media); }
+
+/* o calendário dos prazos */
+.qd-fe-cal { margin-bottom: 14px; }
+.qd-fe-cal-cab { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: 'tit mostrar setas'; align-items: center; gap: 10px 18px; margin-bottom: 10px; }
+.qd-fe-cal-tit { grid-area: tit; min-width: 0; }
+.qd-fe-mostrar { grid-area: mostrar; align-items: center; }
+.qd-fe-setas { grid-area: setas; display: flex; align-items: center; gap: 4px; }
+.bi-quadro .qd-fe-cal h2 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.qd-fe-cal-tit .bq-sub { margin-bottom: 0 !important; }
+.qd-fe-mostrar .qd-pill { gap: 7px; }
+.qd-fe-mostrar .bq-rot { margin-right: 2px; }
+.qd-fe-mostrar .qd-pill[aria-pressed="true"] { background: var(--bq-surface); color: var(--tinta); border-color: var(--tinta); }
+.qd-fe-mostrar .qd-pill[aria-pressed="false"] { color: var(--tinta-media); }
+.qd-fe-seta, .qd-fe-hoje-bt { min-height: 36px; min-width: 36px; border-radius: 9px; border: 1.5px solid var(--bq-linha); background: var(--bq-surface-2);
+  color: var(--tinta); cursor: pointer; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 18px; line-height: 1; }
+.qd-fe-hoje-bt { font-size: 13px; padding: 0 14px; }
+.qd-fe-hoje-bt:disabled { color: var(--tinta-media); cursor: default; border-style: dashed; }
+.qd-fe-seta:hover, .qd-fe-hoje-bt:not(:disabled):hover { border-color: var(--tinta-fraca); }
+.bi-quadro .qd-fe-mes { width: calc(100% + 10px); table-layout: fixed; border-collapse: separate; border-spacing: 5px; margin: 0 -5px; font-size: 12px; }
+.bi-quadro .qd-fe-mes th { position: static; background: transparent; border: none; cursor: default; padding: 2px 0 0; text-align: center;
+  font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--tinta-media); }
+.bi-quadro .qd-fe-mes td { vertical-align: top; white-space: normal; height: 86px; padding: 5px 4px; border: 1.5px solid var(--bq-linha);
+  border-radius: 11px; background: var(--bq-surface); position: relative; }
+.bi-quadro .qd-fe-mes tbody tr:hover { background: transparent; }
+.bi-quadro .qd-fe-mes td.passado { background: transparent; }
+.bi-quadro .qd-fe-mes td.fora { border-style: dashed; background: transparent; }
+.bi-quadro .qd-fe-mes td.hoje { border: 2px solid var(--tinta); }
+.bi-quadro .qd-fe-mes td.marca-critico { box-shadow: inset 0 3px 0 var(--fe-critico); }
+.bi-quadro .qd-fe-mes td.marca-atencao { box-shadow: inset 0 3px 0 var(--fe-atencao); }
+.bi-quadro .qd-fe-mes td.escolhido { outline: 2px solid var(--tinta); outline-offset: 1px; }
+.qd-fe-dia-cab { display: flex; align-items: center; gap: 6px; min-height: 20px; margin-bottom: 4px; }
+.qd-fe-dia-n { font-family: 'Archivo', sans-serif; font-size: 12.5px; font-weight: 600; color: var(--tinta-media); }
+.qd-fe-dia.hoje .qd-fe-dia-n { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 99px;
+  background: var(--tinta); color: var(--vidro-alto); font-weight: 800; }
+.qd-fe-hoje { font-family: 'Archivo', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta); }
+.qd-fe-dia-resumo { display: none; }
+.qd-fe-pilulas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.qd-fe-pilulas > li { min-width: 0; }
+.qd-fe-mais { display: block; margin: 4px 0 0 2px; border: none; background: none; padding: 0; font-size: 11px; font-weight: 700;
+  color: var(--tinta-media); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* pílulas: cheia = limite; contornada com envelope = último dia do aviso */
+.qd-fe-pil { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 22px; padding: 2px 5px 2px 3px; border-radius: 6px;
+  border: 1.5px solid transparent; font-family: 'Archivo', sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: 0; line-height: 1.2;
+  text-align: left; cursor: pointer; box-shadow: 0 1px 3px -1px rgba(15, 23, 42, .25); }
+.qd-fe-pil-nome { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-fe-pil-eq { flex: none; font-size: 10.5px; font-weight: 800; }
+.qd-fe-pil:hover { filter: brightness(1.06); box-shadow: 0 3px 10px -4px rgba(15, 23, 42, .45); }
+.qd-fe-pil:focus-visible, .qd-fe-chip:focus-visible, .qd-fe-sit:focus-visible, .qd-fe-item:focus-visible, .qd-fe-ag-item:focus-visible, .qd-fe-esc:focus-visible,
+.qd-fe-seta:focus-visible, .qd-fe-hoje-bt:focus-visible, .qd-fe-dia-resumo:focus-visible, .qd-fe-geral-n button:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
+.qd-fe-pil.limite.critico { background: var(--fe-critico); color: #fff; }
+.qd-fe-pil.limite.atencao { background: var(--fe-atencao); color: #14152b; }
+.qd-fe-pil.limite.planejar { background: var(--fe-planejar); color: var(--fe-planejar-tinta); }
+.qd-fe-pil.limite.neutro { background: rgba(71, 85, 105, .14); color: var(--tinta); box-shadow: none; }
+[data-tema="escuro"] .qd-fe-pil.limite.neutro { background: rgba(148, 163, 184, .2); }
+.qd-fe-pil.aviso { background: var(--bq-surface); color: var(--tinta); box-shadow: none; }
+.qd-fe-pil.aviso.critico { border-color: var(--fe-critico); background: var(--qd-grave-fundo); }
+.qd-fe-pil.aviso.atencao { border-color: var(--fe-atencao-borda); background: var(--qd-atencao-fundo); }
+.qd-fe-pil.aviso.planejar { border-color: var(--fe-planejar); }
+.qd-fe-pil.aviso.neutro { border-color: var(--linha-forte); color: var(--tinta-media); }
+.qd-fe-pil.aviso.passou { border-style: dashed; background: transparent; }
+.qd-fe-mes.destacando .qd-fe-pil.apagada { opacity: .25; box-shadow: none; }
+.qd-fe-mes.destacando .qd-fe-pil.apagada:focus-visible { opacity: 1; }
+.qd-fe-mes.destacando .qd-fe-pil.casa { box-shadow: 0 0 0 2px var(--bq-surface), 0 0 0 3.5px var(--tinta); }
+
+.qd-fe-legenda { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 12px 2px 0; font-size: 12px; color: var(--tinta); }
+.qd-fe-legenda > span { display: inline-flex; align-items: center; gap: 5px; }
+.qd-fe-legenda small { font-size: 11.5px; color: var(--tinta-media); }
+.qd-fe-leg-sep { width: 1px; height: 16px; background: var(--bq-linha); }
+.qd-fe-amostra { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 13px; border-radius: 4px; flex: none; }
+.qd-fe-amostra.limite { background: var(--tinta-media); }
+.qd-fe-amostra.aviso { border: 1.5px solid var(--tinta-media); color: var(--tinta-media); }
+.qd-fe-amostra.aviso .qd-fe-ico { width: 10px; height: 10px; }
+.qd-pill .qd-fe-amostra { width: 18px; height: 11px; }
+.qd-fe-cal-rodape { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--bq-linha); font-size: 12.5px; }
+
+/* o mês (ou o dia) em lista */
+.qd-fe-agenda { margin-top: 12px; }
+.qd-fe-agenda h3 { font-family: 'Archivo', sans-serif; font-size: 14px; margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.qd-fe-agenda h3 .qd-link { font-size: 12px; font-weight: 500; font-family: inherit; }
+.qd-fe-agenda h3:focus-visible { outline: 2px solid var(--tinta); outline-offset: 3px; border-radius: 2px; }
+.qd-fe-ag-dias { list-style: none; margin: 0; padding: 0; }
+.qd-fe-ag-dias > li { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--bq-linha); }
+.qd-fe-ag-data b { display: block; font-family: 'Archivo', sans-serif; font-size: 15px; font-variant-numeric: tabular-nums; }
+.qd-fe-ag-data span { font-size: 11.5px; color: var(--tinta-media); }
+.qd-fe-ag-data.hoje b { text-decoration: underline; text-underline-offset: 3px; }
+.qd-fe-ag-dias.um-dia > li { grid-template-columns: minmax(0, 1fr); }
+.qd-fe-ag-dias.um-dia .qd-fe-ag-data { display: none; }
+.qd-fe-ag-dias ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.qd-fe-ag-item { width: 100%; display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; text-align: left;
+  padding: 5px 6px; border: none; background: transparent; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--tinta); }
+.qd-fe-ag-item:hover { background: var(--bq-surface-2); }
+.qd-fe-ag-tipo { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 11.5px; white-space: nowrap; }
+.qd-fe-ag-quem { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; }
+.qd-fe-ag-quem b { font-weight: 600; }
+.qd-fe-ag-quem small { font-size: 11.5px; color: var(--tinta-media); }
+.qd-fe-ag-sit { font-size: 11.5px; color: var(--tinta-media); white-space: nowrap; }
+
+/* embaixo: limites por turno + de férias agora */
+.qd-fe-baixo { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.qd-fe-baixo > * { min-width: 0; }
+.qd-fe-mapa td.c { min-width: 40px; }
+.qd-fe-mapa td.venc { font-variant-numeric: tabular-nums; color: var(--tinta-media); }
+.qd-fe-mapa td.venc b { color: var(--tinta); font-family: 'Archivo', sans-serif; font-size: 13.5px; }
+.qd-fe-mapa thead th.n { text-transform: none; letter-spacing: .02em; font-size: 11.5px; white-space: nowrap; }
+.qd-fe-mapa thead th.n .qd-ico { width: 11px; height: 11px; vertical-align: -1px; margin-right: 3px; }
+.qd-fe-mapa thead th.escolhida { color: var(--tinta); box-shadow: inset 0 -2px 0 var(--tinta); }
+.qd-fe-mapa tbody th .qd-eq { font-size: 11px; }
+.qd-fe-agora-eq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 8px; }
+.qd-fe-agora-eq > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.qd-fe-agora-eq b { font-family: 'Archivo', sans-serif; font-size: 14px; }
+.qd-fe-agora { list-style: none; margin: 0; padding: 0; }
+.qd-fe-agora li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 7px 0; border-top: 1px solid var(--bq-linha); font-size: 12.5px; }
+.qd-fe-agora li > span { color: var(--tinta-media); font-size: 11.5px; }
+.qd-fe-agora li > .qd-fe-agora-lim { display: inline-flex; align-items: center; gap: 4px; color: var(--tinta); font-weight: 600; }
+.qd-fe-fonte { font-size: 11.5px; color: var(--tinta-media); margin: 14px 2px 0; line-height: 1.55; }
+.qd-fe-sem-aba p { font-size: 13px; color: var(--tinta-media); line-height: 1.6; max-width: 760px; }
+.qd-fe .qd-faixa { margin-bottom: 14px; }
+
+/* ficha: a seção Férias com a linha do tempo de cada período */
+.qd-fe-ficha { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
+.qd-fe-ficha > li { padding: 10px 12px 12px; border-radius: 10px; border: 1px solid var(--bq-linha); background: var(--bq-surface-2); }
+.qd-fe-ficha-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
+.qd-fe-ficha-cab span { color: var(--tinta-media); font-size: 12px; }
+.qd-fe-ficha-nota { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--tinta-media); margin: 0 0 8px; line-height: 1.5; }
+.qd-fe-ficha-nota .qd-fe-ico { margin-top: 2px; }
+.qd-fe-tempo { position: relative; height: 8px; margin: 24px 2px 10px; border-radius: 99px; background: var(--linha); }
+.qd-fe-tempo i { position: absolute; top: 0; bottom: 0; }
+.qd-fe-tempo i.aq { background: var(--linha-forte); border-radius: 99px 0 0 99px; }
+.qd-fe-tempo i.livre { background: var(--tinta-fraca); }
+.qd-fe-tempo i.aviso { border-radius: 0 99px 99px 0; background: var(--tinta-media); }
+.qd-fe-tempo i.aviso.critico { background: var(--fe-critico); }
+.qd-fe-tempo i.aviso.atencao { background: var(--fe-atencao); }
+.qd-fe-tempo i.aviso.planejar { background: var(--fe-planejar); }
+.qd-fe-tempo-hoje { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--tinta); border-radius: 2px; }
+.qd-fe-tempo-hoje span { position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); font-family: 'Archivo', sans-serif;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.qd-fe-ficha-datas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
+.qd-fe-ficha-datas dt { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tinta-media); }
+.qd-fe-ficha-datas dd { margin: 2px 0 0; font-size: 12.5px; }
+
+/* visão geral: o cartão curto */
+.qd-fe-geral-n { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 2px 0 10px; }
+.qd-fe-geral-n button { display: flex; flex-direction: column; gap: 3px; text-align: left; border: 1px solid var(--bq-linha); background: var(--bq-surface-2);
+  border-radius: 9px; padding: 8px 10px; cursor: pointer; color: var(--tinta); min-width: 0; }
+.qd-fe-geral-n button:hover { border-color: var(--tinta-fraca); }
+.qd-fe-geral-n b { font-family: 'Archivo', sans-serif; font-size: 24px; font-weight: 800; line-height: 1.05; }
+.qd-fe-geral-n span { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--tinta-media); white-space: nowrap; }
+.qd-fe-geral-prox { font-size: 12.5px; color: var(--tinta-media); margin: 0; line-height: 1.6; }
+
+@media (max-width: 1199px) {
+  .qd-fe-regua { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .qd-fe-sit.heroi { grid-column: 1 / -1; }
+  .qd-fe-baixo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .qd-fe-regua { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .qd-fe-sit { padding: 9px 10px 10px; gap: 3px; }
+  .qd-fe-sit-n { font-size: 24px; }
+  .qd-fe-sit.heroi .qd-fe-sit-n { font-size: 32px; }
+  .qd-fe-sit:not(.heroi) .qd-fe-sit-txt { display: none; }
+  .qd-fe-sit-linha .qd-fe-sit-txt { display: inline; }
+  .qd-fe-sit-rot { letter-spacing: .06em; font-size: 10px; }
+  .qd-fe-colunas { grid-template-columns: minmax(0, 1fr); }
+  .qd-fe-col.dir { border-left: none; padding-left: 0; margin-top: 8px; }
+  .qd-fe-item { grid-template-columns: 16px minmax(0, 1fr); }
+  .qd-fe-item-quando { grid-column: 2; flex-direction: row; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; text-align: left; white-space: normal; }
+  .qd-fe-tira-sub { display: none; }
+  .qd-fe-chip { flex: 0 0 66px; min-width: 66px; padding: 7px 8px 8px; gap: 5px; }
+  .qd-fe-chip-rot { font-size: 10.5px; }
+  .qd-fe-chip-n { font-size: 17px; }
+  .qd-fe-depois { margin-left: 0; font-size: 11.5px; }
+  .bi-quadro .qd-fe-cal h2 { font-size: 17px; }
+  .qd-fe-cal-cab { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'tit tit' 'mostrar setas'; gap: 8px 10px; }
+  .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
+  .bi-quadro .qd-fe-mes { border-spacing: 3px; width: calc(100% + 6px); margin: 0 -3px; }
+  .bi-quadro .qd-fe-mes td { height: 48px; padding: 3px 3px 2px; border-radius: 8px; border-width: 1px; }
+  .bi-quadro .qd-fe-mes td.hoje { border-width: 2px; }
+  .qd-fe-pilulas, .qd-fe-mais, .qd-fe-hoje { display: none; }
+  .qd-fe-dia-cab { flex-direction: column; align-items: flex-start; gap: 3px; margin: 0; min-height: 0; }
+  .qd-fe-dia-n { font-size: 11.5px; }
+  .qd-fe-dia.hoje .qd-fe-dia-n { min-width: 20px; height: 20px; }
+  .qd-fe-dia-resumo { display: inline-flex; align-items: center; gap: 2px; border: none; background: none; padding: 1px 0; cursor: pointer;
+    font-family: 'Archivo', sans-serif; font-size: 11.5px; color: var(--tinta); min-height: 24px; }
+  .qd-fe-dia-resumo .qd-ico, .qd-fe-dia-resumo .qd-fe-ico { width: 10px; height: 10px; }
+  .qd-fe-longo { display: none; }
+  .qd-fe-curto { display: inline; }
+  .qd-fe-legenda { gap: 6px 12px; font-size: 11.5px; }
+  .qd-fe-legenda small { display: none; }
+  .qd-fe-leg-sep { display: none; }
+  .qd-fe-ag-dias > li { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
+  .qd-fe-ag-item { grid-template-columns: minmax(0, 1fr); padding: 6px 4px; }
+  .qd-fe-ficha-datas { grid-template-columns: 1fr; }
+  .qd-fe-geral-n b { font-size: 21px; }
+}
+@media (forced-colors: active) {
+  .qd-fe-pil, .qd-fe-chip-med, .qd-fe-chip-med i, .qd-fe-tempo i, .qd-fe-amostra, .qd-fe-dia.hoje .qd-fe-dia-n { forced-color-adjust: none; }
+  .qd-fe-pil { border: 1px solid CanvasText; }
+  .qd-fe-pil.aviso { border-style: dashed; }
+  .qd-fe-sit, .qd-fe-chip, .qd-fe-esc, .qd-fe-geral-n button { border: 1px solid CanvasText; }
+  .qd-fe-item { box-shadow: none; border-left: 3px solid CanvasText; }
+  .qd-fe-sit[aria-pressed="true"], .qd-fe-chip[aria-pressed="true"] { outline: 3px solid Highlight; }
+  .bi-quadro .qd-fe-mes td.hoje { outline: 3px solid Highlight; outline-offset: -3px; }
+  .qd-fe-mes.destacando .qd-fe-pil.casa { outline: 2px solid Highlight; outline-offset: 1px; }
+  .qd-fe-pil:focus-visible, .qd-fe-chip:focus-visible, .qd-fe-sit:focus-visible, .qd-fe-item:focus-visible { outline: 3px dashed CanvasText; outline-offset: 2px; }
+}
 </style>

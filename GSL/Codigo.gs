@@ -668,6 +668,7 @@ const ACOES = {
 
   // quadro do CD
   salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },
+  salvarParametrosFerias: { capacidade: 'PROGRAMAR',   funcao: 'acaoSalvarParametrosFerias', modulo: ['quadro', 'config'] },
   atualizarQuadro:     { capacidade: null,             funcao: 'acaoAtualizarQuadro', modulo: 'quadro' },
 
   // entrada (4.2)

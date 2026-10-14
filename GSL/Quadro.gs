@@ -11,21 +11,30 @@
  * tiver a GERAL (outra filial no layout antigo). Admitidos (CADMITIDOS) e
  * desligados (CDESLIGADOS) continuam vindo das mesmas abas.
  *
+ * 14/10 — FÉRIAS. A aba FÉRIAS da mesma planilha (a extracao do sistema de
+ * RH: matricula, nome, centro de custo, periodo aquisitivo e as datas
+ * limite) e cruzada com a GERAL pela matricula — os ultimos numeros do RH.
+ * A tela mostra quem esta perto do limite antes da multa.
+ *
  * INCONSISTENCIAS: desligado (CDESLIGADOS) que continua ATIVO na GERAL — o
  * pedido da gerencia, a unica "grave" (a faixa vermelha da tela) — e, como
  * "atencao", o que deixa o quadro errado: linha sem nome, EQUIPE fora do
  * padrao, produtivo ou matricula repetidos e admitido que nao entrou na
  * GERAL. Cada uma diz a linha da planilha.
  */
-const BUILD_QUADRO = '2026.10.13b';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_QUADRO = '2026.10.14';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const QUADRO_ABA_GERAL = 'GERAL';
 const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];
 const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
+const QUADRO_ABA_FERIAS = 'FÉRIAS';
+// Centro de custo do CD: linha da FÉRIAS dele sem par na GERAL vira conferencia (as dos outros centros sao de outros setores).
+const QUADRO_CC_CD = ['655'];
 const QUADRO_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
 // O formato do que vai para o cache: copia de outro formato (versao anterior do Quadro.gs) e relida.
-const QUADRO_FORMATO = 3;
+// 4 (14/10): com as ferias.
+const QUADRO_FORMATO = 4;
 
 /*
  * A aba e achada pelo nome sem diferenciar maiuscula, acento, espaco ou
@@ -37,7 +46,8 @@ const QUADRO_FORMATO = 3;
 const QUADRO_APELIDOS = {
   GERAL: { nomes: ['GERAL', 'QUADROGERAL', 'BASEGERAL', 'GERALCD'], pedacos: [] },
   CADMITIDOS: { nomes: ['CADMITIDOS', 'CDADMITIDOS', 'ADMITIDOS', 'ADMISSOES', 'CADMISSOES', 'CDADMISSOES'], pedacos: ['ADMITID', 'ADMISS'] },
-  CDESLIGADOS: { nomes: ['CDESLIGADOS', 'CDDESLIGADOS', 'DESLIGADOS', 'DESLIGAMENTOS', 'CDESLIGAMENTOS', 'CDDESLIGAMENTOS'], pedacos: ['DESLIG', 'DEMITID', 'DEMISS'] }
+  CDESLIGADOS: { nomes: ['CDESLIGADOS', 'CDDESLIGADOS', 'DESLIGADOS', 'DESLIGAMENTOS', 'CDESLIGAMENTOS', 'CDDESLIGAMENTOS'], pedacos: ['DESLIG', 'DEMITID', 'DEMISS'] },
+  'FÉRIAS': { nomes: ['FERIAS', 'CFERIAS', 'CDFERIAS', 'FERIASCD', 'BASEFERIAS', 'EXTRACAOFERIAS', 'CONTROLEFERIAS', 'CONTROLEDEFERIAS'], pedacos: ['FERIAS'] }
 };
 function chaveAbaQ_(nome) { return normalizaQ_(nome).replace(/[^A-Z0-9]/g, ''); }
 function abaQuadro_(ss, nomeAba) {
@@ -124,6 +134,33 @@ const QUADRO_COLUNAS_DES = {
   data:   { exatos: ['DATA DESLIGAMENTO', 'DATA DO DESLIGAMENTO', 'DATA DEMISSAO', 'DATA DE DEMISSAO', 'DESLIGAMENTO', 'DATA'], pedacos: ['DESLIG', 'DEMISS', 'SAIDA', 'DATA'], evitar: ['MOTIVO', 'TIPO', 'ADMISS', 'NASC'] },
   tipo:   { exatos: ['TIPO', 'TIPO DE DESLIGAMENTO', 'TIPO DESLIGAMENTO'], pedacos: ['TIPO'], evitar: ['MOTIVO'] },
   motivo: { exatos: ['MOTIVO', 'MOTIVO DO DESLIGAMENTO', 'MOTIVO DESLIGAMENTO'], pedacos: ['MOTIVO'] }
+};
+/*
+ * Aba FÉRIAS (14/10): a extracao do sistema de RH, como vem — Empresa,
+ * Filial, Matricula, Descricao, Nome, cc, turno, admissao, pa_inicio,
+ * pa_fim, DTA_LIMITE, DTA_LIMITEMAX, dias vencidos, codfuc, tipfuncao.
+ * "pa_inicio" vira "PA INICIO" no cabecalho comparavel. TIPFUNCAO e CODFUC
+ * nao sao a funcao (por isso a funcao nao e achada pelo pedaco FUNCAO).
+ */
+const QUADRO_COLUNAS_FERIAS = {
+  matricula:    { exatos: ['MATRICULA', 'MATRIC', 'MAT', 'MATRICULA RH', 'CHAPA', 'REGISTRO'], pedacos: ['MATRIC'] },
+  nome:         { exatos: ['NOME', 'NOME DO COLABORADOR', 'NOME COLABORADOR', 'COLABORADOR', 'FUNCIONARIO', 'NOME FUNCIONARIO', 'NOME COMPLETO'],
+                  pedacos: ['NOME', 'COLABORADOR', 'FUNCIONARIO'], evitar: ['EMPRESA', 'FILIAL', 'FUNCAO', 'CARGO', 'TURNO', 'CUSTO'] },
+  funcao:       { exatos: ['DESCRICAO', 'FUNCAO', 'CARGO', 'DESCRICAO FUNCAO', 'DESCRICAO DA FUNCAO', 'DESCRICAO CARGO', 'DESCRICAO DO CARGO'],
+                  pedacos: ['DESCRI', 'CARGO'], evitar: ['TIP', 'COD', 'TURNO', 'CUSTO', 'EMPRESA', 'FILIAL'] },
+  cc:           { exatos: ['CC', 'C C', 'CENTRO DE CUSTO', 'CENTRO CUSTO', 'C CUSTO', 'CCUSTO', 'COD CC'], pedacos: ['CUSTO'] },
+  equipe:       { exatos: ['TURNO', 'EQUIPE', 'DESCRICAO TURNO'], pedacos: ['TURNO'] },
+  admissao:     { exatos: ['ADMISSAO', 'DATA ADMISSAO', 'DATA DE ADMISSAO', 'DT ADMISSAO', 'DTA ADMISSAO'], pedacos: ['ADMISS'] },
+  paInicio:     { exatos: ['PA INICIO', 'INICIO PA', 'PA INI', 'INICIO PERIODO AQUISITIVO', 'PERIODO AQUISITIVO INICIO', 'INICIO AQUISITIVO', 'DT INICIO PA'],
+                  pedacos: ['PA INI', 'INICIO PER', 'AQUISITIVO INI'] },
+  paFim:        { exatos: ['PA FIM', 'FIM PA', 'FIM PERIODO AQUISITIVO', 'PERIODO AQUISITIVO FIM', 'FIM AQUISITIVO', 'DT FIM PA'],
+                  pedacos: ['PA FIM', 'FIM PER', 'AQUISITIVO FIM'] },
+  limite:       { exatos: ['DTA LIMITE', 'DATA LIMITE', 'DT LIMITE', 'LIMITE'], pedacos: [] },
+  limiteMax:    { exatos: ['DTA LIMITEMAX', 'DTA LIMITE MAX', 'DTA LIMITE MAXIMA', 'DATA LIMITE MAX', 'DATA LIMITE MAXIMA', 'DT LIMITEMAX', 'DT LIMITE MAX',
+                  'LIMITEMAX', 'LIMITE MAX', 'LIMITE MAXIMO'], pedacos: ['LIMITEMAX', 'LIMITE MAX'] },
+  diasVencidos: { exatos: ['DIAS VENCIDOS', 'DIAS VENC', 'DIAS VENCIDO', 'VENCIDOS', 'QTD DIAS VENCIDOS', 'QT DIAS VENCIDOS'], pedacos: ['VENCID'] },
+  empresa:      { exatos: ['EMPRESA'], pedacos: [] },
+  filial:       { exatos: ['FILIAL'], pedacos: [] }
 };
 
 /* Cabecalho comparavel: sem acento, maiusculo, pontuacao vira espaco ("PROD." = "PROD"). */
@@ -356,14 +393,25 @@ function lerPlanilhaQuadro_(id) {
     leitura.des = null;
   }
 
+  // Ferias (14/10): a extracao do sistema de RH, cruzada com a GERAL. Sem a aba, a tela diz como carregar.
+  const ferias = lerFeriasQ_(ss);
+  const confFerias = casarFeriasQ_(geral, ferias);
+  if (ferias) {
+    const ccs = {};
+    ferias.linhas.forEach(function (f) { const k = f.cc || '(vazio)'; ccs[k] = (ccs[k] || 0) + 1; });
+    leitura.ferias = { aba: ferias.aba, linhas: ferias.linhas.length, colunas: ferias.colunas, faltam: ferias.faltam,
+      linhaCabecalho: ferias.linhaCabecalho, ligadas: ferias.linhas.filter(function (f) { return f.ref; }).length,
+      peloNome: ferias.linhas.filter(function (f) { return f.chave === 'nome'; }).length, foraDoCd: ferias.foraDoCd, ccs: ccs };
+  } else {
+    leitura.ferias = null;
+  }
+
   return {
     formato: QUADRO_FORMATO,
     geral: geral, adm: adm, des: des, desSemData: desSemData,
-    // Transicao (13/10): so a tela anterior do Quadro le "apoio" (aberta durante a implantacao). Sai na proxima entrega.
-    apoio: geral.filter(function (g) { return g.ativo; }).map(function (g) {
-      return { cod: g.cod, nome: g.nome, equipe: { '1° TURNO': 'TA', '2° TURNO': 'TB', '3° TURNO': 'TC' }[g.equipe] || g.equipe || g.equipeBruta, funcao: g.funcao };
-    }),
-    inconsistencias: inconsistenciasQ_(geral, adm, des.concat(desSemData)),
+    // So as linhas do quadro (as de outros centros de custo sem par na GERAL sao de outros setores e ficam de fora).
+    ferias: ferias ? { aba: ferias.aba, gid: ferias.gid, linhas: ferias.linhas.filter(function (f) { return f.ref || f.doCd; }) } : null,
+    inconsistencias: inconsistenciasQ_(geral, adm, des.concat(desSemData)).concat(confFerias),
     leitura: leitura,
     atualizado: new Date().toISOString(),
     fonte: { nome: ss.getName(), url: ss.getUrl() },
@@ -387,6 +435,171 @@ function linhaGeralQ_(linha, col, numeroLinha, turnoDaAba) {
   r.situacao = situacaoQ_(r.status);
   r.ativo = r.situacao !== 'FORA';
   return r;
+}
+
+/* ------------------------------------------------------------------ */
+/* FERIAS (14/10)                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Le a aba FÉRIAS: uma linha por periodo aquisitivo em aberto. As datas
+ * vem como data do Sheets ou como texto (10/06/2026); a tela calcula a
+ * situacao de cada uma com a data de hoje. Linha sem matricula e sem nome
+ * (vazia, total, rodape) nao conta. Sem a aba: null.
+ */
+function lerFeriasQ_(ss) {
+  const aba = abaQuadro_(ss, QUADRO_ABA_FERIAS);
+  if (!aba) return null;
+  const t = lerTabelaQ_(aba, QUADRO_COLUNAS_FERIAS);
+  const r = { aba: aba.getName(), gid: null, linhaCabecalho: t.primeiraLinha - 1, colunas: {}, faltam: [], linhas: [], foraDoCd: 0,
+    semCc: t.col.cc === undefined };
+  try { r.gid = aba.getSheetId(); } catch (e) { r.gid = null; }
+  Object.keys(t.col).forEach(function (k) { r.colunas[k] = t.cab[t.col[k]]; });
+  // sem estas a aba nao serve para os avisos (o centro de custo e a admissao sao uteis, mas nao essenciais)
+  r.faltam = ['matricula', 'nome', 'paFim', 'limiteMax'].filter(function (k) { return t.col[k] === undefined; });
+  t.linhas.forEach(function (linha, i) {
+    const v = function (k) { return valorQ_(linha, t.col, k); };
+    const f = {
+      linha: t.primeiraLinha + i,
+      matricula: digitosQ_(v('matricula')),
+      nome: txtQ_(v('nome')),
+      funcao: txtQ_(v('funcao')).toUpperCase(),
+      cc: txtQ_(v('cc')).replace(/[.,]0+$/, ''),
+      equipeBruta: txtQ_(v('equipe')).toUpperCase(),
+      admissao: dataQ_(v('admissao')),
+      paInicio: dataQ_(v('paInicio')),
+      paFim: dataQ_(v('paFim')),
+      limite: dataQ_(v('limite')),
+      limiteMax: dataQ_(v('limiteMax')),
+      diasVencidos: numeroQ_(v('diasVencidos'))
+    };
+    if (!f.matricula && !f.nome) return;
+    f.equipe = equipeQ_(f.equipeBruta);
+    f.doCd = r.semCc || ccDoCdQ_(f.cc);
+    r.linhas.push(f);
+  });
+  return r;
+}
+
+/* So os numeros, sem zeros a esquerda ("0123" = "123"; 123.0 do Sheets = "123"). Sem nenhum numero de 1 a 9: ''. */
+function digitosQ_(v) {
+  const d = txtQ_(v).replace(/[.,]0+$/, '').replace(/\D+/g, '').replace(/^0+(?=\d)/, '');
+  return /[1-9]/.test(d) ? d : '';
+}
+/* Numero escrito do jeito brasileiro ("1.234,5") ou numero do Sheets; vazio: ''. */
+function numeroQ_(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : '';
+  const s = txtQ_(v).replace(/\s+/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const n = Number(s);
+  return s !== '' && isFinite(n) ? n : '';
+}
+/* Centro de custo do CD (655, "655 - CD", "0655"). Vazio: nao da para saber — conta como do CD. */
+function ccDoCdQ_(cc) {
+  const t = txtQ_(cc);
+  if (!t) return true;
+  const m = t.match(/\d+/);
+  return !!m && QUADRO_CC_CD.indexOf(m[0].replace(/^0+(?=\d)/, '')) !== -1;
+}
+
+/* Nomes da mesma pessoa? O mesmo primeiro nome e mais um nome em comum ("JOSE DA SILVA" = "JOSE SILVA SANTOS"). */
+const PARTICULAS_Q = { DA: 1, DE: 1, DO: 1, DAS: 1, DOS: 1, E: 1 };
+function nomeParecidoQ_(a, b) {
+  const partes = function (v) { return nomeChaveQ_(v).split(' ').filter(function (x) { return x && !PARTICULAS_Q[x]; }); };
+  const pa = partes(a), pb = partes(b);
+  if (!pa.length || !pb.length) return true;              // sem nome de um dos lados: nao da para comparar
+  if (pa[0] !== pb[0]) return false;
+  if (pa.length === 1 || pb.length === 1) return true;
+  return pa.slice(1).some(function (x) { return pb.indexOf(x) > 0; });
+}
+
+/*
+ * Cada linha da FÉRIAS acha a pessoa da GERAL (f.ref) pela Matricula: os
+ * ultimos numeros do RH (3; ou todos os da matricula, se ela tiver mais).
+ * Com 3 numeros, RH de prefixos diferentes podem ter o mesmo final (100123
+ * e 109123): entre as pessoas ATIVAS com esse final, o nome desempata. Se
+ * o numero acha uma pessoa de outro nome, a linha nao e ligada a ela (as
+ * ferias seriam de outra pessoa) e vira conferencia. Sem numero que sirva:
+ * pelo nome, se so uma pessoa ativa tiver aquele nome. Devolve as
+ * conferencias (todas "atencao").
+ */
+function casarFeriasQ_(geral, ferias) {
+  const saida = [];
+  if (!ferias) return saida;
+  const fimRh = function (g) { const d = digitosQ_(g.rh); return d && d.length < 3 ? ('000' + d).slice(-3) : d; };
+  const porFim = {}, porNome = {};
+  geral.forEach(function (g) {
+    const d = fimRh(g);
+    if (d) (porFim[d.slice(-3)] = porFim[d.slice(-3)] || []).push(g);
+    const n = nomeChaveQ_(g.nome);
+    if (n && g.ativo) (porNome[n] = porNome[n] || []).push(g);
+  });
+  const quemG = function (g) { return (g.nome || 'uma linha sem nome') + (g.rh ? ' (RH ' + g.rh + ')' : ' (sem RH na GERAL)'); };
+  const item = function (f, tipo, detalhe, g) {
+    return { tipo: tipo, gravidade: 'atencao', cod: g ? g.cod : '', rh: g ? g.rh : '', nome: f.nome || (g ? g.nome : ''),
+      equipe: g ? (g.equipe || g.equipeBruta) : (f.equipe || f.equipeBruta), linha: f.linha, aba: ferias.aba, gid: ferias.gid,
+      ref: g ? g.ref : 0, matricula: f.matricula, detalhe: detalhe };
+  };
+  ferias.linhas.forEach(function (f) {
+    f.ref = 0; f.chave = '';
+    let cands = [];
+    if (f.matricula) {
+      const m = f.matricula.length < 3 ? ('000' + f.matricula).slice(-3) : f.matricula;
+      cands = (porFim[m.slice(-3)] || []).filter(function (g) { return fimRh(g).slice(-m.length) === m; });
+    }
+    const ativos = cands.filter(function (g) { return g.ativo; });
+    let g = null, outroNome = null;
+    if (ativos.length === 1) {
+      g = ativos[0];
+    } else if (ativos.length > 1) {
+      const mesmo = ativos.filter(function (x) { return f.nome && x.nome && nomeParecidoQ_(f.nome, x.nome); });
+      if (mesmo.length === 1) g = mesmo[0];
+      else {
+        saida.push(item(f, 'FERIAS_DUPLA', 'A matrícula ' + f.matricula + ' da aba ' + ferias.aba + (f.nome ? ' (' + f.nome + ')' : '') +
+          ' bate com o RH de ' + ativos.length + ' pessoas ativas da GERAL: ' + ativos.map(quemG).join('; ') + '. O nome não desempata.'));
+        return;
+      }
+    } else if (cands.length) {
+      // so quem ja saiu da empresa tem esse final de RH: a linha e dela (fica fora das ferias do quadro)
+      f.ref = cands[0].ref; f.chave = 'matricula';
+      return;
+    }
+    if (g && f.nome && g.nome && !nomeParecidoQ_(f.nome, g.nome)) { outroNome = g; g = null; }
+    if (g) { f.ref = g.ref; f.chave = 'matricula'; return; }
+    // pelo nome: so se uma pessoa ativa tiver exatamente esse nome
+    const n = nomeChaveQ_(f.nome);
+    const pn = (n && porNome[n]) || [];
+    if (pn.length === 1) { f.ref = pn[0].ref; f.chave = 'nome'; }
+    if (outroNome) {
+      saida.push(item(f, 'FERIAS_NOME', 'Na aba ' + ferias.aba + ', a matrícula ' + f.matricula + ' é de ' + f.nome + '; na GERAL, esse final de RH é de ' +
+        quemG(outroNome) + '.' + (f.ref ? ' As férias foram ligadas a ' + quemG(pn[0]) + ' pelo nome: confira o RH dele(a) na GERAL.'
+          : ' As férias não foram ligadas a ninguém: confira o RH na GERAL.'), f.ref ? pn[0] : outroNome));
+      return;
+    }
+    if (f.ref) return;
+    if (pn.length > 1) {
+      saida.push(item(f, 'FERIAS_DUPLA', 'A aba ' + ferias.aba + ' tem ' + f.nome + (f.matricula ? ' (matrícula ' + f.matricula + ', que não bate com nenhum RH da GERAL)' : ' sem matrícula') +
+        ', e há ' + pn.length + ' pessoas ativas com esse nome na GERAL: ' + pn.map(quemG).join('; ') + '.'));
+      return;
+    }
+    if (f.doCd) {
+      saida.push(item(f, 'FERIAS_FORA_GERAL', 'Está na aba ' + ferias.aba + (f.cc ? ' (centro de custo ' + f.cc + ')' : '') +
+        (f.matricula ? ', matrícula ' + f.matricula : '') + ', mas ninguém da GERAL tem esse final de RH' + (f.nome ? ' nem esse nome' : '') + '.'));
+    } else {
+      ferias.foraDoCd++;
+    }
+  });
+  // Quem esta no quadro e nao tem linha na FÉRIAS: sem o prazo, o GSL nao avisa.
+  if (ferias.linhas.length) {
+    const comFerias = {};
+    ferias.linhas.forEach(function (f) { if (f.ref) comFerias[f.ref] = true; });
+    geral.filter(function (g) { return g.ativo && !comFerias[g.ref]; }).forEach(function (g) {
+      saida.push({ tipo: 'FERIAS_SEM_DADOS', gravidade: 'atencao', cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta,
+        linha: g.linha, ref: g.ref, aba: g.aba || '',
+        detalhe: (digitosQ_(g.rh) ? 'O final do RH ' + g.rh + ' não está na aba ' + ferias.aba + '.' : 'Sem RH na GERAL (a aba ' + ferias.aba + ' casa pela matrícula, os últimos números do RH).') +
+          ' Sem a linha dele(a), o GSL não avisa o prazo das férias.' });
+    });
+  }
+  return saida;
 }
 
 /* ------------------------------------------------------------------ */

@@ -141,7 +141,7 @@
   </div>
 
   <div id="aplicacao" class="oculto">
-    <aside class="lateral">
+    <aside id="barra-lateral" class="lateral">
       <div class="marca">
         <div class="marca-linha">
           <div class="logo-icone" role="img" aria-label="Bartofil"></div>
@@ -166,9 +166,21 @@
 
     <main class="conteudo">
       <header class="topo">
-        <div>
-          <h1 id="titulo-pagina">Início</h1>
-          <p id="subtitulo-pagina" class="subtitulo"></p>
+        <div class="topo-titulo">
+          <!-- 14/10: a barra lateral recolhe e a tela ganha a largura toda (a escolha fica neste navegador). -->
+          <button id="lateral-alternar" class="lateral-alternar" type="button" onclick="alternarLateral()"
+                  aria-controls="barra-lateral" aria-expanded="true"
+                  title="Ocultar a barra lateral" aria-label="Ocultar a barra lateral">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"></rect>
+              <path d="M9 4v16" fill="none" stroke="currentColor" stroke-width="2"></path>
+              <path class="seta" d="M16 9.5 13.5 12l2.5 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </button>
+          <div class="topo-textos">
+            <h1 id="titulo-pagina">Início</h1>
+            <p id="subtitulo-pagina" class="subtitulo"></p>
+          </div>
         </div>
         <div class="acoes-topo">
           <div id="acoes-topo" class="acoes-topo"></div>

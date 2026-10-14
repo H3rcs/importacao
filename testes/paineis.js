@@ -358,7 +358,8 @@ caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esque
   afirmar(ler('PaineisEstilo.html').match(/--gsl-paineis-estilo: '([^']+)'/)[1] === esperaPE, 'PaineisEstilo.html no carimbo que o App.html espera (' + esperaPE + ')');
   const esperaEstilo = app.match(/carimboDoEstilo\(\) !== '([^']+)'/)[1];
   afirmar(ler('Estilo.html').match(/--gsl-estilo: '([^']+)'/)[1] === esperaEstilo, 'Estilo.html no carimbo que o App.html espera (' + esperaEstilo + ')');
-  afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')), 'Index.html com o que o App.html confere');
+  afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')) && /id="lateral-alternar"/.test(ler('Index.html')),
+    'Index.html com o que o App.html confere');
   const esperaPaineis = app.match(/BUILD_PAINEIS !== '([^']+)'/)[1];
   afirmar(ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === esperaPaineis, 'Paineis.html no carimbo que o App.html espera (' + esperaPaineis + ')');
   const m = mundo(); const s = entrar(m, DONO, '4321');
@@ -670,8 +671,9 @@ caso('quadro do CD: homonimo (ou COD digitado errado) vira atencao; COD de preen
   const mn = d.inconsistencias.filter((x) => x.tipo === 'MESMO_NOME');
   afirmar(mn.length === 1 && mn[0].cod === '30002' && mn[0].gravidade === 'atencao' && /o COD é 99999 na CDESLIGADOS e 30002 na GERAL/.test(mn[0].detalhe),
     'so o homonimo, como atencao: ' + JSON.stringify(mn));
-  // a tela anterior do Quadro (aberta durante a implantacao) le "apoio": os ativos, com o turno no jeito antigo
-  afirmar(d.apoio.length === 4 && d.apoio.filter((a) => a.equipe === 'TA').length === 2 && d.apoio.every((a) => a.nome && a.funcao), 'apoio de transicao: ' + JSON.stringify(d.apoio));
+  // o "apoio" de transicao (13/10) saiu; sem a aba FÉRIAS, ferias = null e nenhuma conferencia de ferias
+  afirmar(d.apoio === undefined && d.ferias === null && d.leitura.ferias === null && !d.inconsistencias.some((x) => /^FERIAS_/.test(x.tipo)),
+    'sem apoio e sem ferias: ' + JSON.stringify([d.apoio, d.ferias]));
   // planilha sem a GERAL (nem as APOIO): erro que diz o que fazer, e nada fica guardado no cache
   const semAba = planilhaAntiga(m, 'Outra planilha', { 'QUADRO': [['EQUIPE', 'COD', 'PROD']], 'CDESLIGADOS': [['COD']] });
   acao(m, s, 'salvarFonteQuadro', { link: semAba });
@@ -846,6 +848,60 @@ caso('quadro do CD: so cala a recontratacao a admissao do MESMO nome, ja feita e
   afirmar(!d2.inconsistencias.some((x) => x.cod === '30080'), 'com a data da readmissao, sem aviso: ' + JSON.stringify(d2.inconsistencias.filter((x) => x.cod === '30080')));
 });
 
+caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH; o nome desempata o mesmo final; conferencias das ferias', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const D = (dias) => { const h = new Date(); return new m.DataDoScript(h.getFullYear(), h.getMonth(), h.getDate() + dias, 12, 0, 0); };
+  const link = planilhaAntiga(m, 'BI Quadro Feira', {
+    'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+      ['1° TURNO', '30001', 'ANA LIMA', 'SEPARADOR', '100123', 'ATIVO'],          // dois periodos em aberto
+      ['1° TURNO', '30002', 'BRUNO DIAS', 'SEPARADOR', '100456', 'ATIVO'],        // o final 456 esta na FÉRIAS com outro nome
+      ['2° TURNO', '30003', 'CARLOS MOTA', 'CONFERENTE', '', 'ATIVO'],            // sem RH: acha pelo nome
+      ['2° TURNO', '30004', 'DORA MELO', 'CONFERENTE', '100999', 'ATIVO'],        // 999: o mesmo final que a EVA
+      ['3° TURNO', '30005', 'EVA PRADO', 'SEPARADOR', '109999', 'ATIVO'],
+      ['ADM', '30006', 'FABIO ALVES', 'ANALISTA', '200777', 'INATIVO'],           // saiu da empresa
+      ['ADM', '30007', 'GIL SANTOS', 'ANALISTA', '200888', 'ATIVO']],             // sem linha na FÉRIAS
+    'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR']], 'CDESLIGADOS': [['COD', 'COLABORADOR']],
+    'Férias': [['RELATÓRIO DE FÉRIAS - FILIAL 21'],
+      ['Empresa', 'Filial', 'Matricula', 'Descrição', 'Nome', 'cc', 'turno', 'admissão', 'pa_inicio', 'pa_fim', 'DTA_LIMITE', 'DTA_LIMITEMAX', 'dias vencidos', 'codfuc', 'tipfuncao'],
+      ['Bartofil', 21, 123, 'SEPARADOR', 'Ana Lima', 655, 'A', '10/06/2020', '10/06/2025', '09/06/2026', '09/06/2026', '24/04/2027', 30, 101, 'OPERACIONAL'],
+      ['Bartofil', 21, 123, 'SEPARADOR', 'ANA LIMA', 655, 'A', '10/06/2020', '10/06/2026', '09/06/2027', '09/06/2027', '24/04/2028', '', 101, 'OPERACIONAL'],
+      ['Bartofil', 21, '0456', 'CONFERENTE', 'CARLOS MOTA', '655', 'B', D(-900), D(-500), D(-135), D(-135), D(180), 0, 102, 'OPERACIONAL'],
+      ['Bartofil', 21, 999, 'SEPARADOR', 'Eva Prado', 655, 'C', D(-800), D(-400), D(-35), D(-35), D(280), 0, 101, 'OPERACIONAL'],
+      ['Bartofil', 21, 999, 'CONFERENTE', 'DORA MELO', 655, 'B', D(-800), D(-420), D(-55), D(-55), D(260), 0, 102, 'OPERACIONAL'],
+      ['Bartofil', 21, 999, 'SEPARADOR', 'JOAO NINGUEM', 655, 'B', D(-800), D(-420), D(-55), D(-55), D(260), 0, 101, 'OPERACIONAL'],
+      ['Bartofil', 21, 777, 'ANALISTA', 'FABIO ALVES', 655, 'ADM', D(-900), D(-500), D(-135), D(-135), D(180), 0, 103, 'ADMINISTRATIVO'],
+      ['Bartofil', 21, 555, 'SEPARADOR', 'HELIO COSTA', 655, 'A', D(-200), D(-200), D(165), D(165), D(480), 0, 101, 'OPERACIONAL'],
+      ['Bartofil', 21, 444, 'VENDEDOR', 'IRIS LOPES', 700, 'ADM', D(-200), D(-200), D(165), D(165), D(480), 0, 104, 'COMERCIAL'],
+      ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '']]
+  });
+  acao(m, s, 'salvarFonteQuadro', { link });
+  const d = tela(m, s, 'quadro');
+  afirmar(!d.erro && d.formato === 4 && d.ferias && d.ferias.aba === 'Férias', 'leu a aba Férias: ' + (d.erro || JSON.stringify(d.ferias && d.ferias.aba)));
+  const lf = d.leitura.ferias;
+  afirmar(lf.colunas.matricula === 'MATRICULA' && lf.colunas.funcao === 'DESCRICAO' && lf.colunas.paInicio === 'PA INICIO' && lf.colunas.paFim === 'PA FIM' &&
+    lf.colunas.limite === 'DTA LIMITE' && lf.colunas.limiteMax === 'DTA LIMITEMAX' && lf.colunas.diasVencidos === 'DIAS VENCIDOS' && lf.colunas.cc === 'CC' &&
+    !lf.faltam.length, 'colunas do sistema (TIPFUNCAO nao e a funcao): ' + JSON.stringify(lf));
+  afirmar(lf.linhas === 9 && lf.ligadas === 6 && lf.peloNome === 1 && lf.foraDoCd === 1 && lf.linhaCabecalho === 2, 'resumo da leitura: ' + JSON.stringify(lf));
+  const ref = (cod) => d.geral.find((g) => g.cod === cod).ref;
+  const de = (cod) => d.ferias.linhas.filter((f) => f.ref === ref(cod));
+  const ana = de('30001');
+  afirmar(ana.length === 2 && ana.every((f) => f.chave === 'matricula') && ana[0].paFim === '2026-06-09' && ana[0].limiteMax === '2027-04-24' &&
+    ana[0].diasVencidos === 30 && ana[1].diasVencidos === '' && ana[0].linha === 3, 'ANA, dois periodos pela matricula 123: ' + JSON.stringify(ana));
+  afirmar(de('30003').length === 1 && de('30003')[0].chave === 'nome', 'CARLOS (sem RH) achado pelo nome: ' + JSON.stringify(de('30003')));
+  afirmar(de('30004').length === 1 && de('30005').length === 1 && de('30005')[0].nome === 'Eva Prado', 'o nome desempata o final 999 (DORA e EVA)');
+  afirmar(de('30006').length === 1, 'linha de quem saiu fica ligada a ela (a tela deixa de fora)');
+  afirmar(!d.ferias.linhas.some((f) => /IRIS/.test(f.nome)) && d.ferias.linhas.some((f) => /HELIO/.test(f.nome) && !f.ref), 'outro centro de custo sai; o do CD sem par fica');
+  const conf = (tipo) => d.inconsistencias.filter((x) => x.tipo === tipo);
+  afirmar(conf('FERIAS_NOME').length === 1 && /é de CARLOS MOTA; na GERAL, esse final de RH é de BRUNO DIAS \(RH 100456\)\. As férias foram ligadas a CARLOS MOTA \(sem RH na GERAL\) pelo nome/.test(conf('FERIAS_NOME')[0].detalhe),
+    'matricula de outra pessoa: ' + JSON.stringify(conf('FERIAS_NOME')));
+  afirmar(conf('FERIAS_DUPLA').length === 1 && /JOAO NINGUEM/.test(conf('FERIAS_DUPLA')[0].detalhe) && /2 pessoas ativas/.test(conf('FERIAS_DUPLA')[0].detalhe),
+    'final 999 sem nome que desempate: ' + JSON.stringify(conf('FERIAS_DUPLA')));
+  afirmar(conf('FERIAS_FORA_GERAL').length === 1 && conf('FERIAS_FORA_GERAL')[0].matricula === '555' && conf('FERIAS_FORA_GERAL')[0].linha === 10 &&
+    conf('FERIAS_FORA_GERAL')[0].aba === 'Férias', 'CC 655 sem par na GERAL: ' + JSON.stringify(conf('FERIAS_FORA_GERAL')));
+  afirmar(conf('FERIAS_SEM_DADOS').map((x) => x.cod).sort().join() === '30002,30007', 'quem esta no quadro sem linha na FÉRIAS: ' + JSON.stringify(conf('FERIAS_SEM_DADOS')));
+  afirmar(d.inconsistencias.filter((x) => /^FERIAS_/.test(x.tipo)).every((x) => x.gravidade === 'atencao'), 'conferencias das ferias sao de atencao');
+});
+
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   const link = planilhaAntiga(m, 'BI Quadro Feira', {
@@ -869,7 +925,7 @@ caso('quadro do CD: a aba GERAL faz a triagem dos turnos; titulo em cima, "1º"/
   const { abas, esperado: E } = require('./dados-quadro.js')(m.DataDoScript, new Date());
   acao(m, s, 'salvarFonteQuadro', { link: planilhaAntiga(m, 'BI Quadro CD Feira', abas) });
   const d = tela(m, s, 'quadro');
-  afirmar(!d.erro && d.formato === 3 && d.leitura.layout === 'GERAL' && d.leitura.aba === 'GERAL', 'leu a GERAL: ' + JSON.stringify(d.leitura));
+  afirmar(!d.erro && d.formato === 4 && d.leitura.layout === 'GERAL' && d.leitura.aba === 'GERAL', 'leu a GERAL: ' + JSON.stringify(d.leitura));
   afirmar(d.leitura.colunas.nome === 'PROD' && d.leitura.colunas.funcao === 'DESCRICAO' && d.leitura.colunas.rh === 'RH' && !d.leitura.faltam.length,
     'colunas: ' + JSON.stringify(d.leitura));
   afirmar(!d.geral.some((g) => /NAO LER/.test(g.nome)), 'a aba APOIO TA nao foi lida');
@@ -900,7 +956,11 @@ caso('quadro do CD: a aba GERAL faz a triagem dos turnos; titulo em cima, "1º"/
   afirmar(tipo('COD_REPETIDO').map((x) => x.cod).join() === E.codRepetido.join() && tipo('COD_REPETIDO')[0].linhas.length === 2, 'produtivo repetido');
   afirmar(!tipo('RH_REPETIDO').length, 'matricula repetida: nenhuma');
   afirmar(tipo('ADMITIDO_FORA').map((x) => x.cod).sort().join() === E.admitidoFora.join(), 'admitido fora da GERAL: ' + JSON.stringify(tipo('ADMITIDO_FORA')));
-  afirmar(d.inconsistencias.length === 8, 'oito inconsistencias: ' + d.inconsistencias.length);
+  // ferias (14/10): uma pessoa do quadro sem linha na FÉRIAS (e a linha sem nome), uma linha do CC 655 fora da GERAL
+  afirmar(tipo('FERIAS_SEM_DADOS').map((x) => x.cod).sort().join() === [E.feriasSemLinha].concat(E.semNome).sort().join(), 'sem linha na FÉRIAS: ' + JSON.stringify(tipo('FERIAS_SEM_DADOS')));
+  afirmar(tipo('FERIAS_FORA_GERAL').length === 1 && /NATALIA/.test(tipo('FERIAS_FORA_GERAL')[0].nome), 'CC 655 fora da GERAL');
+  afirmar(d.inconsistencias.length === 11, 'onze inconsistencias (oito do quadro e tres das ferias): ' + d.inconsistencias.length);
+  afirmar(d.ferias.linhas.length === 171 && d.leitura.ferias.foraDoCd === 1, 'ferias: ' + d.ferias.linhas.length);
 });
 
 caso('quadro do CD: titulo com "COLABORADORES" em cima do cabecalho nao rouba a coluna do nome; copia velha do cache e relida', () => {
@@ -920,7 +980,7 @@ caso('quadro do CD: titulo com "COLABORADORES" em cima do cabecalho nao rouba a 
   const c = novaExecucao(m, PASTA, { contaGoogle: DONO }, OP); c._porta = true;
   c.gravarTextoCache(c.chaveNoEspaco('quadro|' + id), JSON.stringify({ apoio: [{ nome: 'VELHO' }] }), 300);
   const d2 = tela(m, s, 'quadro');
-  afirmar(d2.formato === 3 && d2.geral.length === 3, 'copia velha relida: ' + JSON.stringify(Object.keys(d2)));
+  afirmar(d2.formato === 4 && d2.geral.length === 3, 'copia velha relida: ' + JSON.stringify(Object.keys(d2)));
 });
 
 caso('perfil SUPERVISOR cuida so da Limpeza: plano e estoque da limpeza; nada do calendario nem do estoque de TI', () => {

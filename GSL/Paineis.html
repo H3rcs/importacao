@@ -1,6 +1,6 @@
 <script>
 /* Carimbo desta entrega (ver conferirVersao no App.html). */
-const BUILD_PAINEIS = '2026.10.13b';
+const BUILD_PAINEIS = '2026.10.14';
 
 /* =====================================================================
    PAINEIS NOVOS DO GSL
@@ -1349,10 +1349,10 @@ function pintarQuadro(r) {
     ${completo ? '<button class="icone-botao" onclick="qdCopiarResumo()">Copiar resumo</button>' : ''}
     ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
   if (d.erro) { el('acoes-topo').innerHTML = acoes(false); el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
-  if (d.formato !== 3) {
+  if (d.formato !== 4) {
     el('acoes-topo').innerHTML = acoes(false);
     el('subtitulo-pagina').textContent = 'Atualização incompleta';
-    el('pagina').innerHTML = d.formato > 3
+    el('pagina').innerHTML = d.formato > 4
       // aba aberta antes de uma implantacao nova: o servidor ja e mais novo que esta pagina
       ? `<div class="cartao pn-vazio-grande"><strong>O GSL foi atualizado.</strong> Recarregue a página (F5) para ver o Quadro do CD.</div>`
       // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.

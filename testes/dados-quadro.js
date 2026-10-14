@@ -113,6 +113,32 @@ module.exports = function planilhaQuadro(Data, hoje, opcoes) {
   abas['CDESLIGADOS'] = [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO']]
     .concat(desligados.map((d) => [d.cod, d.nome, d.equipe, d.funcao, d.data, d.tipo, d.motivo]));
 
+  // FÉRIAS (14/10): a extracao do sistema de RH. Matricula = os 3 ultimos numeros do RH da GERAL. Um periodo
+  // aquisitivo em aberto por pessoa (alguns com dois), com o limite antes da multa espalhado de -40 a +400 dias.
+  if (!opcoes.antigo && !opcoes.semFerias) {
+    const fmt = (dt) => ('0' + dt.getDate()).slice(-2) + '/' + ('0' + (dt.getMonth() + 1)).slice(-2) + '/' + dt.getFullYear();
+    const linhaFerias = (p, k, limiteMax, comoTexto) => {
+      const lm = dia(limiteMax), paFim = dia(limiteMax - 320), paIni = dia(limiteMax - 685), adm = dia(limiteMax - 685 - 365 * (k % 4));
+      const d = (x) => comoTexto ? fmt(x) : x;
+      return ['Bartofil', 21, p.rh.slice(-3), p.funcao, p.nome, 655, p.equipe.replace('1º', '1°').slice(0, 1) === 'A' ? 'ADM' : p.equipe.slice(0, 1),
+        d(adm), d(paIni), d(paFim), d(paFim), d(lm), limiteMax < 0 ? 30 : 0, 100 + (k % 7), 'OPERACIONAL'];
+    };
+    const ferias = [];
+    pessoas.forEach((p, k) => {
+      if (k === 77) return;                                                 // uma pessoa da GERAL sem linha (conferencia)
+      // limite: 2 vencidos, 5 em ate 30 dias, ~10 em 31-60, ~10 em 61-90, o resto liberado ou em aquisicao
+      const lm = k < 2 ? -10 - k * 25 : (k < 7 ? 3 + k * 5 : (k < 17 ? 32 + (k - 7) * 3 : (k < 27 ? 62 + (k - 17) * 3 : 95 + ((k * 37) % 300))));
+      ferias.push(linhaFerias(p, k, lm, k % 3 === 0));
+      if (k % 40 === 1) ferias.push(linhaFerias(p, k, lm + 365, false));    // segundo periodo em aberto
+    });
+    // os especiais com nome tambem estao na extracao (o final do RH deles repete o de outras pessoas: o nome desempata)
+    especiais.filter((p) => p.nome).forEach((p, k) => ferias.push(linhaFerias(p, k, 150 + k * 20, false)));
+    ferias.push(['Bartofil', 21, '901', 'SEPARADOR', 'NATALIA COSTA FREIRE', 655, '1', dia(-500), dia(-500), dia(-135), dia(-135), dia(180), 0, 101, 'OPERACIONAL']);   // CC 655, fora da GERAL
+    ferias.push(['Bartofil', 21, '902', 'VENDEDOR', 'OSCAR LIMA PRADO', 700, 'ADM', dia(-500), dia(-500), dia(-135), dia(-135), dia(180), 0, 104, 'COMERCIAL']);     // outro setor
+    abas['FÉRIAS'] = [['Empresa', 'Filial', 'Matricula', 'Descrição', 'Nome', 'cc', 'turno', 'admissão', 'pa_inicio', 'pa_fim', 'DTA_LIMITE', 'DTA_LIMITEMAX',
+      'dias vencidos', 'codfuc', 'tipfuncao']].concat(ferias);
+  }
+
   const porEquipe = { '1° TURNO': 0, '2° TURNO': 0, '3° TURNO': 0, 'ADM': 0 };
   pessoas.forEach((p) => { porEquipe[p.equipe.replace('º', '°')]++; });
   porEquipe['2° TURNO']++; porEquipe['3° TURNO']++;              // a linha sem nome e a do produtivo repetido
@@ -131,7 +157,9 @@ module.exports = function planilhaQuadro(Data, hoje, opcoes) {
       semNome: ['39002'],
       equipeForaDoPadrao: ['39001'],
       codRepetido: [pessoas[10].cod],
-      admitidoFora: ['39100', '39101']
+      admitidoFora: ['39100', '39101'],
+      feriasSemLinha: opcoes.antigo || opcoes.semFerias ? null : pessoas[77].cod,
+      feriasVencidas: opcoes.antigo || opcoes.semFerias ? 0 : 2
     }
   };
 };

@@ -17,7 +17,7 @@
 /* As fontes (Archivo e Inter) sao carregadas no Index.html, sem bloquear a pagina. */
 
 :root {
-  --gsl-estilo: '2026.10.10';   /* carimbo da entrega (conferirVersao no App.html) */
+  --gsl-estilo: '2026.10.14';   /* carimbo da entrega (conferirVersao no App.html) */
   /* Marca — iguais nos dois temas. NAO existe vermelho na marca. */
   --azul: #111785;
   --verde: #01973A;
@@ -932,6 +932,37 @@ td.celula-medidor { min-width: 110px; }
 .subtitulo { margin: 6px 0 0; color: var(--tinta-media); font-size: 13px; line-height: 1.4; overflow: visible; }
 .topo h1 { line-height: 1.15; }
 .acoes-topo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* =========================================================
+   BARRA LATERAL RECOLHIVEL (14/10)
+   O botao ao lado do titulo esconde a barra lateral: ela desliza para
+   a esquerda e os paineis ganham a largura toda. Escondida, fica
+   "hidden" (sai da ordem do Tab e do leitor de tela). No celular a
+   barra e a faixa de cima: ali ela so some.
+   ========================================================= */
+.topo-titulo { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.topo-textos { min-width: 0; }
+.lateral-alternar {
+  flex-shrink: 0; width: 38px; height: 38px; margin-top: 1px; border-radius: 11px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  background: var(--vidro-alto); color: var(--tinta); border: 1px solid var(--linha-forte); box-shadow: var(--sombra);
+  transition: transform .2s ease, background .2s ease;
+}
+.lateral-alternar:hover { transform: translateY(-1px); background: var(--campo); }
+.lateral-alternar:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
+.lateral-alternar .seta { transition: transform .25s ease; transform-box: fill-box; transform-origin: center; }
+#aplicacao.lateral-oculta .lateral-alternar .seta { transform: scaleX(-1); }
+.lateral { transition: background .5s ease, margin-left .25s ease, visibility 0s linear 0s; }
+#aplicacao.lateral-oculta .lateral {
+  margin-left: -244px; visibility: hidden;
+  transition: background .5s ease, margin-left .25s ease, visibility 0s linear .25s;
+}
+@media (max-width: 760px) {
+  #aplicacao.lateral-oculta .lateral { display: none; }
+}
+@media (forced-colors: active) {
+  .lateral-alternar { border: 1px solid ButtonText; }
+}
 /* O seletor de competencia e o comando mais usado da tela de
    assiduidade e era um select cru, do tamanho da letra. Ganha corpo. */
 .acoes-topo select {

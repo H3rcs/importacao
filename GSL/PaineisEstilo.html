@@ -949,39 +949,32 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-ficha-datas dd { margin: 2px 0 0; font-size: 12.5px; }
 
 /* visão geral: o cartão curto */
-.qd-fe-geral-n { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 2px 0 10px; }
+.qd-fe-geral-n { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; margin: 2px 0 10px; }
 .qd-fe-geral-n button { display: flex; flex-direction: column; gap: 3px; text-align: left; border: 1px solid var(--bq-linha); background: var(--bq-surface-2);
   border-radius: 9px; padding: 8px 10px; cursor: pointer; color: var(--tinta); min-width: 0; }
 .qd-fe-geral-n button:hover { border-color: var(--tinta-fraca); }
 .qd-fe-geral-n b { font-family: 'Archivo', sans-serif; font-size: 24px; font-weight: 800; line-height: 1.05; }
-.qd-fe-geral-n span { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--tinta-media); white-space: nowrap; }
+.qd-fe-geral-n span { display: inline-flex; align-items: flex-start; gap: 5px; font-size: 11.5px; line-height: 1.35; color: var(--tinta-media); }
+.qd-fe-geral-n span .qd-ico { flex: none; margin-top: 1px; }
 .qd-fe-geral-prox { font-size: 12.5px; color: var(--tinta-media); margin: 0; line-height: 1.6; }
 
-@media (max-width: 1199px) {
+/*
+ * A aba se ajusta a largura que ELA tem, e nao a da janela: com a barra lateral
+ * aberta, um tablet em pe ou um notebook com zoom deixam a aba estreita mesmo
+ * com a janela larga (container query; Chrome 105+).
+ */
+.qd-fe { container-type: inline-size; container-name: qdfe; }
+@container qdfe (max-width: 1000px) {
   .qd-fe-regua { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .qd-fe-sit.heroi { grid-column: 1 / -1; }
   .qd-fe-baixo { grid-template-columns: minmax(0, 1fr); }
 }
-@media (max-width: 760px) {
-  .qd-fe-regua { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-  .qd-fe-sit { padding: 9px 10px 10px; gap: 3px; }
-  .qd-fe-sit-n { font-size: 24px; }
-  .qd-fe-sit.heroi .qd-fe-sit-n { font-size: 32px; }
-  .qd-fe-sit:not(.heroi) .qd-fe-sit-txt { display: none; }
-  .qd-fe-sit-linha .qd-fe-sit-txt { display: inline; }
-  .qd-fe-sit-rot { letter-spacing: .06em; font-size: 10px; }
+@container qdfe (max-width: 860px) {
   .qd-fe-colunas { grid-template-columns: minmax(0, 1fr); }
   .qd-fe-col.dir { border-left: none; padding-left: 0; margin-top: 8px; }
-  .qd-fe-item { grid-template-columns: 16px minmax(0, 1fr); }
-  .qd-fe-item-quando { grid-column: 2; flex-direction: row; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; text-align: left; white-space: normal; }
-  .qd-fe-tira-sub { display: none; }
-  .qd-fe-chip { flex: 0 0 66px; min-width: 66px; padding: 7px 8px 8px; gap: 5px; }
-  .qd-fe-chip-rot { font-size: 10.5px; }
-  .qd-fe-chip-n { font-size: 17px; }
-  .qd-fe-depois { margin-left: 0; font-size: 11.5px; }
-  .bi-quadro .qd-fe-cal h2 { font-size: 17px; }
+}
+@container qdfe (max-width: 760px) {
   .qd-fe-cal-cab { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'tit tit' 'mostrar setas'; gap: 8px 10px; }
-  .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
   .bi-quadro .qd-fe-mes { border-spacing: 3px; width: calc(100% + 6px); margin: 0 -3px; }
   .bi-quadro .qd-fe-mes td { height: 48px; padding: 3px 3px 2px; border-radius: 8px; border-width: 1px; }
   .bi-quadro .qd-fe-mes td.hoje { border-width: 2px; }
@@ -992,13 +985,34 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-fe-dia-resumo { display: inline-flex; align-items: center; gap: 2px; border: none; background: none; padding: 1px 0; cursor: pointer;
     font-family: 'Archivo', sans-serif; font-size: 11.5px; color: var(--tinta); min-height: 24px; }
   .qd-fe-dia-resumo .qd-ico, .qd-fe-dia-resumo .qd-fe-ico { width: 10px; height: 10px; }
-  .qd-fe-longo { display: none; }
-  .qd-fe-curto { display: inline; }
+  .qd-fe-mes.destacando .qd-fe-dia-resumo.apagada { opacity: .35; }
   .qd-fe-legenda { gap: 6px 12px; font-size: 11.5px; }
   .qd-fe-legenda small { display: none; }
   .qd-fe-leg-sep { display: none; }
+}
+@container qdfe (max-width: 560px) {
+  .qd-fe-regua { gap: 8px; margin-bottom: 14px; }
+  .qd-fe-sit { padding: 9px 10px 10px; gap: 3px; }
+  .qd-fe-sit-n { font-size: 24px; }
+  .qd-fe-sit.heroi .qd-fe-sit-n { font-size: 32px; }
+  .qd-fe-sit:not(.heroi) .qd-fe-sit-txt { display: none; }
+  .qd-fe-sit-linha .qd-fe-sit-txt { display: inline; }
+  .qd-fe-sit-rot { letter-spacing: .06em; font-size: 10px; }
+  .qd-fe-item { grid-template-columns: 16px minmax(0, 1fr); }
+  .qd-fe-item-quando { grid-column: 2; flex-direction: row; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; text-align: left; white-space: normal; }
+  .qd-fe-tira-sub { display: none; }
+  .qd-fe-chip { flex: 0 0 66px; min-width: 66px; padding: 7px 8px 8px; gap: 5px; }
+  .qd-fe-chip-rot { font-size: 10.5px; }
+  .qd-fe-chip-n { font-size: 17px; }
+  .qd-fe-depois { margin-left: 0; font-size: 11.5px; }
+  .bi-quadro .qd-fe-cal h2 { font-size: 17px; }
+  .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
+  .qd-fe-longo { display: none; }
+  .qd-fe-curto { display: inline; }
   .qd-fe-ag-dias > li { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
   .qd-fe-ag-item { grid-template-columns: minmax(0, 1fr); padding: 6px 4px; }
+}
+@media (max-width: 760px) {
   .qd-fe-ficha-datas { grid-template-columns: 1fr; }
   .qd-fe-geral-n b { font-size: 21px; }
 }
@@ -1006,6 +1020,8 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-fe-pil, .qd-fe-chip-med, .qd-fe-chip-med i, .qd-fe-tempo i, .qd-fe-amostra, .qd-fe-dia.hoje .qd-fe-dia-n { forced-color-adjust: none; }
   .qd-fe-pil { border: 1px solid CanvasText; }
   .qd-fe-pil.aviso { border-style: dashed; }
+  .qd-fe-pil.aviso, .qd-fe-pil.limite.neutro { background: Canvas !important; color: CanvasText !important; }
+  .qd-fe-pil.aviso { border-color: CanvasText !important; }
   .qd-fe-sit, .qd-fe-chip, .qd-fe-esc, .qd-fe-geral-n button { border: 1px solid CanvasText; }
   .qd-fe-item { box-shadow: none; border-left: 3px solid CanvasText; }
   .qd-fe-sit[aria-pressed="true"], .qd-fe-chip[aria-pressed="true"] { outline: 3px solid Highlight; }

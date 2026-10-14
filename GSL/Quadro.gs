@@ -115,16 +115,17 @@ function dadosQuadro(usuario) {
   };
   if (!id) return base;
 
-  const chave = chaveQuadroQ_(id, pf);
+  const chave = chaveQuadroQ_(id);
   const guardado = lerTextoCache(chave);
   if (guardado) {
     try {
       const g = JSON.parse(guardado);
-      if (g && g.formato === QUADRO_FORMATO) return Object.assign(base, g);
+      if (g && g.formato === QUADRO_FORMATO && g.assinaturaFerias === assinaturaFeriasQ_(pf)) return Object.assign(base, g);
     } catch (e) { /* le de novo */ }
   }
   try {
     const dados = lerPlanilhaQuadro_(id, pf);
+    dados.assinaturaFerias = assinaturaFeriasQ_(pf);
     gravarTextoCache(chave, JSON.stringify(dados), QUADRO_CACHE_SEGUNDOS);
     return Object.assign(base, dados);
   } catch (e) {
@@ -316,8 +317,14 @@ function situacaoQ_(v) {
 /* LEITURA                                                             */
 /* ------------------------------------------------------------------ */
 
-/* O centro de custo e os numeros da matricula mudam o casamento das ferias: entram na chave do que fica guardado. */
-function chaveQuadroQ_(id, pf) { return chaveNoEspaco('quadro|' + id + '|' + pf.cc.join(',') + '|' + pf.digitos); }
+/*
+ * Uma chave so por planilha: o "Atualizar dados" da barra lateral (Codigo.gs)
+ * apaga esta mesma chave. O centro de custo e os numeros da matricula mudam o
+ * casamento das ferias: vao dentro da copia guardada, e uma copia de outros
+ * parametros e relida.
+ */
+function chaveQuadroQ_(id) { return chaveNoEspaco('quadro|' + id); }
+function assinaturaFeriasQ_(pf) { return pf.cc.join(',') + '|' + pf.digitos; }
 
 function lerPlanilhaQuadro_(id, pf) {
   pf = pf || parametrosFeriasQ_();
@@ -537,26 +544,65 @@ function ccDoCdQ_(cc, lista) {
   return !!m && lista.indexOf(m[0].replace(/^0+(?=\d)/, '')) !== -1;
 }
 
-/* Nomes da mesma pessoa? O mesmo primeiro nome e mais um nome em comum ("JOSE DA SILVA" = "JOSE SILVA SANTOS"). */
+/*
+ * Nomes da mesma pessoa? A GERAL e digitada a mao e a FÉRIAS sai do sistema,
+ * entao a grafia muda (THIAGO/TIAGO, LUIZ/LUIS, SOUZA/SOUSA, WELLINGTON/
+ * WELINGTON, MAYCON/MAICON, WILLIAM/WILLIAN, RAPHAEL/RAFAEL). O nivel diz o
+ * quanto os dois nomes batem:
+ *   3 = o mesmo nome (na grafia acertada);
+ *   2 = o mesmo primeiro nome e mais um nome em comum (ou um dos lados so com o primeiro nome);
+ *   1 = o primeiro nome so com a inicial ("J CARLOS SILVA"), ou sem o primeiro nome:
+ *       todos os nomes do mais curto estao no outro ("PAULA SOUZA" = "ANA PAULA DE SOUZA");
+ *   0 = outro nome (so o sobrenome em comum nao basta: irmaos, marido e mulher);
+ *  -1 = um dos lados sem nome (nao da para comparar).
+ */
 const PARTICULAS_Q = { DA: 1, DE: 1, DO: 1, DAS: 1, DOS: 1, E: 1 };
-function nomeParecidoQ_(a, b) {
-  const partes = function (v) { return nomeChaveQ_(v).split(' ').filter(function (x) { return x && !PARTICULAS_Q[x]; }); };
-  const pa = partes(a), pb = partes(b);
-  if (!pa.length || !pb.length) return true;              // sem nome de um dos lados: nao da para comparar
-  if (pa[0] !== pb[0]) return false;
-  if (pa.length === 1 || pb.length === 1) return true;
-  return pa.slice(1).some(function (x) { return pb.indexOf(x) > 0; });
+function grafiaQ_(x) {
+  if (x.length < 2) return x;                              // a inicial fica como esta
+  return x.replace(/TH/g, 'T').replace(/PH/g, 'F').replace(/Y/g, 'I').replace(/W/g, 'V').replace(/K/g, 'C').replace(/Z/g, 'S')
+    .replace(/^H(?=[AEIOU])/, '').replace(/(.)\1+/g, '$1').replace(/M$/, 'N');
 }
+function partesNomeQ_(v) { return nomeChaveQ_(v).split(' ').filter(function (x) { return x && !PARTICULAS_Q[x]; }); }
+/* O nome sem particulas e com a grafia acertada: "THIAGO DOS SANTOS" = "TIAGO SANTOS". */
+function nomeGrafiaQ_(v) { return partesNomeQ_(v).map(grafiaQ_).join(' '); }
+function nivelNomeQ_(a, b) {
+  const ra = partesNomeQ_(a), rb = partesNomeQ_(b);
+  if (!ra.length || !rb.length) return -1;
+  const ga = ra.map(grafiaQ_), gb = rb.map(grafiaQ_);
+  if (ga.join(' ') === gb.join(' ')) return 3;
+  const inteiro = function (x) { return x.length > 1; };   // uma inicial nao conta como nome em comum
+  const algumEmComum = function (xa, xb) { return xa.some(function (x) { return inteiro(x) && xb.indexOf(x) !== -1; }); };
+  if (ga[0] === gb[0]) return ga.length === 1 || gb.length === 1 || algumEmComum(ga.slice(1), gb.slice(1)) ? 2 : 0;
+  // a inicial e comparada com a letra escrita (antes da grafia: o H de HELENA, o M de MARIA)
+  const inicial = function (x, y) { return x.length === 1 && y.charAt(0) === x; };
+  if ((inicial(ra[0], rb[0]) || inicial(rb[0], ra[0])) && algumEmComum(ga.slice(1), gb.slice(1))) return 1;
+  const curto = ga.length <= gb.length ? ga : gb, longo = curto === ga ? gb : ga;
+  if (curto.length >= 2 && curto.every(function (x) { return inteiro(x) && longo.indexOf(x) !== -1; })) return 1;
+  return 0;
+}
+function nomeParecidoQ_(a, b) { return nivelNomeQ_(a, b) !== 0; }
 
 /*
  * Cada linha da FÉRIAS acha a pessoa da GERAL (f.ref) pela Matricula: os
  * ultimos numeros do RH (3; ou todos os da matricula, se ela tiver mais).
- * Com 3 numeros, RH de prefixos diferentes podem ter o mesmo final (100123
- * e 109123): entre as pessoas ATIVAS com esse final, o nome desempata. Se
- * o numero acha uma pessoa de outro nome, a linha nao e ligada a ela (as
- * ferias seriam de outra pessoa) e vira conferencia. Sem numero que sirva:
- * pelo nome, se so uma pessoa ativa tiver aquele nome. Devolve as
- * conferencias (todas "atencao").
+ * As linhas da mesma matricula e do mesmo nome sao uma pessoa (um periodo
+ * por linha). Uma pessoa da GERAL tem uma matricula so.
+ * 1. Pela matricula, com o nome conferido. Cada par (linha, pessoa com esse
+ *    final de RH) vale mais quanto mais numeros da matricula batem (1456
+ *    antes de 456), quanto mais o nome bate (nivelNomeQ_) e se a pessoa esta
+ *    ativa. Os pares entram do mais forte para o mais fraco; quem ja tem uma
+ *    matricula nao recebe outra. Empate no melhor par: "duas pessoas".
+ *    Linha do CD: o nome precisa bater ao menos no nivel 1 (ou faltar de um
+ *    lado, so com gente ativa). Linha de outro centro de custo: nivel 2 ou 3.
+ *    Quem ja saiu fica com a linha so se o nome bater (a tela a deixa de fora).
+ * 2. O que sobrou, so nas linhas do CD: pelo nome igual, a pessoa ativa SEM
+ *    RH na GERAL (linha sem matricula: qualquer RH, nao ha numero que
+ *    desminta). Com outro RH e um homonimo, ou o RH esta errado: conferencia.
+ * 3. Conferencias (todas "atencao"), so das linhas do CD: a matricula e de
+ *    alguem ativo de outro nome que nao tem linha (FERIAS_NOME); empate
+ *    (FERIAS_DUPLA); ninguem da GERAL e o dono (FERIAS_FORA_GERAL). A linha
+ *    de outro centro de custo que sobra e de outro setor (foraDoCd).
+ * Quem esta no quadro sem linha vira FERIAS_SEM_DADOS, dizendo por que.
  */
 function casarFeriasQ_(geral, ferias, pf) {
   const saida = [];
@@ -564,77 +610,144 @@ function casarFeriasQ_(geral, ferias, pf) {
   const N = (pf || FERIAS_PADRAO).digitos;                         // quantos numeros do fim do RH formam a matricula
   const zeros = new Array(N + 1).join('0');
   const fimRh = function (g) { const d = digitosQ_(g.rh); return d && d.length < N ? (zeros + d).slice(-N) : d; };
+  const completa = function (m) { return m.length < N ? (zeros + m).slice(-N) : m; };
+  const ehDoFinal = function (g, mm) { return fimRh(g).slice(-mm.length) === mm; };
   const porFim = {}, porNome = {};
   geral.forEach(function (g) {
     const d = fimRh(g);
     if (d) (porFim[d.slice(-N)] = porFim[d.slice(-N)] || []).push(g);
-    const n = nomeChaveQ_(g.nome);
+    const n = nomeGrafiaQ_(g.nome);
     if (n && g.ativo) (porNome[n] = porNome[n] || []).push(g);
   });
   const quemG = function (g) { return (g.nome || 'uma linha sem nome') + (g.rh ? ' (RH ' + g.rh + ')' : ' (sem RH na GERAL)'); };
   const item = function (f, tipo, detalhe, g) {
-    return { tipo: tipo, gravidade: 'atencao', cod: g ? g.cod : '', rh: g ? g.rh : '', nome: f.nome || (g ? g.nome : ''),
+    return { tipo: tipo, gravidade: 'atencao', cod: g ? g.cod : '', rh: g ? g.rh : '', nome: g ? (g.nome || f.nome) : f.nome,
       equipe: g ? (g.equipe || g.equipeBruta) : (f.equipe || f.equipeBruta), linha: f.linha, aba: ferias.aba, gid: ferias.gid,
       ref: g ? g.ref : 0, matricula: f.matricula, detalhe: detalhe };
   };
+  // as linhas da mesma matricula e do mesmo nome (na grafia) sao uma pessoa
+  const grupos = [], porChave = {};
   ferias.linhas.forEach(function (f) {
     f.ref = 0; f.chave = '';
-    let cands = [];
-    if (f.matricula) {
-      const m = f.matricula.length < N ? (zeros + f.matricula).slice(-N) : f.matricula;
-      cands = (porFim[m.slice(-N)] || []).filter(function (g) { return fimRh(g).slice(-m.length) === m; });
-    }
-    const ativos = cands.filter(function (g) { return g.ativo; });
-    let g = null, outroNome = null;
-    if (ativos.length === 1) {
-      g = ativos[0];
-    } else if (ativos.length > 1) {
-      const mesmo = ativos.filter(function (x) { return f.nome && x.nome && nomeParecidoQ_(f.nome, x.nome); });
-      if (mesmo.length === 1) g = mesmo[0];
-      else {
-        saida.push(item(f, 'FERIAS_DUPLA', 'A matrícula ' + f.matricula + ' da aba ' + ferias.aba + (f.nome ? ' (' + f.nome + ')' : '') +
-          ' bate com o RH de ' + ativos.length + ' pessoas ativas da GERAL: ' + ativos.map(quemG).join('; ') + '. O nome não desempata.'));
-        return;
+    const mm = f.matricula ? completa(f.matricula) : '';
+    const k = mm + '|' + nomeGrafiaQ_(f.nome);
+    let G = porChave[k];
+    if (!G) { G = porChave[k] = { mm: mm, f: f, linhas: [], doCd: false, cands: [], pares: [] }; grupos.push(G); }
+    G.linhas.push(f);
+    if (f.doCd) G.doCd = true;
+  });
+  const matDe = {};                                                // ref -> a matricula que a pessoa ja recebeu
+  const livre = function (g, G) { return !matDe[g.ref] || matDe[g.ref] === G.mm; };
+  const ligar = function (G, g, chave) {
+    G.dono = g; G.chave = chave;
+    if (G.mm) matDe[g.ref] = G.mm; else if (!matDe[g.ref]) matDe[g.ref] = '#' + g.ref;
+    G.linhas.forEach(function (f) { f.ref = g.ref; f.chave = chave; });
+  };
+  // 1. pela matricula: os pares do mais forte para o mais fraco
+  const pares = [];
+  grupos.forEach(function (G) {
+    if (!G.mm) return;
+    G.cands = (porFim[G.mm.slice(-N)] || []).filter(function (g) { return ehDoFinal(g, G.mm); });
+    G.cands.forEach(function (g) {
+      const L = nivelNomeQ_(G.f.nome, g.nome);
+      const serve = L === -1 ? G.doCd && g.ativo : L >= (G.doCd ? 1 : 2);
+      if (!serve) return;
+      const p = { G: G, g: g, L: L, k: G.mm.length * 100 + (L + 1) * 10 + (g.ativo ? 1 : 0) };
+      G.pares.push(p); pares.push(p);
+    });
+  });
+  pares.sort(function (a, b) { return b.k - a.k || (a.g.linha || 0) - (b.g.linha || 0); });
+  pares.forEach(function (p) {
+    const G = p.G;
+    if (G.dono || G.empate || !livre(p.g, G)) return;
+    const iguais = G.pares.filter(function (q) { return q.k === p.k && livre(q.g, G); });
+    if (iguais.length > 1 && p.g.ativo) { G.empate = iguais.map(function (q) { return q.g; }); return; }
+    ligar(G, p.g, 'matricula');                                    // empate entre quem ja saiu: tanto faz, sai da tela
+  });
+  // 2. o que sobrou das linhas do CD: pelo nome igual, quem esta sem RH na GERAL
+  grupos.forEach(function (G) {
+    if (G.dono || G.empate || !G.doCd) return;
+    const n = nomeGrafiaQ_(G.f.nome);
+    G.pn = ((n && porNome[n]) || []).filter(function (g) { return G.cands.indexOf(g) === -1; });
+    G.semRh = (G.mm ? G.pn.filter(function (g) { return !digitosQ_(g.rh); }) : G.pn).filter(function (g) { return livre(g, G); });
+    if (G.semRh.length === 1) ligar(G, G.semRh[0], 'nome');
+  });
+  // 3. conferencias (so das linhas do CD) e o motivo de quem ficou sem linha
+  const recusa = {};
+  const recusar = function (lista, texto) { lista.forEach(function (g) { if (!recusa[g.ref]) recusa[g.ref] = texto; }); };
+  grupos.forEach(function (G) {
+    const f = G.f;
+    const quemF = (f.nome || 'uma linha sem nome') + ' (linha ' + f.linha + (G.doCd ? '' : ', centro de custo ' + (f.cc || 'vazio')) + ')';
+    // gente ativa com esse final que nao ficou com nenhuma matricula: a linha podia ser dela (outro nome)
+    const ativos = G.cands.filter(function (g) { return g.ativo; });
+    const semLinha = ativos.filter(function (g) { return !matDe[g.ref]; });
+    const ocupados = ativos.filter(function (g) { return matDe[g.ref] && g !== G.dono; });
+    if (G.dono) {
+      if (G.chave === 'nome' && semLinha.length) {
+        recusar(semLinha, 'A aba ' + ferias.aba + ' tem a matrícula ' + f.matricula + ', mas de ' + quemF + ', que ficou com ' + quemG(G.dono) +
+          ' pelo nome: veja "Férias: matrícula de outra pessoa".');
+        saida.push(item(f, 'FERIAS_NOME', 'Na aba ' + ferias.aba + ', a matrícula ' + f.matricula + ' é de ' + f.nome + '; na GERAL, esse final de RH é de ' +
+          semLinha.map(quemG).join('; ') + '. As férias foram ligadas a ' + quemG(G.dono) + ' pelo nome: inclua o RH dele(a) na GERAL e confira o de ' +
+          semLinha.map(function (g) { return g.nome || 'quem tem esse final'; }).join(' e ') + '.', G.dono));
       }
-    } else if (cands.length) {
-      // so quem ja saiu da empresa tem esse final de RH: a linha e dela (fica fora das ferias do quadro)
-      f.ref = cands[0].ref; f.chave = 'matricula';
       return;
     }
-    if (g && f.nome && g.nome && !nomeParecidoQ_(f.nome, g.nome)) { outroNome = g; g = null; }
-    if (g) { f.ref = g.ref; f.chave = 'matricula'; return; }
-    // pelo nome: so se uma pessoa ativa tiver exatamente esse nome
-    const n = nomeChaveQ_(f.nome);
-    const pn = (n && porNome[n]) || [];
-    if (pn.length === 1) { f.ref = pn[0].ref; f.chave = 'nome'; }
-    if (outroNome) {
-      saida.push(item(f, 'FERIAS_NOME', 'Na aba ' + ferias.aba + ', a matrícula ' + f.matricula + ' é de ' + f.nome + '; na GERAL, esse final de RH é de ' +
-        quemG(outroNome) + '.' + (f.ref ? ' As férias foram ligadas a ' + quemG(pn[0]) + ' pelo nome: confira o RH dele(a) na GERAL.'
-          : ' As férias não foram ligadas a ninguém: confira o RH na GERAL.'), f.ref ? pn[0] : outroNome));
+    if (!G.doCd) {
+      // de outro setor: nao gera conferencia
+      ferias.foraDoCd += G.linhas.length;
+      if (G.empate) recusar(G.empate, 'A matrícula ' + f.matricula + ' está na aba ' + ferias.aba + ' só numa linha de outro centro de custo (' + quemF + '), que bate com mais de uma pessoa: o GSL não a usa.');
+      else if (semLinha.length) recusar(semLinha, 'A aba ' + ferias.aba + ' tem a matrícula ' + f.matricula + ', mas de ' + quemF + ', outro nome.');
       return;
     }
-    if (f.ref) return;
-    if (pn.length > 1) {
-      saida.push(item(f, 'FERIAS_DUPLA', 'A aba ' + ferias.aba + ' tem ' + f.nome + (f.matricula ? ' (matrícula ' + f.matricula + ', que não bate com nenhum RH da GERAL)' : ' sem matrícula') +
-        ', e há ' + pn.length + ' pessoas ativas com esse nome na GERAL: ' + pn.map(quemG).join('; ') + '.'));
+    if (G.empate) {
+      recusar(G.empate, 'A matrícula ' + f.matricula + ' da aba ' + ferias.aba + ', de ' + quemF + ', serve a mais de uma pessoa: veja "Férias: linha que serve a mais de uma pessoa".');
+      saida.push(item(f, 'FERIAS_DUPLA', 'A matrícula ' + f.matricula + ' da aba ' + ferias.aba + (f.nome ? ' (' + f.nome + ')' : '') +
+        ' bate com o RH de ' + G.empate.length + ' pessoas ativas da GERAL: ' + G.empate.map(quemG).join('; ') + '. O nome não desempata.'));
       return;
     }
-    if (f.doCd) {
-      saida.push(item(f, 'FERIAS_FORA_GERAL', 'Está na aba ' + ferias.aba + (f.cc ? ' (centro de custo ' + f.cc + ')' : '') +
-        (f.matricula ? ', matrícula ' + f.matricula : '') + ', mas ninguém da GERAL tem esse final de RH' + (f.nome ? ' nem esse nome' : '') + '.'));
-    } else {
-      ferias.foraDoCd++;
+    if (G.semRh && G.semRh.length > 1) {
+      recusar(G.semRh, 'A linha ' + f.linha + ' da aba ' + ferias.aba + ' (' + f.nome + ') serve a mais de uma pessoa: veja "Férias: linha que serve a mais de uma pessoa".');
+      saida.push(item(f, 'FERIAS_DUPLA', 'A aba ' + ferias.aba + ' tem ' + f.nome +
+        (f.matricula ? ' (matrícula ' + f.matricula + (G.cands.length ? '' : ', que não bate com nenhum RH da GERAL') + ')' : ' sem matrícula') +
+        ', e há ' + G.semRh.length + ' pessoas ativas com esse nome' + (f.matricula ? ' e sem RH' : '') + ' na GERAL: ' + G.semRh.map(quemG).join('; ') + '.'));
+      return;
     }
+    if (semLinha.length) {
+      recusar(semLinha, 'A aba ' + ferias.aba + ' tem a matrícula ' + f.matricula + ', mas de ' + quemF + ', outro nome: veja "Férias: matrícula de outra pessoa".');
+      saida.push(item(f, 'FERIAS_NOME', 'Na aba ' + ferias.aba + ', a matrícula ' + f.matricula + ' é de ' + (f.nome || 'uma linha sem nome') + '; na GERAL, esse final de RH é de ' +
+        semLinha.map(quemG).join('; ') + '. Os nomes não batem, e o GSL não ligou as férias a ninguém. Se for a mesma pessoa, escreva o nome na GERAL como no sistema; se não for, confira o RH na GERAL.',
+        semLinha[0]));
+      return;
+    }
+    // ninguem da GERAL e o dono: o final (se houver) e de quem ja tem a sua linha ou ja saiu; o homonimo, se houver, tem outro RH
+    const pn = G.pn || [], saiu = G.cands.filter(function (g) { return !g.ativo; });
+    const onde = 'Está na aba ' + ferias.aba + (f.cc ? ' (centro de custo ' + f.cc + ')' : '');
+    const ninguem = ocupados.length ? 'não é de ninguém da GERAL' : 'nenhuma pessoa ativa da GERAL tem esse final de RH';
+    let txt;
+    if (!f.matricula) txt = onde + ', sem matrícula, e ninguém ativo da GERAL ' + (pn.length ? 'sem linha tem esse nome.' : 'tem esse nome.');
+    else if (pn.length) {
+      txt = onde + ', matrícula ' + f.matricula + ', mas ' + ninguem + '. ' + pn.map(quemG).join('; ') + (pn.length === 1 ? ' tem' : ' têm') +
+        ' o mesmo nome: se for a mesma pessoa, o RH na GERAL está errado; se não for, inclua a pessoa na GERAL.';
+    } else txt = onde + ', matrícula ' + f.matricula + ', mas ' + ninguem + (f.nome ? ' nem esse nome.' : '.');
+    if (ocupados.length) txt += ' O final ' + f.matricula + ' é de ' + ocupados.map(quemG).join('; ') + ', que já ' + (ocupados.length === 1 ? 'tem a sua linha' : 'têm as suas linhas') + ', com outro nome.';
+    if (saiu.length) txt += ' O final ' + f.matricula + ' também é de ' + saiu.map(quemG).join('; ') + ', que já saiu da empresa.';
+    saida.push(item(f, 'FERIAS_FORA_GERAL', txt));
   });
   // Quem esta no quadro e nao tem linha na FÉRIAS: sem o prazo, o GSL nao avisa.
   if (ferias.linhas.length) {
-    const comFerias = {};
-    ferias.linhas.forEach(function (f) { if (f.ref) comFerias[f.ref] = true; });
-    geral.filter(function (g) { return g.ativo && !comFerias[g.ref]; }).forEach(function (g) {
+    geral.filter(function (g) { return g.ativo && !matDe[g.ref]; }).forEach(function (g) {
+      const fim = fimRh(g);
+      // a linha com a matricula dele(a) (o mesmo teste do passo 1) que ficou com outra pessoa
+      const donos = [];
+      if (fim) grupos.forEach(function (G) { if (G.dono && G.mm && ehDoFinal(g, G.mm) && donos.indexOf(G.dono) === -1) donos.push(G.dono); });
+      let txt = recusa[g.ref];
+      if (!txt && donos.length) {
+        txt = 'A matrícula ' + fim.slice(-N) + ' (o final do RH ' + g.rh + ') está na aba ' + ferias.aba + ', mas a linha ficou com ' + donos.map(quemG).join('; ') + ', pelo nome.';
+      }
+      if (!txt) txt = fim ? 'A matrícula ' + fim.slice(-N) + ' (o final do RH ' + g.rh + ') não está na aba ' + ferias.aba + '.'
+        : 'Sem RH na GERAL (a aba ' + ferias.aba + ' casa pela matrícula, os últimos números do RH).';
       saida.push({ tipo: 'FERIAS_SEM_DADOS', gravidade: 'atencao', cod: g.cod, rh: g.rh, nome: g.nome, equipe: g.equipe || g.equipeBruta,
-        linha: g.linha, ref: g.ref, aba: g.aba || '',
-        detalhe: (digitosQ_(g.rh) ? 'O final do RH ' + g.rh + ' não está na aba ' + ferias.aba + '.' : 'Sem RH na GERAL (a aba ' + ferias.aba + ' casa pela matrícula, os últimos números do RH).') +
-          ' Sem a linha dele(a), o GSL não avisa o prazo das férias.' });
+        linha: g.linha, ref: g.ref, aba: g.aba || '', detalhe: txt + ' Sem a linha dele(a), o GSL não avisa o prazo das férias.' });
     });
   }
   return saida;
@@ -952,18 +1065,18 @@ function acaoSalvarParametrosFerias(usuario, params) {
     aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', avisar: 'Férias (Quadro do CD): avisar já — limite em até N dias',
     planejar: 'Férias (Quadro do CD): planejar — limite em até N dias', janela: 'Férias (Quadro do CD): escalonar — limites a menos de N dias',
     meses: 'Férias (Quadro do CD): escalonar e mapa — próximos N meses' };
-  const antes = parametrosFeriasQ_(), id = idPlanilhaQuadro_();
+  const id = idPlanilhaQuadro_();
   Object.keys(FERIAS_CHAVES).forEach(function (k) {
     acaoSalvarParametro(usuario, { chave: FERIAS_CHAVES[k], valor: params.padrao ? '' : String(valores[k]), descricao: desc[k] });
   });
   // a leitura guardada com o casamento antigo (centro de custo, matricula) nao serve mais
-  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id, antes)); } catch (e) {} }
+  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id)); } catch (e) {} }
   return { ok: true, invalidarTudo: true, recado: params.padrao ? 'Parâmetros das férias de volta ao padrão.' : 'Parâmetros das férias salvos.' };
 }
 
 function acaoAtualizarQuadro(usuario) {
   const id = idPlanilhaQuadro_();
-  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id, parametrosFeriasQ_())); } catch (e) {} }
+  if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id)); } catch (e) {} }
   // A chave e fatiada (gravarTextoCache): sem o numero de fatias, a leitura
   // volta vazia e a planilha e relida.
   limparCache('PARAMETROS');

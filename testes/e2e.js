@@ -1615,7 +1615,7 @@ async function rodar() {
     }, nomeDoCod('30001'));
     afirmar(casa[0] === '' && casa[1] === '' && casa[2] === '30001' && casa[3] === null && casa[4] === null && casa[5] === 1, 'casamento na tela: ' + JSON.stringify(casa));
     const resumo = await f.evaluate(() => qdResumoTexto());
-    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL\nFérias: 2 com limite vencido, 4 em até 30 dias, 11 para avisar nos próximos 30 dias$/.test(resumo),
+    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL\nFérias: 2 com limite vencido, 4 a menos de 30 dias, 11 para avisar nos próximos 30 dias, 2 sem prazo conhecido$/.test(resumo),
       'copiar resumo: ' + resumo);
     // mapa de calor: SEPARADOR x 1° TURNO = 18; tocar leva para a lista dessas 18 pessoas
     const celula = await f.evaluate(() => {
@@ -1668,10 +1668,10 @@ async function rodar() {
     await f.evaluate(() => qdAba('ferias'));
     await f.waitForSelector('.qd-fe-regua', { timeout: 5000 });
     const regua = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-sit')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(regua.length === 4 && /^RISCO DE MULTA 6 pessoas 2 limites vencidos 4 em até 30 dias ONDE 1° TURNO 6$/.test(regua[0]) && /^AVISAR JÁ 11 pessoas limite em 31 a 60 dias/.test(regua[1]) &&
+    afirmar(regua.length === 4 && /^RISCO DE MULTA 6 pessoas 2 limites vencidos 4 a menos de 30 dias 2 sem prazo conhecido ONDE 1° TURNO 6$/.test(regua[0]) && /^AVISAR JÁ 11 pessoas limite em 30 a 60 dias/.test(regua[1]) &&
       /^PLANEJAR 10 pessoas limite em 61 a 90 dias/.test(regua[2]) && /^SEM URGÊNCIA \d+ pessoas/.test(regua[3]), 'regua das ferias: ' + regua.join(' || '));
     const gruposFe = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-grupo-tit')).map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(gruposFe.join('|') === 'LIMITE VENCIDO 2|LIMITE EM ATÉ 30 DIAS 4|AVISAR NOS PRÓXIMOS 30 DIAS 11', 'o que fazer agora: ' + gruposFe.join('|'));
+    afirmar(gruposFe.join('|') === 'LIMITE VENCIDO 2|LIMITE A MENOS DE 30 DIAS 4|AVISAR NOS PRÓXIMOS 30 DIAS 11', 'o que fazer agora: ' + gruposFe.join('|'));
     const cal = await f.evaluate(() => ({ cap: !!document.querySelector('.qd-fe-mes caption'), hoje: !!document.querySelector('.qd-fe-mes td[aria-current="date"]'),
       pil: document.querySelectorAll('.qd-fe-mes .qd-fe-pil').length, rot: (document.querySelector('.qd-fe-mes .qd-fe-pil') || {}).getAttribute('aria-label') || '' }));
     afirmar(cal.cap && cal.hoje && cal.pil > 0 && /^(Limite das férias de|Avisar até) /.test(cal.rot), 'calendario dos prazos: ' + JSON.stringify(cal));
@@ -1687,14 +1687,61 @@ async function rodar() {
     await f.click('#janela-rodape button:has-text("Salvar")');
     await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 45 && document.querySelector('.qd-fe-sit'), null, { timeout: 15000 });
     const regua45 = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-sit')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(/em até 45 dias/.test(regua45[0]) && /limite em 46 a 75 dias/.test(regua45[1]), 'parametros mudam a regua: ' + regua45.join(' || '));
+    afirmar(/a menos de 45 dias/.test(regua45[0]) && /limite em 45 a 75 dias/.test(regua45[1]), 'parametros mudam a regua: ' + regua45.join(' || '));
     await f.click('.qd-fe-agir-acoes button:has-text("Parâmetros")');
     await f.waitForSelector('#fp-aviso', { timeout: 5000 });
     await f.click('#janela-rodape button:has-text("Voltar ao padrão")');
     await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 30, null, { timeout: 15000 });
-    // a barra lateral recolhe e volta
+    // FÉRIAS sem prazo conhecido (revisao de 14/10): aba vazia, sem a coluna do limite, periodo sem data — nada disso vira "nada vence"
+    const semPrazo = await f.evaluate(() => {
+      const orig = DADOS, r = {};
+      const com = (ferias, leitura) => Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, ferias), leitura: Object.assign({}, orig.leitura, { ferias: Object.assign({}, orig.leitura.ferias, leitura) }) });
+      const tela = () => ({ card: qdFeCartaoGeral().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '), linha: qdFeResumoLinha(), resumo: qdFeResumoTexto(),
+        faixa: qdFeFaltam().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '), regua: qdFeRegua(qdFeContagem(qdFePessoas())).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ') });
+      try {
+        DADOS = com({ linhas: [] }, { linhas: 0 }); r.vazia = tela();
+        r.vazia.conf = qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join(); r.vazia.selo = qdSeloAba();
+        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { limiteMax: '' })) }, { faltam: ['limiteMax'] }); r.semColuna = tela();
+        // a pessoa mais urgente ganha um periodo antigo sem DTA_LIMITEMAX: continua na faixa dela e aparece como "sem prazo"
+        const p0 = qdFeriasDados().lista.find((p) => p.pior.k === 'planejar');
+        DADOS = orig;
+        const p1 = qdFeriasDados().lista.find((p) => p.pior.k === 'planejar');
+        const extra = Object.assign({}, p1.periodos[0].f, { linha: 999, limiteMax: '', limite: '', paFim: qdSomarDias(qdHoje(), -500), paInicio: qdSomarDias(qdHoje(), -864) });
+        DADOS = com({ linhas: orig.ferias.linhas.concat([extra]) }, {});
+        const p2 = qdFeriasDados().porRef[p1.g.ref];
+        r.semData = { pior: p2.pior.k, ks: p2.periodos.map((x) => x.k).join(), nota: qdFeNotaConferencia(qdFeContagem(qdFePessoas())).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '),
+          item: qdFeLinha(p2).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '), linha: qdFeResumoLinha(), p0: !!p0 };
+        // sem prazo perto, o periodo sem data passa na frente do "ja pode tirar"/"em aquisicao"
+        DADOS = orig;
+        const p3 = qdFeriasDados().lista.find((p) => p.pior.k === 'liberada' || p.pior.k === 'aquisicao');
+        DADOS = com({ linhas: orig.ferias.linhas.concat([Object.assign({}, p3.periodos[0].f, { linha: 998, limiteMax: '', limite: '', paFim: qdSomarDias(qdHoje(), -500) })]) }, {});
+        r.semData.p3 = qdFeriasDados().porRef[p3.g.ref].pior.k;
+      } finally { DADOS = orig; }
+      // a linha sem PROD (RH 109002) entra no texto copiado com o COD e o RH, nao com o nome vazio
+      r.resumoSemNome = qdFeResumoTexto().split('\n').filter((l) => /RH 109002/.test(l) || /^-  \(/.test(l));
+      // as bordas: com o limite a 30 dias o aviso ainda cabe (e hoje); a 29, nao. No dia do pa_fim, ainda em aquisicao
+      const h = qdHoje(), P = qdFeP(), sit = (lim, fim) => qdFeriasSituacao({ limiteMax: lim === null ? '' : qdSomarDias(h, lim), paFim: qdSomarDias(h, fim) }, h, P).k;
+      r.bordas = [sit(30, -200), sit(29, -200), sit(0, -200), sit(-1, -200), sit(60, -200), sit(61, -200), sit(400, 0), sit(400, -1), sit(null, 0), sit(null, -1)].join();
+      return r;
+    });
+    afirmar(/A aba FÉRIAS está vazia/.test(semPrazo.vazia.faixa) && /A aba FÉRIAS está vazia: nenhum prazo é conhecido/.test(semPrazo.vazia.card) && !/Nada vence/.test(semPrazo.vazia.card) &&
+      semPrazo.vazia.linha === 'Férias: a aba FÉRIAS está vazia (nenhum prazo conhecido)' && /\nA aba FÉRIAS está vazia: nenhum prazo é conhecido\.$/.test(semPrazo.vazia.resumo) &&
+      /A aba FÉRIAS está vazia: nenhum prazo é conhecido/.test(semPrazo.vazia.regua) && semPrazo.vazia.conf === 'A aba FÉRIAS está vazia: só tem o cabeçalho. Sem as linhas, o GSL não sabe o prazo de ninguém.' &&
+      !/planilha conferida/.test(semPrazo.vazia.selo), 'aba FÉRIAS vazia: ' + JSON.stringify(semPrazo.vazia));
+    afirmar(/Não achei a coluna DTA_LIMITEMAX/.test(semPrazo.semColuna.faixa) && /sem a coluna DTA_LIMITEMAX: nenhum prazo é conhecido/.test(semPrazo.semColuna.card) && !/Nada vence/.test(semPrazo.semColuna.card) &&
+      semPrazo.semColuna.linha === 'Férias: a aba FÉRIAS está sem a coluna DTA_LIMITEMAX (nenhum prazo conhecido)' && !/Nada vence/.test(semPrazo.semColuna.resumo) &&
+      /Sem urgência (\d+) pessoas? 0 já podem tirar · \1 em aquisição/.test(semPrazo.semColuna.regua),
+      'sem a coluna DTA_LIMITEMAX: ' + JSON.stringify(semPrazo.semColuna));
+    afirmar(semPrazo.semData.pior === 'planejar' && semPrazo.semData.p3 === 'semdata' && /semdata/.test(semPrazo.semData.ks) && /pessoas? com período sem DTA_LIMITEMAX/.test(semPrazo.semData.nota) &&
+      /e um período sem DTA_LIMITEMAX na aba FÉRIAS/.test(semPrazo.semData.item) && /, 3 sem prazo conhecido$/.test(semPrazo.semData.linha),
+      'periodo sem data atras de outro: ' + JSON.stringify(semPrazo.semData));
+    afirmar(semPrazo.bordas === 'avisar,critica,critica,vencida,avisar,planejar,aquisicao,liberada,aquisicao,semdata', 'bordas das faixas: ' + semPrazo.bordas);
+    afirmar(semPrazo.resumoSemNome.join('|') === '- Sem nome, COD 39002, RH 109002 (2° TURNO) — sem linha na aba FÉRIAS', 'sem nome no texto copiado: ' + semPrazo.resumoSemNome.join('|'));
+    // a barra lateral recolhe e volta; quem desenha pela largura da caixa (graficos do Aprendiz) recebe um "resize"
+    await f.evaluate(() => { window.__redim = 0; window.addEventListener('resize', () => { window.__redim++; }); });
     await f.click('#lateral-alternar');
     afirmar(await f.evaluate(() => document.getElementById('aplicacao').classList.contains('lateral-oculta') && el('lateral-alternar').getAttribute('aria-expanded') === 'false'), 'barra lateral recolhida');
+    await f.waitForFunction(() => window.__redim >= 1, null, { timeout: 3000 });
     await f.click('#lateral-alternar');
     afirmar(await f.evaluate(() => !document.getElementById('aplicacao').classList.contains('lateral-oculta')), 'barra lateral de volta');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));

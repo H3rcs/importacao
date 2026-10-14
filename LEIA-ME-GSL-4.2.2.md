@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10; as mudanças de 14/10 estão no `GSL-ferias-14-10.zip`, só com os arquivos que mudaram. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -60,27 +60,46 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
 
 **Como o GSL liga a FÉRIAS à GERAL**
 - Pelos 3 últimos números do RH: o RH 100123 da GERAL é a matrícula 123 da FÉRIAS. Zeros à esquerda não contam ("0123" = "123").
-- Duas pessoas ativas com o mesmo final de RH (100123 e 109123): o nome desempata.
+- O nome confere a ligação. A grafia pode mudar, porque a GERAL é digitada à mão e a FÉRIAS sai do sistema:
+  - THIAGO e TIAGO, LUIZ e LUIS, SOUZA e SOUSA, WELLINGTON e WELINGTON valem como o mesmo nome;
+  - o nome pode vir sem o primeiro nome ("PAULA SOUZA" = "ANA PAULA DE SOUZA") ou com a inicial ("J CARLOS SILVA").
+  
+  Se for outro nome, o GSL não liga as férias e aponta na Conferência: elas seriam de outra pessoa. Só o sobrenome em comum não basta.
+- Mais de uma pessoa com o mesmo final de RH (100123 e 109123):
+  - vale primeiro quem bate mais números da matrícula: a matrícula 1456 é do RH 101456, e a 456 não é dele;
+  - depois, o nome mais parecido: o nome igual vem antes do só parecido;
+  - uma pessoa da GERAL fica com uma matrícula só: quem já tem a sua linha não recebe a de outra matrícula.
+  
+  Se ainda empatar, a Conferência aponta "linha que serve a mais de uma pessoa".
+- Quem está **sem RH** na GERAL é achado pelo nome exato, se for a única pessoa ativa com esse nome.
 - Só entram pessoas **ativas** na GERAL. Quem já saiu fica fora das férias do quadro.
+- As linhas de **outro centro de custo** só entram se a matrícula bater e o nome for o mesmo (ou o mesmo primeiro nome e mais um nome em comum). As outras são de outros setores e não geram aviso.
 - O que não fecha vai para a **Conferência**, como **atenção**, com a linha da aba FÉRIAS e o botão que abre a planilha nela:
-  - **Férias: matrícula de outra pessoa:** o número bate com alguém de outro nome. As férias não são ligadas a essa pessoa;
-  - **Férias: linha que serve a mais de uma pessoa:** o número (ou o nome) bate com mais de uma pessoa ativa, e o nome não desempata;
-  - **Férias: do CD, mas fora da GERAL:** a linha tem o centro de custo do CD, mas ninguém da GERAL tem essa matrícula nem esse nome;
-  - **Férias: sem linha na aba FÉRIAS:** a pessoa está ativa na GERAL, mas a extração não tem a matrícula dela. Sem a linha, o GSL não tem como avisar o prazo.
+  - **Férias: matrícula de outra pessoa:** o final do RH é de alguém da GERAL com outro nome, e o GSL não liga as férias a essa pessoa. Ou o RH está errado na GERAL, ou o nome está escrito diferente demais;
+  - **Férias: linha que serve a mais de uma pessoa:** a matrícula (ou o nome) bate com mais de uma pessoa ativa, e o nome não desempata;
+  - **Férias: do CD, mas fora da GERAL:** a linha tem o centro de custo do CD, mas ninguém da GERAL é o dono dela. Se alguém da GERAL tem o mesmo nome com outro RH, o aviso diz quem é: ou é a mesma pessoa e o RH está errado, ou é um homônimo;
+  - **Férias: sem linha na aba FÉRIAS:** a pessoa está ativa na GERAL, mas não tem linha ligada a ela. O aviso diz o motivo: a matrícula não veio na extração, ou veio com outro nome. Sem a linha, o GSL não tem como avisar o prazo.
 
 **A aba Férias**
 
-A aba fica entre Movimentação e Conferência. O número ao lado do nome da aba conta quem tem o limite vencido ou em até 30 dias (■). Sem nenhum caso desses, conta quem é para avisar já (▲). A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
+A aba fica entre Movimentação e Conferência. O número ao lado do nome da aba conta quem tem o limite vencido ou a menos de 30 dias (■). Sem nenhum caso desses, conta quem é para avisar já (▲). A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
 
 Os prazos contam os dias até o DTA_LIMITEMAX, com a data de hoje:
 
 | Situação | Quando |
 |---|---|
 | **Limite vencido** (vermelho) | o DTA_LIMITEMAX já passou: férias em dobro |
-| **Limite em até 30 dias** (vermelho) | não dá mais para dar os 30 dias de aviso |
-| **Avisar já** (âmbar) | o limite está entre 31 e 60 dias. "Avisar até" = limite menos 30 dias |
+| **Limite a menos de 30 dias** (vermelho) | não dá mais para dar os 30 dias de aviso |
+| **Avisar já** (âmbar) | o limite está entre 30 e 60 dias. "Avisar até" = limite menos 30 dias (com o limite a 30 dias, o aviso é hoje) |
 | **Planejar** | o limite está entre 61 e 90 dias |
-| **Sem urgência** | o resto: período completo sem prazo perto, ainda em aquisição ou sem data |
+| **Sem urgência** | período completo sem prazo perto, ou ainda em aquisição (até o pa_fim) |
+
+O GSL nunca diz "nada vence" sem saber. Ele avisa na aba, no cartão da Visão geral e no Copiar resumo quando:
+- a aba FÉRIAS está vazia ou sem a coluna DTA_LIMITEMAX (faixa vermelha: nenhum prazo é conhecido);
+- alguém do quadro não tem linha na aba FÉRIAS;
+- alguém tem um período sem DTA_LIMITEMAX, mesmo que outro período dele tenha prazo.
+
+Nesses casos, aparece "N sem prazo conhecido" (no Risco de multa, no cartão e no resumo). Quem não tem prazo conhecido nunca conta como "sem urgência".
 
 O que a aba mostra:
 - **A régua:** quantas pessoas em cada situação. Tocar numa faixa destaca essas pessoas no calendário.
@@ -95,13 +114,15 @@ O que a aba mostra:
 - **Limites por turno:** um mapa com os vencidos e os próximos 6 meses.
 - **De férias agora:** quem está de férias pelo STATUS da GERAL.
 - Na **ficha** da pessoa (tocar no nome), uma seção **Férias**. Cada período em aberto aparece numa linha do tempo (aquisição → pode tirar → aviso → limite), com três datas: pode tirar desde, avisar até e limite.
-- Na **Visão geral**, um cartão **Férias** com os vencidos, os de até 30 dias e os de avisar já, e o próximo aviso.
+- Na **Visão geral**, um cartão **Férias** com os vencidos, os de menos de 30 dias e os de avisar já, e o próximo aviso.
 - **Copiar resumo:**
   - na aba Férias, copia a lista de quem chamar, para o WhatsApp;
   - nas outras abas, o resumo ganha uma linha de férias.
 - **Baixar Excel** gera a planilha com todos os períodos: situação, nome, equipe, função, matrícula, RH, as datas e os dias até o limite.
 
 Se a planilha não tiver a aba FÉRIAS, a aba Férias explica como criar. O resto do Quadro continua igual.
+
+A aba se ajusta à largura que tem, com ou sem a barra lateral: num tablet, ou num notebook com zoom, a lista vira uma coluna só e o calendário mostra cada dia em resumo (o pior nível e quantos prazos; tocar abre a lista do dia).
 
 **Parâmetros (editáveis na própria tela)**
 
@@ -123,7 +144,7 @@ Botão **Parâmetros** na aba Férias, ou o link **editar** no rodapé da aba. S
 
 Antes do título de cada tela há um botão (o ícone de painel) que **esconde a barra lateral**: a tela ocupa a largura toda. Clicar de novo traz a barra de volta. O GSL lembra a escolha naquele computador. No celular, a barra é a faixa de cima da tela, e o botão a esconde do mesmo jeito.
 
-**Arquivos desta entrega** (carimbo `2026.10.14`; estão em `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10:
+**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10:
 - `Quadro.gs`;
 - `Paineis.html`;
 - `PaineisEstilo.html`;
@@ -484,7 +505,7 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias (50 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias (52 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
 node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral (51 cenários)
 ```

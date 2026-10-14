@@ -266,6 +266,8 @@ function alternarLateral() {
   const oculta = !(el('aplicacao') && el('aplicacao').classList.contains('lateral-oculta'));
   aplicarLateral(oculta);
   gravarLocal(CHAVE_LATERAL, oculta ? '1' : '0');
+  // a largura do conteudo muda sem a janela mudar: quem desenha pela largura da caixa (graficos do Aprendiz) redesenha
+  setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch (e) {} }, 320);
 }
 aplicarLateral(lerLocal(CHAVE_LATERAL) === '1');
 

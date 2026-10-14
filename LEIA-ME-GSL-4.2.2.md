@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -147,7 +147,7 @@ Link **Parâmetros** no rodapé da aba Férias (ou no cartão "Falta a aba FÉRI
 
 Antes do título de cada tela há um botão (o ícone de painel) que **esconde a barra lateral**: a tela ocupa a largura toda. Clicar de novo traz a barra de volta. O GSL lembra a escolha naquele computador. No celular, a barra é a faixa de cima da tela, e o botão a esconde do mesmo jeito.
 
-**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10. A aba refeita substitui a primeira versão: use este pacote, não o anterior.
+**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10-v2.zip`). São só os sete que mudaram desde o pacote de 13/10. A aba refeita substitui a primeira versão: use este pacote, não o `GSL-ferias-14-10.zip` anterior.
 - `Quadro.gs`;
 - `Paineis.html`;
 - `PaineisEstilo.html`;

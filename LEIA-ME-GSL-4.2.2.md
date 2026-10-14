@@ -158,7 +158,7 @@ Antes do título de cada tela há um botão (o ícone de painel) que **esconde a
 - `Estilo.html`.
 
 Como publicar:
-1. Cole os sete por cima dos de mesmo nome.
+1. Cole os sete por cima dos de mesmo nome. Se você já tinha colado a primeira versão de 14/10, bastam os cinco que mudaram desde ela: `Quadro.gs`, `Paineis.html`, `PaineisEstilo.html`, `Codigo.gs` e `App.html` (o `Index.html` e o `Estilo.html` são iguais).
 2. Crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual.
 3. **Recarregue a página (F5).** Quem estiver com o GSL aberto durante a implantação também precisa recarregar.
 4. Abra o Quadro e clique em **Atualizar dados**.

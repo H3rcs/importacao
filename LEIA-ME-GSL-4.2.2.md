@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/` (e empacotado em `GSL-v4.2.2.zip`). A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10; as mudanças de 14/10 estão no `GSL-ferias-14-10.zip`, só com os arquivos que mudaram. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -28,13 +28,121 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **− Saída** em cada linha: quantidade, data da saída, **setor** e **usuário que recebeu** (pelo menos um dos dois). Os setores e usuários já usados aparecem como sugestão.
   - As abas **Resumo**, **Movimentações** e **Inventário** continuam.
   - Em **Colar da planilha**, a última coluna é o estoque ideal. O esquema subiu para 8.4 e a coluna nova é criada sozinha.
-- **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas GERAL, CADMITIDOS (ou CDADMITIDOS) e CDESLIGADOS (veja o pedido de 13/10). O nome da aba pode variar em maiúsculas, acentos e espaços; o título acima do cabeçalho é ignorado; a data de admissão pode ser data, texto (02/09/2025) ou mês ("ago/2025"). Depois de mudar a planilha, clique em **Atualizar dados** no Quadro: ele lê na hora. Sem isso, a tela guardada pode levar de 10 a 15 minutos para mostrar a mudança. Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
+- **Planilha do BI do Quadro do CD:** abra o painel **Quadro do CD**. Se ainda não houver planilha ligada, a tela mostra o campo para colar o link e o botão **Ligar planilha**; depois, o botão **Trocar planilha** fica no alto da tela. É a planilha com as abas GERAL, CADMITIDOS (ou CDADMITIDOS), CDESLIGADOS e FÉRIAS (veja os pedidos de 13/10 e 14/10). O nome da aba pode variar em maiúsculas, acentos e espaços; o título acima do cabeçalho é ignorado; a data de admissão pode ser data, texto (02/09/2025) ou mês ("ago/2025"). Depois de mudar a planilha, clique em **Atualizar dados** no Quadro: ele lê na hora. Sem isso, a tela guardada pode levar de 10 a 15 minutos para mostrar a mudança. Ela precisa estar compartilhada com a conta dona do script (a que publicou o GSL). Cada filial liga a sua.
 - **Nobreaks:**
   - **Hora só com números:** `0830` vira 08:30 e `14` vira 14:00 (não precisa dos dois pontos). Hora que não existe fica vermelha e não é gravada.
   - O **Histórico** tem a mesma cara da folha de lançamento: dia agrupado, entrada em azul, saída em verde, carga e alerta em vermelho. O mês pode ser "Todos (últimos 120 dias)".
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Pedido de 14/10 (Quadro do CD: aba Férias e barra lateral que recolhe)
+
+**A planilha: aba FÉRIAS**
+
+Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma planilha da GERAL. Pode colar como sai do sistema:
+- a ordem das colunas não importa;
+- um título acima do cabeçalho é ignorado;
+- o nome da aba pode variar em maiúsculas, acentos e espaços (FERIAS, CD FÉRIAS, BASE FÉRIAS, CONTROLE DE FÉRIAS…).
+
+| Coluna | Para que o GSL usa |
+|---|---|
+| **Matricula** | liga a linha à pessoa da GERAL: são os 3 últimos números do RH |
+| **Nome** | confirma a ligação; se a matrícula não servir, liga pelo nome |
+| **cc** | só as linhas do centro de custo do CD (655) entram; as outras são de outros setores |
+| **pa_inicio** e **pa_fim** | o período aquisitivo: depois do pa_fim (ou do DTA_LIMITE, que repete a data), a pessoa já pode tirar as férias |
+| **DTA_LIMITEMAX** | o limite antes da multa: todos os prazos e alertas contam a partir dele |
+
+- **Matricula, Nome, pa_fim e DTA_LIMITEMAX são obrigatórias.** Se faltar uma delas, uma faixa vermelha na aba Férias diz qual.
+- As outras colunas (Empresa, Filial, Descrição, turno, admissão, dias vencidos, codfuc, tipfuncao) podem vir na extração. A equipe e a função que aparecem na tela são as da GERAL.
+- Datas podem ser data do Sheets ou texto (10/06/2026).
+- Uma pessoa com dois períodos em aberto tem duas linhas: o GSL mostra os dois e alerta pelo mais urgente.
+
+**Como o GSL liga a FÉRIAS à GERAL**
+- Pelos 3 últimos números do RH: o RH 100123 da GERAL é a matrícula 123 da FÉRIAS. Zeros à esquerda não contam ("0123" = "123").
+- Duas pessoas ativas com o mesmo final de RH (100123 e 109123): o nome desempata.
+- Só entram pessoas **ativas** na GERAL. Quem já saiu fica fora das férias do quadro.
+- O que não fecha vai para a **Conferência**, como **atenção**, com a linha da aba FÉRIAS e o botão que abre a planilha nela:
+  - **Férias: matrícula de outra pessoa:** o número bate com alguém de outro nome. As férias não são ligadas a essa pessoa;
+  - **Férias: linha que serve a mais de uma pessoa:** o número (ou o nome) bate com mais de uma pessoa ativa, e o nome não desempata;
+  - **Férias: do CD, mas fora da GERAL:** a linha tem o centro de custo do CD, mas ninguém da GERAL tem essa matrícula nem esse nome;
+  - **Férias: sem linha na aba FÉRIAS:** a pessoa está ativa na GERAL, mas a extração não tem a matrícula dela. Sem a linha, o GSL não tem como avisar o prazo.
+
+**A aba Férias**
+
+A aba fica entre Movimentação e Conferência. O número ao lado do nome da aba conta quem tem o limite vencido ou em até 30 dias (■). Sem nenhum caso desses, conta quem é para avisar já (▲). A linha de filtros (Equipe e Função) vale para tudo o que está abaixo dela.
+
+Os prazos contam os dias até o DTA_LIMITEMAX, com a data de hoje:
+
+| Situação | Quando |
+|---|---|
+| **Limite vencido** (vermelho) | o DTA_LIMITEMAX já passou: férias em dobro |
+| **Limite em até 30 dias** (vermelho) | não dá mais para dar os 30 dias de aviso |
+| **Avisar já** (âmbar) | o limite está entre 31 e 60 dias. "Avisar até" = limite menos 30 dias |
+| **Planejar** | o limite está entre 61 e 90 dias |
+| **Sem urgência** | o resto: período completo sem prazo perto, ainda em aquisição ou sem data |
+
+O que a aba mostra:
+- **A régua:** quantas pessoas em cada situação. Tocar numa faixa destaca essas pessoas no calendário.
+- **O que fazer agora:**
+  - a lista de quem chamar, do mais urgente ao menos urgente, com a data do aviso e a do limite;
+  - **Escalonar:** metade ou mais das pessoas de uma função, no mesmo turno, com o limite a menos de 30 dias uma da outra. Não dá para dar férias a todas ao mesmo tempo, então é preciso começar antes;
+  - os botões **Parâmetros** e **Baixar Excel**.
+- **Calendário dos prazos:**
+  - o mês no mesmo desenho da tela Calendário: cada limite e cada "avisar até" no seu dia;
+  - **‹ Hoje ›** para trocar de mês e os botões **Limites** e **Avisos** para mostrar um ou os dois;
+  - tocar num dia mostra a lista daquele dia.
+- **Limites por turno:** um mapa com os vencidos e os próximos 6 meses.
+- **De férias agora:** quem está de férias pelo STATUS da GERAL.
+- Na **ficha** da pessoa (tocar no nome), uma seção **Férias**. Cada período em aberto aparece numa linha do tempo (aquisição → pode tirar → aviso → limite), com três datas: pode tirar desde, avisar até e limite.
+- Na **Visão geral**, um cartão **Férias** com os vencidos, os de até 30 dias e os de avisar já, e o próximo aviso.
+- **Copiar resumo:**
+  - na aba Férias, copia a lista de quem chamar, para o WhatsApp;
+  - nas outras abas, o resumo ganha uma linha de férias.
+- **Baixar Excel** gera a planilha com todos os períodos: situação, nome, equipe, função, matrícula, RH, as datas e os dias até o limite.
+
+Se a planilha não tiver a aba FÉRIAS, a aba Férias explica como criar. O resto do Quadro continua igual.
+
+**Parâmetros (editáveis na própria tela)**
+
+Botão **Parâmetros** na aba Férias, ou o link **editar** no rodapé da aba. Só aparece para quem pode trocar a planilha do Quadro (nível com a permissão de programar, como o ADMIN). Os parâmetros valem para a filial e para todo mundo que vê o Quadro.
+
+| Parâmetro | Padrão | Faixa |
+|---|---|---|
+| Centro(s) de custo do CD | 655 | um ou mais, separados por vírgula |
+| Quantos números do fim do RH formam a matrícula | 3 | 1 a 8 |
+| Aviso de férias: dias antes do início | 30 | 0 a 120 |
+| "Avisar já": limite em até quantos dias | 60 | maior que o aviso |
+| "Planejar": limite em até quantos dias | 90 | maior que o "avisar já" |
+| Escalonar: limites a menos de quantos dias um do outro | 30 | 1 a 120 |
+| Escalonar: olhar os próximos quantos meses (também o tamanho do mapa) | 6 | 1 a 24 |
+
+**Salvar** relê a planilha com os parâmetros novos. **Voltar ao padrão** devolve todos os valores da tabela.
+
+**Barra lateral que recolhe**
+
+Antes do título de cada tela há um botão (o ícone de painel) que **esconde a barra lateral**: a tela ocupa a largura toda. Clicar de novo traz a barra de volta. O GSL lembra a escolha naquele computador. No celular, a barra é a faixa de cima da tela, e o botão a esconde do mesmo jeito.
+
+**Arquivos desta entrega** (carimbo `2026.10.14`; estão em `GSL-ferias-14-10.zip`). São só os sete que mudaram desde o pacote de 13/10:
+- `Quadro.gs`;
+- `Paineis.html`;
+- `PaineisEstilo.html`;
+- `Codigo.gs`;
+- `App.html`;
+- `Index.html`;
+- `Estilo.html`.
+
+Como publicar:
+1. Cole os sete por cima dos de mesmo nome.
+2. Crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual.
+3. **Recarregue a página (F5).** Quem estiver com o GSL aberto durante a implantação também precisa recarregar.
+4. Abra o Quadro e clique em **Atualizar dados**.
+
+**Para conferir:**
+1. Cole a extração na aba FÉRIAS, abra o Quadro do CD e clique em **Atualizar dados**. A aba **Férias** aparece entre Movimentação e Conferência.
+2. Escolha uma pessoa da lista "O que fazer agora" e compare o limite com o DTA_LIMITEMAX da linha dela na aba FÉRIAS. O "avisar até" é 30 dias antes.
+3. Em **Conferência**, veja os grupos que começam com "Férias:". "Sem linha na aba FÉRIAS" lista quem está ativo na GERAL e não veio na extração.
+4. Clique no botão à esquerda do título: a barra lateral some e a tela se alarga. Clique de novo para trazer a barra.
 
 ## Pedido de 13/10 (Quadro do CD: uma aba só, a GERAL, e um painel novo)
 
@@ -376,9 +484,9 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos (12 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD (49 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias (50 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade (22 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD (51 cenários)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral (51 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

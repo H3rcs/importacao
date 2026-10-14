@@ -974,7 +974,7 @@ function montarSessao(r) {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.10.14';
+const BUILD_APP = '2026.10.14b';
 function mostrarResultadoAcao(x) {
   if (!x) return;
   if (x.ok === false) {
@@ -1000,8 +1000,8 @@ function conferirVersao(r) {
   const faltam = [].concat(app.foraDaVersao || []);
   if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
   // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
-  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.14') faltam.push('Paineis.html');
-  if (carimboCss('--gsl-paineis-estilo') !== '2026.10.14') faltam.push('PaineisEstilo.html');
+  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.14b') faltam.push('Paineis.html');
+  if (carimboCss('--gsl-paineis-estilo') !== '2026.10.14b') faltam.push('PaineisEstilo.html');
   if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.10.09c') faltam.push('Aprendiz.html (e a linha dele no Index.html)');
   if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar') || !el('lateral-alternar')) faltam.push('Index.html');
   if (carimboDoEstilo() !== '2026.10.14') faltam.push('Estilo.html');

@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.14'
+  build: '2026.10.14b'
 };
 
 /*
@@ -37,6 +37,7 @@ const APP = {
  *   2026.10.13  = Quadro do CD pela aba GERAL, inconsistencias e painel novo
  *   2026.10.13b = Quadro do CD: correcoes da revisao (recontratado, mesmo nome, datas, casamento na tela)
  *   2026.10.14  = Quadro do CD: aba Ferias (a aba FERIAS cruzada com a GERAL) e a barra lateral que recolhe
+ *   2026.10.14b = Quadro do CD: aba Ferias refeita (uma lista so, calendario a um toque, palavras neutras)
  */
 function arquivosForaDaVersao_() {
   const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c', DESEMPENHO = '2026.10.10';

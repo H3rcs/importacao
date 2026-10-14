@@ -23,7 +23,7 @@
  * padrao, produtivo ou matricula repetidos e admitido que nao entrou na
  * GERAL. Cada uma diz a linha da planilha.
  */
-const BUILD_QUADRO = '2026.10.14';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_QUADRO = '2026.10.14b';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const QUADRO_ABA_GERAL = 'GERAL';
 const QUADRO_ABAS_APOIO = ['APOIO TA', 'APOIO TB', 'APOIO TC'];

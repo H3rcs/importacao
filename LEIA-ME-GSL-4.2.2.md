@@ -99,7 +99,8 @@ Os prazos contam os dias até o DTA_LIMITEMAX (a data limite para sair de féria
   - **de férias agora**: pelo STATUS da GERAL. Se as férias forem deste período, está resolvido;
   - **afastado**: as férias ficam para depois da volta;
   - **2 períodos completos**;
-  - **período sem data**: outro período da pessoa veio sem DTA_LIMITEMAX. Veja a ficha.
+  - **período sem data**: outro período da pessoa veio sem DTA_LIMITEMAX. Veja a ficha;
+  - **consta como desligado**: está na CDESLIGADOS e ainda ativo na GERAL (a mesma pessoa da faixa vermelha do painel). Corrija o STATUS na GERAL; se ela saiu mesmo, as férias vão na rescisão.
 - **Tocar na linha** abre a ficha da pessoa.
 - **Ninguém para avisar nem para sair:** a linha diz quem é o próximo aviso e até quando.
 - **Rodapé:**
@@ -115,7 +116,7 @@ Os prazos contam os dias até o DTA_LIMITEMAX (a data limite para sair de féria
   - **‹ ›** troca de mês, e **Hoje** volta ao mês atual.
 - **Tela estreita** (celular, tablet, notebook com zoom): a linha vira três andares, e o calendário mostra só os símbolos de cada dia. Tocar no dia abre a lista dele.
 - **O número na aba** (visto das outras abas) conta quem precisa sair de férias (■). Se não houver ninguém, conta quem é para avisar (▲). Com a aba Férias aberta, o número some, porque já está na lista.
-- **O GSL nunca diz "ninguém para avisar" sem saber.** Com a aba FÉRIAS vazia ou sem a coluna DTA_LIMITEMAX, a aba e o cartão da Visão geral dizem que ninguém tem prazo. Quem não tem linha na aba FÉRIAS, ou tem como período mais urgente um sem DTA_LIMITEMAX, entra em "sem dados de férias", e o texto passa a dizer "entre quem tem prazo".
+- **O GSL nunca diz "ninguém para avisar" sem saber.** Com a aba FÉRIAS vazia, sem a coluna DTA_LIMITEMAX ou sem as colunas Matricula e Nome, a aba, o cartão da Visão geral e o Copiar resumo dizem que o GSL não sabe o prazo de ninguém (e o que corrigir). Quem não tem linha na aba FÉRIAS, ou tem como período mais urgente um sem DTA_LIMITEMAX, entra em "sem dados de férias", e o texto passa a dizer "entre quem tem prazo".
 
 Fora da aba:
 - **Ficha da pessoa:** a seção Férias mostra cada período em aberto numa linha do tempo (aquisição → pode tirar → aviso → data limite), com três datas: pode tirar desde, avisar até e **sair até (data limite)**. A situação de cada período é Prazo vencido, Urgente: sair até a data, Avisar, Programar, Em dia ou Sem data limite na aba FÉRIAS.
@@ -147,7 +148,7 @@ Link **Parâmetros** no rodapé da aba Férias (ou no cartão "Falta a aba FÉRI
 
 Antes do título de cada tela há um botão (o ícone de painel) que **esconde a barra lateral**: a tela ocupa a largura toda. Clicar de novo traz a barra de volta. O GSL lembra a escolha naquele computador. No celular, a barra é a faixa de cima da tela, e o botão a esconde do mesmo jeito.
 
-**Arquivos desta entrega** (carimbo `2026.10.14`; enviados no `GSL-ferias-14-10-v2.zip`). São só os sete que mudaram desde o pacote de 13/10. A aba refeita substitui a primeira versão: use este pacote, não o `GSL-ferias-14-10.zip` anterior.
+**Arquivos desta entrega** (carimbo `2026.10.14b`; `Estilo.html` continua `2026.10.14`; enviados no `GSL-ferias-14-10-v2.zip`). São só os sete que mudaram desde o pacote de 13/10. A aba refeita substitui a primeira versão: use este pacote, não o `GSL-ferias-14-10.zip` anterior.
 - `Quadro.gs`;
 - `Paineis.html`;
 - `PaineisEstilo.html`;

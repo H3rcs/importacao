@@ -1,6 +1,6 @@
 <script>
 /* Carimbo desta entrega (ver conferirVersao no App.html). */
-const BUILD_PAINEIS = '2026.10.14';
+const BUILD_PAINEIS = '2026.10.14b';
 
 /* =====================================================================
    PAINEIS NOVOS DO GSL
@@ -2381,7 +2381,8 @@ const QD_FE_ICO = {
   cal: '<svg class="qd-fe-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="1.6" y="2.6" width="12.8" height="11.8" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 6.4h12.4M5 1.2v2.8M11 1.2v2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 };
 const qdFeIco = (gr) => gr === 'sair' ? QD_ICONES.grave : gr === 'avisar' ? QD_ICONES.atencao : (QD_FE_ICO[gr] || QD_FE_ICO.emdia);
-const qdFeDM = (iso) => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) : '—';
+/* "17/10"; com o ano quando a data esta a mais de 300 dias de hoje (para frente ou para tras), para o ano nunca ser lido errado. */
+const qdFeDM = (iso) => iso ? (Math.abs(qdDias(qdHoje(), iso)) > 300 ? pnDataLonga(iso) : iso.slice(8, 10) + '/' + iso.slice(5, 7)) : '—';
 const qdFeSemana = (iso) => QD_FE_SEMANA_LONGA[new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)))).getUTCDay()];
 /* "17/10 sáb": o dia da semana importa (as ferias nao podem comecar nos 2 dias antes do descanso ou de feriado). */
 const qdFeDMS = (iso) => iso ? qdFeDM(iso) + ' ' + qdFeSemana(iso).slice(0, 3) : '—';
@@ -2411,6 +2412,8 @@ function qdFeEm(iso) {
 }
 /* A data de agir: a data limite (quem precisa sair) ou o ultimo dia do aviso (os outros). */
 const qdFeDataAgir = (per) => QD_FE_GRUPO[per.k] === 'sair' ? per.f.limiteMax : per.avisar;
+/* Quem a CDESLIGADOS diz que saiu e continua ATIVO na GERAL (a faixa vermelha do painel ja diz o nome): a linha avisa. */
+const qdFeSaiu = (g) => (qdMemo().pend[g.ref] || []).some((x) => x.tipo === 'DESLIGADO_ATIVO');
 /* Do mais urgente para o menos: pelos dias ate a data limite (o prazo vencido ha mais tempo primeiro); empate, pelo nome. */
 const qdFePorPrazo = (a, b) => (a.pior.dias === null ? 1e9 : a.pior.dias) - (b.pior.dias === null ? 1e9 : b.pior.dias) ||
   qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g));
@@ -2434,13 +2437,29 @@ function qdFeContagem(pessoas) {
  * cada pessoa conta num lugar so. Nada disso pode virar "ninguem para avisar".
  */
 function qdFeDesconhecido() {
-  const lf = (DADOS.leitura && DADOS.leitura.ferias) || {};
   const pessoas = qdFePessoas(), comLinha = {};
   pessoas.forEach((p) => { comLinha[p.g.ref] = true; });
   const semLinha = qdRecorte(qdNaEmpresa()).filter((g) => !comLinha[g.ref]);
   const semData = pessoas.filter((p) => p.pior.k === 'semdata');
-  const aba = (lf.faltam || []).indexOf('limiteMax') !== -1 ? 'sem a coluna DTA_LIMITEMAX' : (lf.linhas === 0 ? 'vazia' : '');
-  return { aba, semLinha, semData, n: semLinha.length + semData.length };
+  const ruim = qdFeAbaRuim();
+  return { aba: ruim ? ruim.curto : '', semLinha, semData, n: semLinha.length + semData.length };
+}
+/*
+ * A aba FÉRIAS que nao serve para os prazos: sem a coluna da data limite, sem Matricula e sem Nome (nenhuma linha
+ * lida) ou so com o cabecalho. Devolve o titulo e o que fazer (o cartao curto da aba) e o jeito curto de dizer
+ * ("a aba FÉRIAS esta ...", na Visao geral e no Copiar resumo); null se a aba serve.
+ */
+function qdFeAbaRuim() {
+  const lf = (DADOS.leitura && DADOS.leitura.ferias) || {}, aba = lf.aba || 'FÉRIAS', faltam = lf.faltam || [];
+  const cab = 'O cabeçalho precisa ter Matricula, Nome, pa_fim e DTA_LIMITEMAX, como sai do sistema.';
+  if (faltam.indexOf('limiteMax') !== -1) {
+    return { curto: 'sem a coluna DTA_LIMITEMAX', t: 'Não achei a coluna DTA_LIMITEMAX na aba ' + aba, frase: 'Sem ela, o GSL não sabe o prazo de ninguém. ' + cab };
+  }
+  if (lf.linhas === 0 && faltam.indexOf('matricula') !== -1 && faltam.indexOf('nome') !== -1) {
+    return { curto: 'sem as colunas Matricula e Nome', t: 'Não achei as colunas Matricula e Nome na aba ' + aba, frase: 'Sem elas, nenhuma linha foi lida. ' + cab };
+  }
+  if (lf.linhas === 0) return { curto: 'vazia', t: 'A aba ' + aba + ' está vazia', frase: 'Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados.' };
+  return null;
 }
 /* O proximo aviso entre quem nao precisa sair: a primeira data de "avisar ate" (de hoje em diante). */
 function qdFeProximoAviso(pessoas) {
@@ -2472,23 +2491,13 @@ function qdFeCab(completo) {
     ${completo ? `<div class="qd-seg pequeno qd-fe-vista" role="group" aria-label="Ver como">${vista('lista', QD_FE_ICO.lista, 'Lista')}${vista('calendario', QD_FE_ICO.cal, 'Calendário')}</div>` : ''}
   </header>`;
 }
-/* Sem a aba, com a aba vazia ou sem a data limite: o cartao curto, com o que fazer (e os Parametros, para quem pode). */
+/* Sem a aba, ou com a aba que nao serve (vazia, sem a data limite, sem Matricula e Nome): o cartao curto, com o que fazer. */
 function qdFeEstado() {
-  const lf = (DADOS.leitura && DADOS.leitura.ferias) || {}, aba = lf.aba || 'FÉRIAS';
-  let t = '', frase = '';
-  if (!DADOS.ferias) {
-    t = 'Falta a aba FÉRIAS na planilha';
-    frase = 'Extraia as férias do sistema (com Matricula, Nome, pa_fim e DTA_LIMITEMAX), cole numa aba chamada FÉRIAS desta planilha e use Atualizar dados.';
-  } else if ((lf.faltam || []).indexOf('limiteMax') !== -1) {
-    t = 'Não achei a coluna DTA_LIMITEMAX na aba ' + aba;
-    frase = 'Sem ela, ninguém tem prazo. O cabeçalho precisa ter Matricula, Nome, pa_fim e DTA_LIMITEMAX, como sai do sistema.';
-  } else if (lf.linhas === 0) {
-    t = 'A aba ' + aba + ' está vazia';
-    frase = 'Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados.';
-  }
-  if (!t) return '';
+  const ruim = DADOS.ferias ? qdFeAbaRuim() : { t: 'Falta a aba FÉRIAS na planilha',
+    frase: 'Extraia as férias do sistema (com Matricula, Nome, pa_fim e DTA_LIMITEMAX), cole numa aba chamada FÉRIAS desta planilha e use Atualizar dados.' };
+  if (!ruim) return '';
   return `<section class="bq-card qd-fe" aria-labelledby="qd-fe-tit">${qdFeCab(false)}
-    <div class="qd-fe-estado">${QD_ICONES.grave}<b>${esc(t)}</b><p>${esc(frase)}</p>
+    <div class="qd-fe-estado">${QD_ICONES.grave}<b>${esc(ruim.t)}</b><p>${esc(ruim.frase)}</p>
       ${DADOS.podeConfigurar ? '<p><button class="icone-botao" onclick="qdFeParametros()">Parâmetros das férias</button></p>' : ''}</div>
   </section>`;
 }
@@ -2524,7 +2533,7 @@ function qdFeGrupo(gr, titulo, frase, lista, recolhe) {
 function qdFeNinguem(pessoas, d) {
   const prox = qdFeProximoAviso(pessoas);
   return `<p class="qd-fe-ninguem">${d.n ? '' : QD_ICONES.ok}<span><b>Ninguém para avisar ou sair de férias agora${d.n ? ' entre quem tem prazo' : ''}</b>${prox
-    ? ` · próximo aviso: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> até ${qdFeDMS(prox.pior.avisar)}` : ''}</span></p>`;
+    ? ` · próximo aviso: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> até ${qdFeDMS(prox.pior.avisar)} (${qdFeEm(prox.pior.avisar)})` : ''}</span></p>`;
 }
 /* A folhinha: a data de agir (mes na faixa de cima, o dia grande, o dia da semana embaixo). */
 function qdFeFolha(iso) {
@@ -2545,6 +2554,8 @@ function qdFeItem(p, semFolha) {
   if (g.situacao === 'FERIAS') tag(QD_FE_ICO.sol + 'de férias agora', 'Pelo STATUS da GERAL. Se as férias forem deste período, está resolvido.',
     'De férias agora pelo STATUS da GERAL: se forem deste período, está resolvido.');
   if (g.situacao === 'AFASTADO') tag('afastado', 'As férias ficam para depois da volta.', 'Afastado: as férias ficam para depois da volta.');
+  if (qdFeSaiu(g)) tag('consta como desligado', 'Está na CDESLIGADOS e ainda ativo na GERAL: confira na Conferência.',
+    'Consta como desligado: está na CDESLIGADOS e ainda ativo na GERAL.');
   if (completos > 1) tag(completos + ' períodos completos', '', completos + ' períodos completos.');
   if (per.k !== 'semdata' && p.periodos.some((x) => x.k === 'semdata')) tag('período sem data', 'Outro período desta pessoa está sem DTA_LIMITEMAX na aba FÉRIAS: veja a ficha.',
     'Outro período sem data limite na aba FÉRIAS.');
@@ -2570,13 +2581,15 @@ function qdFeRodape(c, d) {
   const emDia = c.liberada.length + c.aquisicao.length;
   const inc = qdMemo().inc.filter((x) => /^FERIAS_/.test(x.tipo) && x.tipo !== 'FERIAS_ABA');
   const linhas = inc.filter((x) => x.tipo !== 'FERIAS_SEM_DADOS');
-  const ir = d.semLinha.length && inc.length > linhas.length ? 'FERIAS_SEM_DADOS' : (linhas[0] || {}).tipo || '';
-  const conf = ir ? `<span aria-hidden="true">·</span><button class="qd-link" onclick="qdIrConferencia(${jsArg(ir)})">ver na Conferência</button>` : '';
+  // quem esta sem linha tem o item dele na Conferencia; quem tem um periodo sem data, nao (esta na lista que abre aqui)
+  const semLinhaConf = d.semLinha.length && inc.length > linhas.length;
+  const conf = (tipo) => `<span aria-hidden="true">·</span><button class="qd-link" onclick="qdIrConferencia(${jsArg(tipo)})">ver na Conferência</button>`;
   const partes = [`<span class="qd-fe-rod-item">${QD_FE_ICO.emdia}<span><b class="bq-num">${qdN(emDia)}</b> em dia</span></span>`];
   if (d.n) {
-    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<button class="qd-link" aria-expanded="${!!QD.feSemDados}" onclick="QD.feSemDados=!QD.feSemDados;qdDesenhar()"><b class="bq-num">${qdN(d.n)}</b> sem dados de férias</button>${conf}</span>`);
-  } else if (linhas.length) {
-    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<span><b class="bq-num">${qdN(linhas.length)}</b> ${linhas.length === 1 ? 'linha' : 'linhas'} da aba FÉRIAS para conferir</span>${conf}</span>`);
+    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<button class="qd-link" aria-expanded="${!!QD.feSemDados}" onclick="QD.feSemDados=!QD.feSemDados;qdDesenhar()"><b class="bq-num">${qdN(d.n)}</b> sem dados de férias</button>${semLinhaConf ? conf('FERIAS_SEM_DADOS') : ''}</span>`);
+  }
+  if (linhas.length && !semLinhaConf) {
+    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<span><b class="bq-num">${qdN(linhas.length)}</b> ${linhas.length === 1 ? 'linha' : 'linhas'} da aba FÉRIAS para conferir</span>${conf(linhas[0].tipo)}</span>`);
   }
   return `<footer class="qd-fe-rodape">
     <div class="qd-fe-rod-linha">${partes.join('')}
@@ -2592,7 +2605,7 @@ function qdFeSemDados(d) {
   const mostra = itens.slice(0, 50);
   return `<ul class="qd-fe-semdados">${mostra.map(([g, t]) => `<li><button class="qd-link" onclick="qdFicha(${Number(g.ref)})">${esc(qdFeNomeOuId(g))}</button>
       ${qdEq(g.equipe, g.equipeBruta)}<span>${qdRotFuncao(qdFuncaoTela(g))} · ${t}</span></li>`).join('')}
-    ${itens.length > mostra.length ? `<li><span>e mais ${qdN(itens.length - mostra.length)} — veja na Conferência</span></li>` : ''}</ul>`;
+    ${itens.length > mostra.length ? `<li><span>e mais ${qdN(itens.length - mostra.length)}</span></li>` : ''}</ul>`;
 }
 
 /*
@@ -2622,7 +2635,7 @@ function qdFeCalendario(pessoas, c) {
     const cel = [];
     for (let i = 0; i < 7; i++) {
       const iso = new Date(Date.UTC(ano, mes, s * 7 + i - ini + 1)).toISOString().slice(0, 10), n = Number(iso.slice(8, 10));
-      if (iso.slice(0, 7) !== ym) { cel.push(`<td class="qd-fe-dia fora" aria-hidden="true"><div class="qd-fe-dia-cab"><span class="qd-fe-dia-n">${n}</span></div></td>`); continue; }
+      if (iso.slice(0, 7) !== ym) { cel.push(`<td class="qd-fe-dia fora"><div class="qd-fe-dia-cab" aria-hidden="true"><span class="qd-fe-dia-n">${n}</span></div></td>`); continue; }
       const evs = porDia[iso] || [], grs = evs.map((p) => QD_FE_GRUPO[p.pior.k]);
       const cor = ['sair', 'avisar', 'prog', 'emdia'].filter((x) => grs.indexOf(x) !== -1)[0] || '';
       const cabe = evs.length > 3 ? 2 : 3, ehHoje = iso === hoje;
@@ -2640,14 +2653,14 @@ function qdFeCalendario(pessoas, c) {
   return `<div class="qd-fe-cal-cab">
       <div class="qd-fe-cal-tit"><h3 id="qd-fe-mes-tit">${qdFeMesLongo(ym)}</h3><span>cada pessoa no último dia para agir<span class="qd-fe-so-estreito"> · toque no dia para ver quem</span></span></div>
       <div class="qd-fe-setas">
-        <button class="qd-fe-seta ant" onclick="qdFeMesRel(-1)" aria-label="Mês anterior">‹</button>
         ${ym === mesHoje ? '' : `<button class="qd-fe-hoje-bt" onclick="QD.focoDepois='.qd-fe-seta.prox';qdFeIrMes(${jsArg(mesHoje)})">Hoje</button>`}
+        <button class="qd-fe-seta ant" onclick="qdFeMesRel(-1)" aria-label="Mês anterior">‹</button>
         <button class="qd-fe-seta prox" onclick="qdFeMesRel(1)" aria-label="Próximo mês">›</button>
       </div>
     </div>
     ${venc.length ? `<p class="qd-fe-vencidos">${QD_ICONES.grave}<b>Prazo vencido</b>${mostraV.map((p) => `<span><button class="qd-link" onclick="qdFicha(${Number(p.g.ref)})"
         title="${esc((qdNomeTxt(p.g) || 'Sem nome') + ': prazo vencido em ' + pnDataLonga(p.pior.f.limiteMax))}">${esc(qdFeNomeCurto(p.g.nome))}</button> (${qdFeDM(p.pior.f.limiteMax)})</span>`).join('')}${venc.length > mostraV.length
-        ? `<button class="qd-link" onclick="qdFeVista('lista')">e mais ${venc.length - mostraV.length} na lista</button>` : ''}</p>` : ''}
+        ? `<button class="qd-link" onclick="QD.focoDepois='#qd-fe-g-sair';qdFeVista('lista')">e mais ${venc.length - mostraV.length} na lista</button>` : ''}</p>` : ''}
     <table class="qd-fe-mes" aria-labelledby="qd-fe-mes-tit">
       <thead><tr>${QD_FE_SEMANA.map(([l, k], i) => `<th scope="col" abbr="${QD_FE_SEMANA_LONGA[i]}"><span class="qd-fe-longo">${l}</span><span class="qd-fe-curto" aria-hidden="true">${k}</span></th>`).join('')}</tr></thead>
       <tbody>${semanas.join('')}</tbody>
@@ -2660,9 +2673,9 @@ function qdFePilula(p) {
   const per = p.pior, g = p.g, gr = QD_FE_GRUPO[per.k], d = qdFeDataAgir(per);
   const quem = (qdNomeTxt(g) || 'Sem nome') + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ')';
   const rot = (gr === 'sair' ? 'Sair até ' : 'Avisar até ') + pnDataLonga(d) + ': ' + quem + (gr === 'prog' ? ' — programar' : gr === 'emdia' ? ' — em dia' : '') +
-    (gr === 'sair' ? '' : '; sair até ' + pnDataLonga(per.f.limiteMax)) + '.';
-  const ico = gr === 'sair' ? QD_FE_ICO.pilSair : gr === 'avisar' ? QD_FE_ICO.pilAvisar : qdFeIco(gr);
-  return `<button class="qd-fe-pil ${gr}" title="${esc(rot)}" aria-label="${esc(rot)}" onclick="qdFicha(${Number(g.ref)})">${ico}<span class="qd-fe-pil-nome">${esc(qdFeNomePilula(g.nome))}</span></button>`;
+    (gr === 'sair' ? '' : '; sair até ' + pnDataLonga(per.f.limiteMax)) + '.' + (qdFeSaiu(g) ? ' Consta como desligado.' : '');
+  const ico = gr === 'sair' ? QD_FE_ICO.pilSair : gr === 'avisar' ? QD_FE_ICO.pilAvisar : qdFeIco(gr), nome = qdFeNomePilula(g.nome);
+  return `<button class="qd-fe-pil ${gr}" title="${esc(rot)}" aria-label="${esc(nome + ' — ' + rot)}" onclick="qdFicha(${Number(g.ref)})">${ico}<span class="qd-fe-pil-nome">${esc(nome)}</span></button>`;
 }
 /* A lista de um dia (o "+N no dia"; no estreito, o toque no dia), embaixo da grade. */
 function qdFeDiaLista(porDia, hoje) {
@@ -2700,8 +2713,8 @@ function qdFeSeloAba() {
   const l = qdFeriasDados().lista;
   const s = l.filter((p) => QD_FE_GRUPO[p.pior.k] === 'sair').length, a = l.filter((p) => p.pior.k === 'avisar').length;
   const selo = (cls, sinal, n, rot) => `<span class="qd-contador ${cls}" role="img" aria-label="${rot}" title="${rot}">${sinal} ${n}</span>`;
-  if (s) return selo('grave', '■', s, s === 1 ? '1 pessoa precisa sair de férias' : qdN(s) + ' pessoas precisam sair de férias');
-  if (a) return selo('atencao', '▲', a, qdPlural(a, 'aviso de férias para dar', 'avisos de férias para dar'));
+  if (s) return selo('grave', '■', s, s === 1 ? '1 pessoa do CD precisa sair de férias' : qdN(s) + ' pessoas do CD precisam sair de férias');
+  if (a) return selo('atencao', '▲', a, qdPlural(a, 'aviso de férias para dar', 'avisos de férias para dar') + ' no CD');
   return '';
 }
 
@@ -2738,7 +2751,7 @@ function qdFeParametros() {
     ${campo('fp-aviso', 'Aviso de férias: dias antes da saída', P.aviso, 0, 120, '“Avisar até” = data limite menos este número. Data limite mais perto que isso: “precisam sair de férias”.')}
     ${campo('fp-avisar', '“Avisar”: data limite em até quantos dias', P.avisar, 1, 400, '')}
     ${campo('fp-planejar', '“Programar”: data limite em até quantos dias', P.planejar, 2, 400, 'Depois disso, “em dia”.')}
-    <p class="dica">Padrão: centro de custo ${esc(D.cc.join(', '))} · ${D.digitos} números · aviso de ${D.aviso} dias · avisar até ${D.avisar} · programar até ${D.planejar}.</p></div>`, `
+    <p class="dica">Padrão: centro de custo ${esc(D.cc.join(', '))} · ${D.digitos} números · aviso de ${D.aviso} dias · “Avisar” ${D.avisar} dias · “Programar” ${D.planejar} dias.</p></div>`, `
     <button class="botao secundario" onclick="qdFeSalvarParametros(true)">Voltar ao padrão</button>
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="qdFeSalvarParametros(false)">Salvar</button>`);
@@ -2760,11 +2773,15 @@ function qdFeFichaSecao(ref) {
     ${g.situacao === 'FERIAS' ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}De férias agora pelo STATUS da GERAL: se forem as do período mais antigo, o prazo está sendo cumprido (a linha sai da extração quando o sistema fechar o período).</p>` : ''}
     <ul class="qd-fe-ficha">${p.periodos.map((per) => {
       const f = per.f, gr = QD_FE_GRUPO[per.k], paFim = f.paFim || f.limite;   // sem o pa_fim, o DTA_LIMITE
-      if (!f.limiteMax || !paFim) {
+      const fim = f.limiteMax;
+      const sairAte = fim ? `<div><dt>Sair até (data limite)</dt><dd><b>${qdFeDMAS(fim)}</b> · ${per.dias < 0 ? 'venceu ' + qdFeEm(fim) : qdFeEm(fim)}</dd></div>` : '';
+      if (!fim || !paFim) {
+        // sem a data limite, so a situacao; sem o fim do periodo, as datas que se sabe (o aviso e a data limite)
         return `<li class="${gr}"><div class="qd-fe-ficha-cab">${qdFeIco(gr)}<b>${QD_FE_ROTULO[per.k]}</b>
-          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${paFim ? pnDataLonga(paFim) : '—'} · linha ${f.linha} da aba ${esc((DADOS.ferias || {}).aba || 'FÉRIAS')}</span></div></li>`;
+          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${paFim ? pnDataLonga(paFim) : '—'} · linha ${f.linha} da aba ${esc((DADOS.ferias || {}).aba || 'FÉRIAS')}</span></div>
+          ${fim ? `<dl class="qd-fe-ficha-datas"><div><dt>Avisar até</dt><dd>${qdFeDMAS(per.avisar)}</dd></div>${sairAte}</dl>` : ''}</li>`;
       }
-      const ini = f.paInicio || qdSomarDias(paFim, -364), fim = f.limiteMax;
+      const ini = f.paInicio || qdSomarDias(paFim, -364);
       const total = Math.max(1, qdDias(ini, fim));
       const pos = (d) => Math.max(0, Math.min(100, qdDias(ini, d) / total * 100));
       const hojePos = qdDias(ini, hoje) / total * 100;
@@ -2780,7 +2797,7 @@ function qdFeFichaSecao(ref) {
         <dl class="qd-fe-ficha-datas">
           <div><dt>Pode tirar desde</dt><dd>${qdFeDMAS(qdSomarDias(paFim, 1))}</dd></div>
           <div><dt>Avisar até</dt><dd>${qdFeDMAS(per.avisar)}</dd></div>
-          <div><dt>Sair até (data limite)</dt><dd><b>${qdFeDMAS(fim)}</b> · ${per.dias < 0 ? 'venceu ' + qdFeEm(fim) : qdFeEm(fim)}</dd></div>
+          ${sairAte}
         </dl></li>`;
     }).join('')}</ul>`;
 }
@@ -2794,7 +2811,7 @@ function qdFeCartaoGeral() {
   return `<div class="bq-card qd-fe-geral">
     <div class="qd-fe-card-cab"><h2>Férias</h2><button class="qd-link" onclick="qdAba('ferias')">Ver férias →</button></div>
     <p class="bq-sub">Prazos pela aba FÉRIAS.</p>
-    ${d.aba ? `<p class="qd-fe-geral-prox">${QD_ICONES.grave} A aba FÉRIAS está ${d.aba}: ninguém tem prazo.</p>` : `<div class="qd-fe-geral-n">
+    ${d.aba ? `<p class="qd-fe-geral-prox">${QD_ICONES.grave} A aba FÉRIAS está ${d.aba}: o GSL não sabe o prazo de ninguém.</p>` : `<div class="qd-fe-geral-n">
       ${bt(sair, QD_ICONES.grave, sair === 1 ? 'precisa sair de férias' : 'precisam sair de férias')}
       ${bt(c.avisar.length, QD_ICONES.atencao, 'para avisar')}
     </div>
@@ -2810,7 +2827,7 @@ function qdFeCartaoGeral() {
 function qdFeResumoLinha() {
   if (!DADOS.ferias) return '';
   const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(), sair = c.vencida.length + c.critica.length;
-  if (d.aba) return 'Férias: a aba FÉRIAS está ' + d.aba + ' (ninguém tem prazo)';
+  if (d.aba) return 'Férias: a aba FÉRIAS está ' + d.aba + ' (o GSL não sabe os prazos)';
   return 'Férias: ' + qdN(sair) + (sair === 1 ? ' precisa' : ' precisam') + ' sair de férias, ' + qdN(c.avisar.length) + ' para avisar' +
     (d.n ? ', ' + qdN(d.n) + ' sem dados de férias' : '');
 }
@@ -2819,9 +2836,10 @@ function qdFeResumoTexto() {
   const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
   const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido();
   const quem = (g) => '- ' + qdFeNomeOuId(g) + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ')';
-  const bloco = (titulo, lista, txt) => lista.length ? [titulo + ' (' + lista.length + ')'].concat(lista.map((p) => quem(p.g) + ' — ' + txt(p))) : [];
+  const bloco = (titulo, lista, txt) => lista.length ? [titulo + ' (' + lista.length + ')']
+    .concat(lista.map((p) => quem(p.g) + ' — ' + txt(p) + (qdFeSaiu(p.g) ? ' (consta como desligado)' : ''))) : [];
   const titulo = 'Férias — Quadro do CD' + (filial ? ' — ' + filial : '') + ' — ' + pnDataLonga(qdHoje()) + (qdRotuloRecorte() ? ' — ' + qdRotuloRecorte() : '');
-  if (d.aba) return [titulo, 'A aba FÉRIAS está ' + d.aba + ': ninguém tem prazo.'].join('\n');
+  if (d.aba) return [titulo, 'A aba FÉRIAS está ' + d.aba + ': o GSL não sabe o prazo de ninguém.'].join('\n');
   const sair = c.vencida.concat(c.critica).sort(qdFePorPrazo), avisar = c.avisar.slice().sort(qdFePorPrazo);
   const prox = sair.length + avisar.length ? null : qdFeProximoAviso(pessoas);
   const desc = d.semLinha.map((g) => quem(g) + ' — sem linha na aba FÉRIAS').concat(d.semData.map((p) => quem(p.g) + ' — período sem data limite na aba FÉRIAS'));
@@ -2829,7 +2847,7 @@ function qdFeResumoTexto() {
     .concat(bloco('PRECISAM SAIR DE FÉRIAS', sair, (p) => p.pior.k === 'vencida' ? 'prazo vencido em ' + qdFeDMS(p.pior.f.limiteMax) : 'sair até ' + qdFeDMS(p.pior.f.limiteMax)))
     .concat(bloco('AVISAR', avisar, (p) => 'avisar até ' + qdFeDMS(p.pior.avisar) + ' (sair até ' + qdFeDM(p.pior.f.limiteMax) + ')'))
     .concat(sair.length + avisar.length ? [] : ['Ninguém para avisar ou sair de férias agora' + (d.n ? ' entre quem tem prazo' : '') + '.' +
-      (prox ? ' Próximo aviso: ' + qdFeNomeOuId(prox.g) + ' até ' + qdFeDMS(prox.pior.avisar) + '.' : '')])
+      (prox ? ' Próximo aviso: ' + qdFeNomeOuId(prox.g) + ' até ' + qdFeDMS(prox.pior.avisar) + ' (' + qdFeEm(prox.pior.avisar) + ').' : '')])
     .concat(d.n ? ['SEM DADOS DE FÉRIAS (' + d.n + ')'].concat(desc.slice(0, 10), desc.length > 10 ? ['- e mais ' + (desc.length - 10)] : []) : []).join('\n');
 }
 

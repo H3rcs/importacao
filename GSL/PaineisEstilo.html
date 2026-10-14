@@ -3,7 +3,7 @@
    PAINEIS NOVOS — filiais, nobreaks, limpeza e quadro do CD.
    Usa as mesmas variaveis do Estilo (claro e escuro).
    ========================================================= */
-:root { --gsl-paineis-estilo: '2026.10.14'; }   /* carimbo da entrega (conferirVersao no App.html) */
+:root { --gsl-paineis-estilo: '2026.10.14b'; }   /* carimbo da entrega (conferirVersao no App.html) */
 
 /* ---- barra lateral: filial em uso ---- */
 .filial-atual {
@@ -744,6 +744,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-quem { grid-area: quem; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; }
 .qd-fe-nome { font-size: 13.5px; font-weight: 600; }
 .qd-fe-funcao { font-size: 12px; color: var(--tinta-media); }
+.qd-fe-quem .qd-eq, .qd-fe-semdados .qd-eq, .qd-fe-geral-prox .qd-eq { white-space: normal; }
 .qd-fe-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap;
   background: var(--bq-surface-2); border: 1px solid var(--bq-linha); color: var(--tinta-media); }
 .qd-fe-quando { grid-area: quando; display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; font-size: 12.5px; color: var(--tinta-media); }
@@ -915,7 +916,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-fe-abrir { display: none; }
   .qd-fe-nome { width: 100%; }
   .qd-fe-rod-acoes { margin-left: 0; width: 100%; }
-  .qd-fe-rodape .qd-link { display: inline-block; padding: 7px 0; }
+  .qd-fe-rodape .qd-link, .qd-fe-vencidos .qd-link, .qd-fe-dia-lista h4 .qd-link, .qd-fe-grupo-bt, .qd-fe-ninguem .qd-link { display: inline-block; padding: 7px 0; }
   .qd-fe-cal-tit > span { width: 100%; }
   .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
 }
@@ -931,5 +932,7 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .bi-quadro .qd-fe-mes td.hoje { outline: 3px solid Highlight; outline-offset: -3px; }
   .bi-quadro .qd-fe-mes td.escolhido { outline: 3px dashed Highlight; outline-offset: -3px; }
   .qd-fe-item:focus-visible, .qd-fe-pil:focus-visible, .qd-fe-dia-bt:focus-visible, .qd-fe-mais:focus-visible { outline: 3px dashed CanvasText; outline-offset: 2px; }
+  .qd-fe-dia-bt:focus-visible { outline-offset: -4px; }       /* a celula corta o que passa dela */
+  .qd-fe-ico.prog, .qd-fe-ico.emdia { color: CanvasText; }
 }
 </style>

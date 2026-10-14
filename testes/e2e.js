@@ -1702,14 +1702,19 @@ async function rodar() {
     // o calendario: cada pessoa uma vez, no dia de agir; o prazo vencido numa faixa em cima; a escolha fica guardada
     await f.click('.qd-fe-vista .qd-pill:has-text("Calendário")');
     await f.waitForSelector('.qd-fe-mes', { timeout: 5000 });
-    const cal = await f.evaluate(() => ({ guardada: localStorage.getItem('gsl_ferias_vista'), tit: document.querySelector('#qd-fe-mes-tit').innerText.trim(),
-      hoje: !!document.querySelector('.qd-fe-mes td[aria-current="date"]'), botaoHoje: !!document.querySelector('.qd-fe-hoje-bt'),
-      rot: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => b.getAttribute('aria-label')),
+    const mesHoje = await f.evaluate(() => ({ guardada: localStorage.getItem('gsl_ferias_vista'), hoje: !!document.querySelector('.qd-fe-mes td[aria-current="date"]'),
+      botaoHoje: !!document.querySelector('.qd-fe-hoje-bt') }));
+    afirmar(mesHoje.guardada === 'calendario' && mesHoje.hoje && !mesHoje.botaoHoje, 'o calendario abre no mes de hoje, sem o botao Hoje: ' + JSON.stringify(mesHoje));
+    // nos ultimos dias do mes, as datas de agir podem estar todas no mes seguinte: anda ate um mes com gente
+    await f.evaluate(() => { for (let i = 0; i < 3 && !document.querySelector('.qd-fe-mes .qd-fe-pil'); i++) qdFeMesRel(1); });
+    const cal = await f.evaluate(() => ({ tit: document.querySelector('#qd-fe-mes-tit').innerText.trim(),
+      rot: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => b.getAttribute('title')),
+      nomes: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => [b.getAttribute('aria-label'), b.innerText.trim()]),
       dias: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-dia-bt')).map((b) => b.getAttribute('data-dia')),
       venc: (document.querySelector('.qd-fe-vencidos') || { innerText: '' }).innerText.replace(/\s+/g, ' ').trim(),
       leg: document.querySelector('.qd-fe-legenda').innerText.replace(/\s+/g, ' ').trim(), html: document.querySelector('.qd-fe').innerHTML }));
-    afirmar(cal.guardada === 'calendario' && cal.hoje && !cal.botaoHoje && cal.rot.length > 0 && cal.rot.every((r) => /^(Sair|Avisar) até \d\d\/\d\d\/\d{4}: .+\.$/.test(r)) &&
-      new Set(cal.rot.map((r) => r.split(': ')[1])).size === cal.rot.length, 'calendario (uma pilula por pessoa): ' + JSON.stringify(cal).slice(0, 700));
+    afirmar(cal.rot.length > 0 && cal.rot.every((r) => /^(Sair|Avisar) até \d\d\/\d\d\/\d{4}: .+\.$/.test(r)) && new Set(cal.rot.map((r) => r.split(': ')[1])).size === cal.rot.length &&
+      cal.nomes.every(([rot, nome]) => rot.indexOf(nome + ' — ') === 0), 'calendario (uma pilula por pessoa; o nome que aparece comeca o nome acessivel): ' + JSON.stringify(cal).slice(0, 700));
     afirmar(/^Prazo vencido /.test(cal.venc) && (cal.venc.match(/\(\d\d\/\d\d\)/g) || []).length === 2, 'faixa do prazo vencido: ' + cal.venc);
     afirmar(cal.leg === 'sair até avisar até programar em dia · toque no nome para abrir a ficha' && !PROIBIDAS.test(cal.html), 'legenda: ' + cal.leg);
     // o dia com gente abre a lista dele embaixo da grade (no celular e o toque no dia; no computador, o "+N no dia")
@@ -1809,21 +1814,23 @@ async function rodar() {
       return r;
     });
     afirmar(/^O que fazer e até quando A aba FÉRIAS está vazia Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados\. Parâmetros das férias$/.test(semPrazo.vazia.aba) &&
-      /A aba FÉRIAS está vazia: ninguém tem prazo\./.test(semPrazo.vazia.card) && !/Ninguém para avisar/.test(semPrazo.vazia.card) &&
-      semPrazo.vazia.linha === 'Férias: a aba FÉRIAS está vazia (ninguém tem prazo)' && /\nA aba FÉRIAS está vazia: ninguém tem prazo\.$/.test(semPrazo.vazia.resumo) &&
+      /A aba FÉRIAS está vazia: o GSL não sabe o prazo de ninguém\./.test(semPrazo.vazia.card) && !/Ninguém para avisar/.test(semPrazo.vazia.card) &&
+      semPrazo.vazia.linha === 'Férias: a aba FÉRIAS está vazia (o GSL não sabe os prazos)' && /\nA aba FÉRIAS está vazia: o GSL não sabe o prazo de ninguém\.$/.test(semPrazo.vazia.resumo) &&
       semPrazo.vazia.conf === 'A aba FÉRIAS está vazia: só tem o cabeçalho. Sem as linhas, o GSL não sabe o prazo de ninguém.' && !/planilha conferida/.test(semPrazo.vazia.selo),
       'aba FÉRIAS vazia: ' + JSON.stringify(semPrazo.vazia));
-    afirmar(/Não achei a coluna DTA_LIMITEMAX na aba FÉRIAS Sem ela, ninguém tem prazo\./.test(semPrazo.semColuna.aba) && /sem a coluna DTA_LIMITEMAX: ninguém tem prazo\./.test(semPrazo.semColuna.card) &&
-      !/Ninguém para avisar/.test(semPrazo.semColuna.card + semPrazo.semColuna.resumo) && semPrazo.semColuna.linha === 'Férias: a aba FÉRIAS está sem a coluna DTA_LIMITEMAX (ninguém tem prazo)',
+    afirmar(/Não achei a coluna DTA_LIMITEMAX na aba FÉRIAS Sem ela, o GSL não sabe o prazo de ninguém\./.test(semPrazo.semColuna.aba) &&
+      /sem a coluna DTA_LIMITEMAX: o GSL não sabe o prazo de ninguém\./.test(semPrazo.semColuna.card) &&
+      !/Ninguém para avisar/.test(semPrazo.semColuna.card + semPrazo.semColuna.resumo) && semPrazo.semColuna.linha === 'Férias: a aba FÉRIAS está sem a coluna DTA_LIMITEMAX (o GSL não sabe os prazos)',
       'sem a coluna DTA_LIMITEMAX: ' + JSON.stringify(semPrazo.semColuna));
     afirmar(/Pode tirar desde \d\d\/\d\d\/\d{4}/.test(semPrazo.semPaFim.ficha) && /Sair até \(data limite\)/.test(semPrazo.semPaFim.ficha) &&
       /Não achei a coluna pa_fim na aba FÉRIAS: parte das férias pode ficar sem dados\. ver na Conferência/.test(semPrazo.semPaFim.aba) &&
       /^Não achei a coluna pa_fim: "pode tirar desde" e "em aquisição" usam o DTA_LIMITE/.test(semPrazo.semPaFim.conf), 'sem pa_fim: ' + JSON.stringify(semPrazo.semPaFim));
     afirmar(semPrazo.semCabecalho === 'Não achei as colunas Matricula, Nome, pa_fim, DTA_LIMITEMAX no cabeçalho da aba FÉRIAS, e nenhuma linha foi lida (sem Matricula e sem Nome, nenhuma linha serve): o GSL não sabe o prazo de ninguém.',
       'colada sem o cabecalho: ' + semPrazo.semCabecalho);
-    afirmar(/Ninguém para avisar ou sair de férias agora entre quem tem prazo · próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} Programar \d+/.test(semPrazo.ninguem.aba) &&
+    afirmar(/Ninguém para avisar ou sair de férias agora entre quem tem prazo · próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} \(em \d+ dias\) Programar \d+/.test(semPrazo.ninguem.aba) &&
       /0 precisam sair de férias 0 para avisar Ninguém para avisar ou sair de férias agora entre quem tem prazo\. Próximo aviso: /.test(semPrazo.ninguem.card) &&
-      /\nNinguém para avisar ou sair de férias agora entre quem tem prazo\. Próximo aviso: .+ até \d\d\/\d\d [a-zá]{3}\.\n/.test(semPrazo.ninguem.resumo), 'ninguem para agir: ' + JSON.stringify(semPrazo.ninguem));
+      /\nNinguém para avisar ou sair de férias agora entre quem tem prazo\. Próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} \(em \d+ dias\)\.\n/.test(semPrazo.ninguem.resumo),
+      'ninguem para agir: ' + JSON.stringify(semPrazo.ninguem));
     afirmar(semPrazo.semData.pior === 'planejar' && semPrazo.semData.p3 === 'semdata' && /semdata/.test(semPrazo.semData.ks) && /período sem data/.test(semPrazo.semData.item) &&
       semPrazo.semData.linha === 'Férias: 6 precisam sair de férias, 11 para avisar, 2 sem dados de férias' && semPrazo.semData.linha3 === 'Férias: 6 precisam sair de férias, 11 para avisar, 3 sem dados de férias' &&
       semPrazo.semData.lista.length === 3 && semPrazo.semData.lista.filter((t) => / · período sem data limite na aba FÉRIAS$/.test(t)).length === 1,
@@ -1831,6 +1838,64 @@ async function rodar() {
     afirmar(semPrazo.bordas === 'avisar,critica,critica,vencida,avisar,planejar,aquisicao,liberada,aquisicao,semdata', 'bordas das faixas: ' + semPrazo.bordas);
     afirmar(semPrazo.resumoSemNome.length === 1 && /^- Sem nome, COD 39002, RH 109002 \(2° TURNO, [^)]+\) — sem linha na aba FÉRIAS$/.test(semPrazo.resumoSemNome[0]), 'sem nome no texto copiado: ' + semPrazo.resumoSemNome.join('|'));
     afirmar(!PROIBIDAS.test(JSON.stringify(semPrazo)), 'nenhuma palavra de multa nos casos sem dados');
+    // cada pessoa conta num lugar so; quem consta como desligado tem a etiqueta; o "+N no dia"; o corte da faixa do prazo vencido;
+    // a aba sem Matricula e Nome; sem a aba; a ficha de um periodo com data limite e sem pa_fim
+    const maisFe = await f.evaluate(() => {
+      const orig = DADOS, r = {};
+      const txt = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const dom = (h) => new DOMParser().parseFromString(h, 'text/html');
+      const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido();
+      r.soma = ['vencida', 'critica', 'avisar', 'planejar', 'liberada', 'aquisicao'].reduce((n, k) => n + c[k].length, 0) + d.n;
+      r.quadro = qdRecorte(qdNaEmpresa()).length;
+      QD.feProgramar = true; QD.feVista = 'lista';
+      const itens = Array.from(dom(qdFerias()).querySelectorAll('.qd-fe-item')).map((b) => ({ ref: Number(/qdFicha\((\d+)\)/.exec(b.getAttribute('onclick'))[1]),
+        tag: /consta como desligado/.test(b.textContent), rot: b.getAttribute('aria-label') }));
+      r.saiu = itens.filter((x) => qdFeSaiu({ ref: x.ref }));
+      r.etiquetaSobrando = itens.filter((x) => x.tag && !qdFeSaiu({ ref: x.ref })).length;
+      r.resumoSaiu = qdFeResumoTexto().split('\n').filter((l) => /consta como desligado/.test(l)).length;
+      r.saiuNoResumo = qdFePessoas().filter((p) => ['vencida', 'critica', 'avisar'].indexOf(p.pior.k) !== -1 && qdFeSaiu(p.g)).length;
+      try {
+        // cinco pessoas com o mesmo "avisar ate" (2 pilulas e "+N no dia"); seis a mais com o prazo vencido (a faixa mostra 6 e corta)
+        const hoje = qdHoje(), limite = qdSomarDias(hoje, 45);
+        const emDia = qdFePessoas().filter((p) => p.pior.k === 'liberada' || p.pior.k === 'aquisicao').map((p) => p.g.ref);
+        const mesmoDia = emDia.slice(0, 5), vencem = emDia.slice(5, 11);         // pessoas do quadro (todos os periodos delas)
+        const linhas = orig.ferias.linhas.map((x) => {
+          const y = Object.assign({}, x);
+          if (mesmoDia.indexOf(y.ref) !== -1) y.limiteMax = limite;
+          else if (vencem.indexOf(y.ref) !== -1) y.limiteMax = qdSomarDias(hoje, -20 - vencem.indexOf(y.ref));
+          return y;
+        });
+        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas }) });
+        const dia = qdSomarDias(limite, -qdFeP().aviso);
+        QD.feVista = 'calendario'; QD.feMes = dia.slice(0, 7); QD.feDia = '';
+        const cal = dom(qdFerias());
+        const td = cal.querySelector('.qd-fe-dia-bt[data-dia="' + dia + '"]').closest('td');
+        r.mais = { pil: td.querySelectorAll('.qd-fe-pil').length, mais: (td.querySelector('.qd-fe-mais') || {}).textContent || '', n: qdFePorDia(qdFePessoas(), dia.slice(0, 7))[dia].length };
+        const venc = cal.querySelector('.qd-fe-vencidos');
+        r.venc = { nomes: venc.querySelectorAll('span .qd-link').length, mais: (Array.from(venc.querySelectorAll('button')).pop() || {}).textContent || '',
+          total: qdFeContagem(qdFePessoas()).vencida.length };
+        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas: [] }),
+          leitura: Object.assign({}, orig.leitura, { ferias: Object.assign({}, orig.leitura.ferias, { linhas: 0, faltam: ['matricula', 'nome'] }) }) });
+        r.semMatNome = { aba: txt(qdFerias()), card: txt(qdFeCartaoGeral()), linha: qdFeResumoLinha() };
+        DADOS = Object.assign({}, orig, { ferias: null });
+        r.semAba = txt(qdFerias());
+        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { paFim: '', limite: '' })) }) });
+        r.fichaSemPaFim = txt(qdFeFichaSecao(qdFeriasDados().lista.find((x) => x.pior.k === 'avisar').g.ref));
+      } finally { DADOS = orig; QD.feVista = 'lista'; QD.feMes = ''; QD.feDia = ''; QD.feProgramar = false; }
+      return r;
+    });
+    afirmar(maisFe.soma === maisFe.quadro, 'cada pessoa conta num lugar so: ' + maisFe.soma + ' x ' + maisFe.quadro);
+    afirmar(maisFe.saiu.length >= 1 && maisFe.saiu.every((x) => x.tag && /Consta como desligado/.test(x.rot)) && !maisFe.etiquetaSobrando &&
+      maisFe.saiuNoResumo >= 1 && maisFe.resumoSaiu === maisFe.saiuNoResumo, 'quem consta como desligado: ' + JSON.stringify([maisFe.saiu, maisFe.resumoSaiu, maisFe.saiuNoResumo]));
+    afirmar(maisFe.mais.n >= 5 && maisFe.mais.pil === 2 && maisFe.mais.mais === '+' + (maisFe.mais.n - 2) + ' no dia', 'muita gente no mesmo dia (2 pilulas e "+N no dia"): ' + JSON.stringify(maisFe.mais));
+    afirmar(maisFe.venc.total === 8 && maisFe.venc.nomes === 6 && maisFe.venc.mais === 'e mais 2 na lista', 'faixa do prazo vencido cortada: ' + JSON.stringify(maisFe.venc));
+    afirmar(/^O que fazer e até quando Não achei as colunas Matricula e Nome na aba FÉRIAS Sem elas, nenhuma linha foi lida\./.test(maisFe.semMatNome.aba) &&
+      /A aba FÉRIAS está sem as colunas Matricula e Nome: o GSL não sabe o prazo de ninguém\./.test(maisFe.semMatNome.card) &&
+      maisFe.semMatNome.linha === 'Férias: a aba FÉRIAS está sem as colunas Matricula e Nome (o GSL não sabe os prazos)', 'sem Matricula e Nome: ' + JSON.stringify(maisFe.semMatNome));
+    afirmar(/^O que fazer e até quando Falta a aba FÉRIAS na planilha Extraia as férias do sistema \(com Matricula, Nome, pa_fim e DTA_LIMITEMAX\)/.test(maisFe.semAba), 'sem a aba FÉRIAS: ' + maisFe.semAba);
+    afirmar(/Avisar até \d\d\/\d\d\/\d{4} [a-zá]{3}/.test(maisFe.fichaSemPaFim) && /Sair até \(data limite\) \d\d\/\d\d\/\d{4} [a-zá]{3} · em \d+ dias/.test(maisFe.fichaSemPaFim) &&
+      !/Pode tirar desde/.test(maisFe.fichaSemPaFim), 'ficha sem pa_fim: ' + maisFe.fichaSemPaFim);
+    afirmar(!PROIBIDAS.test(JSON.stringify(maisFe)), 'nenhuma palavra de multa nos casos novos');
     // a barra lateral recolhe e volta; quem desenha pela largura da caixa (graficos do Aprendiz) recebe um "resize"
     await f.evaluate(() => { window.__redim = 0; window.addEventListener('resize', () => { window.__redim++; }); });
     await f.click('#lateral-alternar');

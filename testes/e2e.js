@@ -1614,6 +1614,51 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('plano de acao: selos — "novo" sai quando eu respondo (tambem de outro aparelho); o leitor de tela ouve "2 comentários, com comentário novo"; "@ você" nao fica na cancelada; sem localStorage, abrir o historico tira o "novo" ate recarregar', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321'), joao = pelaPorta(s, GERAL, GERENTE, '5555'), maria = pelaPorta(s, GERAL, COORD, '1234');
+    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const a2 = dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const a3 = dono('salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-03', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+    joao('comentarAcao', { id: a1, texto: 'Comprei as lâmpadas' });
+    joao('comentarAcao', { id: a1, texto: 'A manutenção vem quinta' });
+    joao('comentarAcao', { id: a2, texto: 'Maria, a tinta chegou' });
+    maria('comentarAcao', { id: a2, texto: 'Pinto amanhã' });                     // a Maria respondeu pelo celular
+    dono('comentarAcao', { id: a3, texto: '@Maria Souza confere a validade?', mencoes: [COORD] });
+    dono('cancelarAcao', { id: a3, motivo: 'A brigada trocou todos' });
+    // o computador do CD com o armazenamento do navegador bloqueado (cookie de terceiros)
+    const contexto = await navegador.newContext();
+    await contexto.addCookies([{ name: 'gas_sem_storage', value: '1', url: s.url }]);
+    const aba = await abrirAba(s, GERAL, { contexto });
+    await entrar(aba, COORD, '1234');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const selos = () => f.evaluate(() => Object.fromEntries([...document.querySelectorAll('.cartao-acao')].map((c) => [c.querySelector('.acao-titulo').textContent.trim(), {
+      coment: ((c.querySelector('.selo-coment') || {}).textContent || '').replace(/\s+/g, ' ').trim(), novo: !!c.querySelector('.selo-coment.novo'),
+      mencao: !!c.querySelector('.selo-mencao') }])));
+    const abrirPlano = async () => {
+      await f.evaluate(() => abrir('acoes', { situacao: 'TODAS' }));
+      await f.waitForFunction(() => paginaAtual === 'acoes' && document.querySelectorAll('.cartao-acao').length === 3, null, { timeout: 15000 });
+    };
+    await f.evaluate(() => esquecerTelas());
+    await abrirPlano();
+    let k = await selos();
+    afirmar(/ 2 comentários, com comentário novo$/.test(k['Iluminação do Flow'].coment) && k['Iluminação do Flow'].novo, 'dois, um deles novo: ' + JSON.stringify(k['Iluminação do Flow']));
+    afirmar(/ 2 comentários$/.test(k['Pintura da faixa'].coment) && !k['Pintura da faixa'].novo, 'respondi depois do comentario: sem "novo" — ' + JSON.stringify(k['Pintura da faixa']));
+    afirmar(k['Extintores vencidos'] && !k['Extintores vencidos'].mencao, 'cancelada (ninguem comenta): sem "@ você" — ' + JSON.stringify(k['Extintores vencidos']));
+    await f.click('.cartao-acao:has-text("Iluminação do Flow") .selo-coment');
+    await f.waitForSelector('#janela:not(.oculto) #cm-texto', { timeout: 10000 });
+    await f.evaluate(() => fecharJanela());
+    k = await selos();
+    afirmar(/ 2 comentários$/.test(k['Iluminação do Flow'].coment) && !k['Iluminação do Flow'].novo, 'abrir tira o "novo" (e o texto do leitor): ' + JSON.stringify(k['Iluminação do Flow']));
+    await f.evaluate(() => abrir('modulos'));
+    await aba.page.waitForTimeout(300);
+    await abrirPlano();
+    afirmar(!(await selos())['Iluminação do Flow'].novo, 'de volta a tela, sem localStorage: continua visto');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('plano de acao: "@" sugere pessoas (setas, Enter, Tab, Esc), botao "@ Marcar pessoa", grava; cada marcado recebe o e-mail e o historico destaca o @Nome', async () => {
     const s = await subir(); instalarComPessoas(s);
     cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
@@ -1687,7 +1732,204 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
-  await cenario('link do e-mail de mencao (?tela=acoes&acao=ID) abre o historico depois do e-mail e PIN — tambem pela reserva (HTTP 403, acao ja concluida) e na Limpeza (aba Plano); F5 nao reabre; acao que sumiu so avisa', async () => {
+  /* A lista do "@" na revisao de 19/10: o cursor que anda, o "@ " sem nome, a lista inteira, nome composto, "@Pedro," e o @Nome apagado. */
+  await cenario('plano de acao: "@" — com o cursor fora do @ (Home, setas, clique) o Enter quebra a linha e o Tab sai, sem marcar; "@ " nao abre a lista; "@" sozinho lista todos e as setas rolam a lista; nome composto e "@Pedro,"; apagar o @Nome desmarca e so quem ficou recebe o e-mail', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const RIBEIRO = 'ana.paula.ribeiro@bartofil.com.br', CARLOS = 'carlos.mendes@bartofil.com.br';
+    [[PEDRO, 'Pedro Alves', 'B'], [CARLOS, 'Carlos Mendes', 'B'], [RIBEIRO, 'Ana Paula Ribeiro', 'C'], ['ana.paula@bartofil.com.br', 'Ana Paula', 'A'],
+     ['helena.isidoro@bartofil.com.br', 'Helena Isidoro', 'C'], ['bruno.lima@bartofil.com.br', 'Bruno Lima', 'A'],
+     ['igor.santos@bartofil.com.br', 'Igor Santos', 'B'], ['otavio.reis@bartofil.com.br', 'Otávio Reis', 'C']]
+      .forEach(([email, nome, turno]) => cadastrar(s, email, nome, 'COORDENADOR', turno, 'Coordenador'));
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.cartao-acao button:has-text("Comentários")', { timeout: 15000 });
+    const comentarDoZero = async () => { await f.evaluate((x) => { fecharJanela(); abrirComentarios(x, true); }, id); await f.click('#cm-texto'); };
+    const teclar = (t) => aba.page.keyboard.type(t, { delay: 20 });
+    const listaAberta = () => f.waitForSelector('#cm-sugestoes .mencao-opcao', { timeout: 5000 });
+    const campo = () => f.evaluate(() => ({ texto: el('cm-texto').value, escolhidas: MENCAO.escolhidas.slice(), aberta: !el('cm-sugestoes').classList.contains('oculto'),
+      foco: document.activeElement === el('cm-texto'), opcoes: [...document.querySelectorAll('#cm-sugestoes [role="option"] b')].map((b) => b.textContent),
+      emails: MENCAO.lista.map((p) => p.email), vazia: !!document.querySelector('#cm-sugestoes .mencao-vazia'),
+      linha: el('cm-marcados').textContent.replace(/\s+/g, ' ').trim() }));
+    // (1) o cursor saiu do "@...": Home + Enter quebra a linha — nada duplicado, ninguem marcado
+    await comentarDoZero();
+    await teclar('Lâmpadas compradas. Falta @Hel');
+    await listaAberta();
+    await aba.page.keyboard.press('Home');
+    let c = await campo();
+    afirmar(!c.aberta, 'o Home fecha a lista: ' + JSON.stringify(c));
+    await aba.page.keyboard.press('Enter');
+    c = await campo();
+    afirmar(c.texto === '\nLâmpadas compradas. Falta @Hel' && !c.escolhidas.length && !c.linha, 'Home + Enter: ' + JSON.stringify(c));
+    // setas para dentro do "@..." + Tab: o Tab sai do campo e nao sobra pedaco do nome
+    await comentarDoZero();
+    await teclar('Oi @Hel');
+    await listaAberta();
+    for (let i = 0; i < 3; i++) await aba.page.keyboard.press('ArrowLeft');
+    await aba.page.keyboard.press('Tab');
+    c = await campo();
+    afirmar(c.texto === 'Oi @Hel' && !c.escolhidas.length && !c.foco, 'setas + Tab: ' + JSON.stringify(c));
+    // clique (ou toque) no comeco do texto com a lista aberta: ela fecha, e o Enter quebra a linha ali
+    await comentarDoZero();
+    await teclar('Troca feita na quinta, @ped');
+    await listaAberta();
+    await f.click('#cm-texto', { position: { x: 3, y: 8 } });
+    c = await campo();
+    afirmar(!c.aberta, 'o clique no texto fecha a lista: ' + JSON.stringify(c));
+    await aba.page.keyboard.press('Enter');
+    c = await campo();
+    afirmar(c.texto === '\nTroca feita na quinta, @ped' && !c.escolhidas.length, 'clique + Enter: ' + JSON.stringify(c));
+    // (2) "@ " (espaco logo depois do @) nao e marcacao: o Enter quebra a linha
+    await comentarDoZero();
+    await teclar('Reunião amanhã @ ');
+    c = await campo();
+    afirmar(!c.aberta, '"@ " nao abre a lista: ' + JSON.stringify(c));
+    await aba.page.keyboard.press('Enter');
+    c = await campo();
+    afirmar(c.texto === 'Reunião amanhã @ \n' && !c.escolhidas.length, '"@ " + Enter: ' + JSON.stringify(c));
+    // (3) "@" sozinho (o botao): todos do plano menos quem escreve — mais de 8 — e as setas levam a lista junto
+    await comentarDoZero();
+    await f.click('.mencao-barra .botao-texto');
+    await listaAberta();
+    c = await campo();
+    afirmar(c.opcoes.length === 11 && !c.emails.includes(DONO), 'a lista inteira (11 pessoas): ' + c.opcoes.join());
+    for (let i = 0; i < 10; i++) await aba.page.keyboard.press('ArrowDown');
+    const rolou = await f.evaluate(() => { const cx = el('cm-sugestoes'), a = cx.querySelector('.mencao-opcao.ativa');
+      return { ativa: a.querySelector('b').textContent, topo: cx.scrollTop, visivel: a.offsetTop >= cx.scrollTop && a.offsetTop + a.offsetHeight <= cx.scrollTop + cx.clientHeight }; });
+    afirmar(rolou.topo > 0 && rolou.visivel && rolou.ativa === c.opcoes[10], 'a ativa fica a vista: ' + JSON.stringify(rolou));
+    await aba.page.keyboard.press('Escape');
+    // (4) nome composto (ate 4 palavras) e "@Pedro,": a lista continua e o nome entra inteiro, com a virgula
+    await comentarDoZero();
+    await teclar('Lâmpadas: @Ana Paula R');
+    c = await campo();
+    afirmar(c.aberta && c.opcoes.join() === 'Ana Paula Ribeiro', 'nome composto: ' + JSON.stringify(c));
+    await aba.page.keyboard.press('Enter');
+    await teclar('@Pedro,');
+    c = await campo();
+    afirmar(c.aberta && !c.vazia && c.opcoes.join() === 'Pedro Alves', '"@Pedro," ainda acha o Pedro: ' + JSON.stringify(c));
+    await aba.page.keyboard.press('Enter');
+    // (5) apagar o @Nome desmarca: a Carla escolhida por engano, apagada com Backspace; depois o Carlos
+    await teclar('e @carl');
+    await listaAberta();
+    await aba.page.keyboard.press('Enter');
+    c = await campo();
+    afirmar(c.escolhidas.includes(CONSULTA), 'a Carla entrou: ' + JSON.stringify(c));
+    for (let i = 0; i < '@Carla Dias '.length; i++) await aba.page.keyboard.press('Backspace');
+    c = await campo();
+    afirmar(!c.escolhidas.includes(CONSULTA) && !/Carla/.test(c.linha), 'o @Nome apagado sai da linha: ' + JSON.stringify(c));
+    await teclar('@carlo');
+    await listaAberta();
+    await aba.page.keyboard.press('Enter');
+    c = await campo();
+    afirmar(c.texto === 'Lâmpadas: @Ana Paula Ribeiro @Pedro Alves, e @Carlos Mendes ' && c.escolhidas.join() === [RIBEIRO, PEDRO, CARLOS].join(), 'texto e marcados: ' + JSON.stringify(c));
+    const antes = s.mundo.emails.length;
+    await f.click('#janela-rodape .botao >> text=Registrar comentário');
+    await f.waitForFunction(() => document.getElementById('janela').classList.contains('oculto'), null, { timeout: 15000 });
+    const para = s.mundo.emails.slice(antes).map((m) => m.to).sort();
+    afirmar(para.join() === [RIBEIRO, PEDRO, CARLOS].sort().join(), 'so quem ficou na linha recebe: ' + para.join());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('plano de acao: "@Nome" escrito inteiro sem escolher na lista — o 1o clique em Registrar poe a pessoa em "Vai avisar" com a nota e nao grava; o 2o grava e avisa; quem saiu pelo × fica fora', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const RIBEIRO = 'ana.paula.ribeiro@bartofil.com.br';
+    cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
+    cadastrar(s, RIBEIRO, 'Ana Paula Ribeiro', 'COORDENADOR', 'C', 'Coordenadora');
+    cadastrar(s, 'ana.paula@bartofil.com.br', 'Ana Paula', 'COORDENADOR', 'A', 'Coordenadora');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, COORD, '1234');
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '1234');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.cartao-acao button:has-text("Comentários")', { timeout: 15000 });
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    await f.fill('#cm-texto', '@Pedro Alves, tem lâmpada sobrando? E a @Ana Paula Ribeiro também. @Maria Souza anota.');
+    const antes = s.mundo.emails.length, comentarios = () => s.contexto(DONO).listar('COMENTARIOS').filter((x) => x.ACAO_ID === id);
+    await f.click('#janela-rodape .botao >> text=Registrar comentário');
+    const r = await f.evaluate(() => ({ janela: !el('janela').classList.contains('oculto'), vivo: el('cm-marcados').getAttribute('aria-live'),
+      chips: [...document.querySelectorAll('#cm-marcados .mencao-chip')].map((x) => x.firstChild.textContent.trim()),
+      nota: (document.querySelector('#cm-marcados .mencao-nota') || {}).textContent }));
+    afirmar(r.janela && r.vivo === 'polite' && r.chips.join() === '@Pedro Alves,@Ana Paula Ribeiro' &&
+      r.nota === 'Você escreveu @Pedro Alves e @Ana Paula Ribeiro sem escolher na lista. As pessoas entraram em “Vai avisar por e-mail”: confira (o × tira) e clique de novo em Registrar comentário.',
+      '1o clique (quem escreve e a "Ana Paula" de dentro do nome maior ficam fora): ' + JSON.stringify(r));
+    afirmar(s.mundo.emails.length === antes && !comentarios().length, '1o clique: nada gravado nem enviado');
+    await f.click('#cm-marcados .mencao-tirar[aria-label="Não marcar Ana Paula Ribeiro"]');
+    await f.click('#janela-rodape .botao >> text=Registrar comentário');
+    await f.waitForFunction(() => document.getElementById('janela').classList.contains('oculto'), null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => el('recado').textContent) === 'Comentário registrado. 1 pessoa marcada foi avisada por e-mail.', 'recado');
+    const mails = s.mundo.emails.slice(antes);
+    afirmar(mails.map((m) => m.to).join() === PEDRO && comentarios().length === 1 && comentarios()[0].MENCOES === PEDRO,
+      '2o clique: grava e avisa so o Pedro: ' + JSON.stringify([mails.map((m) => m.to), comentarios().map((x) => x.MENCOES)]));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('plano de acao: "Editar" mostra quem foi marcado — desmarcar quem foi marcado por engano tira a pessoa da acao (so tira)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD] });
+    dono('comentarAcao', { id, texto: '@Pedro Alves @Carla Dias vejam', mencoes: [PEDRO, CONSULTA] });
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.cartao-acao:has-text("Iluminação do Flow") button:has-text("Editar")', { timeout: 15000 });
+    await f.click('.cartao-acao:has-text("Pintura da faixa") button:has-text("Editar")');
+    afirmar(!(await f.$('.janela .mencao-marcados')), 'sem marcados, o formulario nao mostra a caixa');
+    await f.evaluate(() => fecharJanela());
+    await f.click('.cartao-acao:has-text("Iluminação do Flow") button:has-text("Editar")');
+    const form = await f.evaluate(() => { const fs = document.querySelector('.janela fieldset.mencao-marcados');
+      return fs && { legenda: fs.querySelector('legend').textContent, marcados: [...fs.querySelectorAll('.ac-marcado')].map((x) => x.value + (x.checked ? ':sim' : ':nao')),
+        nomes: [...fs.querySelectorAll('label')].map((l) => l.textContent.trim()), dica: fs.querySelector('.dica').textContent }; });
+    afirmar(form && form.legenda === 'Marcados (veem e comentam esta ação)' && form.marcados.join() === PEDRO + ':sim,' + CONSULTA + ':sim' &&
+      form.nomes.join() === 'Pedro Alves,Carla Dias' && form.dica === 'Desmarque quem foi marcado por engano: a pessoa deixa de ver esta ação.', 'formulario: ' + JSON.stringify(form));
+    await f.uncheck('.ac-marcado[value="' + PEDRO + '"]');
+    await f.click('#janela-rodape .botao >> text=Salvar');
+    await f.waitForFunction(() => document.getElementById('janela').classList.contains('oculto'), null, { timeout: 15000 });
+    await f.waitForFunction(() => /Marcados: Carla Dias/.test(document.querySelector('.cartao-acao').textContent), null, { timeout: 15000 });
+    afirmar(s.contexto(DONO).obter('ACOES', id).MARCADOS === CONSULTA, 'MARCADOS: ' + s.contexto(DONO).obter('ACOES', id).MARCADOS);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('plano de acao: painel Oculto — o "@" so oferece quem abre o painel (o administrador); o campo Responsaveis continua com todos', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, 'bia.admin@bartofil.com.br', 'Bia Admin', 'ADMIN', '', 'Administradora');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    dono('alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'OCULTO' });
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.cartao-acao button:has-text("Comentários")', { timeout: 15000 });
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    await f.click('.mencao-barra .botao-texto');
+    await f.waitForSelector('#cm-sugestoes .mencao-opcao', { timeout: 5000 });
+    const opcoes = await f.evaluate(() => [...document.querySelectorAll('#cm-sugestoes [role="option"] b')].map((b) => b.textContent));
+    afirmar(opcoes.join() === 'Bia Admin', 'so quem abre o painel Oculto: ' + opcoes.join());
+    await f.evaluate(() => { fecharJanela(); formAcao(); });
+    const resp = await f.evaluate(() => [...document.querySelectorAll('.ac-resp')].map((x) => x.value));
+    afirmar(resp.includes(COORD) && resp.includes(GERENTE), 'responsaveis com todos: ' + resp.join());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('link do e-mail de mencao (?filial=FSA&tela=acoes&acao=ID) abre o historico depois do e-mail e PIN, sem a escolha de filial para quem tem duas — tambem pela reserva (HTTP 403, acao ja concluida) e na Limpeza (aba Plano); F5 nao reabre; acao que sumiu so avisa, com a filial', async () => {
     const s = await subir(); instalarComPessoas(s);
     cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
     cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
@@ -1701,9 +1943,11 @@ async function rodar() {
     dono('comentarAcao', { id: a2, texto: '@Pedro Alves confere a validade?', mencoes: [PEDRO] });
     dono('comentarAcaoLimpeza', { id: l1, texto: '@Carla Dias confere na auditoria?', mencoes: [CONSULTA] });
     dono('comentarAcaoLimpeza', { id: l2, texto: '@Carla Dias veja', mencoes: [CONSULTA] });
+    // Pedro e Carla entram em duas filiais: o link leva a filial (tambem a principal), senao cairiam na escolha da filial
+    dono('salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador - BA', codigo: 'SSA', paineis: { calendario: 'ATIVO', limpeza: 'ATIVO' } });
     const q1 = linkDaMencao(s, PEDRO, /Iluminação/), q2 = linkDaMencao(s, PEDRO, /Extintores/);
     const ql1 = linkDaMencao(s, CONSULTA, /Banheiro/), ql2 = linkDaMencao(s, CONSULTA, /Lixeira/);
-    afirmar(q1 === '?tela=acoes&acao=' + a1 && ql1 === '?tela=limpeza&acao=' + l1, 'links: ' + q1 + ' ' + ql1);
+    afirmar(q1 === '?filial=FSA&tela=acoes&acao=' + a1 && ql1 === '?filial=FSA&tela=limpeza&acao=' + l1, 'links: ' + q1 + ' ' + ql1);
     const janela = (f) => f.evaluate(() => ({ titulo: el('janela-titulo').textContent, situacao: !!el('cm-sit'), pagina: paginaAtual,
       filtro: paginaAtual === 'acoes' ? DADOS.filtro.situacao : PLANO.local.situacao, abaLp: typeof ABA_LP === 'undefined' ? '' : ABA_LP }));
     // (1) canal normal: depois do e-mail e do PIN o historico da acao abre sozinho; o endereco perde o "acao="
@@ -1746,15 +1990,74 @@ async function rodar() {
     st = await janela(f);
     const ativa = await f.evaluate(() => (document.querySelector('#pagina .abas .aba.ativa') || { dataset: {} }).dataset.aba);
     afirmar(/Banheiro da central sem papel/.test(st.titulo) && st.pagina === 'limpeza' && st.abaLp === 'plano' && ativa === 'plano', 'limpeza: ' + JSON.stringify([st, ativa]));
-    // (4) o link de uma acao que sumiu (excluida): so o aviso, sem janela
+    // (4) o link de uma acao que sumiu (excluida): so o aviso, sem janela — com a filial, para quem tem mais de uma
     dono('excluirAcaoLimpeza', { id: l2 });
     await aba.page.goto(s.url + ql2, { waitUntil: 'domcontentloaded' });
     await esperarTela(aba, ['aplicacao', 'entrar']);
     f = await frame(aba);
-    await f.waitForFunction(() => /Esta ação não está mais disponível para você\./.test(el('recado').textContent), null, { timeout: 20000 });
+    await f.waitForFunction(() => el('recado').textContent === 'Esta ação não está nesta filial (CD Feira de Santana) ou não está mais disponível para você.', null, { timeout: 20000 });
     afirmar(await f.evaluate(() => el('janela').classList.contains('oculto')), 'sem janela para a acao que sumiu');
     afirmar(!aba.erros.length, 'erros (limpeza): ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('link de mencao: so o plano da tela do link abre a acao — o outro plano nao avisa "não está mais disponível", e abrir outra tela descarta o link', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [DONO] }).id;
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const estado = () => f.evaluate(() => ({ recado: el('recado').textContent, janela: !el('janela').classList.contains('oculto'), link: ACAO_DO_LINK,
+      aba: typeof ABA_LP === 'undefined' ? '' : ABA_LP }));
+    // o link da Limpeza ficou pendente (a Limpeza nao chegou a abrir) e a pessoa foi para o Plano de Acao do Calendario
+    await f.evaluate((id) => { ACAO_DO_LINK = { id: id, tela: 'limpeza' }; el('recado').textContent = ''; esquecerTelas(); abrir('acoes'); }, l1);
+    await f.waitForFunction(paginaPronta, 'acoes', { timeout: 15000 });
+    await aba.page.waitForTimeout(300);
+    let st = await estado();
+    afirmar(!st.recado && !st.janela && st.link === null, 'o Calendario nao usa (nem guarda) o link da Limpeza: ' + JSON.stringify(st));
+    await f.evaluate(() => { esquecerTelas(); abrir('limpeza'); });
+    await f.waitForFunction(paginaPronta, 'limpeza', { timeout: 15000 });
+    await aba.page.waitForTimeout(300);
+    st = await estado();
+    afirmar(!st.janela && st.aba === 'gestao', 'a Limpeza abre como sempre (o link foi descartado): ' + JSON.stringify(st));
+    // na tela do link, abre o historico (aba Plano)
+    await f.evaluate((id) => { ACAO_DO_LINK = { id: id, tela: 'limpeza' }; esquecerTelas(); abrir('limpeza'); }, l1);
+    await f.waitForSelector('#janela:not(.oculto) #cm-texto', { timeout: 15000 });
+    st = await estado();
+    afirmar(st.aba === 'plano' && st.link === null && /Banheiro da central sem papel/.test(await f.evaluate(() => el('janela-titulo').textContent)), 'limpeza: ' + JSON.stringify(st));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('implantacao pela metade: App.html de antes com o Paineis.html desta versao — a Limpeza CD abre (Gestao e Plano), so sem o selo', async () => {
+    const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+    let velho;
+    try { velho = execSync('git show 2b60bb2:GSL/App.html', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+    catch (e) { console.log('        (sem o historico do git: cenario pulado)'); return; }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-app-velho-'));
+    try {
+      fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+      fs.writeFileSync(path.join(tmp, 'App.html'), velho);
+      const s = await subir({ pasta: tmp }); instalarComPessoas(s);
+      const dono = pelaPorta(s, DONO, DONO, '4321');
+      const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [DONO] }).id;
+      dono('comentarAcaoLimpeza', { id: l1, texto: 'Papel pedido ao almoxarifado' });
+      const aba = await abrirAba(s, DONO);
+      await entrar(aba, DONO, '4321');
+      await esperarTela(aba, ['aplicacao']);
+      const f = await frame(aba);
+      await f.evaluate(() => { esquecerTelas(); abrir('limpeza'); });
+      await f.waitForFunction(() => paginaAtual === 'limpeza' && !/Carregando/.test(el('pagina').innerText), null, { timeout: 15000 });
+      const gestao = await f.evaluate(() => el('pagina').innerText);
+      afirmar(!/Não consegui montar/.test(gestao) && /Banheiro da central sem papel/.test(gestao), 'Gestao: ' + gestao.slice(0, 200));
+      await f.evaluate(() => trocarAbaLP('plano'));
+      await f.waitForSelector('#conteudo-lp .cartao-acao', { timeout: 10000 });
+      afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+      await aba.contexto.close(); await s.fechar();
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
   await cenario('celular 390 px: os selos ("@ você", comentario "novo" e situacao) descem para baixo do titulo sem vazar do cartao; o "novo" fica legivel no tema escuro', async () => {
@@ -1797,6 +2100,35 @@ async function rodar() {
     const novo = await f.$eval('.selo-coment.novo', (b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color]);
     afirmar(!m.fora.length && m.rolagem <= 0 && novo.join() === 'rgb(79, 70, 229),rgb(255, 255, 255)', 'escuro: ' + JSON.stringify([m, novo]));
     if (process.env.FOTO_CELULAR) await aba.page.screenshot({ path: process.env.FOTO_CELULAR + '-escuro.png' });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('celular (toque): o × de cada pessoa marcada tem 32 px para o dedo, o "@ Marcar pessoa" tambem, e os chips nao ficam colados', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    const contexto = await navegador.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.cartao-acao button:has-text("Comentários")', { timeout: 15000 });
+    await f.tap('.cartao-acao button:has-text("Comentários")');
+    await f.tap('#cm-texto');
+    for (const parte of ['@ped', '@joa']) {
+      await aba.page.keyboard.type(parte, { delay: 20 });
+      await f.waitForSelector('#cm-sugestoes .mencao-opcao', { timeout: 5000 });
+      await aba.page.keyboard.press('Enter');
+    }
+    const m = await f.evaluate(() => {
+      const caixa = (x) => { const r = x.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; };
+      return { toque: matchMedia('(pointer: coarse)').matches, tirar: [...document.querySelectorAll('#cm-marcados .mencao-tirar')].map(caixa),
+        botao: caixa(document.querySelector('.mencao-barra .botao-texto')), margem: getComputedStyle(document.querySelector('#cm-marcados .mencao-chip')).marginRight };
+    });
+    afirmar(m.toque && m.tirar.length === 2 && m.tirar.every(([l, a]) => l >= 32 && a >= 32) && m.botao[1] >= 32 && parseFloat(m.margem) >= 6, 'alvos: ' + JSON.stringify(m));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });
@@ -1909,6 +2241,35 @@ async function rodar() {
     await esperarEstado(aba, (x) => /não saiu para: joana\.invalido/.test(x.recado), 10000, 'o aviso do e-mail que nao saiu');
     const linha = s.contexto(DONO).listar('COMENTARIOS').find((c) => /Vejam isto/.test(c.TEXTO || ''));
     afirmar(linha && linha.TEXTO === 'Vejam isto @Maria Souza e @Joana Prado' && linha.MENCOES === COORD + ',joana.invalido@bartofil.com.br', 'comentario: ' + JSON.stringify(linha && [linha.TEXTO, linha.MENCOES]));
+    afirmar(s.mundo.emails.some((m) => m.to === COORD && /marcou você numa ação: Iluminação do Flow$/.test(m.subject)), 'a Maria recebeu o aviso');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal barrado: "@Nome" escrito sem escolher na lista — o 1o clique so poe a pessoa em "Vai avisar" (nenhum POST); o 2o clique grava pela pagina (1 POST) e avisa', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const gerente = pelaPorta(s, GERAL, GERENTE, '5555');
+    gerente('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+    const aba = await abrirAbaReal(s, GERAL, { bloqueio403: '1', atraso: 1500, atrasoPost: 800 });
+    await entrarReal(aba, GERENTE, '5555');
+    await esperarEstado(aba, (x) => x.tela === 'aplicacao' && x.pos.cardCalendario, 30000, 'menu');
+    await clicarEm(aba, 'cardCalendario');
+    await clicarEm(aba, 'menuAcoes');
+    await esperarEstado(aba, (x) => x.coment === 0 && x.pos.comentarios, 15000, 'cartao da acao');
+    await clicarEm(aba, 'comentarios');
+    await clicarEm(aba, 'cmTexto');
+    await aba.page.keyboard.type('Vejam isto, @Maria Souza.', { delay: 20 });
+    marcar(aba);
+    await clicarEm(aba, 'registrar');
+    await new Promise((ok) => setTimeout(ok, 800));
+    let d = desdeMarca(aba);
+    afirmar(d.posts === 0 && /Iluminação do Flow/.test(aba.estado.janela), '1o clique: so revisa, sem POST: ' + JSON.stringify([d, aba.estado.janela]));
+    await clicarEm(aba, 'registrar');
+    await esperarEstado(aba, (x) => x.coment === 1, 15000, 'comentario gravado');
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((f) => f !== 'sondarCanal').length, '2o clique: gravou pela pagina: ' + JSON.stringify(d));
+    const linha = s.contexto(DONO).listar('COMENTARIOS').find((c) => /Vejam isto/.test(c.TEXTO || ''));
+    afirmar(linha && linha.MENCOES === COORD, 'marcou a Maria: ' + JSON.stringify(linha && [linha.TEXTO, linha.MENCOES]));
     afirmar(s.mundo.emails.some((m) => m.to === COORD && /marcou você numa ação: Iluminação do Flow$/.test(m.subject)), 'a Maria recebeu o aviso');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();

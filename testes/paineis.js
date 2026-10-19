@@ -1588,6 +1588,25 @@ caso('comentarios: concluir, reabrir e cancelar SEM texto sao registros automati
   afirmar(h2.length === 4 && h2.every((c) => c.automatico === false), 'escritos: ' + JSON.stringify(h2.map((c) => [c.tipo, c.texto, c.automatico])));
 });
 
+caso('comentarios: os registros que a Limpeza antiga (LP_ACOES) escrevia sozinha — "Situação alterada ... (edição da ação)." e "Concluída em dd/mm/aaaa" sem evidencia — tambem nao contam', () => {
+  const m = mundo(); let c = ctx(m);
+  const [idL] = c.inserirVarios('LP_ACOES', [
+    { DATA: '2026-10-02', TURNO: 'A', ORIGEM: 'Vistoria setorial', ZONA: 'Z7', LOCAL: 'Banheiro da central', PROBLEMA: 'Sem papel', CRITICIDADE: 'Média',
+      ACAO: 'Repor', RESPONSAVEL: 'Equipe do turno', PRAZO: '2026-10-09', STATUS: 'Concluída', FECHAMENTO: '2026-10-06', EVIDENCIA: '', CUSTO: '', DEPENDE: '' }
+  ], 'antigo@bartofil.com.br');
+  [['Situação alterada de Aberta para Em andamento (edição da ação).', 'STATUS'], ['Concluída em 05/10/2026', 'CONCLUSAO'],
+   ['Situação alterada de Concluída para Cancelada (edição da ação).', 'CANCELAMENTO'],
+   ['Concluída em 06/10/2026 · evidência: foto do dispenser cheio', 'CONCLUSAO'], ['Concluída em 06/10/2026', 'COMENTARIO']
+  ].forEach(([texto, tipo]) => {
+    c = ctx(m); c.inserir('COMENTARIOS', { ORIGEM: 'LP_ACOES', ACAO_ID: idL, TEXTO: texto, AUTOR: GERENTE, AUTOR_NOME: 'João Lima', TIPO: tipo }, GERENTE);
+  });
+  c = ctx(m); c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.7');
+  c = ctx(m); c.garantirEsquema();                                   // a atualizacao passa a acao para o Plano de Acao
+  const a = tela(m, entrar(m, GERENTE, '5555'), 'limpeza').plano.lista.find((x) => x.id === idL);
+  afirmar(a && JSON.stringify(a.comentarios.map((x) => x.automatico)) === '[true,true,true,false,false]',
+    'automaticos: ' + JSON.stringify(a && a.comentarios.map((x) => [x.tipo, x.texto, x.automatico])));
+});
+
 caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail por marcado (o autor nao) com o comentario escapado e o link que abre a acao; o recado conta os avisados', () => {
   const { m } = mundoComMencoes();
   const ger = entrar(m, GERENTE, '5555');
@@ -1621,7 +1640,23 @@ caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail p
     /Z7 · Banheiro da central/.test(ml.htmlBody) && new RegExp('[?&]tela=limpeza&acao=' + idL + '$').test(linkDoEmail(ml)), 'e-mail da limpeza: ' + ml.subject + ' ' + linkDoEmail(ml));
 });
 
-caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordenador na Limpeza, so de outra filial, inativo, sem cadastro), recusa o comentario inteiro — nada gravado, enviado ou subido', () => {
+caso('marcar pessoa: o e-mail guarda as linhas do comentario; o link leva a filial (tambem a principal); "Responder" vai para quem marcou e o texto pede a resposta pelo botao', () => {
+  const { m } = mundoComMencoes();
+  const ger = entrar(m, GERENTE, '5555');
+  const id = acao(m, ger, 'salvarAcao', { acao: 'Extintores', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const e0 = m.emails.length;
+  acao(m, ger, 'comentarAcao', { id, texto: '@Pedro Alves preciso de:\n- 2 extintores\r\n- 1 mangueira <b>já</b>', mencoes: [PEDRO] });
+  const mp = m.emails.slice(e0).find((e) => e.to === PEDRO);
+  afirmar(/@Pedro Alves preciso de:<br>- 2 extintores<br>- 1 mangueira &lt;b&gt;já&lt;\/b&gt;<\/div>/.test(mp.htmlBody), 'linhas: ' + mp.htmlBody.slice(mp.htmlBody.indexOf('Comentário:'), mp.htmlBody.indexOf('Comentário:') + 160));
+  afirmar(new RegExp('\\?filial=' + ger.f + '&tela=acoes&acao=' + id + '$').test(linkDoEmail(mp)), 'link com a filial principal: ' + linkDoEmail(mp));
+  afirmar(mp.replyTo === GERENTE, 'responder vai para quem marcou: ' + mp.replyTo);
+  const dica = mp.htmlBody.indexOf('Responda pelo botão abaixo: a resposta fica no histórico da ação.');
+  afirmar(dica !== -1 && dica < mp.htmlBody.indexOf('Abrir a ação no GSL'), 'a dica vem antes do botao');
+  const nova = m.emails.find((e) => e.to === COORD && /^Nova ação: Extintores/.test(e.subject));
+  afirmar(nova && !nova.replyTo && !/filial=/.test(linkDoEmail(nova)), 'o aviso de acao nova continua como era: ' + JSON.stringify(nova && [nova.replyTo, linkDoEmail(nova)]));
+});
+
+caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordenador na Limpeza, so de outra filial, inativo, sem cadastro), recusa o comentario inteiro — nada gravado, enviado ou subido; a recusa so da nome de quem e desta filial', () => {
   const { m, adm } = mundoComMencoes();
   acao(m, adm, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO' } });
   acao(m, adm, 'salvarUsuario', { email: 'davi@bartofil.com.br', nome: 'Davi Souza', perfil: 'COORDENADOR', turno: 'C', filiais: 'SSA', papel: 'Coord' });
@@ -1632,9 +1667,9 @@ caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordena
   const recusa = (nome, id, mencoes) => erroDe(() => acao(m, adm, nome, { id, texto: 'Vejam isto', mencoes, fotos: [foto(1)] }));
   const casos = [
     ['comentarAcaoLimpeza', idL, [COORD], 'Não dá para marcar quem não abre o Plano de Ação da Limpeza nesta filial: Maria Souza.'],
-    ['comentarAcao', idC, ['davi@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Davi Souza.'],
+    ['comentarAcao', idC, ['davi@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: davi@bartofil.com.br.'],
     ['comentarAcao', idC, [PEDRO, 'ines@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Inês Prado.'],
-    ['comentarAcao', idC, ['fulano.tal@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Fulano Tal.'],
+    ['comentarAcao', idC, ['fulano.tal@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: fulano.tal@bartofil.com.br.'],
     ['comentarAcao', idC, Array.from({ length: 11 }, (x, i) => 'p' + i + '@bartofil.com.br'), 'Marque no máximo 10 pessoas por comentário.']
   ];
   casos.forEach(([nome, id, mencoes, msg]) => {
@@ -1644,6 +1679,19 @@ caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordena
   const c = ctx(m);
   afirmar(c.listar('COMENTARIOS').length === n0 && m.emails.length === e0 && m.arquivos.size === d0, 'nada gravado, enviado ou subido');
   afirmar(!c.obter('ACOES', idC).MARCADOS && !c.obter('ACOES', idL).MARCADOS, 'ninguem marcado');
+});
+
+caso('marcar pessoa: a marcacao so e conferida depois da acao e de quem comenta — id inventado, acao alheia ou cancelada nao viram consulta de quem tem cadastro', () => {
+  const { m, adm } = mundoComMencoes();
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const cancelada = acao(m, adm, 'salvarAcao', { acao: 'Pintura', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  acao(m, adm, 'cancelarAcao', { id: cancelada });
+  const pedro = entrar(m, PEDRO, '2222'), maria = entrar(m, COORD, '1234');
+  // a supervisora da limpeza nao abre este plano; o fulano nem tem cadastro: antes a recusa dizia os nomes
+  const sonda = (s, idAcao) => erroDe(() => acao(m, s, 'comentarAcao', { id: idAcao, texto: 'x', mencoes: [SUP, 'fulano.tal@bartofil.com.br'] }));
+  const respostas = [sonda(pedro, 'ACO-NAO-EXISTE'), sonda(pedro, id), sonda(maria, cancelada)];
+  afirmar(/Ação não encontrada/.test(respostas[0]) && /Só os responsáveis/.test(respostas[1]) && /Esta ação foi cancelada/.test(respostas[2]), 'recusas: ' + respostas.join(' | '));
+  afirmar(!respostas.some((r) => /Sueli|Fulano|marcar/.test(r)), 'nenhum nome: ' + respostas.join(' | '));
 });
 
 caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em aberto, bolinha e foto) e a responder — sem concluir nem mudar a situacao; "Sob sua responsabilidade" nao muda; editar a acao mantem os marcados', () => {
@@ -1674,6 +1722,48 @@ caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em 
   afirmar(ctx(m).obter('ACOES', id).MARCADOS === PEDRO && tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'editar a acao mantem o marcado');
   acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, PEDRO] });
   afirmar(!tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id).marcados.length, 'virou responsavel: sai de "Marcados" (sem repetir no cartao)');
+});
+
+caso('desmarcar (Editar a acao): a gestao tira quem foi marcado por engano — a pessoa deixa de ver e de comentar; ninguem entra por ali; tela antiga nao mexe; quem vira responsavel sai dos marcados e nao volta', () => {
+  const { m, adm } = mundoComMencoes();
+  const base = { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] };
+  const id = acao(m, adm, 'salvarAcao', base).id;
+  const editar = (extra) => acao(m, adm, 'salvarAcao', Object.assign({ id }, base, extra));
+  const marcados = () => ctx(m).obter('ACOES', id).MARCADOS;
+  acao(m, adm, 'comentarAcao', { id, texto: '@Pedro Alves @Carla Dias vejam', mencoes: [PEDRO, CONSULTA] });
+  const pedro = entrar(m, PEDRO, '2222');
+  afirmar(tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'marcado, o Pedro ve a acao');
+  editar({});
+  afirmar(marcados() === PEDRO + ',' + CONSULTA, 'tela antiga (sem a lista): ninguem sai — ' + marcados());
+  editar({ desmarcados: [PEDRO, 'fulano@bartofil.com.br'] });
+  afirmar(marcados() === CONSULTA, 'desmarcou so o Pedro: ' + marcados());
+  afirmar(!tela(m, pedro, 'acoes', { situacao: 'TODAS' }).lista.some((x) => x.id === id), 'desmarcado, o Pedro nao ve mais');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id, texto: 'oi' }))), 'nem comenta');
+  editar({ desmarcados: [], marcadosEmails: [PEDRO, GERENTE], marcados: PEDRO + ',' + GERENTE, MARCADOS: PEDRO });
+  afirmar(marcados() === CONSULTA, 'ninguem entra pela edicao: ' + marcados());
+  const coord = entrar(m, COORD, '1234');
+  afirmar(/nao pode executar|não pode/i.test(erroDe(() => acao(m, coord, 'salvarAcao', Object.assign({ id, desmarcados: [CONSULTA] }, base)))) && marcados() === CONSULTA, 'so a gestao edita');
+  editar({ responsaveisEmails: [COORD, CONSULTA] });
+  afirmar(!marcados(), 'virou responsavel: sai de MARCADOS — ' + marcados());
+  editar({});
+  const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
+  afirmar(!a.marcados.length && !a.responsaveisEmails.includes(CONSULTA), 'deixou de ser responsavel e nao voltou como marcada: ' + JSON.stringify([a.marcados, a.responsaveisEmails]));
+});
+
+caso('marcar pessoa: com o painel do plano Oculto (so o administrador abre), os outros nao sao marcados — recusa com o nome, nada gravado nem enviado; continuam podendo ser responsaveis', () => {
+  const { m, adm } = mundoComMencoes();
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+  acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'OCULTO' });
+  const abre = (e) => (tela(m, adm, 'acoes').pessoas.find((p) => p.email === e) || {}).abre;
+  afirmar(abre(COORD) === false && abre(GERENTE) === false && abre(DONO) === true, 'abre: ' + JSON.stringify(tela(m, adm, 'acoes').pessoas.map((p) => [p.email, p.abre])));
+  const e0 = m.emails.length, n0 = ctx(m).listar('COMENTARIOS').length;
+  const e = erroDe(() => acao(m, adm, 'comentarAcao', { id, texto: '@Maria Souza confere?', mencoes: [COORD] }));
+  afirmar(e.endsWith(': Não dá para marcar quem não abre o Plano de Ação nesta filial: Maria Souza.'), 'recusa: ' + e);
+  afirmar(m.emails.length === e0 && ctx(m).listar('COMENTARIOS').length === n0 && !ctx(m).obter('ACOES', id).MARCADOS, 'nada gravado nem enviado');
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, COORD] });
+  afirmar(ctx(m).obter('ACOES', id).RESPONSAVEL_EMAIL === GERENTE + ',' + COORD, 'responsavel continua valendo com o painel Oculto');
+  acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'ATIVO' });
+  afirmar(/1 pessoa marcada/.test(acao(m, adm, 'comentarAcao', { id, texto: '@Pedro Alves confere?', mencoes: [PEDRO] }).recado), 'painel Ativo: marca de novo');
 });
 
 caso('marcar pessoa: quem ja via tudo (gestao, CONSULTA) entra em MARCADOS sem o "passou a acompanhar"; a CONSULTA passa a responder so naquela acao; a lista de pessoas diz quem ja ve todas', () => {
@@ -1731,6 +1821,32 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);
   afirmar(c2.obter('ACOES', id).MARCADOS === GERENTE && c2.listar('COMENTARIOS')[0].MENCOES === GERENTE, 'a mencao gravou');
+});
+
+caso('Instalacao.gs de antes (esquema 8.9, colado pela metade): marcar pessoa e recusado antes de gravar, subir foto ou mandar e-mail; sem marcar, comentar e editar a acao funcionam', () => {
+  const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+  let velho;
+  try { velho = execSync('git show 2b60bb2:GSL/Instalacao.gs', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+  catch (e) { console.log('        (sem o historico do git: caso pulado)'); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-inst-velho-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.writeFileSync(path.join(tmp, 'Instalacao.gs'), velho);
+    const m = new Mundo({ dono: DONO });
+    const run = (fn, ...a) => chamarPeloNavegador(m, tmp, { contaGoogle: DONO }, fn, a, OP);
+    afirmar(run('instalar', DONO).ok, 'instalou com o Instalacao.gs de antes');
+    const e = JSON.parse(run('entrar', DONO, '4321', '4321', '', '').valor);
+    const ag = (nome, p) => { const r = run('executarAcao', { t: e.token, f: e.filial.codigo }, nome, p); return r.ok ? JSON.parse(r.valor) : { ok: false, erro: r.erro.message }; };
+    ag('salvarUsuario', { email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+    const id = ag('salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+    const e0 = m.emails.length, d0 = m.arquivos.size;
+    const r = ag('comentarAcao', { id, texto: '@João Lima veja', mencoes: [GERENTE], fotos: [foto(1)] });
+    afirmar(r.ok === false && r.erro === 'Atualização incompleta do GSL: para marcar pessoas, o Instalacao.gs desta versão precisa estar no Apps Script. Avise o administrador do sistema.', 'recusa: ' + JSON.stringify(r));
+    const c = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); c._porta = true;
+    afirmar(!c.listar('COMENTARIOS').length && m.emails.length === e0 && m.arquivos.size === d0, 'nada gravado, enviado ou subido');
+    afirmar(ag('comentarAcao', { id, texto: 'Sem marcar ninguém' }).recado === 'Comentário registrado.', 'comentar sem marcar continua');
+    afirmar(ag('salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO], desmarcados: [GERENTE] }).recado === 'Ação atualizada.', 'editar (com a lista de desmarcados) continua');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 caso('marcar pessoa: pela porta do outro plano a acao "nao existe" — nada gravado nem enviado', () => {

@@ -193,6 +193,19 @@ const ANDAMENTOS_ACAO = ['Em andamento', 'Aguardando', 'Concluída'];
  * tela nao contam (antes "Comentarios (1)" aparecia sem ninguem ter escrito).
  */
 const TEXTOS_AUTOMATICOS = { CONCLUSAO: 'Ação concluída.', REABERTURA: 'Ação reaberta.', CANCELAMENTO: 'Ação cancelada.' };
+/*
+ * Os que a Limpeza antiga (LP_ACOES, entregas de 02/10 a 09/10) escrevia
+ * sozinha: mudar a situacao pela edicao e concluir sem evidencia. Com a
+ * evidencia ("Concluida em ... · evidencia: ...") alguem escreveu: conta.
+ */
+const AUTOMATICOS_LP_ACOES = [
+  { tipos: ['STATUS', 'CONCLUSAO', 'CANCELAMENTO'], texto: /^Situação alterada de .+ para .+ \(edição da ação\)\.$/ },
+  { tipos: ['CONCLUSAO'], texto: /^Concluída em \d{2}\/\d{2}\/\d{4}$/ }
+];
+function ehAutomatico_(origem, tipo, texto) {
+  return TEXTOS_AUTOMATICOS[tipo] === texto || (origem === 'LP_ACOES' &&
+    AUTOMATICOS_LP_ACOES.some(function (a) { return a.tipos.indexOf(tipo) !== -1 && a.texto.test(texto); }));
+}
 
 /*
  * Os comentarios das acoes da limpeza que vieram da tabela antiga (LP_ACOES)
@@ -220,7 +233,7 @@ function comentariosPorAcao_(origens) {
       tipo: tipo, texto: texto, situacao: String(c.SITUACAO || ''), depende: String(c.DEPENDE || ''),
       fotos: fotosDaCelula_(c.ANEXOS),
       mencoes: emailsDaAcao_(c.MENCOES),                    // quem foi marcado neste comentario (19/10)
-      automatico: TEXTOS_AUTOMATICOS[tipo] === texto
+      automatico: ehAutomatico_(String(c.ORIGEM || ''), tipo, texto)
     });
   });
   Object.keys(mapa).forEach(function (k) {
@@ -288,10 +301,13 @@ const MENCOES_POR_COMENTARIO = 10;
 
 /*
  * MARCAR PESSOA (19/10). Quem foi marcado no comentario, conferido antes de
- * tudo: so quem abre o modulo do plano nesta filial (a mesma lista do campo
- * Responsaveis). Fora dela o comentario inteiro e recusado — a tela so
- * oferece essa lista. Devolve as pessoas como pessoasParaAcao as da
- * (veTodas: ja enxergava a acao antes de ser marcada). Marcar a si mesmo nao conta.
+ * gravar, subir foto ou mandar e-mail: so quem abre o Plano de Acao nesta
+ * filial (a lista do campo Responsaveis, menos quem nao abre o painel dele:
+ * o Oculto e so do administrador). Fora dela o comentario inteiro e
+ * recusado — a tela so oferece essa lista. A recusa da o nome so de quem e
+ * desta filial (os outros voltam pelo e-mail): ela nao e consulta ao
+ * cadastro mestre. Devolve as pessoas como pessoasParaAcao as da (veTodas:
+ * ja enxergava a acao antes de ser marcada). Marcar a si mesmo nao conta.
  */
 function mencoesDoPedido_(plano, usuario, params) {
   const eu = String(usuario.email || '').toLowerCase().trim();
@@ -299,13 +315,18 @@ function mencoesDoPedido_(plano, usuario, params) {
     .filter(function (e) { return e !== eu; });
   if (emails.length > MENCOES_POR_COMENTARIO) throw new Error('Marque no máximo ' + MENCOES_POR_COMENTARIO + ' pessoas por comentário.');
   if (!emails.length) return [];
+  // Instalacao.gs de antes (esquema sem MARCADOS/MENCOES): a marcacao sumiria calada e o e-mail prometeria um acesso que nao vem.
+  if (colunasDe('ACOES').indexOf('MARCADOS') === -1 || colunasDe('COMENTARIOS').indexOf('MENCOES') === -1) {
+    throw new Error('Atualização incompleta do GSL: para marcar pessoas, o Instalacao.gs desta versão precisa estar no Apps Script. Avise o administrador do sistema.');
+  }
   const podem = pessoasParaAcao(plano);
-  const achar = function (e) { return podem.filter(function (p) { return p.email === e; })[0]; };
+  const achar = function (e) { return podem.filter(function (p) { return p.email === e && p.abre; })[0]; };
   const fora = emails.filter(function (e) { return !achar(e); });
   if (fora.length) {
-    const conhecidos = pessoasPorEmail_();
+    const daFilial = {};
+    pessoasDaFilial().forEach(function (p) { daFilial[String(p.EMAIL || '').toLowerCase().trim()] = String(p.NOME || '').trim(); });
     throw new Error('Não dá para marcar quem não abre o ' + plano.nome + ' nesta filial: ' +
-      fora.map(function (e) { return nomeDoEmail_(conhecidos, e); }).join(', ') + '.');
+      fora.map(function (e) { return daFilial[e] || e; }).join(', ') + '.');
   }
   return emails.map(achar);
 }
@@ -340,13 +361,14 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
   if (!texto) throw new Error('Escreva o comentário: o que avançou, o que foi feito.');
   if (situacao && ANDAMENTOS_ACAO.indexOf(situacao) === -1) throw new Error('Situação inválida: ' + situacao);
   const fotos = fotosDoPedido_(params);
-  const marcadas = mencoesDoPedido_(plano, usuario, params);
   const emailDe = function (p) { return p.email; };
 
   // Confere ANTES de subir as fotos (o Drive e lento e fica fora da trava)...
   const antes = acaoDoPlano_(plano, id);
   exigirQuemComenta_(plano, usuario, antes);
   if (String(antes.SITUACAO || '').toUpperCase().trim() === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
+  // ...e quem foi marcado, so depois de saber que a pessoa comenta nesta acao (a recusa diz nomes).
+  const marcadas = mencoesDoPedido_(plano, usuario, params);
   const gravadas = gravarFotos_(usuario, id, fotos);
 
   // ...e de novo na trava, que e onde vale: a tela pode estar velha.
@@ -584,6 +606,10 @@ function dadosPlano_(plano, usuario, params) {
  * chegava por e-mail e a pessoa nao tinha onde abrir. A mesma lista e a de
  * quem pode ser marcado num comentario (19/10); veTodas diz quem ja ve todas
  * as acoes do plano (a tela avisa "passa a ver esta ação" para os outros).
+ * abre: o painel do plano aparece para a pessoa nesta filial (Oculto: so o
+ * administrador). Quem nao abre continua podendo ser responsavel (a acao
+ * fica pronta antes de o painel ser mostrado), mas nao pode ser marcado: o
+ * e-mail prometeria um acesso que ela nao tem.
  */
 function pessoasParaAcao(plano) {
   return pessoasDaFilial()
@@ -601,7 +627,8 @@ function pessoasParaAcao(plano) {
         turno: String(p.TURNO || '').toUpperCase().trim(),
         papel: String(p.PAPEL || '').trim(),
         // A mesma regra de acoesNoAlcance.
-        veTodas: !!(plano && x.u) && (podeFazer(x.u, plano.cap) || escopoDe(x.u).tipo === 'TODOS')
+        veTodas: !!(plano && x.u) && (podeFazer(x.u, plano.cap) || escopoDe(x.u).tipo === 'TODOS'),
+        abre: !plano || !!(x.u && painelVisivel(x.u, plano.modulo))
       };
     })
     .filter(function (p) { return !!p.email; })
@@ -618,6 +645,19 @@ function usuarioDoCadastro_(p) {
 /* ------------------------------------------------------------------ */
 /* ESCRITA                                                             */
 /* ------------------------------------------------------------------ */
+
+/*
+ * MARCADOS ao editar a acao (19/10). A gestao desmarca quem foi marcado por
+ * engano (desmarcados: os que ela tirou na tela) e quem virou responsavel
+ * sai da lista (deixando de ser responsavel, deixa de ver). So tira: nenhum
+ * e-mail entra por aqui. Vai como "os que sairam", e nao "os que ficam",
+ * para nao derrubar quem outra pessoa marcou com o formulario aberto. Tela
+ * antiga (sem a lista) nao desmarca ninguem.
+ */
+function marcadosQueFicam_(marcados, responsaveis, desmarcados) {
+  const saem = responsaveis.concat(emailsDaAcao_([].concat(desmarcados || []).join(',')));
+  return marcados.filter(function (e) { return saem.indexOf(e) === -1; });
+}
 
 /*
  * Cria ou edita. So quem gere o plano (GERIR_ACOES no Calendario,
@@ -698,6 +738,10 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
         const lista = lerAnexos_(atual.ANEXOS);
         if (lista.length + gravadas.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
         campos.ANEXOS = JSON.stringify(lista.map(metadadosDoAnexo_).concat(gravadas));
+      }
+      if ('MARCADOS' in atual) {
+        const marcados = emailsDaAcao_(atual.MARCADOS), ficam = marcadosQueFicam_(marcados, emails, params.desmarcados);
+        if (ficam.length !== marcados.length) campos.MARCADOS = ficam.join(',');
       }
       atualizar('ACOES', id, campos, usuario.email);
     });
@@ -1093,6 +1137,8 @@ function avisarAcaoNova(campos, email, nova, id, plano) {
  * botao que abre o historico dela no GSL (?tela=...&acao=ID). r: a linha da
  * acao ja com o que o comentario mudou. passouAVer: a pessoa nao enxergava
  * a acao antes (o coordenador de outro turno) — o e-mail diz que agora ve.
+ * O "Responder" do e-mail vai para quem marcou (nao para a conta que roda o
+ * GSL), e o texto pede a resposta pelo botao, que e a que entra no historico.
  */
 function avisarMencao_(plano, r, autor, texto, email, passouAVer) {
   const limpeza = plano.id === 'LIMPEZA';
@@ -1111,6 +1157,7 @@ function avisarMencao_(plano, r, autor, texto, email, passouAVer) {
     linha('Situação', situacao) + (r.DEPENDE ? linha('Depende de', r.DEPENDE) : '') +
     (limpeza && onde ? linha('Local', onde) : '') + '</table>' +
     (passouAVer ? '<p style="color:#475569">Você passou a acompanhar esta ação no GSL: pode ver o histórico e responder.</p>' : '') +
+    '<p style="color:#475569">Responda pelo botão abaixo: a resposta fica no histórico da ação.</p>' +
     rodapeLink(plano.tela, r.ID);
-  enviar([email], assunto, corpo);
+  enviar([email], assunto, corpo, null, autor.email ? { replyTo: autor.email } : null);
 }

@@ -1018,7 +1018,8 @@ function pintarLimpeza(r) {
     ' produto(s) no estoque' + (repor ? ' · ' + repor + ' para repor' : '');
   const abas = [['gestao', 'Gestão'], ['plano', 'Plano de Ação'], ['estoque', 'Estoque'], ['movimentos', 'Movimentações']]
     .concat(d.estoque.permissoes.cadastrar ? [['inventario', 'Inventário']] : []);
-  if (ACAO_DO_LINK) ABA_LP = 'plano';                // link do e-mail de mencao: a acao abre na aba do plano
+  // Link do e-mail de mencao da Limpeza: a acao abre na aba do plano. typeof: App.html de antes (colado pela metade).
+  if (typeof ACAO_DO_LINK !== 'undefined' && ACAO_DO_LINK && ACAO_DO_LINK.tela === 'limpeza') ABA_LP = 'plano';
   if (!abas.some((a) => a[0] === ABA_LP)) ABA_LP = 'gestao';
   el('pagina').innerHTML = pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
   pintarAbaLP(d);
@@ -1048,7 +1049,7 @@ function pintarAbaLP(d) {
   EST = EST_LP; PLANO = PLANO_LP;
   lpBotoesTopo(d);
   try {
-    if (ABA_LP === 'plano') { alvo.innerHTML = planoHtml(d.plano); abrirAcaoDoLink(); return; }
+    if (ABA_LP === 'plano') { alvo.innerHTML = planoHtml(d.plano); if (typeof abrirAcaoDoLink === 'function') abrirAcaoDoLink(); return; }
     if (ABA_LP === 'gestao') { alvo.innerHTML = lpGestao(d); return; }
     if (!d.estoque.itens.length && ABA_LP !== 'movimentos') { alvo.innerHTML = lpEstoqueVazio(d); return; }
     if (ABA_LP === 'estoque') alvo.innerHTML = estItens(d.estoque);
@@ -1093,7 +1094,7 @@ function lpGestao(d) {
           <button class="botao-texto" onclick="trocarAbaLP('plano')">Abrir o plano →</button></div>
         ${vencem.length ? `<table><tbody>${vencem.map((a) => `<tr class="${a.status === 'Atrasada' ? 'lp-atrasada' : ''}">
           <td style="white-space:nowrap"><strong>${esc(a.prazo || '—')}</strong><div class="lp-sub">${planoPrazoTexto(a)}</div></td>
-          <td><strong>${esc(a.acao)}</strong> ${seloComentarios(a, podeComentarAcao(a, pl.permissoes))}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
+          <td><strong>${esc(a.acao)}</strong> ${typeof seloComentarios === 'function' && typeof podeComentarAcao === 'function' ? seloComentarios(a, podeComentarAcao(a, pl.permissoes)) : ''}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
           <td>${a.criticidade ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
           : '<div class="vazio">Nenhuma ação em aberto. 👍</div>'}
       </div>

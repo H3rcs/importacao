@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -18,7 +18,7 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
 
 ## Depois da primeira publicação
 
-- **O ADMIN vê tudo.** A tabela PERFIS e os painéis gravados na filial podiam vir incompletos de versões antigas, e o administrador não via Filiais e painéis, Nobreaks, Limpeza, Quadro do CD (onde se liga a planilha do BI) e Estoque de TI. Agora o ADMIN tem todas as telas e permissões, sem depender da tabela PERFIS. Ele também vê todos os painéis em qualquer filial. Um painel que não está ligado para os outros aparece para ele com o selo **oculto**; para ligar para todos, use **Filiais e painéis**.
+- **O ADMIN tem todas as telas e permissões.** A tabela PERFIS podia vir incompleta de versões antigas, e o administrador não via Filiais e painéis, Nobreaks, Limpeza, Quadro do CD (onde se liga a planilha do BI) e Estoque de TI. Agora o ADMIN tem todas as telas e permissões, sem depender da tabela PERFIS. Nos painéis vale o estado de cada filial (desde 19/10): **Oculto** aparece só para o administrador, com o selo **oculto**; **Desativado** e **Não usar nesta filial** somem até para ele. Se um painel sumiu do seu menu, ligue-o como Ativo ou Oculto em **Configuração › Filiais e painéis**.
 - **Cadastrar outro CD** (Campina Grande, Ponte Nova…): **Configuração › Filiais e painéis › Nova filial**. Informe nome, cidade, código (ex.: CPG, PNV) e os painéis. O sistema cria a planilha da filial sozinho.
 - **Estoque de TI** abre direto na aba **Estoque**:
   - Busca grande no topo: digite "mouse" e a lista filtra na hora.
@@ -35,6 +35,74 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Pedido de 19/10 (rotinas do calendário, comentários e fotos HEIC nas ações, painel desativado)
+
+**Calendário › Rotinas: o dia nos botões, e a mudança vale também para o que já foi gerado**
+
+Em **Configuração › Calendário › Rotinas**:
+- O campo que pedia número saiu. A rotina agora tem **Repete**:
+  - **Toda semana:** escolha o dia nos botões **Seg Ter Qua Qui Sex Sáb Dom**. Embaixo aparecem as próximas datas, por exemplo "Toda quarta-feira · próximas: 21/10, 28/10, 04/11". Sábado e domingo também valem.
+  - **Todo mês:** 1ª segunda-feira, última sexta-feira ou um dia fixo (1 a 31). Se o mês não tiver o dia (31 em setembro), vale o último dia do mês. Continua uma por turno no mês: mudar o dia do mês não cria uma segunda atividade se a do mês já foi feita.
+  - **Vagas sem data:** de 1 a 10 vagas por mês. O gerente agenda cada vaga em "Treinamentos e vagas".
+- **Rotina nova** entra na hora no mês atual e no seguinte (os que já foram gerados), só de hoje em diante. Nenhuma atividade nasce atrasada.
+- **Mudar o dia** (de quarta para sexta, por exemplo): as atividades pendentes de hoje em diante vão para a sexta da mesma semana, com a nota "Remarcada de … para …: a rotina mudou para toda sexta.". Antes de gravar, a tela diz quantas vão mudar. As remarcadas à mão ficam no dia escolhido, e a confirmação diz quantas ficam. Se a sexta desta semana já passou, a desta semana fica como está. Desmarcando **Ajustar também as atividades já geradas**, a mudança vale só para os meses que ainda vão ser gerados.
+- **Desativar** (botão na lista): as pendentes de hoje em diante são canceladas, inclusive as remarcadas à mão. Elas saem do calendário e ficam no "Arquivo — atividades canceladas" do mês, com o motivo "Cancelada pela rotina". **Ativar** traz essas atividades de volta (a remarcada à mão volta no dia que tinha sido escolhido, se ele ainda não passou).
+- **Remover** pede confirmação e cancela as pendentes de hoje em diante. O histórico continua. Mudar o turno ou a frequência também cancela as que a regra nova não gera, e as confirmações avisam.
+- **Nunca mudam:** atividades entregues ou validadas, com anexo, canceladas à mão, vagas já agendadas e datas que já passaram.
+- A **sigla** não muda depois que a rotina gerou atividades, porque ela está no código delas. Para usar outra sigla, crie uma rotina nova e desative a antiga.
+- **"Exige setor"** agora vale para qualquer rotina, não só para a vistoria: o gerente escolhe o setor na atividade e o turno recebe o aviso.
+- **Gerar mês** num mês que já existe só completa de hoje em diante.
+- Depois de gravar, o recado diz o que aconteceu no calendário, por exemplo "Rotina salva. No calendário: 6 mudaram para sexta." ou "Rotina desativada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4)." Os recados longos ficam mais tempo na tela.
+- Duas pessoas editando a mesma rotina: quem salvar com a janela aberta antes da mudança da outra recebe "Esta rotina foi alterada por outra pessoa enquanto a janela estava aberta. Feche e abra de novo." Nada é desfeito.
+
+**O que ficou da versão anterior (vale conferir uma vez depois de publicar):**
+- **Rotina que você desativou antes desta versão** e cujas atividades ainda aparecem no calendário: na lista ela aparece como "parada · 6 ainda no calendário". Clique em **Tirar do calendário (6)**.
+- **Rotina que você removeu antes desta versão** e cujas atividades ficaram no calendário: aparece embaixo da lista, em **Atividades de rotinas removidas** (por exemplo "RON — 6 pendentes de hoje em diante"). Clique em **Tirar do calendário**.
+- **Atividades que ficaram no dia antigo** (a versão anterior não mexia no calendário quando a rotina mudava) ou que foram mudadas direto na planilha: abra a rotina e clique em **Salvar**. A tela pergunta "Levar para o dia da rotina?": **Levar para quarta** move as atividades (com a nota "Remarcada de … para …: dia da rotina (toda quarta)."), **Deixar como estão** salva sem mexer nelas.
+
+**Plano de Ação: selo de comentário e marcar uma pessoa** (Calendário e Limpeza)
+- Cada cartão mostra no topo o selo **💬 N**, com o número de comentários. Ele aparece também na tabela da **Limpeza › Gestão**. Conta só o que alguém escreveu: concluir, reabrir ou cancelar sem texto não conta. Clicar no selo abre o histórico.
+- **novo:** o selo fica cheio, com a palavra "novo", quando outra pessoa comentou nas últimas 72 horas e você ainda não abriu o histórico naquele aparelho (nem respondeu depois).
+- **Marcar alguém:** no comentário, digite **@** e o começo do nome, da função ou do turno (não precisa de acento), ou use o botão **@ Marcar pessoa**, que mostra todas as pessoas do plano. Escolha com o dedo, o mouse, ou as setas e Enter. A linha "Vai avisar por e-mail: @Nome ×" mostra quem será avisado; o × tira a pessoa, e apagar o "@Nome" do texto também. Até 10 pessoas por comentário, entre quem abre aquele Plano de Ação na filial.
+- Escreveu o nome inteiro sem escolher na lista? Ao clicar em **Registrar comentário**, a pessoa entra em "Vai avisar por e-mail" com um aviso. Confira e clique de novo para gravar.
+- Cada pessoa marcada recebe um e-mail com o comentário, os dados da ação e o botão **Abrir a ação no GSL**. Depois do e-mail e do PIN, ele abre direto o histórico da ação, na filial certa (na Limpeza, na aba Plano de Ação). Responder o e-mail vai para quem marcou, mas o que entra no histórico é a resposta pelo botão.
+- Quem foi marcado passa a ver **aquela** ação e pode comentar nela. Não conclui, não edita e não muda a situação. No cartão aparece "Marcados: …" e, para quem foi marcado, o selo **@ você**, até a pessoa responder.
+- **Marcou por engano?** Em **Editar** a ação (gestão), a caixa **Marcados (veem e comentam esta ação)** deixa desmarcar: a pessoa deixa de ver a ação.
+- Na primeira entrada depois de publicar, o banco de cada filial ganha sozinho as colunas MARCADOS (aba ACOES) e MENCOES (aba COMENTARIOS). É a versão 8.10 do esquema; ninguém precisa rodar nada.
+
+**Fotos HEIC no Plano de Ação**
+- A foto HEIC que o Chrome não abre (copiada do iPhone para o computador, ou o HEIF de alguns Android) agora é convertida pelo Google no momento em que é escolhida. Enquanto isso, o campo mostra "Convertendo IMG_0001.HEIC para JPG — leva alguns segundos…". Depois ela segue como as outras: prévia, JPEG de até 1600 px, gravada como .jpg. Vale na ação, no comentário e na conclusão, nos dois planos.
+- No computador, o seletor de arquivos passa a mostrar os .heic. Pelo iPhone (câmera ou Fototeca), nada muda: o próprio iPhone entrega a foto em JPEG.
+- Se o Google ainda não tiver preparado a foto, ou a conexão falhar, ela vai como veio, com um aviso, e aparece normalmente quando alguém abrir a ação.
+- As fotos HEIC gravadas antes desta versão também abrem no visor, e o **Baixar** entrega .jpg.
+- Arquivo que não abre como foto (TIFF, PDF…) é recusado na hora: "Envie JPG, PNG ou HEIC."
+- A cópia temporária usada na conversão é apagada de vez do Drive (não fica ocupando a lixeira).
+
+**Painel desativado some do menu de todos**
+- Em **Configuração › Filiais e painéis**, cada painel tem um estado por filial:
+  - **Ativo:** aparece para quem tem o nível liberado;
+  - **Oculto:** só o administrador vê, com a etiqueta **oculto**. Bom para montar e testar (e ligar a planilha) antes de mostrar para a equipe;
+  - **Desativado** e **Não usar nesta filial:** some do menu de todos, **inclusive do administrador**. Os dados continuam guardados: é só voltar para Ativo.
+- Vale na hora, sem F5: o cartão some ou volta. Quem estava com o sistema aberto vê o cartão sumir ao voltar ao menu. Se clicar no cartão antigo, ou recarregar a página, volta ao menu com o aviso "Este painel foi desligado nesta filial."
+- O administrador nunca fica trancado: Configuração, Pessoas e acessos, Filiais e painéis e Relatos de erro continuam sempre abertos para ele. Numa filial com todos os painéis desligados, o menu diz "Nenhum painel ligado nesta filial." e tem o botão para religar.
+- **Editar nome** da filial grava só o nome e a cidade. Antes ele podia religar um painel que tinha acabado de ser desligado.
+
+**Arquivos desta entrega** (carimbo `2026.10.19`; enviados no `GSL-19-10.zip`). São os 15 que mudaram desde o pacote de 14/10:
+- `Acoes.gs`, `Auth.gs`, `Banco.gs`, `Calendario.gs`, `Codigo.gs`, `Config.gs`, `Emails.gs`, `Filiais.gs`, `Instalacao.gs`, `Permissoes.gs`;
+- `App.html`, `Paineis.html`, `Index.html`, `Estilo.html`, `PaineisEstilo.html`.
+
+Como publicar:
+1. Cole os 15 por cima dos de mesmo nome (os outros arquivos do projeto não mudam).
+2. Crie uma **Nova versão** da implantação (Implantar › Gerenciar implantações › editar › Nova versão). Se faltar algum arquivo, a faixa amarela no topo diz qual. Com um arquivo faltando, nada se perde: a parte nova recusa com "Atualização incompleta do GSL…" até o arquivo ser colado.
+3. **Recarregue a página (F5).** Quem estiver com o GSL aberto durante a implantação também precisa recarregar.
+4. Os e-mails de quem foi marcado usam o envio de e-mail que o GSL já tem: não pede autorização nova.
+
+**Para conferir:**
+1. **Rotinas:** em Configuração › Calendário › Rotinas, abra uma rotina semanal, troque o dia e salve. No Calendário, as pendentes de hoje em diante estão no dia novo. Veja se alguma rotina aparece como "parada · N ainda no calendário" ou se há "Atividades de rotinas removidas", e use **Tirar do calendário**.
+2. **Comentários:** num cartão do Plano de Ação, abra Comentários, digite **@** e escolha uma pessoa. Ela recebe o e-mail, e o selo 💬 aparece no cartão.
+3. **HEIC:** no computador, anexe uma foto .HEIC numa ação. Ela aparece com prévia e é gravada como .jpg. Confira também se uma foto **em pé** continua em pé.
+4. **Painéis:** em Filiais e painéis, ponha um painel em Desativado: o cartão some do seu menu na hora. Volte para Ativo.
 
 ## Pedido de 14/10 (Quadro do CD: aba Férias e barra lateral que recolhe)
 

@@ -1398,10 +1398,16 @@ input[type="file"] { border: 0; background: none; padding: 0; font-size: 12px; c
 .rot-opcao { align-items: flex-start; margin-top: 10px; line-height: 1.5; color: var(--tinta-media); }
 .rot-opcao input { margin-top: 3px; flex-shrink: 0; }
 .rot-opcao b { color: var(--tinta); }
-.rot-agora { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--azul-tenue); color: var(--tinta); }
+/* .dica.rot-agora: o .dica (mais abaixo) tem a mesma especificidade e vinha depois — a cor fraca e a margem dele ganhavam. */
+.dica.rot-agora { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--azul-tenue); color: var(--tinta); }
 .rot-texto { margin: 0 0 14px; line-height: 1.7; color: var(--tinta-media); }
 .rot-texto b { color: var(--tinta); }
 .rot-botoes { display: flex; flex-wrap: wrap; gap: 6px; }
+/* O que a versao anterior deixou no calendario: rotina parada com pendentes e rotinas removidas. */
+.pendente-entrega.rot-ainda { color: var(--laranja-escuro); border-color: var(--laranja); background: var(--laranja-tenue); white-space: nowrap; }
+.rot-orfas { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--laranja); border-radius: 10px; background: var(--laranja-tenue); }
+.rot-orfas-titulo { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--laranja-escuro); }
+.rot-orfa { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
 @media (forced-colors: active) {
   .rot-pilulas input:checked + span { outline: 2px solid Highlight; outline-offset: 1px; }
 }

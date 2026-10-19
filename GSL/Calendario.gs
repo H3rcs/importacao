@@ -164,19 +164,26 @@ function gerarCompetencia(competencia, quem, soSeNaoGerado) {
 
     // Dentro da trava o listar() relê a planilha: a comTrava derrubou a
     // memoria da execucao, entao o que outra execucao gravou agora aparece.
-    const existentes = {}, antigosDoAno = {};
+    const existentes = {}, antigosDoAno = {}, doMes = {};
     listar('ATIVIDADES', true).forEach(function (a) {
       const id = String(a.ID || '');
       existentes[id] = true;
       if (anosDaLinha_(a).indexOf(ano) !== -1) antigosDoAno[id] = true;
+      // Completar: a sigla e o turno que ja tem atividade do mes (feita, pendente ou dispensada a mao).
+      const tipo = String(a.TIPO || '').toUpperCase().trim();
+      if (completar && !marcado(a.EXCLUIDO) && situacaoNaRotina_(a, hojeIso) !== 'canceladaPelaRotina' &&
+          mesDaAtividadeDaRotina_(a, tipo) === ano * 12 + mes) doMes[tipo + '|' + String(a.TURNO || '').trim()] = true;
     });
 
     const equipe = coordenadoresPorTurno();
     const novas = [];
 
     listar('ROTINAS').forEach(function (rotina) {
+      const mensal = String(rotina.FREQUENCIA || '').toUpperCase().trim() === 'MENSAL';
       planoDaRotina_(rotina, ano, mes).forEach(function (p) {
         if (completar && !p.vaga && p.iso < hojeIso) return;
+        // Mensal e uma por turno no mes: o ID e por semana, e a do dia antigo nao casa com a do dia novo.
+        if (completar && mensal && doMes[siglaDaRotina_(rotina) + '|' + p.turno]) return;
         // A vaga 1 e a atividade com data tinham, no formato antigo, o
         // mesmo ID sem ano: se ele existe neste ano, a atividade existe.
         if (existentes[p.id] || (p.antigo && antigosDoAno[p.antigo])) return;
@@ -408,10 +415,13 @@ function gerarMesDaFilial_() {
  *     regra a quer de novo (reativar a rotina, recriar a sigla);
  *   - o que a regra nova gera e nao existe NASCE, nunca no passado.
  * Nao mexe: entregue, validada ou com anexo; cancelada ou remarcada a mao;
- * vaga ja agendada; data que ja passou; mes encerrado.
+ * vaga ja agendada; data que ja passou; mes encerrado (a atividade dele
+ * remarcada para hoje em diante e acertada, contada no mes do prazo).
+ * Mensal e uma por turno no mes, mesmo quando o dia do mes muda.
  */
 const MARCA_ROTINA = 'Cancelada pela rotina';
 const NOTA_ROTINA = ': a rotina mudou para ';
+const NOTA_DIA_DA_ROTINA = ': dia da rotina (';   // a regra nao mudou: a linha estava fora do dia dela
 const SIGLA_AVULSA = 'AV';             // atividade avulsa do calendario (acaoCriarAtividade), nunca de rotina
 const DIAS_DA_ROTINA = ['', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo'];
 
@@ -464,10 +474,10 @@ function descreverRegra_(rotina) {
 
 function canceladaPelaRotina_(motivo) { return motivoDeValidacao_(motivo).indexOf(MARCA_ROTINA) === 0; }
 
-/* Remarcada pela tela ("Remarcada de ... para ...: motivo"); a nota do acerto da rotina nao conta. */
+/* Remarcada pela tela ("Remarcada de ... para ...: motivo"); as notas do acerto da rotina nao contam. */
 function remarcadaAMao_(motivo) {
   return partesDoMotivo_(motivo).some(function (s) {
-    return s.indexOf(PREFIXO_REMARCACAO) === 0 && s.indexOf(NOTA_ROTINA) === -1;
+    return s.indexOf(PREFIXO_REMARCACAO) === 0 && s.indexOf(NOTA_ROTINA) === -1 && s.indexOf(NOTA_DIA_DA_ROTINA) === -1;
   });
 }
 
@@ -488,31 +498,66 @@ function situacaoNaRotina_(linha, hojeIso) {
 
 /*
  * Para a tela da Configuracao, por sigla: as pendentes de hoje em diante
- * (o mesmo criterio do acerto) e se a rotina ja gerou atividade (a sigla
- * trava). A confirmacao da tela conta daqui, sem ir ao servidor: com o canal
- * barrado so a gravacao pela pagina funciona.
+ * (o mesmo criterio do acerto: a de mes encerrado remarcada para frente conta
+ * no mes do prazo), quantas delas estao fora do dia do plano — remarcadas a
+ * mao (a troca de dia nao as move) e foraDoDia (sem nota: o "Levar para o dia
+ * da rotina" as moveria) — e se a rotina ja gerou atividade (a sigla trava).
+ * A confirmacao da tela conta daqui, sem ir ao servidor: com o canal barrado
+ * so a gravacao pela pagina funciona.
  */
 function calendarioDasRotinas_(rotinas) {
   const hojeIso = hojeISO(), atual = ordemDoMes_(hoje());
-  const porSigla = {};
-  rotinas.forEach(function (r) { porSigla[siglaDaRotina_(r)] = { temAtividades: false, total: 0, porOrdem: {} }; });
+  const porSigla = {}, planos = {};
+  rotinas.forEach(function (r) {
+    porSigla[siglaDaRotina_(r)] = { rotina: r, temAtividades: false, total: 0, porOrdem: {}, remarcadas: 0, foraDoDia: 0 };
+  });
+  // O item do plano do ID, com a regra como se a rotina estivesse ativa (o Editar pode ativa-la sem mudar a regra).
+  const doPlano = function (sigla, x, ordem, id) {
+    const k = sigla + '|' + ordem;
+    if (!planos[k]) planos[k] = porIdDoPlano_(planoDaRotina_(comCampos_(x.rotina, { ATIVO: 'SIM' }), Math.floor(ordem / 12), ordem % 12));
+    return planos[k][id];
+  };
   listar('ATIVIDADES').forEach(function (l) {
     const sigla = String(l.TIPO || '').toUpperCase().trim();
     const x = porSigla[sigla];
     if (!x) return;
     x.temAtividades = true;
-    const ordem = mesDaAtividadeDaRotina_(l, sigla);
-    if (ordem === null || ordem < atual || situacaoNaRotina_(l, hojeIso) !== 'pendente') return;
+    const doId = mesDaAtividadeDaRotina_(l, sigla);
+    if (doId === null || situacaoNaRotina_(l, hojeIso) !== 'pendente') return;
+    if (doId < atual && !prazoDeHojeEmDiante_(l, hojeIso)) return;
+    const ordem = doId < atual ? ordemDoMes_(paraData(l.PRAZO)) : doId;
     x.total++;
     x.porOrdem[ordem] = (x.porOrdem[ordem] || 0) + 1;
+    const p = doPlano(sigla, x, doId, String(l.ID)), prazo = paraData(l.PRAZO);
+    if (!p || p.vaga || !prazo || paraISO(prazo) === p.iso) return;
+    if (remarcadaAMao_(l.MOTIVO)) x.remarcadas++;
+    else if (p.iso >= hojeIso) x.foraDoDia++;
   });
   Object.keys(porSigla).forEach(function (s) {
     const x = porSigla[s], porMes = {};
     Object.keys(x.porOrdem).map(Number).sort(function (a, b) { return a - b; })
       .forEach(function (o) { porMes[competenciaDaOrdem_(o)] = x.porOrdem[o]; });
-    porSigla[s] = { temAtividades: x.temAtividades, pendentes: { total: x.total, porMes: porMes } };
+    porSigla[s] = { temAtividades: x.temAtividades,
+                    pendentes: { total: x.total, porMes: porMes, remarcadas: x.remarcadas, foraDoDia: x.foraDoDia } };
   });
   return porSigla;
+}
+
+/*
+ * Siglas sem rotina na lista com pendentes de hoje em diante: a rotina foi
+ * removida pela versao anterior, que so tirava a linha de ROTINAS. A
+ * Configuracao oferece tira-las do calendario (acaoLimparSiglaOrfa, Config.gs).
+ */
+function siglasOrfas_(rotinas) {
+  const vistas = {}, soltas = [];
+  rotinas.forEach(function (r) { vistas[siglaDaRotina_(r)] = true; });
+  listar('ATIVIDADES').forEach(function (l) {
+    const s = String(l.TIPO || '').toUpperCase().trim();
+    if (s && s !== SIGLA_AVULSA && !vistas[s]) { vistas[s] = true; soltas.push({ TIPO: s }); }
+  });
+  const cal = calendarioDasRotinas_(soltas);
+  return soltas.map(siglaDaRotina_).filter(function (s) { return cal[s].pendentes.total; }).sort()
+    .map(function (s) { return { sigla: s, pendentes: cal[s].pendentes }; });
 }
 
 /* A sigla ja esta em alguma atividade (e entao nao muda mais: ela esta no ID). */
@@ -526,31 +571,45 @@ function siglaTemAtividades_(sigla) {
  * DENTRO da trava de quem grava a rotina: uma leitura de ATIVIDADES, um
  * atualizarVarios e um inserirVarios. Sem e-mail por atividade (seriam
  * dezenas): o recado da tela diz o que mudou.
+ * alinharForaDoDia: false deixa onde esta a pendente fora do dia da regra (sem
+ * nota da tela) que a regra nao mudou de dia: o "Deixar como estao" da tela e
+ * o Ativar da lista. Sem ele, ela vai para o dia da regra.
  */
-function sincronizarRotina_(antes, depois, quem) {
+function sincronizarRotina_(antes, depois, quem, alinharForaDoDia) {
   const acerto = {
     antes: antes, depois: depois, hojeIso: hojeISO(), ocupados: {}, mudancas: [], novas: [], equipe: null,
+    alinhar: alinharForaDoDia !== false, mesmaRegra: mesmaRegra_(antes, depois),
     nota: { movidas: 0, canceladas: 0, criadas: 0, reativadas: 0, renomeadas: 0, porMes: {},
-            mantidas: { entregues: 0, remarcadas: 0, agendadas: 0, semanaPassou: 0, passadas: 0, canceladasAMao: 0 } }
+            mantidas: { entregues: 0, remarcadas: 0, agendadas: 0, semanaPassou: 0, mesPassou: 0, foraDoDia: 0,
+                        passadas: 0, canceladasAMao: 0 } }
   };
   const sigla = siglaDaRotina_(depois || antes);
   if (!sigla || sigla === SIGLA_AVULSA) return acerto.nota;
 
   // Os meses: os ja gerados de hoje em diante e qualquer mes de hoje em diante com atividade da rotina.
   const atual = ordemDoMes_(hoje());
-  const meses = {};
+  const meses = {}, adiantadas = [];
   mesesGeradosDeHojeEmDiante_().forEach(function (c) { meses[ordemDoMes_(competenciaParaData(c))] = []; });
   listar('ATIVIDADES', true).forEach(function (l) {
     const id = String(l.ID || '');
     if (marcado(l.EXCLUIDO)) { acerto.ocupados[id] = acerto.ocupados[id] || l; return; }
     acerto.ocupados[id] = l;                     // nada nasce em cima de um ID que existe (nem excluido)
     const ordem = mesDaAtividadeDaRotina_(l, sigla);
-    if (ordem !== null && ordem >= atual) (meses[ordem] = meses[ordem] || []).push(l);
+    if (ordem === null) return;
+    if (ordem >= atual) (meses[ordem] = meses[ordem] || []).push(l);
+    else if (prazoDeHojeEmDiante_(l, acerto.hojeIso)) adiantadas.push({ ordem: ordem, linha: l });   // de mes encerrado, remarcada para frente
   });
 
   acerto.equipe = coordenadoresPorTurno();
   Object.keys(meses).map(Number).sort(function (a, b) { return a - b; })
     .forEach(function (ordem) { acertarMes_(acerto, ordem, meses[ordem]); });
+  // A de mes encerrado: so a linha, contra o plano do mes dela (la nada nasce); a conta vai para o mes do prazo.
+  adiantadas.forEach(function (x) {
+    const ano = Math.floor(x.ordem / 12), mes = x.ordem % 12, id = String(x.linha.ID);
+    acertarLinha_(acerto, ordemDoMes_(paraData(x.linha.PRAZO)), x.linha,
+      porIdDoPlano_(planoDaRotina_(acerto.depois, ano, mes))[id], porIdDoPlano_(planoDaRotina_(acerto.antes, ano, mes))[id]);
+  });
+  acerto.nota.porMes = emOrdemDeMes_(acerto.nota.porMes);
 
   if (acerto.mudancas.length) atualizarVarios('ATIVIDADES', acerto.mudancas, quem);
   if (acerto.novas.length) inserirVarios('ATIVIDADES', acerto.novas, quem);
@@ -565,10 +624,13 @@ function acertarMes_(acerto, ordem, linhas) {
   const ano = Math.floor(ordem / 12), mes = ordem % 12;
   const plano = planoDaRotina_(acerto.depois, ano, mes);
   const novo = porIdDoPlano_(plano), velho = porIdDoPlano_(planoDaRotina_(acerto.antes, ano, mes));
+  // Mensal: uma por turno no mes. O ID e por semana, entao trocar o dia do mes nao casa a do mes pelo ID.
+  const mensal = String((acerto.depois || {}).FREQUENCIA || '').toUpperCase().trim() === 'MENSAL';
   const atendidos = {};
   linhas.forEach(function (l) {
     const alvo = novo[String(l.ID)];
     if (alvo) atendidos[alvo.id] = true;
+    if (mensal && !alvo && mensalDoMesFica_(acerto, plano, atendidos, l)) return;
     acertarLinha_(acerto, ordem, l, alvo, velho[String(l.ID)]);
   });
   plano.forEach(function (p) {
@@ -577,6 +639,43 @@ function acertarMes_(acerto, ordem, linhas) {
     acerto.ocupados[p.id] = true;
     contarNoAcerto_(acerto, 'criadas', ordem);
   });
+}
+
+/*
+ * Mensal, linha do mes que a regra nova nao gera pelo ID. A do mes que ja
+ * aconteceu (entregue, validada, atrasada) ou foi dispensada a mao segura a do
+ * dia novo, que nao nasce. A pendente cujo dia novo deste mes ja passou fica
+ * como esta (como "a desta semana" na semanal). true = a linha fica como esta.
+ */
+function mensalDoMesFica_(acerto, plano, atendidos, l) {
+  const p = plano.filter(function (x) { return x.turno === String(l.TURNO || '').trim(); })[0];
+  if (!p || atendidos[p.id]) return false;
+  const situacao = situacaoNaRotina_(l, acerto.hojeIso);
+  if (situacao === 'entregues' || situacao === 'passadas' || situacao === 'canceladasAMao') atendidos[p.id] = true;
+  if (situacao !== 'pendente' || p.iso >= acerto.hojeIso) return false;
+  atendidos[p.id] = true;
+  acerto.nota.mantidas.mesPassou++;
+  return true;
+}
+
+/* A atividade de mes encerrado remarcada para hoje em diante ainda esta no calendario. */
+function prazoDeHojeEmDiante_(l, hojeIso) {
+  const p = paraData(l.PRAZO);
+  return !!p && paraISO(p) >= hojeIso;
+}
+
+/* O porMes da nota em ordem de mes (a de mes encerrado conta no mes do prazo, depois dos outros). */
+function emOrdemDeMes_(porMes) {
+  const saida = {};
+  Object.keys(porMes).sort(function (a, b) { return competenciaParaData(a) - competenciaParaData(b); })
+    .forEach(function (c) { saida[c] = porMes[c]; });
+  return saida;
+}
+
+/* A regra (frequencia, dia, vagas e turno) nao mudou: o que vai para o dia dela leva a nota neutra. */
+function mesmaRegra_(antes, depois) {
+  return !!antes && !!depois && descreverRegra_(antes) === descreverRegra_(depois) &&
+    marcado(antes.POR_TURNO) === marcado(depois.POR_TURNO);
 }
 
 /* O plano indexado pelo ID e pelo ID antigo (sem ano). */
@@ -596,27 +695,64 @@ function idOcupado_(ocupados, p, ano) {
 function acertarLinha_(acerto, ordem, linha, alvo, velho) {
   const situacao = situacaoNaRotina_(linha, acerto.hojeIso);
   if (situacao === 'canceladaPelaRotina') {
-    if (alvo && (alvo.vaga || alvo.iso >= acerto.hojeIso)) mudarNoAcerto_(acerto, ordem, 'reativadas', linha, camposParaVoltar_(acerto, linha, alvo));
+    if (alvo) voltarAoCalendario_(acerto, ordem, linha, alvo);
     return;
   }
   if (situacao !== 'pendente') { acerto.nota.mantidas[situacao]++; return; }
-  if (!alvo) { mudarNoAcerto_(acerto, ordem, 'canceladas', linha, camposDeCancelar_(acerto, linha)); return; }
+  if (!alvo) {
+    // Semana que atravessa o mes: o dia novo DESTA semana caiu no mes vizinho e ja passou — fica como esta.
+    if (diaNovoDaSemanaJaPassou_(acerto, linha, velho)) acerto.nota.mantidas.semanaPassou++;
+    else mudarNoAcerto_(acerto, ordem, 'canceladas', linha, camposDeCancelar_(acerto, linha));
+    return;
+  }
 
   const campos = {};
   if (String(linha.ATIVIDADE || '').trim() !== String(acerto.depois.ATIVIDADE || '').trim()) campos.ATIVIDADE = acerto.depois.ATIVIDADE;
   const prazo = paraData(linha.PRAZO);
   const prazoIso = prazo ? paraISO(prazo) : '';
   if (!alvo.vaga && prazoIso !== alvo.iso) {
-    // Fora do dia da regra antiga E com nota de remarcacao da tela: quem pos ali foi uma pessoa.
-    if (!(velho && velho.iso === prazoIso) && remarcadaAMao_(linha.MOTIVO)) acerto.nota.mantidas.remarcadas++;
+    // Fora do dia da regra antiga: com nota de remarcacao da tela, quem pos ali foi uma pessoa; sem nota
+    // (versao anterior, planilha), vai para o dia da regra — menos no "Deixar como estao" e no Ativar.
+    const noDiaVelho = !!velho && velho.iso === prazoIso;
+    if (!noDiaVelho && remarcadaAMao_(linha.MOTIVO)) acerto.nota.mantidas.remarcadas++;
+    else if (!noDiaVelho && !acerto.alinhar) acerto.nota.mantidas.foraDoDia++;
     else if (alvo.iso < acerto.hojeIso) acerto.nota.mantidas.semanaPassou++;   // o dia novo desta semana ja passou
     else Object.assign(campos, camposDeMudarDia_(acerto, linha, prazo, alvo));
   }
   if (Object.keys(campos).length) mudarNoAcerto_(acerto, ordem, campos.PRAZO ? 'movidas' : 'renomeadas', linha, campos);
 }
 
+/* A cancelada pela rotina que a regra quer de novo volta; a remarcada a mao, no dia que a pessoa escolheu. */
+function voltarAoCalendario_(acerto, ordem, linha, alvo) {
+  const prazo = paraData(linha.PRAZO), prazoIso = prazo ? paraISO(prazo) : '';
+  if (!alvo.vaga && prazoIso && prazoIso !== alvo.iso && remarcadaAMao_(linha.MOTIVO)) {
+    if (prazoIso >= acerto.hojeIso) {
+      mudarNoAcerto_(acerto, ordem, 'reativadas', linha, { VALIDACAO: '', MOTIVO: motivoComValidacao_(linha.MOTIVO, ''),
+        STATUS: statusDe(prazoIso, '', ''), ATIVIDADE: acerto.depois.ATIVIDADE });
+    }
+    return;
+  }
+  if (alvo.vaga || alvo.iso >= acerto.hojeIso) mudarNoAcerto_(acerto, ordem, 'reativadas', linha, camposParaVoltar_(acerto, linha, alvo));
+}
+
+/*
+ * Semanal: o dia novo da semana desta linha (a do ID, pelo dia da regra antiga;
+ * sem ela, a do prazo) ja passou. A semana que atravessa o mes tem esse dia no
+ * mes vizinho, fora do plano deste mes.
+ */
+function diaNovoDaSemanaJaPassou_(acerto, linha, velho) {
+  const d = acerto.depois, base = (velho && velho.data) || paraData(linha.PRAZO);
+  if (!d || !base || !marcado(d.ATIVO) || String(d.FREQUENCIA || '').toUpperCase().trim() !== 'SEMANAL') return false;
+  const dia = String(d.DIA == null ? '' : d.DIA).trim();
+  const turnos = marcado(d.POR_TURNO) ? TURNOS : ['Todos'];
+  if (!/^[1-7]$/.test(dia) || turnos.indexOf(String(linha.TURNO || '').trim()) === -1) return false;
+  const novo = new Date(base.getFullYear(), base.getMonth(), base.getDate() - (base.getDay() || 7) + Number(dia));
+  return paraISO(novo) < acerto.hojeIso;
+}
+
 function mudarNoAcerto_(acerto, ordem, chave, linha, campos) {
-  acerto.mudancas.push({ id: String(linha.ID), campos: campos });
+  // _linha: a linha fisica lida nesta trava. ID gravado em dobro: cada copia e acertada na sua linha.
+  acerto.mudancas.push({ id: String(linha.ID), linha: linha._linha, campos: campos });
   contarNoAcerto_(acerto, chave, ordem);
 }
 
@@ -627,12 +763,16 @@ function contarNoAcerto_(acerto, chave, ordem) {
   nota.porMes[c][chave] = (nota.porMes[c][chave] || 0) + 1;
 }
 
-/* "Remarcada de 21/10/2026 para 23/10/2026: a rotina mudou para toda sexta." — o ID fica. */
+/*
+ * "Remarcada de 21/10/2026 para 23/10/2026: a rotina mudou para toda sexta." — o ID fica.
+ * Sem mudar a regra (a linha estava fora do dia dela): "...: dia da rotina (toda sexta)."
+ */
 function camposDeMudarDia_(acerto, linha, prazo, alvo) {
+  const regra = descreverRegra_(acerto.depois);
   return {
     PRAZO: alvo.iso, SEMANA: alvo.semana, COMPETENCIA: competenciaDe(alvo.data), STATUS: statusDe(alvo.iso, '', ''),
-    MOTIVO: motivoComRemarcacao_(linha.MOTIVO, PREFIXO_REMARCACAO + formatarData(prazo) + ' para ' +
-      formatarData(alvo.data) + NOTA_ROTINA + descreverRegra_(acerto.depois) + '.')
+    MOTIVO: motivoComRemarcacao_(linha.MOTIVO, PREFIXO_REMARCACAO + formatarData(prazo) + ' para ' + formatarData(alvo.data) +
+      (acerto.mesmaRegra ? NOTA_DIA_DA_ROTINA + regra + ').' : NOTA_ROTINA + regra + '.'))
   };
 }
 

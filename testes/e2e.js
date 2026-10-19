@@ -384,6 +384,13 @@ function comOutENov(s, ronda) {
   c2.acaoSalvarRotina({ email: DONO, perfil: 'ADMIN', permissoes: c2.permissoesDe('ADMIN') }, Object.assign({ tipo: 'RON',
     atividade: 'Ronda de segurança', frequencia: 'SEMANAL', dia: '3', porTurno: false, exigeSetor: false, ativo: true }, ronda));
 }
+/* Pelo servidor, sem tela: fn recebe o contexto e o "usuario" administrador (cada chamada e uma execucao nova). */
+function noServidor(s, fn) {
+  const c = s.contexto(DONO);
+  c._porta = true;
+  return fn(c, { email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') });
+}
+const idDaRotinaNoServidor = (s, tipo) => noServidor(s, (c) => c.listar('ROTINAS').find((r) => String(r.TIPO) === tipo).ID);
 /* Os dias (do mes aberto no calendario) com pilula da sigla: "21,28". */
 const diasDaSigla = (f, sigla) => f.evaluate((s) => [...document.querySelectorAll('.grade-mes .dia:not(.fora)')]
   .filter((d) => [...d.querySelectorAll('.pilula')].some((p) => p.textContent.trim().split(' ')[0] === s))
@@ -2395,6 +2402,121 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  /*
+   * O que a versao anterior deixou no calendario: "Desativar" so gravava ATIVO=NAO e "Remover" so tirava a
+   * linha de ROTINAS — as pendentes ficaram (a queixa "desativar nao vai").
+   */
+  await cenario('rotinas da versao anterior: a parada com pendentes mostra "Tirar do calendario (6)" e a removida aparece em "Atividades de rotinas removidas"; as duas saem do calendario', async () => {
+    const s = await subir({ agora: SEGUNDA_19_10 }); instalarComPessoas(s); comOutENov(s);
+    const nova = (campos) => noServidor(s, (c, adm) => c.acaoSalvarRotina(adm, Object.assign({ frequencia: 'SEMANAL', porTurno: false, exigeSetor: false, ativo: true }, campos)));
+    nova({ tipo: 'LIM', atividade: 'Limpeza da doca', dia: '4' });
+    nova({ tipo: 'INS', atividade: 'Inspeção de extintores', dia: '2' });
+    const lim = idDaRotinaNoServidor(s, 'LIM'), ins = idDaRotinaNoServidor(s, 'INS');
+    noServidor(s, (c) => c.atualizar('ROTINAS', lim, { ATIVO: 'NAO' }, DONO));
+    noServidor(s, (c) => c.excluir('ROTINAS', ins, DONO));
+    const aba = await abrirAba(s, DONO, { relogio: SEGUNDA_19_10, contexto: await navegador.newContext({ viewport: { width: 1300, height: 1300 } }) });
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await abrirRotinas(f);
+    // 1. parada com pendentes: a lista diz quantas ainda estao no calendario e oferece tira-las
+    afirmar(await linhaDaRotina(f, 'LIM') === 'LIM | Limpeza da doca | toda quinta | — | parada · 6 ainda no calendário', await linhaDaRotina(f, 'LIM'));
+    await f.click('#conteudo-cfg tr:has(td:text-is("LIM")) >> text=Tirar do calendário (6)');
+    await f.waitForSelector('#janela-rodape >> text=Tirar do calendário');
+    afirmar(await textoDe(f, '#janela-titulo') === 'Tirar “Limpeza da doca” do calendário?', await textoDe(f, '#janela-titulo'));
+    const parada = await textoDe(f, '.rot-texto');
+    afirmar(parada === 'A rotina já está parada, mas 6 atividades pendentes de hoje em diante (OUT 2026: 2 · NOV 2026: 4) continuam no calendário — ' +
+      'ficaram da versão anterior. Elas serão canceladas e ficam no Arquivo de canceladas do mês.', parada);
+    let r = await recadoDe(f, () => f.click('#janela-rodape >> text=Tirar do calendário'));
+    afirmar(r === 'Rotina parada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4).', r);
+    await f.waitForFunction(() => paginaAtual === 'config' && DADOS.rotinas.some((x) => x.tipo === 'LIM' && !x.pendentes.total), null, { timeout: 15000 });
+    afirmar(await linhaDaRotina(f, 'LIM') === 'LIM | Limpeza da doca | toda quinta | — | parada' && !(await f.$('text=Tirar do calendário (')), await linhaDaRotina(f, 'LIM'));
+    // 2. removida: nao esta na lista, mas as pendentes dela aparecem a parte
+    afirmar(await textoDe(f, '.rot-orfas') === 'Atividades de rotinas removidas INS — 6 pendentes de hoje em diante Tirar do calendário', await textoDe(f, '.rot-orfas'));
+    await f.click('.rot-orfa:has-text("INS") >> text=Tirar do calendário');
+    await f.waitForSelector('#janela-rodape >> text=Tirar do calendário');
+    afirmar(await textoDe(f, '#janela-titulo') === 'Tirar as atividades da rotina removida INS?', await textoDe(f, '#janela-titulo'));
+    afirmar(await textoDe(f, '.rot-texto') === 'As 6 pendentes de hoje em diante (OUT 2026: 2 · NOV 2026: 4) serão canceladas e ficam no Arquivo de canceladas do mês.',
+      await textoDe(f, '.rot-texto'));
+    r = await recadoDe(f, () => f.click('#janela-rodape >> text=Tirar do calendário'));
+    afirmar(r === 'Rotina removida INS: 6 atividades pendentes canceladas.', r);
+    await f.waitForFunction(() => paginaAtual === 'config' && !(DADOS.orfas || []).length && !document.querySelector('.rot-orfas'), null, { timeout: 15000 });
+    // 3. o calendario sem as duas
+    for (const comp of ['OUT 2026', 'NOV 2026']) {
+      await abrirMes(f, comp);
+      afirmar(await diasDaSigla(f, 'LIM') === '' && await diasDaSigla(f, 'INS') === '', comp + ': ' + await diasDaSigla(f, 'LIM') + ' / ' + await diasDaSigla(f, 'INS'));
+    }
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('rotina com atividade fora do dia (mudada na planilha): salvar so o nome pergunta "Levar para o dia da rotina?" — Deixar nao mexe, Levar leva; a troca de dia conta a remarcada a mao; janela velha recusada sem erro na tela', async () => {
+    const s = await subir({ agora: SEGUNDA_19_10 }); instalarComPessoas(s); comOutENov(s, {});
+    noServidor(s, (c) => c.atualizar('ATIVIDADES', 'NOV26-S47-RON-T', { PRAZO: '2026-11-19' }, DONO));          // direto na planilha
+    noServidor(s, (c, adm) => c.acaoRemarcar(adm, { id: 'NOV26-S46-RON-T', prazo: '2026-11-12', motivo: 'feriado', avisar: false }));   // pela tela
+    const aba = await abrirAba(s, DONO, { relogio: SEGUNDA_19_10, contexto: await navegador.newContext({ viewport: { width: 1300, height: 1300 } }) });
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const editarRonda = async () => {
+      await abrirRotinas(f);
+      await f.click('#conteudo-cfg tr:has(td:text-is("RON")) >> text=Editar');
+      await f.waitForSelector('.rot-dias input:checked');
+    };
+    await editarRonda();
+    // "No calendario agora" com a cor e a margem dele (o .dica de depois nao apaga)
+    const agora = await f.evaluate(() => {
+      const p = getComputedStyle(document.querySelector('.rot-agora')), x = document.createElement('span');
+      x.style.color = 'var(--tinta)'; document.body.appendChild(x);
+      const tinta = getComputedStyle(x).color; x.remove();
+      return p.marginTop === '14px' && p.color === tinta;
+    });
+    afirmar(agora, 'a caixa "No calendário agora" com a cor e a margem dela');
+    // 1. so o nome: a tela pergunta, sem ir ao servidor; "Deixar como esta" nao mexe na linha
+    await f.fill('#ro-atividade', 'Ronda da noite');
+    await f.click('#janela-rodape >> text=Salvar');
+    await f.waitForSelector('#janela-rodape >> text=Levar para quarta');
+    afirmar(await textoDe(f, '#janela-titulo') === 'Levar para o dia da rotina?', await textoDe(f, '#janela-titulo'));
+    const fora = await textoDe(f, '.rot-texto');
+    afirmar(fora === '1 atividade pendente de hoje em diante está fora do dia da rotina (toda quarta): ficou no dia antigo na versão anterior ' +
+      'ou foi mudada direto na planilha.', fora);
+    let r = await recadoDe(f, () => f.click('#janela-rodape >> text=Deixar como está'));
+    afirmar(r === 'Rotina salva. No calendário: 6 com o nome novo. Ficaram como estavam: 1 remarcada à mão, 1 fora do dia da rotina.', r);
+    await f.waitForFunction(() => paginaAtual === 'config' && DADOS.rotinas.some((x) => x.tipo === 'RON' && x.atividade === 'Ronda da noite'), null, { timeout: 15000 });
+    await abrirMes(f, 'NOV 2026');
+    afirmar(await diasDaSigla(f, 'RON') === '4,12,19,25', 'Deixar: ' + await diasDaSigla(f, 'RON'));
+    // 2. de novo, "Levar para quarta": a de 19/11 vai para 18/11 (a remarcada a mao fica)
+    await editarRonda();
+    await f.click('#janela-rodape >> text=Salvar');
+    await f.waitForSelector('#janela-rodape >> text=Levar para quarta');
+    r = await recadoDe(f, () => f.click('#janela-rodape >> text=Levar para quarta'));
+    afirmar(r === 'Rotina salva. No calendário: 1 mudou para quarta. Ficaram como estavam: 1 remarcada à mão.', r);
+    await f.waitForFunction(() => paginaAtual === 'config' && DADOS.rotinas.some((x) => x.tipo === 'RON' && !x.pendentes.foraDoDia), null, { timeout: 15000 });
+    await abrirMes(f, 'NOV 2026');
+    afirmar(await diasDaSigla(f, 'RON') === '4,12,18,25', 'Levar: ' + await diasDaSigla(f, 'RON'));
+    // 3. quarta -> sexta: a confirmacao separa a remarcada a mao, como o servidor faz
+    await editarRonda();
+    await f.click('.rot-dias label:has-text("Sex")');
+    await f.click('#janela-rodape >> text=Salvar');
+    await f.waitForSelector('#ro-ajustar:checked');
+    const mudar = await textoDe(f, '.rot-texto');
+    afirmar(mudar === '“Ronda da noite” passa de toda quarta para toda sexta. Das 6 pendentes de hoje em diante (OUT 2026: 2 · NOV 2026: 4), ' +
+      '5 vão para a sexta da mesma semana e 1 remarcada à mão fica onde está. Não mudam: as já entregues ou validadas e as de datas que já passaram. ' +
+      'Se a sexta desta semana já passou, a desta semana fica como está.', mudar);
+    r = await recadoDe(f, () => f.click('text=Salvar e ajustar o calendário'));
+    afirmar(r === 'Rotina salva. No calendário: 5 mudaram para sexta. Ficaram como estavam: 1 remarcada à mão.', r);
+    await f.waitForFunction(() => paginaAtual === 'config' && DADOS.rotinas.some((x) => x.tipo === 'RON' && x.dia === '5'), null, { timeout: 15000 });
+    // 4. outra pessoa grava a rotina com a janela aberta: o Salvar e recusado, sem "Uncaught (in promise)" na tela
+    await editarRonda();
+    s.mundo.desvioRelogio += 60 * 1000;
+    noServidor(s, (c) => c.atualizar('ROTINAS', idDaRotinaNoServidor(s, 'RON'), { ATIVIDADE: 'Ronda do gerente B' }, DONO));
+    r = await recadoDe(f, () => f.click('#janela-rodape >> text=Salvar'));
+    afirmar(r === '[ERRO] Esta rotina foi alterada por outra pessoa enquanto a janela estava aberta. Feche e abra de novo.', r);
+    afirmar(noServidor(s, (c) => String(c.obter('ROTINAS', idDaRotinaNoServidor(s, 'RON')).ATIVIDADE)) === 'Ronda do gerente B', 'a gravacao do outro ficou');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('rotinas com o Google barrando (HTTP 403): a confirmacao abre sem ir ao servidor e a gravacao vai pela pagina (1 POST), de volta na lista; Desativar tambem', async () => {
     const s = await subir({ agora: SEGUNDA_19_10 }); instalarComPessoas(s); comOutENov(s, {});
     criarPin(s, DONO, DONO, '4321');
@@ -2437,6 +2559,52 @@ async function rodar() {
     afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'desativou pela pagina: ' + JSON.stringify(d));
     await f.waitForFunction(() => /^Rotina desativada\. 6 atividades pendentes canceladas/.test(document.getElementById('recado').textContent), null, { timeout: 5000 });
     afirmar(/ \| parada$/.test(await linhaDaRotina(f, 'RON')), await linhaDaRotina(f, 'RON'));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('rotinas da versao anterior com o Google barrando (HTTP 403): "Tirar do calendario" da rotina removida e o "Deixar como esta" gravam pela pagina (1 POST cada)', async () => {
+    const s = await subir({ agora: SEGUNDA_19_10 }); instalarComPessoas(s); comOutENov(s, {});
+    noServidor(s, (c) => c.excluir('ROTINAS', idDaRotinaNoServidor(s, 'RON'), DONO));                       // removida pela versao anterior
+    noServidor(s, (c) => c.atualizar('ATIVIDADES', 'NOV26-S46-REU-T', { PRAZO: '2026-11-12' }, DONO));      // reuniao de sexta mudada na planilha
+    criarPin(s, DONO, DONO, '4321');
+    const aba = await abrirAba(s, DONO, { bloqueio403: true, relogio: SEGUNDA_19_10,
+      contexto: await navegador.newContext({ viewport: { width: 1300, height: 1300 } }) });
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 30000) === 'aplicacao', 'entrou pela reserva');
+    let f = await paginaNova(aba, () => CANAL_BARRADO && paginaAtual === 'modulos');
+    const pelaPagina = async (gesto, pronta) => {
+      await f.evaluate(() => { window.__paginaVelha = true; });
+      await gesto();
+      f = await paginaNova(aba, pronta);
+    };
+    const listaPronta = () => paginaAtual === 'config' && !!document.querySelector('#conteudo-cfg .rot-botoes');
+    await pelaPagina(() => f.evaluate(() => { esquecerTelas(); abrirConfig('config'); }), () => paginaAtual === 'config' && !!document.querySelector('.abas'));
+    await f.click('.abas .aba >> text=Calendário');
+    await f.waitForSelector('#conteudo-cfg .rot-orfas');
+    afirmar(/RON — 6 pendentes de hoje em diante/.test(await textoDe(f, '.rot-orfas')), await textoDe(f, '.rot-orfas'));
+    await f.click('.rot-orfa:has-text("RON") >> text=Tirar do calendário');
+    await f.waitForSelector('#janela-rodape >> text=Tirar do calendário');
+    marcar(aba);
+    await pelaPagina(() => f.click('#janela-rodape >> text=Tirar do calendário'), listaPronta);
+    let d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'tirou pela pagina: ' + JSON.stringify(d));
+    await f.waitForFunction(() => document.getElementById('recado').textContent === 'Rotina removida RON: 6 atividades pendentes canceladas.', null, { timeout: 5000 });
+    afirmar(!(await f.$('.rot-orfas')), 'a lista das removidas sumiu');
+    afirmar(!noServidor(s, (c) => c.listar('ATIVIDADES').some((a) => String(a.TIPO) === 'RON' && String(a.VALIDACAO) !== 'Cancelada')), 'no servidor, nenhuma RON no calendario');
+    // a reuniao mudada na planilha: salvar sem mudar a regra pergunta; "Deixar" (alinharForaDoDia: false) atravessa o POST
+    await f.click('#conteudo-cfg tr:has(td:text-is("REU")) >> text=Editar');
+    await f.waitForSelector('.rot-dias input:checked');
+    marcar(aba);
+    await f.click('#janela-rodape >> text=Salvar');
+    await f.waitForSelector('#janela-rodape >> text=Levar para sexta');
+    afirmar(!desdeMarca(aba).posts, 'a pergunta abriu sem ir ao servidor');
+    await pelaPagina(() => f.click('#janela-rodape >> text=Deixar como está'), listaPronta);
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'gravou pela pagina: ' + JSON.stringify(d));
+    await f.waitForFunction(() => document.getElementById('recado').textContent === 'Rotina salva. Ficaram como estavam: 1 fora do dia da rotina.', null, { timeout: 5000 });
+    const prazo = noServidor(s, (c) => c.paraISO(c.paraData(c.obter('ATIVIDADES', 'NOV26-S46-REU-T').PRAZO)));
+    afirmar(prazo === '2026-11-12', 'a reuniao ficou na quinta: ' + prazo);
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

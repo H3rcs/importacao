@@ -48,7 +48,11 @@ function dadosConfig(usuario) {
   parametros.forEach(function (p) { p.grupo = grupo(p.chave); });
 
   const rotinas = listar('ROTINAS');
-  const noCalendario = calendarioDasRotinas_(rotinas);
+  // Calendario.gs de outra entrega (colado pela metade): a tela abre assim mesmo, sem os numeros do
+  // calendario; gravar rotina recusa (exigirCalendarioDestaVersao_) e a faixa diz qual arquivo falta.
+  const comCalendario = typeof calendarioDasRotinas_ === 'function' && typeof siglaDaRotina_ === 'function';
+  const noCalendario = comCalendario ? calendarioDasRotinas_(rotinas) : {};
+  const sigla = function (r) { return comCalendario ? siglaDaRotina_(r) : String(r.TIPO || '').toUpperCase().trim(); };
 
   return {
     setores: listar('SETORES').map(function (s) {
@@ -56,15 +60,19 @@ function dadosConfig(usuario) {
     }),
     rotinas: rotinas.map(function (r) {
       const regra = regraDaRotina_(r.FREQUENCIA, r.DIA, r.QUANTIDADE);
-      const cal = noCalendario[siglaDaRotina_(r)];
+      const cal = noCalendario[sigla(r)] || { pendentes: { total: 0, porMes: {} }, temAtividades: false };
       // pendentes e temAtividades: a confirmacao da tela e a trava da sigla, sem ir ao servidor.
-      return { id: r.ID, tipo: siglaDaRotina_(r), atividade: r.ATIVIDADE, frequencia: regra.FREQUENCIA,
+      // versao: o formulario a devolve ao gravar (outra pessoa mudou a rotina com ele aberto?). Em texto, como o
+      // acaoSalvarRotina compara: um Date iria no JSON em outro formato.
+      return { id: r.ID, tipo: sigla(r), atividade: r.ATIVIDADE, frequencia: regra.FREQUENCIA,
                dia: regra.DIA, porTurno: marcado(r.POR_TURNO), exigeSetor: marcado(r.EXIGE_SETOR),
-               quantidade: regra.QUANTIDADE, ativo: marcado(r.ATIVO),
+               quantidade: regra.QUANTIDADE, ativo: marcado(r.ATIVO), versao: String(r.ATUALIZADO_EM || ''),
                pendentes: cal.pendentes, temAtividades: cal.temAtividades, problema: erroNaRegra_(regra) };
     }),
+    // Rotinas removidas pela versao anterior com pendentes ainda no calendario (a tela oferece tira-las).
+    orfas: typeof siglasOrfas_ === 'function' ? siglasOrfas_(rotinas) : [],
     // Onde mudar uma rotina mexe nas atividades que ja existem (os textos da tela dizem quais meses).
-    mesesGerados: mesesGeradosDeHojeEmDiante_(),
+    mesesGerados: typeof mesesGeradosDeHojeEmDiante_ === 'function' ? mesesGeradosDeHojeEmDiante_() : [],
     parametros: parametros.filter(function (p) { return p.grupo !== 'oculto'; }),
     parametrosTodos: parametros.map(function (p) { return { chave: p.chave, valor: p.valor }; }),
     arquivosRH: arquivosRH(),
@@ -199,21 +207,39 @@ function conferirSigla_(sigla, antes) {
   }
 }
 
+/*
+ * Calendario.gs de outra entrega (colado pela metade): a rotina nao e gravada.
+ * Sem o acerto desta versao a linha de ROTINAS mudaria e o calendario nao (ou
+ * mudaria pelas regras de antes). siglasOrfas_ so existe a partir desta entrega.
+ */
+function exigirCalendarioDestaVersao_() {
+  if (typeof sincronizarRotina_ !== 'function' || typeof siglasOrfas_ !== 'function') {
+    throw new Error('Atualização incompleta do GSL: as rotinas precisam do Calendario.gs desta versão. Avise o administrador do sistema.');
+  }
+}
+
 function acaoSalvarRotina(usuario, params) {
+  exigirCalendarioDestaVersao_();
   const campos = camposDaRotina_(params);
   return comTrava(function () {
     const antes = params.id ? obter('ROTINAS', params.id) : null;
     if (params.id && !antes) throw new Error('Rotina não encontrada.');
+    // O formulario aberto antes de outra pessoa gravar desfaria a mudanca dela (e o calendario iria junto).
+    if (antes && params.versao && String(antes.ATUALIZADO_EM || '') !== String(params.versao)) {
+      throw new Error('Esta rotina foi alterada por outra pessoa enquanto a janela estava aberta. Feche e abra de novo.');
+    }
     conferirSigla_(campos.TIPO, antes);
     const r = antes ? atualizar('ROTINAS', params.id, campos, usuario.email)
                     : { ok: true, id: inserir('ROTINAS', campos, usuario.email) };
-    const nota = params.ajustarCalendario === false ? null : sincronizarRotina_(antes, campos, usuario.email);
+    const nota = params.ajustarCalendario === false ? null
+      : sincronizarRotina_(antes, campos, usuario.email, params.alinharForaDoDia !== false);
     return resultadoDaRotina_(r, antes, campos, nota);
   });
 }
 
 /* Desativar / Ativar da lista: so o ATIVO muda (a tela nao reenvia os outros campos). */
 function acaoAlternarRotina(usuario, params) {
+  exigirCalendarioDestaVersao_();
   const ativar = params.ativo === true;
   return comTrava(function () {
     const antes = obter('ROTINAS', params.id);
@@ -223,12 +249,14 @@ function acaoAlternarRotina(usuario, params) {
     const campos = { ATIVO: ativar ? 'SIM' : 'NAO' };
     const depois = comCampos_(antes, campos);
     const r = atualizar('ROTINAS', params.id, campos, usuario.email);
-    return resultadoDaRotina_(r, antes, depois, sincronizarRotina_(antes, depois, usuario.email));
+    // Ativar nao leva para o dia da regra a pendente que estava fora dele (so o Salvar, depois da pergunta da tela).
+    return resultadoDaRotina_(r, antes, depois, sincronizarRotina_(antes, depois, usuario.email, false));
   });
 }
 
 /* Remover: as pendentes de hoje em diante saem do calendario (canceladas); o historico fica. */
 function acaoExcluirRotina(usuario, params) {
+  exigirCalendarioDestaVersao_();
   return comTrava(function () {
     const antes = obter('ROTINAS', params.id);
     if (!antes) throw new Error('Rotina não encontrada.');
@@ -238,9 +266,33 @@ function acaoExcluirRotina(usuario, params) {
 }
 
 /*
+ * Rotina removida pela versao anterior, que so tirava a linha de ROTINAS: as
+ * pendentes de hoje em diante que ficaram no calendario saem agora (canceladas
+ * com a marca, como no Remover). Sigla de rotina da lista e a das avulsas nao.
+ */
+function acaoLimparSiglaOrfa(usuario, params) {
+  exigirCalendarioDestaVersao_();
+  const sigla = String(params.sigla || '').toUpperCase().trim();
+  if (!/^[A-Z0-9]+$/.test(sigla)) throw new Error('Informe a sigla da rotina removida.');
+  if (sigla === SIGLA_AVULSA) throw new Error('A sigla AV é das atividades avulsas criadas no calendário: elas não são de rotina.');
+  return comTrava(function () {
+    if (listar('ROTINAS').some(function (r) { return siglaDaRotina_(r) === sigla; })) {
+      throw new Error('A rotina ' + sigla + ' está na lista: use Desativar ou Remover nela.');
+    }
+    const nota = sincronizarRotina_({ TIPO: sigla }, null, usuario.email);
+    return { ok: true, calendario: nota, esquecerTelas: nota.canceladas > 0,
+             recado: nota.canceladas
+               ? 'Rotina removida ' + sigla + ': ' + quantos_(nota.canceladas, 'atividade pendente cancelada', 'atividades pendentes canceladas') + '.'
+               : 'Nada a tirar: a rotina removida ' + sigla + ' não tem pendentes de hoje em diante.' };
+  });
+}
+
+/*
  * O que volta para a tela: o recado com o que mudou no calendario e, quando
- * o calendario mudou, invalidarTudo — sem ele o calendario abria primeiro a
- * copia guardada (sem a mudanca) e parecia que nada tinha acontecido.
+ * o calendario mudou, esquecerTelas — sem ele o calendario abria primeiro a
+ * copia guardada (sem a mudanca) e parecia que nada tinha acontecido. Nao e o
+ * invalidarTudo: o menu nao muda, e a Configuracao volta junto com a gravacao
+ * (uma ida so ao servidor, executarAcaoETela).
  */
 function resultadoDaRotina_(r, antes, depois, nota) {
   const mudou = !!nota && (nota.movidas + nota.canceladas + nota.criadas + nota.reativadas + nota.renomeadas > 0);
@@ -248,7 +300,7 @@ function resultadoDaRotina_(r, antes, depois, nota) {
   r.recado = nota ? recadoDaRotina_(antes, depois, nota)
     : 'Rotina salva. As atividades já geradas não mudaram; vale a partir de ' + primeiroMesAGerar_() + '.';
   // O "Exige setor" tambem esta no calendario (tiposComSetor).
-  r.invalidarTudo = mudou || marcado((antes || {}).EXIGE_SETOR) !== marcado((depois || {}).EXIGE_SETOR);
+  r.esquecerTelas = mudou || marcado((antes || {}).EXIGE_SETOR) !== marcado((depois || {}).EXIGE_SETOR);
   return r;
 }
 
@@ -266,7 +318,9 @@ function ficaramComoEstavam_(m) {
   const lista = [m.entregues && quantos_(m.entregues, 'entregue', 'entregues'),
                  m.remarcadas && quantos_(m.remarcadas, 'remarcada à mão', 'remarcadas à mão'),
                  m.agendadas && quantos_(m.agendadas, 'vaga já agendada', 'vagas já agendadas'),
-                 m.semanaPassou && m.semanaPassou + ' desta semana (o dia novo já passou)'].filter(Boolean);
+                 m.semanaPassou && m.semanaPassou + ' desta semana (o dia novo já passou)',
+                 m.mesPassou && m.mesPassou + ' deste mês (o dia novo já passou)',
+                 m.foraDoDia && m.foraDoDia + ' fora do dia da rotina'].filter(Boolean);
   return lista.length ? ' Ficaram como estavam: ' + lista.join(', ') + '.' : '';
 }
 
@@ -277,6 +331,8 @@ function recadoDaRotina_(antes, depois, nota) {
   if (!depois) return 'Rotina removida.' + (canceladas ? canceladas + '.' : '') + fim;
   const estava = !!antes && marcado(antes.ATIVO), esta = marcado(depois.ATIVO);
   if (estava && !esta) return 'Rotina desativada.' + (canceladas ? canceladas + ' (' + porMesDoAcerto_(nota, 'canceladas') + ').' : '') + fim;
+  // Ja parada (a versao anterior so gravava ATIVO=NAO): as pendentes que tinham ficado saem agora.
+  if (!estava && !esta && nota.canceladas) return 'Rotina parada.' + canceladas + ' (' + porMesDoAcerto_(nota, 'canceladas') + ').' + fim;
   const voltaram = nota.reativadas + nota.criadas;
   if (antes && !estava && esta && !nota.movidas && !nota.canceladas) {
     return 'Rotina ativada.' + (voltaram ? ' ' + quantos_(voltaram, 'atividade de volta ao calendário.', 'atividades de volta ao calendário.') : '') + fim;

@@ -227,7 +227,7 @@ caso('rotina nova com OUT e NOV ja gerados: nasce de hoje em diante nos dois mes
   afirmar(datas(v) === '21/10 28/10 04/11 11/11 18/11 25/11', 'datas: ' + datas(v));
   afirmar(v.every((l) => l.status === 'Pendente'), 'nenhuma nasce Atrasada: ' + v.map((l) => l.status).join(','));
   afirmar(r.recado === 'Rotina salva. No calendário: 2 criadas em OUT 2026 e 4 em NOV 2026 (de hoje em diante).', r.recado);
-  afirmar(r.invalidarTudo === true, 'a tela esquece as copias (o calendario mudou)');
+  afirmar(r.esquecerTelas === true && !r.invalidarTudo, 'a tela esquece as copias (o calendario mudou), sem refazer o menu');
 });
 
 caso('quarta -> sexta: as pendentes de hoje em diante vao para a sexta (mesmo ID, com a nota); entregue, remarcada a mao, cancelada a mao e atrasada ficam', () => {
@@ -237,6 +237,9 @@ caso('quarta -> sexta: as pendentes de hoje em diante vao para a sexta (mesmo ID
   c = ctx(m); c.atualizar('ATIVIDADES', 'NOV26-S46-RON-T', { ENTREGUE_EM: c.agoraTexto(), ANEXOS: 'arq_x', STATUS: 'Aguard. valid.' }, DONO);
   c = ctx(m); c.acaoRemarcar(admin(c), { id: 'NOV26-S47-RON-T', prazo: '2026-11-19', motivo: 'feriado', avisar: false });
   c = ctx(m); c.acaoCancelarAtividade(admin(c), { id: 'NOV26-S48-RON-T', motivo: 'inventario' });
+  c = ctx(m);
+  const pend = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON').pendentes;
+  afirmar(pend.total === 4 && pend.remarcadas === 1 && pend.foraDoDia === 0, 'a confirmacao conta 4 pendentes, 1 remarcada a mao (fica): ' + JSON.stringify(pend));
   const idsAntes = daRotina(m, 'RON').map((l) => l.id).sort().join();
   const r = salvarRotina(m, { dia: '5' });
   const t = daRotina(m, 'RON'), por = (id) => t.find((l) => l.id === id);
@@ -250,11 +253,78 @@ caso('quarta -> sexta: as pendentes de hoje em diante vao para a sexta (mesmo ID
   afirmar(r.recado === 'Rotina salva. No calendário: 3 mudaram para sexta. Ficaram como estavam: 1 entregue, 1 remarcada à mão.', r.recado);
 });
 
+caso('ID gravado em dobro por versao antiga: cada copia e acertada na sua linha — a entregue fica, a pendente vai para a sexta; desativar tira as duas copias pendentes do calendario', () => {
+  let m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m);
+  c.atualizar('ATIVIDADES', 'NOV26-S46-RON-T', { ENTREGUE_EM: c.agoraTexto(), ANEXOS: 'arq_x', MOTIVO: 'Reprovado: faltou a foto do setor' }, DONO);
+  c = ctx(m); c.inserir('ATIVIDADES', { ID: 'NOV26-S46-RON-T', COMPETENCIA: 'NOV 2026', SEMANA: 'S46', PRAZO: '2026-11-11', ATIVIDADE: 'Ronda', TIPO: 'RON', TURNO: 'Todos', STATUS: 'Pendente' }, DONO);
+  salvarRotina(m, { dia: '5' });
+  c = ctx(m);
+  const copias = c.listar('ATIVIDADES').filter((a) => a.ID === 'NOV26-S46-RON-T').sort((x, y) => x._linha - y._linha)
+    .map((a) => ({ iso: c.paraISO(c.paraData(a.PRAZO)), motivo: String(a.MOTIVO), entregue: !!String(a.ENTREGUE_EM) }));
+  afirmar(copias.length === 2 && copias[0].entregue && copias[0].iso === '2026-11-11' && copias[0].motivo === 'Reprovado: faltou a foto do setor',
+    'a entregue nao mudou: ' + JSON.stringify(copias[0]));
+  afirmar(!copias[1].entregue && copias[1].iso === '2026-11-13' && copias[1].motivo === 'Remarcada de 11/11/2026 para 13/11/2026: a rotina mudou para toda sexta.',
+    'a pendente foi para a sexta: ' + JSON.stringify(copias[1]));
+  // OUT gravado em dobro, as duas copias pendentes: a tela conta 8 e o servidor cancela as 8
+  m = mundoComMeses(); salvarRotina(m);
+  ['OUT26-S43-RON-T', 'OUT26-S44-RON-T'].forEach((id) => {
+    const a = ctx(m).obter('ATIVIDADES', id);
+    ctx(m).inserir('ATIVIDADES', { ID: id, COMPETENCIA: 'OUT 2026', SEMANA: a.SEMANA, PRAZO: a.PRAZO, ATIVIDADE: 'Ronda', TIPO: 'RON', TURNO: 'Todos', STATUS: 'Pendente' }, DONO);
+  });
+  c = ctx(m);
+  const ron = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
+  c = ctx(m);
+  const r = c.acaoAlternarRotina(admin(c), { id: ron.id, ativo: false });
+  afirmar(ron.pendentes.total === 8 && r.calendario.canceladas === 8, 'a tela contou ' + ron.pendentes.total + ', o servidor cancelou ' + r.calendario.canceladas);
+  c = ctx(m);
+  afirmar(!c.dadosCalendario(admin(c), { competencia: 'OUT 2026' }).atividades.some((a) => a.tipo === 'RON') && !vivas(m, 'RON').length, 'OUT sem a rotina');
+});
+
 caso('dia trocado pela versao anterior (as atividades ficaram no dia antigo, sem nota): salvar de novo leva para o dia da rotina', () => {
   const m = mundoComMeses(); salvarRotina(m);
   const c = ctx(m); c.atualizar('ROTINAS', idDaRotina(m, 'RON'), { DIA: '5' }, DONO);    // so a linha da rotina mudava
   const r = salvarRotina(m, { dia: '5' });
   afirmar(r.calendario.movidas === 6 && vivas(m, 'RON').every((l) => l.dia === 'sex'), 'sexta: ' + datas(vivas(m, 'RON')));
+});
+
+caso('linha mudada direto na planilha e a regra nao muda: a Configuracao conta 1 fora do dia; "Deixar como estao" nao mexe; "Levar" leva para a quarta com a nota neutra; Ativar nao realinha', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  const naPlanilha = () => { const c = ctx(m); c.atualizar('ATIVIDADES', 'NOV26-S47-RON-T', { PRAZO: '2026-11-19' }, DONO); };
+  const pendentes = () => { const c = ctx(m); return c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON').pendentes; };
+  const s47 = () => daRotina(m, 'RON').find((l) => l.id === 'NOV26-S47-RON-T');
+  naPlanilha();
+  afirmar(pendentes().foraDoDia === 1 && pendentes().remarcadas === 0, 'fora do dia: ' + JSON.stringify(pendentes()));
+  const r1 = salvarRotina(m, { atividade: 'Ronda de segurança', alinharForaDoDia: false });
+  afirmar(s47().iso === '2026-11-19' && s47().nome === 'Ronda de segurança', '"Deixar": ficou na quinta, so com o nome novo ' + JSON.stringify(s47()));
+  afirmar(r1.recado === 'Rotina salva. No calendário: 6 com o nome novo. Ficaram como estavam: 1 fora do dia da rotina.', r1.recado);
+  const r2 = salvarRotina(m, { atividade: 'Ronda de segurança' });
+  afirmar(s47().iso === '2026-11-18' && s47().motivo === 'Remarcada de 19/11/2026 para 18/11/2026: dia da rotina (toda quarta).', '"Levar": ' + JSON.stringify(s47()));
+  afirmar(r2.recado === 'Rotina salva. No calendário: 1 mudou para quarta.', r2.recado);
+  // a nota neutra e do sistema: mudada na planilha de novo, a linha conta como fora do dia, nao como remarcada a mao
+  naPlanilha();
+  afirmar(pendentes().foraDoDia === 1 && pendentes().remarcadas === 0, 'nota neutra: ' + JSON.stringify(pendentes()));
+  // parada pela versao anterior (so ATIVO=NAO): o Ativar da lista nao leva a linha para o dia da regra
+  let c = ctx(m); c.atualizar('ROTINAS', idDaRotina(m, 'RON'), { ATIVO: 'NAO' }, DONO);
+  c = ctx(m);
+  const r3 = c.acaoAlternarRotina(admin(c), { id: idDaRotina(m, 'RON'), ativo: true });
+  afirmar(s47().iso === '2026-11-19' && r3.recado === 'Rotina ativada. Ficaram como estavam: 1 fora do dia da rotina.', s47().iso + ' / ' + r3.recado);
+});
+
+caso('dois gerentes: o formulario aberto antes de outro mudar a rotina nao desfaz a mudanca (a versao nao bate: recusa e o calendario fica na sexta)', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m);
+  const telaDeA = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
+  m.desvioRelogio += 60 * 1000;                              // um minuto depois (o carimbo ATUALIZADO_EM e por segundo)
+  salvarRotina(m, { dia: '5' });                             // o gerente B muda para sexta
+  let erro = '';
+  try { salvarRotina(m, { atividade: 'Ronda noturna', dia: telaDeA.dia, versao: telaDeA.versao }); } catch (e) { erro = e.message; }
+  afirmar(erro === 'Esta rotina foi alterada por outra pessoa enquanto a janela estava aberta. Feche e abra de novo.', 'recusa: ' + erro);
+  afirmar(vivas(m, 'RON').every((l) => l.dia === 'sex' && l.nome === 'Ronda'), 'continua na sexta, com o nome de antes: ' + datas(vivas(m, 'RON')));
+  c = ctx(m);
+  const atual = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
+  const r = salvarRotina(m, { atividade: 'Ronda noturna', dia: '5', versao: atual.versao });
+  afirmar(r.recado === 'Rotina salva. No calendário: 6 com o nome novo.', 'com a janela aberta de novo, grava: ' + r.recado);
 });
 
 caso('semana que atravessa o mes (sexta 30/10 -> domingo 01/11): a de OUT sai (cancelada pela rotina) e nasce NOV26-S44', () => {
@@ -268,11 +338,20 @@ caso('semana que atravessa o mes (sexta 30/10 -> domingo 01/11): a de OUT sai (c
   afirmar(r.recado === 'Rotina salva. No calendário: 5 mudaram para domingo · 1 cancelada · 1 criada.', r.recado);
 });
 
+caso('(hoje = sabado 31/10) domingo -> sexta: a NOV26-S44 (domingo 01/11) e a desta semana e fica — a sexta dela (30/10, no outro mes) ja passou', () => {
+  const m = mundoComMeses('2026-10-31T10:00:00-03:00');
+  salvarRotina(m, { dia: '7' });
+  const r = salvarRotina(m, { dia: '5' });
+  const s44 = daRotina(m, 'RON').find((l) => l.id === 'NOV26-S44-RON-T');
+  afirmar(s44.status === 'Pendente' && s44.iso === '2026-11-01', 'a desta semana ficou no domingo: ' + JSON.stringify(s44));
+  afirmar(r.recado === 'Rotina salva. No calendário: 4 mudaram para sexta. Ficaram como estavam: 1 desta semana (o dia novo já passou).', r.recado);
+});
+
 caso('desativar pela lista: a Configuracao contava as pendentes, o calendario fica sem a rotina e o Arquivo com elas; ativar traz de volta', () => {
   const m = mundoComMeses(); salvarRotina(m);
   let c = ctx(m);
   const ron = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
-  afirmar(JSON.stringify(ron.pendentes) === '{"total":6,"porMes":{"OUT 2026":2,"NOV 2026":4}}' && ron.temAtividades, JSON.stringify(ron));
+  afirmar(JSON.stringify(ron.pendentes) === '{"total":6,"porMes":{"OUT 2026":2,"NOV 2026":4},"remarcadas":0,"foraDoDia":0}' && ron.temAtividades, JSON.stringify(ron));
   c = ctx(m);
   const r1 = c.acaoAlternarRotina(admin(c), { id: ron.id, ativo: false });
   afirmar(r1.calendario.canceladas === ron.pendentes.total, 'a contagem da tela bateu: ' + r1.calendario.canceladas);
@@ -292,6 +371,57 @@ caso('desativar pela lista: a Configuracao contava as pendentes, o calendario fi
   afirmar(datas(v) === '21/10 28/10 04/11 11/11 18/11 25/11' && v.every((l) => !l.motivo), 'de volta, sem a marca: ' + datas(v));
 });
 
+caso('remarcada a mao, desativada e ativada: volta no dia que a pessoa escolheu, sem a nota "a rotina mudou" — tambem quando o dia da regra ja passou e o dela nao', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m); c.acaoRemarcar(admin(c), { id: 'NOV26-S47-RON-T', prazo: '2026-11-19', motivo: 'feriado', avisar: false });
+  c = ctx(m); c.acaoRemarcar(admin(c), { id: 'OUT26-S43-RON-T', prazo: '2026-10-23', motivo: 'auditoria na quarta', avisar: false });
+  const id = idDaRotina(m, 'RON'), em = (x) => daRotina(m, 'RON').find((l) => l.id === x);
+  const alternar = (ativo) => { const cc = ctx(m); return cc.acaoAlternarRotina(admin(cc), { id: id, ativo: ativo }); };
+  const notaDaTela = em('NOV26-S47-RON-T').motivo;
+  alternar(false);
+  const r1 = alternar(true);                                                 // no mesmo dia
+  afirmar(em('NOV26-S47-RON-T').iso === '2026-11-19' && em('NOV26-S47-RON-T').status === 'Pendente' && em('NOV26-S47-RON-T').motivo === notaDaTela,
+    'voltou na quinta 19/11, so com a nota da tela: ' + JSON.stringify(em('NOV26-S47-RON-T')));
+  afirmar(r1.recado === 'Rotina ativada. 6 atividades de volta ao calendário.', r1.recado);
+  alternar(false);
+  m.desvioRelogio = Date.parse('2026-10-22T10:00:00-03:00') - Date.now();   // quinta 22/10: a quarta da S43 passou, a sexta dela nao
+  const r2 = alternar(true);
+  afirmar(em('OUT26-S43-RON-T').iso === '2026-10-23' && em('OUT26-S43-RON-T').status === 'Pendente', 'voltou na sexta 23/10: ' + JSON.stringify(em('OUT26-S43-RON-T')));
+  afirmar(r2.recado === 'Rotina ativada. 6 atividades de volta ao calendário.', r2.recado);
+});
+
+caso('atividade de mes encerrado remarcada para este mes (SET26-S40 -> 22/10): conta no mes do prazo, fica na troca de dia (remarcada a mao) e desativar a tira do calendario', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m);
+  c.inserir('ATIVIDADES', { ID: 'SET26-S40-RON-T', COMPETENCIA: 'OUT 2026', SEMANA: 'S43', PRAZO: '2026-10-22', ATIVIDADE: 'Ronda', TIPO: 'RON', TURNO: 'Todos',
+    STATUS: 'Pendente', MOTIVO: 'Remarcada de 30/09/2026 para 22/10/2026: chuva' }, DONO);
+  c = ctx(m);
+  const ron = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
+  afirmar(JSON.stringify(ron.pendentes) === '{"total":7,"porMes":{"OUT 2026":3,"NOV 2026":4},"remarcadas":1,"foraDoDia":0}', JSON.stringify(ron.pendentes));
+  const r1 = salvarRotina(m, { dia: '2' });
+  afirmar(daRotina(m, 'RON').find((l) => l.id === 'SET26-S40-RON-T').iso === '2026-10-22', 'a remarcada ficou em 22/10');
+  afirmar(r1.recado === 'Rotina salva. No calendário: 6 mudaram para terça. Ficaram como estavam: 1 remarcada à mão.', r1.recado);
+  // as duas de OUT ja entregues: de OUT so sai a de setembro, contada em OUT (antes de NOV no recado)
+  ['OUT26-S43-RON-T', 'OUT26-S44-RON-T'].forEach((id) => { const cc = ctx(m); cc.atualizar('ATIVIDADES', id, { ENTREGUE_EM: cc.agoraTexto(), ANEXOS: 'arq_x' }, DONO); });
+  c = ctx(m);
+  const r2 = c.acaoAlternarRotina(admin(c), { id: ron.id, ativo: false });
+  afirmar(r2.recado === 'Rotina desativada. 5 atividades pendentes canceladas (OUT 2026: 1 · NOV 2026: 4). Ficaram como estavam: 2 entregues.', r2.recado);
+  c = ctx(m);
+  afirmar(!c.dadosCalendario(admin(c), { competencia: 'OUT 2026' }).atividades.some((a) => a.id === 'SET26-S40-RON-T'), 'OUT sem a de setembro');
+});
+
+caso('rotina parada pela versao anterior (so ATIVO=NAO) com pendentes: a Configuracao as conta e o "Tirar do calendario" (Desativar de novo) as cancela — "Rotina parada."', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m); c.atualizar('ROTINAS', idDaRotina(m, 'RON'), { ATIVO: 'NAO' }, DONO);
+  c = ctx(m);
+  const ron = c.dadosConfig(admin(c)).rotinas.find((x) => x.tipo === 'RON');
+  afirmar(!ron.ativo && ron.pendentes.total === 6, JSON.stringify(ron));
+  c = ctx(m);
+  const r = c.acaoAlternarRotina(admin(c), { id: ron.id, ativo: false });
+  afirmar(r.recado === 'Rotina parada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4).', r.recado);
+  afirmar(!vivas(m, 'RON').length, 'nenhuma no calendario: ' + datas(vivas(m, 'RON')));
+});
+
 caso('remover e recriar a mesma sigla: as canceladas pela rotina voltam no dia novo (sem ID repetido na tabela)', () => {
   const m = mundoComMeses(); salvarRotina(m);
   const c = ctx(m);
@@ -302,6 +432,24 @@ caso('remover e recriar a mesma sigla: as canceladas pela rotina voltam no dia n
   afirmar(ids.length === new Set(ids).size, 'sem ID repetido');
   const v = vivas(m, 'RON');
   afirmar(r2.calendario.reativadas === 6 && v.length === 6 && v.every((l) => l.dia === 'ter' && l.nome === 'Ronda noturna'), datas(v));
+});
+
+caso('rotina removida pela versao anterior (as pendentes ficaram): a Configuracao lista a sigla e "Tirar do calendario" as cancela; sigla de rotina da lista e AV sao recusadas', () => {
+  const m = mundoComMeses(); salvarRotina(m);
+  let c = ctx(m); c.excluir('ROTINAS', idDaRotina(m, 'RON'), DONO);              // o que a versao anterior fazia
+  c = ctx(m);
+  const orfas = c.dadosConfig(admin(c)).orfas;
+  afirmar(JSON.stringify(orfas) === '[{"sigla":"RON","pendentes":{"total":6,"porMes":{"OUT 2026":2,"NOV 2026":4},"remarcadas":0,"foraDoDia":0}}]', JSON.stringify(orfas));
+  const erro = (sigla) => { const cc = ctx(m); try { cc.acaoLimparSiglaOrfa(admin(cc), { sigla: sigla }); return ''; } catch (e) { return e.message; } };
+  const daLista = erro('VIS'), avulsa = erro('av');
+  afirmar(daLista === 'A rotina VIS está na lista: use Desativar ou Remover nela.', daLista);
+  afirmar(avulsa === 'A sigla AV é das atividades avulsas criadas no calendário: elas não são de rotina.', avulsa);
+  c = ctx(m);
+  const r = c.acaoLimparSiglaOrfa(admin(c), { sigla: 'ron' });
+  afirmar(r.recado === 'Rotina removida RON: 6 atividades pendentes canceladas.' && r.esquecerTelas, r.recado);
+  afirmar(!vivas(m, 'RON').length && daRotina(m, 'RON').every((l) => l.motivo === 'Cancelada pela rotina (rotina removida em 19/10/2026).'), 'canceladas com a marca');
+  c = ctx(m);
+  afirmar(!c.dadosConfig(admin(c)).orfas.length, 'a sigla sai da lista das removidas');
 });
 
 caso('"uma por turno" liga e desliga; avulsa 5 -> 3 cancela as vagas sem data e deixa a ja agendada', () => {
@@ -330,6 +478,35 @@ caso('"Gerar mes" num mes ja gerado so completa de hoje em diante (antes nasciam
   afirmar(g.recado === 'OUT 2026: 2 atividade(s) criada(s) — só de hoje em diante: o mês já estava gerado.', g.recado);
   c = ctx(m); c.gerarCompetencia('DEZ 2026', DONO);
   afirmar(vivas(m, 'RON').filter((l) => /^2026-12/.test(l.iso)).length === 5, 'DEZ inteiro (5 quartas)');
+});
+
+caso('mensal e uma por turno no mes: trocar o dia nao cria a 2a de outubro (a de 05/10 foi aprovada); "dia 20" -> "1a segunda" deixa a de 20/10; "Salvar so a rotina" + "Gerar mes" nao cria a 2a', () => {
+  const PLM = (dia, extra) => Object.assign({ tipo: 'PLM', atividade: 'Planejamento mensal', frequencia: 'MENSAL', dia: dia }, extra);
+  const mensalComOutENov = (dia) => {                      // a rotina ja existia quando OUT e NOV foram gerados
+    const m = new Mundo({ dono: DONO, agora: SEGUNDA });
+    ctx(m).instalar(DONO);
+    salvarRotina(m, PLM(dia));
+    ['OUT 2026', 'NOV 2026'].forEach((comp) => ctx(m).gerarCompetencia(comp, DONO));
+    return m;
+  };
+  const aprovarOutubro = (m) => { const c = ctx(m); c.atualizar('ATIVIDADES', 'OUT26-S41-PLM-T', { ENTREGUE_EM: '05/10/2026 15:00:00', ANEXOS: 'arq1', VALIDACAO: 'Aprovado', STATUS: 'Aprovada' }, DONO); };
+  const doMes = (m, mes) => vivas(m, 'PLM').filter((l) => l.iso.slice(5, 7) === mes).map((l) => l.id + '@' + l.iso.slice(8)).join(' ');
+  // 1a segunda -> ultima sexta, com a de outubro (05/10) aprovada
+  let m = mensalComOutENov('PRIMEIRA_SEGUNDA'); aprovarOutubro(m);
+  let r = salvarRotina(m, PLM('ULTIMA_SEXTA'));
+  afirmar(doMes(m, '10') === 'OUT26-S41-PLM-T@05' && doMes(m, '11') === 'NOV26-S48-PLM-T@27', 'OUT so com a aprovada; NOV na ultima sexta: ' + doMes(m, '10') + ' | ' + doMes(m, '11'));
+  afirmar(r.recado === 'Rotina salva. No calendário: 1 cancelada · 1 criada.', r.recado);
+  // dia 20 -> 1a segunda (05/10 ja passou): a de 20/10 fica
+  m = mensalComOutENov('20');
+  r = salvarRotina(m, PLM('PRIMEIRA_SEGUNDA'));
+  afirmar(doMes(m, '10') === 'OUT26-S43-PLM-T@20' && doMes(m, '11') === 'NOV26-S45-PLM-T@02', 'OUT com a de 20/10; NOV na 1a segunda: ' + doMes(m, '10') + ' | ' + doMes(m, '11'));
+  afirmar(r.recado === 'Rotina salva. No calendário: 1 cancelada · 1 criada. Ficaram como estavam: 1 deste mês (o dia novo já passou).', r.recado);
+  // "Salvar so a rotina" e depois "Gerar mes" de OUT (completar): a de outubro ja existe
+  m = mensalComOutENov('PRIMEIRA_SEGUNDA'); aprovarOutubro(m);
+  salvarRotina(m, PLM('ULTIMA_SEXTA', { ajustarCalendario: false }));
+  const c = ctx(m);
+  const g = c.acaoGerarMes(admin(c), { competencia: 'OUT 2026' });
+  afirmar(g.recado === 'Nada a gerar: OUT 2026 já tinha todas as atividades das rotinas.' && doMes(m, '10') === 'OUT26-S41-PLM-T@05', g.recado + ' | ' + doMes(m, '10'));
 });
 
 caso('validacao: sabado e domingo geram; frequencia, dia, vagas e sigla erradas sao recusadas; a sigla trava depois de gerar; mensal minusculo e normalizado', () => {
@@ -373,16 +550,53 @@ caso('"Exige setor": tiposComSetor do calendario segue as rotinas; o aviso do se
   const tipos = () => { const c = ctx(m); return c.dadosCalendario(admin(c), { competencia: 'OUT 2026' }).tiposComSetor.join(','); };
   afirmar(tipos() === 'VIS', 'so a Vistoria: ' + tipos());
   const r = salvarRotina(m, { exigeSetor: true });
-  afirmar(r.invalidarTudo, 'o calendario muda');
+  afirmar(r.esquecerTelas, 'o calendario muda');
   const vis = ctx(m).listar('ROTINAS').find((x) => String(x.TIPO) === 'VIS');
   let c = ctx(m);
   const rv = c.acaoSalvarRotina(admin(c), { id: vis.ID, tipo: 'VIS', atividade: vis.ATIVIDADE, frequencia: 'SEMANAL', dia: '3', porTurno: true, exigeSetor: false, ativo: true });
-  afirmar(rv.invalidarTudo && rv.recado === 'Rotina salva.', 'so a marca mudou: ' + rv.recado);
+  afirmar(rv.esquecerTelas && rv.recado === 'Rotina salva.', 'so a marca mudou: ' + rv.recado);
   afirmar(tipos() === 'RON', 'a Ronda com a marca, a Vistoria sem: ' + tipos());
   m.emails.length = 0;
   c = ctx(m); c.acaoDefinirSetor(admin(c), { id: 'OUT26-S43-RON-T', setor: 'Recebimento' });
   const assuntos = m.emails.map((e) => e.subject);
   afirmar(assuntos.length && assuntos.every((x) => x === 'Setor definido — Ronda (S43): Recebimento'), 'aviso: ' + assuntos.join(' | '));
+});
+
+caso('colado pela metade (Calendario.gs de 14/10 ou da primeira entrega de 19/10 com o Config.gs novo): a Configuracao abre; gravar, desativar, remover e tirar do calendario recusam com o recado, sem gravar nada', () => {
+  const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+  for (const antes of ['2b60bb2', '4983794']) {
+    let velho;
+    try {
+      velho = execSync('git show ' + antes + ':GSL/Calendario.gs', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    } catch (e) { console.log('        (sem o historico do git: caso pulado)'); return; }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-calendario-'));
+    try {
+      fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+      fs.writeFileSync(path.join(tmp, 'Calendario.gs'), velho);
+      const m = new Mundo({ dono: DONO, agora: SEGUNDA });
+      const nova = () => { const c = novaExecucao(m, tmp, { contaGoogle: DONO }, { apagarComentarios: 'nenhum' }); c._porta = true; return c; };
+      nova().instalar(DONO);
+      nova().gerarCompetencia('OUT 2026', DONO);
+      let c = nova();
+      const cfg = c.dadosConfig(admin(c));
+      const vis = cfg.rotinas.find((x) => x.tipo === 'VIS');
+      afirmar(vis && cfg.rotinas.length >= 6 && Array.isArray(cfg.orfas) && Array.isArray(cfg.mesesGerados), antes + ': a Configuracao abriu');
+      const banco = m.planilhas.get(m.props.script.ID_BANCO);
+      const dados = () => ['ROTINAS', 'ATIVIDADES'].map((n) => JSON.stringify(banco.abas.find((a) => a.nome === n).dados)).join();
+      const antesDeGravar = dados();
+      const recado = 'Atualização incompleta do GSL: as rotinas precisam do Calendario.gs desta versão. Avise o administrador do sistema.';
+      const tentar = (fn) => { const x = nova(); try { fn(x); return ''; } catch (e) { return e.message; } };
+      [(x) => x.acaoSalvarRotina(admin(x), Object.assign({}, RONDA)),
+       (x) => x.acaoSalvarRotina(admin(x), { id: vis.id, tipo: 'VIS', atividade: vis.atividade, frequencia: 'SEMANAL', dia: '5', porTurno: true, ativo: true }),
+       (x) => x.acaoAlternarRotina(admin(x), { id: vis.id, ativo: false }),
+       (x) => x.acaoExcluirRotina(admin(x), { id: vis.id }),
+       (x) => x.acaoLimparSiglaOrfa(admin(x), { sigla: 'RON' })].forEach((fn, i) => {
+        const e = tentar(fn);
+        afirmar(e === recado, antes + ': gravacao ' + i + ' — ' + e);
+      });
+      afirmar(dados() === antesDeGravar, antes + ': nada foi gravado em ROTINAS nem em ATIVIDADES');
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
 });
 
 caso('NOV gerado por versao antiga (ID sem ano NOV-S46-RON-T): mudar o dia move a linha antiga e nao nasce NOV26-S46 em dobro', () => {

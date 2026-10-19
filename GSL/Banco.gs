@@ -467,6 +467,8 @@ function inserirVarios(tabela, registros, quem) {
 /**
  * Atualiza varios registros de uma vez.
  * mudancas: [{ id: 'ATV-...', campos: { STATUS: 'Cancelada' } }, ...]
+ * linha (opcional): a linha fisica lida DENTRO da mesma trava. Vale so se
+ * ainda tiver o mesmo ID e nao estiver excluida; senao, a primeira viva do ID.
  */
 function atualizarVarios(tabela, mudancas, quem) {
   if (!mudancas || !mudancas.length) return { ok: true, alterados: 0 };
@@ -496,7 +498,10 @@ function atualizarVarios(tabela, mudancas, quem) {
 
     let menor = valores.length, maior = 0, n = 0;
     mudancas.forEach(function (m) {
-      const i = linhaDe[String(m.id)];
+      // ID gravado em dobro por versao antiga: a linha fisica acerta a copia certa (a outra fica como esta).
+      const fisica = m.linha ? Number(m.linha) - 1 : -1;
+      const i = (fisica >= 1 && fisica < valores.length && String(valores[fisica][colId]) === String(m.id) &&
+                 !(colExc !== -1 && marcado(valores[fisica][colExc]))) ? fisica : linhaDe[String(m.id)];
       if (i === undefined) return;
       Object.keys(m.campos).forEach(function (k) {
         const pos = colunas.indexOf(k.toUpperCase());

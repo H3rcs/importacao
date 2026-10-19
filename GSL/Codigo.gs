@@ -589,6 +589,8 @@ const ACOES = {
   salvarRotina:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarRotina', modulo: ['calendario', 'config'] },
   alternarRotina:      { capacidade: 'PROGRAMAR',     funcao: 'acaoAlternarRotina', modulo: ['calendario', 'config'] },
   excluirRotina:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirRotina', modulo: ['calendario', 'config'] },
+  // Rotina removida pela versao anterior: as pendentes que ficaram no calendario saem (Configuracao > Calendario).
+  limparSiglaOrfa:     { capacidade: 'PROGRAMAR',     funcao: 'acaoLimparSiglaOrfa', modulo: ['calendario', 'config'] },
   salvarParametro:     { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarParametro' },
   corrigirFuso:        { capacidade: 'GERIR_ACESSOS', funcao: 'acaoCorrigirFuso' },
   ligarGatilhos:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoLigarGatilhos' },

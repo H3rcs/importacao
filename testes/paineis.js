@@ -601,14 +601,18 @@ caso('rotinas pela porta (19/10): a Configuracao traz as pendentes da rotina e o
   tela(m, adm, 'calendario', { competencia: 'OUT 2026' });      // abrir o mes gera, como o gerente faz
   tela(m, adm, 'calendario', { competencia: 'NOV 2026' });
   const r = acao(m, adm, 'salvarRotina', { tipo: 'RON', atividade: 'Ronda', frequencia: 'SEMANAL', dia: '3', porTurno: false, ativo: true });
-  afirmar(r.invalidarTudo && r.recado === 'Rotina salva. No calendário: 2 criadas em OUT 2026 e 4 em NOV 2026 (de hoje em diante).', r.recado);
+  afirmar(r.esquecerTelas && !r.invalidarTudo && r.recado === 'Rotina salva. No calendário: 2 criadas em OUT 2026 e 4 em NOV 2026 (de hoje em diante).', r.recado);
   const cfg = tela(m, adm, 'config');
   const ron = cfg.rotinas.find((x) => x.tipo === 'RON');
   afirmar(ron.pendentes.total === 6 && ron.temAtividades && cfg.mesesGerados.join() === 'OUT 2026,NOV 2026', JSON.stringify([ron, cfg.mesesGerados]));
   const coord = entrar(m, COORD, '1234');
   afirmar(/nao pode executar/.test(erroDe(() => acao(m, coord, 'alternarRotina', { id: ron.id, ativo: false }))), 'coordenador recusado');
-  const d = acao(m, adm, 'alternarRotina', { id: ron.id, ativo: false });
-  afirmar(d.invalidarTudo && d.recado === 'Rotina desativada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4).', d.recado);
+  afirmar(/nao pode executar/.test(erroDe(() => acao(m, coord, 'limparSiglaOrfa', { sigla: 'RON' }))), 'coordenador recusado no "Tirar do calendario" da removida');
+  // Uma ida so: a Configuracao volta junto com a gravacao (esquecerTelas, nao invalidarTudo: sem refazer o menu)
+  const ida = JSON.parse(chamar(m, DONO, 'executarAcaoETela', { t: adm.t, f: adm.f }, 'alternarRotina', { id: ron.id, ativo: false }, 'config', {}).valor);
+  const d = ida.r;
+  afirmar(d.esquecerTelas && !d.invalidarTudo && d.recado === 'Rotina desativada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4).', d.recado);
+  afirmar(ida.tela && ida.tela.dados.rotinas.find((y) => y.tipo === 'RON').ativo === false && !ida.menu, 'a tela voltou com a gravacao, sem o menu: ' + JSON.stringify(Object.keys(ida)));
   afirmar(!tela(m, adm, 'calendario', { competencia: 'NOV 2026' }).atividades.some((a) => a.tipo === 'RON'), 'NOV sem a rotina');
   afirmar(tela(m, adm, 'config').rotinas.find((x) => x.tipo === 'RON').ativo === false, 'parada na lista');
 });

@@ -1833,7 +1833,8 @@ async function agir(acao, params, recado) {
      */
     // Acoes globais (parametros, perfis) mudam TODAS as telas: nesses
     // casos o cache inteiro cai, senao outra tela mostra dado velho.
-    if (r && r.invalidarTudo) esquecerTelas();
+    // esquecerTelas (a rotina mudou o calendario): o mesmo, sem o menu — e a tela atual ja voltou com a gravacao.
+    if (r && (r.invalidarTudo || r.esquecerTelas)) esquecerTelas();
     else { esquecerTela(paginaAtual); envelhecerTelas(); }
     // A tela que ja voltou com a gravacao entra fresca no cache: o abrir() abaixo pinta sem ir ao servidor.
     // Trocou de filial enquanto gravava: a tela que voltou e da filial de antes (nao vai para a bolinha nem para o cache).
@@ -3682,13 +3683,17 @@ function cfgCalendario(d) {
         <td class="mono">${esc(t.tipo)}</td><td>${esc(t.atividade)}</td>
         <td>${esc(descreverQuando(t))}${t.problema ? ` <span class="etiqueta atrasada" title="${esc(t.problema)}">revisar</span>` : ''}</td>
         <td>${t.porTurno ? 'sim' : '—'}</td>
-        <td>${t.ativo ? '<span class="selo-entrega">ativa</span>' : '<span class="pendente-entrega">parada</span>'}</td>
+        <td>${t.ativo ? '<span class="selo-entrega">ativa</span>' : pendentesDe(t)
+          ? `<span class="pendente-entrega rot-ainda">parada · ${pendentesDe(t)} ainda no calendário</span>`
+          : '<span class="pendente-entrega">parada</span>'}</td>
         <td><div class="rot-botoes">
           <button class="icone-botao" onclick="formRotina(${jsArg(t.id)})">Editar</button>
           <button class="icone-botao" onclick="alternarRotina(${jsArg(t.id)})">${t.ativo ? 'Desativar' : 'Ativar'}</button>
+          ${!t.ativo && pendentesDe(t) ? `<button class="icone-botao" onclick="tirarDoCalendario(${jsArg(t.id)})">Tirar do calendário (${pendentesDe(t)})</button>` : ''}
           <button class="icone-botao perigo" onclick="removerRotina(${jsArg(t.id)})">Remover</button></div></td></tr>`).join('') ||
         '<tr><td colspan="6" class="vazio">Nenhuma rotina cadastrada.</td></tr>'}
       </tbody></table></div>
+      ${blocoOrfas(d.orfas || [])}
       <p class="dica">${esc(dicaRotinas(d))}</p>
     </div>
 
@@ -3838,6 +3843,15 @@ function dicaRotinas(d) {
     '. Entregues, validadas e datas que já passaram não mudam.';
 }
 
+/* Rotinas removidas pela versao anterior (so a linha de ROTINAS saia): as pendentes que ficaram no calendario. */
+function blocoOrfas(orfas) {
+  if (!orfas.length) return '';
+  return `<div class="rot-orfas"><p class="rot-orfas-titulo">Atividades de rotinas removidas</p>
+    ${orfas.map((o) => `<div class="rot-orfa">
+      <span><b class="mono">${esc(o.sigla)}</b> — ${o.pendentes.total} ${o.pendentes.total === 1 ? 'pendente' : 'pendentes'} de hoje em diante</span>
+      <button class="icone-botao" onclick="tirarOrfa(${jsArg(o.sigla)})">Tirar do calendário</button></div>`).join('')}</div>`;
+}
+
 function formArquivoRH(id) {
   const a = id ? DADOS.arquivosRH.find((x) => x.id === id) : null;
   const agora = new Date();
@@ -3874,12 +3888,17 @@ function formArquivoRH(id) {
    Configuracao: com o canal barrado, so a gravacao (agir) chega ao servidor. */
 const DIAS_ROTINA_CURTOS = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const nomeDoDia = (n) => DIAS_ROTINA[n] + (n >= 6 ? '' : '-feira');
-let ROT_FORM = null;      // a janela aberta: { id, escolha: o dia (ou vagas) escolhido em cada "Repete" }
+let ROT_FORM = null;      // a janela aberta: { id, versao, escolha: o dia (ou vagas) escolhido em cada "Repete" }
 let ROT_PEDIDO = null;    // o que a janela de confirmacao grava: { acao, params, recado, rascunho }
 
 const rotinaDaLista = (id) => (id && DADOS && DADOS.rotinas || []).find((x) => x.id === id) || null;
 const pendentesDe = (t) => (t && t.pendentes && t.pendentes.total) || 0;
+// Das pendentes: as remarcadas a mao (a troca de dia nao as move) e as fora do dia da regra, sem nota (servidor de antes: 0).
+const remarcadasDe = (t) => Math.min(pendentesDe(t), Number(t && t.pendentes && t.pendentes.remarcadas) || 0);
+const foraDoDiaDe = (t) => Number(t && t.pendentes && t.pendentes.foraDoDia) || 0;
 const porMesDe = (t) => Object.keys(t.pendentes.porMes).map((c) => c + ': ' + t.pendentes.porMes[c]).join(' · ');
+/* As remarcadas a mao tambem saem quando a regra nao as gera: ", inclusive as 2 remarcadas a mao" (so quando ha). */
+const inclusiveRemarcadas = (r) => r ? ', inclusive ' + (r === 1 ? 'a remarcada à mão' : 'as ' + r + ' remarcadas à mão') : '';
 
 function formRotina(id, rascunho) {
   // Sem id = rotina nova. rascunho = o que a pessoa ja tinha escolhido (Voltar da confirmacao).
@@ -3887,7 +3906,8 @@ function formRotina(id, rascunho) {
   const t = rascunho || salva || { id: '', tipo: '', atividade: '', frequencia: 'SEMANAL', dia: '',
                                    quantidade: 5, porTurno: false, exigeSetor: false, ativo: true };
   const freq = ['SEMANAL', 'MENSAL', 'AVULSA'].indexOf(t.frequencia) === -1 ? 'SEMANAL' : t.frequencia;
-  ROT_FORM = { id: id || '', escolha: { SEMANAL: '', MENSAL: '', AVULSA: String(t.quantidade || 5) } };
+  // versao: a da rotina quando a janela abriu (o Voltar da confirmacao a traz no rascunho).
+  ROT_FORM = { id: id || '', versao: String(t.versao || ''), escolha: { SEMANAL: '', MENSAL: '', AVULSA: String(t.quantidade || 5) } };
   if (freq !== 'AVULSA') ROT_FORM.escolha[freq] = String(t.dia || '');
   const travada = !!(salva && salva.temAtividades);
   const n = pendentesDe(salva);
@@ -3990,7 +4010,7 @@ function previaRotina() {
 
 function paramsDaRotina() {
   const freq = freqDoForm(), quando = quandoDoForm(freq);
-  return { id: ROT_FORM.id, tipo: val('ro-tipo'), atividade: val('ro-atividade'), frequencia: freq,
+  return { id: ROT_FORM.id, versao: ROT_FORM.versao, tipo: val('ro-tipo'), atividade: val('ro-atividade'), frequencia: freq,
            dia: freq === 'AVULSA' ? '' : quando, quantidade: freq === 'AVULSA' ? quando : '',
            porTurno: marcado('ro-turno'), exigeSetor: marcado('ro-setor'), ativo: marcado('ro-ativo') };
 }
@@ -3998,7 +4018,10 @@ function paramsDaRotina() {
 const mudouARegra = (t, p) => t.frequencia !== p.frequencia || String(t.dia) !== String(p.dia) || !!t.porTurno !== !!p.porTurno ||
   (p.frequencia === 'AVULSA' && Number(t.quantidade) !== Number(p.quantidade));
 
-/* Salvar: com pendentes no calendario, desativar ou mudar a regra passa antes pela confirmacao. */
+/*
+ * Salvar: com pendentes no calendario, desativar ou mudar a regra passa antes pela confirmacao. Sem mudar a
+ * regra, as pendentes fora do dia dela (versao anterior, planilha) so vao para o dia da regra se a pessoa quiser.
+ */
 function salvarRotina() {
   const p = paramsDaRotina();
   if (p.frequencia === 'SEMANAL' && !p.dia) return avisar('Escolha o dia da semana.', true);
@@ -4006,26 +4029,41 @@ function salvarRotina() {
   const t = rotinaDaLista(p.id);
   if (pendentesDe(t) && !p.ativo) return janelaDesativarRotina(t, p);
   if (pendentesDe(t) && mudouARegra(t, p)) return janelaMudarRotina(t, p);
-  agir('salvarRotina', p, 'Rotina salva');
+  if (foraDoDiaDe(t)) return janelaForaDoDia(t, p);
+  agir('salvarRotina', p, 'Rotina salva').catch(() => {});
 }
 
 /* A regra em palavras; o turno entra so quando e ele que muda. */
 const regraEmPalavras = (a, b) => descreverQuando(a) +
   (!!a.porTurno !== !!b.porTurno ? (a.porTurno ? ', uma por turno' : ', uma só (turno Todos)') : '');
 
+/* Troca so do dia da semana: as pendentes vao para o dia novo da mesma semana; as remarcadas a mao ficam. */
+function destinoDaTrocaDeDia(t, oDia) {
+  const n = pendentesDe(t), r = remarcadasDe(t), vao = n - r, meses = ' (' + esc(porMesDe(t)) + ')';
+  if (!r) return (n === 1 ? 'A <b>única</b> atividade pendente' : 'As <b>' + n + '</b> atividades pendentes') +
+    ' de hoje em diante' + meses + ' ' + (n === 1 ? 'vai' : 'vão') + ' para ' + oDia + ' da mesma semana.';
+  if (!vao) return n === 1 ? 'A <b>única</b> pendente de hoje em diante' + meses + ' foi remarcada à mão e fica onde está.'
+    : 'As <b>' + n + '</b> pendentes de hoje em diante' + meses + ' foram remarcadas à mão e ficam onde estão.';
+  return 'Das <b>' + n + '</b> pendentes de hoje em diante' + meses + ', <b>' + vao + '</b> ' + (vao === 1 ? 'vai' : 'vão') +
+    ' para ' + oDia + ' da mesma semana e ' + (r === 1 ? '1 remarcada à mão fica onde está.' : r + ' remarcadas à mão ficam onde estão.');
+}
+
 function janelaMudarRotina(t, p) {
   ROT_PEDIDO = { acao: 'salvarRotina', params: p, recado: 'Rotina salva', rascunho: true };
-  const n = pendentesDe(t);
+  const n = pendentesDe(t), r = remarcadasDe(t);
   // So o dia da semana mudou: as pendentes vao para o dia novo da mesma semana.
   const soODia = t.frequencia === 'SEMANAL' && p.frequencia === 'SEMANAL' && !!t.porTurno === !!p.porTurno;
   const oDia = soODia ? (Number(p.dia) >= 6 ? 'o ' : 'a ') + DIAS_ROTINA[p.dia] : '';
-  const destino = soODia ? (n === 1 ? 'vai' : 'vão') + ' para ' + oDia + ' da mesma semana'
-    : (n === 1 ? 'segue' : 'seguem') + ' a regra nova: o que ela não gera é cancelado (fica no Arquivo de canceladas) e o que falta é criado, só de hoje em diante';
+  // Turno ou frequencia: o que a regra nova nao gera e cancelado, remarcada a mao ou nao (o servidor faz assim).
+  const destino = soODia ? destinoDaTrocaDeDia(t, oDia)
+    : (n === 1 ? 'A <b>única</b> atividade pendente' : 'As <b>' + n + '</b> atividades pendentes') + ' de hoje em diante (' +
+      esc(porMesDe(t)) + ') ' + (n === 1 ? 'segue' : 'seguem') + ' a regra nova: o que ela não gera é cancelado (fica no Arquivo de canceladas)' +
+      inclusiveRemarcadas(r) + ', e o que falta é criado, só de hoje em diante.';
+  const naoMudam = 'Não mudam: as já entregues ou validadas' + (soODia && !r ? ', as remarcadas à mão' : '') +
+    (t.frequencia === 'AVULSA' ? ', as vagas já agendadas' : '') + ' e as de datas que já passaram.';
   abrirJanela('Mudar a rotina no calendário?', `
     <p class="rot-texto">“${esc(t.atividade)}” passa de <b>${esc(regraEmPalavras(t, p))}</b> para <b>${esc(regraEmPalavras(p, t))}</b>.
-      ${n === 1 ? 'A <b>única</b> atividade pendente' : 'As <b>' + n + '</b> atividades pendentes'} de hoje em diante
-      (${esc(porMesDe(t))}) ${destino}. Não mudam: as já entregues ou validadas, as remarcadas à mão e as de datas
-      que já passaram.${soODia ? ' Se ' + oDia + ' desta semana já passou, a desta semana fica como está.' : ''}</p>
+      ${destino} ${naoMudam}${soODia ? ' Se ' + oDia + ' desta semana já passou, a desta semana fica como está.' : ''}</p>
     <label class="marcador"><input type="checkbox" id="ro-ajustar" checked onchange="el('ro-confirmar').textContent = this.checked
       ? 'Salvar e ajustar o calendário' : 'Salvar só a rotina'"> Ajustar também as atividades já geradas</label>
     <p class="dica">Desmarcado: vale só para os meses que ainda vão ser gerados.</p>`, `
@@ -4033,17 +4071,45 @@ function janelaMudarRotina(t, p) {
     <button class="botao" id="ro-confirmar" onclick="confirmarRotina()">Salvar e ajustar o calendário</button>`);
 }
 
-/* p = os campos do formulario (desmarcou "Ativa"); sem p, e o "Desativar" da lista. */
+/*
+ * Sem mudar a regra, ha pendentes fora do dia dela (a versao anterior deixou no dia antigo, ou alguem mudou na
+ * planilha): a pessoa escolhe. "Deixar" manda alinharForaDoDia: false e o servidor nao as move.
+ */
+function janelaForaDoDia(t, p) {
+  ROT_PEDIDO = { acao: 'salvarRotina', params: p, recado: 'Rotina salva' };
+  const n = foraDoDiaDe(t);
+  const dia = t.frequencia === 'SEMANAL' ? DIAS_ROTINA[t.dia] : 'o dia da rotina';
+  abrirJanela('Levar para o dia da rotina?', `
+    <p class="rot-texto">${n === 1 ? '<b>1</b> atividade pendente de hoje em diante está' : '<b>' + n + '</b> atividades pendentes de hoje em diante estão'}
+      fora do dia da rotina (${esc(descreverQuando(t))}): ${n === 1 ? 'ficou' : 'ficaram'} no dia antigo na versão anterior
+      ou ${n === 1 ? 'foi mudada' : 'foram mudadas'} direto na planilha.</p>`, `
+    <button class="botao secundario" onclick="confirmarRotina({ alinharForaDoDia: false })">Deixar como ${n === 1 ? 'está' : 'estão'}</button>
+    <button class="botao" onclick="confirmarRotina({ alinharForaDoDia: true })">Levar para ${esc(dia)}</button>`);
+}
+
+/* p = os campos do formulario (desmarcou "Ativa"); sem p, e o "Desativar" (ou o "Tirar do calendario") da lista. */
 function janelaDesativarRotina(t, p) {
   ROT_PEDIDO = p ? { acao: 'salvarRotina', params: p, recado: 'Rotina salva', rascunho: true }
-                 : { acao: 'alternarRotina', params: { id: t.id, ativo: false }, recado: 'Rotina desativada' };
-  const n = pendentesDe(t);
+                 : { acao: 'alternarRotina', params: { id: t.id, ativo: false }, recado: t.ativo ? 'Rotina desativada' : 'Rotina parada' };
+  const n = pendentesDe(t), r = remarcadasDe(t), meses = esc(porMesDe(t));
+  // Ja parada: a versao anterior so gravava ATIVO=NAO, e as pendentes ficaram no calendario.
+  if (!t.ativo) {
+    abrirJanela('Tirar “' + t.atividade + '” do calendário?', `
+      <p class="rot-texto">A rotina já está parada, mas ${n === 1
+        ? '<b>1</b> atividade pendente de hoje em diante (' + meses + ') continua no calendário — ficou da versão anterior. Ela será <b>cancelada</b> e fica'
+        : '<b>' + n + '</b> atividades pendentes de hoje em diante (' + meses + ') continuam no calendário — ficaram da versão anterior. Elas serão <b>canceladas</b> e ficam'}
+        no Arquivo de canceladas do mês.</p>`, `
+      <button class="botao secundario" onclick="voltarDaConfirmacao()">Voltar</button>
+      <button class="botao perigo" onclick="confirmarRotina()">Tirar do calendário</button>`);
+    return;
+  }
   abrirJanela('Desativar “' + t.atividade + '”?', `
     <p class="rot-texto">A rotina para de gerar atividades. ${n === 1
-      ? 'A <b>única</b> pendente de hoje em diante (' + esc(porMesDe(t)) + ') será <b>cancelada</b>: sai do calendário e fica'
-      : 'As <b>' + n + '</b> pendentes de hoje em diante (' + esc(porMesDe(t)) + ') serão <b>canceladas</b>: saem do calendário e ficam'}
+      ? 'A <b>única</b> pendente de hoje em diante (' + meses + ') será <b>cancelada</b>: sai do calendário e fica'
+      : 'As <b>' + n + '</b> pendentes de hoje em diante (' + meses + ')' + (r ? inclusiveRemarcadas(r) + ',' : '') +
+        ' serão <b>canceladas</b>: saem do calendário e ficam'}
       no Arquivo de canceladas do mês. Se você ativar a rotina de novo, ${n === 1 ? 'ela volta' : 'elas voltam'}.
-      Entregues, validadas e de datas que já passaram não mudam.</p>`, `
+      Entregues, validadas${t.frequencia === 'AVULSA' ? ', vagas já agendadas' : ''} e de datas que já passaram não mudam.</p>`, `
     <button class="botao secundario" onclick="voltarDaConfirmacao()">Voltar</button>
     <button class="botao perigo" onclick="confirmarRotina()">Desativar e cancelar ${n}</button>`);
 }
@@ -4052,31 +4118,53 @@ function janelaDesativarRotina(t, p) {
 function alternarRotina(id) {
   const t = rotinaDaLista(id);
   if (!t) return;
-  if (!t.ativo) return agir('alternarRotina', { id: t.id, ativo: true }, 'Rotina ativada');
+  if (!t.ativo) return agir('alternarRotina', { id: t.id, ativo: true }, 'Rotina ativada').catch(() => {});
   if (pendentesDe(t)) return janelaDesativarRotina(t, null);
-  agir('alternarRotina', { id: t.id, ativo: false }, 'Rotina desativada');
+  agir('alternarRotina', { id: t.id, ativo: false }, 'Rotina desativada').catch(() => {});
+}
+
+/* Parada pela versao anterior com pendentes ainda no calendario: "Tirar do calendario (6)" na lista. */
+function tirarDoCalendario(id) {
+  const t = rotinaDaLista(id);
+  if (t) janelaDesativarRotina(t, null);
 }
 
 function removerRotina(id) {
   const t = rotinaDaLista(id);
   if (!t) return;
-  const n = pendentesDe(t);
+  const n = pendentesDe(t), r = remarcadasDe(t);
   ROT_PEDIDO = { acao: 'excluirRotina', params: { id: t.id }, recado: 'Rotina removida' };
   abrirJanela('Remover “' + t.atividade + '”?', `
     <p class="rot-texto">A rotina sai da lista e para de gerar atividades.${!n ? '' : n === 1
       ? ' A <b>única</b> pendente de hoje em diante será cancelada (fica no Arquivo de canceladas).'
-      : ' As <b>' + n + '</b> pendentes de hoje em diante serão canceladas (ficam no Arquivo de canceladas).'}
-      O histórico — entregues, validadas e passadas — continua.</p>`, `
+      : ' As <b>' + n + '</b> pendentes de hoje em diante' + (r ? inclusiveRemarcadas(r) + ',' : '') +
+        ' serão canceladas (ficam no Arquivo de canceladas).'}
+      ${t.frequencia === 'AVULSA' ? 'As vagas já agendadas ficam. ' : ''}O histórico — entregues, validadas e passadas — continua.</p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
     <button class="botao perigo" onclick="confirmarRotina()">Remover rotina</button>`);
 }
 
-/* O botao da confirmacao grava (dentro do clique: com o canal barrado o agir vai pela pagina). */
-function confirmarRotina() {
+/* Rotina removida pela versao anterior: as pendentes que ficaram saem do calendario (canceladas, como no Remover). */
+function tirarOrfa(sigla) {
+  const o = ((DADOS && DADOS.orfas) || []).find((x) => x.sigla === sigla);
+  if (!o) return;
+  const n = o.pendentes.total, meses = esc(porMesDe(o));
+  ROT_PEDIDO = { acao: 'limparSiglaOrfa', params: { sigla: sigla }, recado: 'Atividades tiradas do calendário' };
+  abrirJanela('Tirar as atividades da rotina removida ' + sigla + '?', `
+    <p class="rot-texto">${n === 1 ? 'A <b>única</b> pendente de hoje em diante (' + meses + ') será <b>cancelada</b> e fica'
+      : 'As <b>' + n + '</b> pendentes de hoje em diante (' + meses + ') serão <b>canceladas</b> e ficam'}
+      no Arquivo de canceladas do mês.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    <button class="botao perigo" onclick="confirmarRotina()">Tirar do calendário</button>`);
+}
+
+/* O botao da confirmacao grava (dentro do clique: com o canal barrado o agir vai pela pagina). extra: a escolha do botao. */
+function confirmarRotina(extra) {
   const x = ROT_PEDIDO;
   if (!x) return;
   if (el('ro-ajustar')) x.params.ajustarCalendario = marcado('ro-ajustar');
-  agir(x.acao, x.params, x.recado);
+  Object.assign(x.params, extra || {});
+  agir(x.acao, x.params, x.recado).catch(() => {});
 }
 
 /* Voltar da confirmacao: para o formulario com o que a pessoa escolheu, ou para a lista. */

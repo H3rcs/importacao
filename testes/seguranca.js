@@ -82,6 +82,7 @@ const bloqueadas = [
   // 19/10: rotinas — gravar, desativar e remover mexem nas atividades ja geradas
   ['acaoSalvarRotina', FALSO, { tipo: 'RON', atividade: 'x', frequencia: 'SEMANAL', dia: '3', ativo: true }],
   ['acaoAlternarRotina', FALSO, { id: 'x', ativo: false }], ['acaoExcluirRotina', FALSO, { id: 'x' }],
+  ['acaoLimparSiglaOrfa', FALSO, { sigla: 'RON' }],
   ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
 ];
 const emailsAntesDosAtaques = m.emails.length;

@@ -24,7 +24,7 @@
  */
 
 var _usuarioDaVez = null;
-const BUILD_AUTH = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_AUTH = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 /*
  * 4.2 — QUEM ENTRA E O E-MAIL DIGITADO, NAO A CONTA DO NAVEGADOR.

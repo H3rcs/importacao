@@ -15,7 +15,7 @@
  * todo e-mail que o sistema manda. Agora e o amarelo da marca escurecido
  * ate ter contraste com texto branco.
  */
-const BUILD_EMAILS = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_EMAILS = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COR_AZUL = '#111785', COR_VERDE = '#01973A', COR_AMAR = '#FFEE03';
 const COR_ALERTA = '#8A6A00';        /* ambar escuro — sinal, nunca vermelho */
 const COR_ALERTA_FUNDO = '#FFF3CC';  /* fundo claro da caixa de motivo */

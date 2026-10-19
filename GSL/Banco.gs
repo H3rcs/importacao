@@ -18,7 +18,7 @@
  * Uma leitura so por execucao, guardada aqui.
  */
 var _props = null;
-const BUILD_BANCO = '2026.10.10';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_BANCO = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 function prop(chave, padrao) {
   // 4.2.2: as propriedades guardam o SEGREDO_PIN e os IDs do banco. Sem esta

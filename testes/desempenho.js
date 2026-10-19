@@ -456,6 +456,70 @@ caso('colagem pela metade: com qualquer um dos .gs desta entrega na versao anter
   }
 });
 
+caso('colagem pela metade (19/10): um .gs da entrega anterior por vez — a faixa diz qual falta, as telas abrem e nada e destruido (paineis da filial, marcacao sem a coluna)', () => {
+  const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+  const ANTES = '2b60bb2';   // a ultima entrega antes de 19/10 (Ferias refeita)
+  const arquivos = ['Acoes.gs', 'Auth.gs', 'Banco.gs', 'Calendario.gs', 'Codigo.gs', 'Config.gs', 'Emails.gs', 'Filiais.gs', 'Instalacao.gs', 'Permissoes.gs'];
+  let velhos = {};
+  try {
+    for (const f of arquivos) velhos[f] = execSync('git show ' + ANTES + ':GSL/' + f, { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+  } catch (e) { console.log('        (sem o historico do git: caso pulado)'); return; }
+  const buildNovo = fs.readFileSync(path.join(PASTA, 'Codigo.gs'), 'utf8').match(/build: '([^']+)'/)[1];
+  const paginaMandaPaineis = /agir\('salvarFilial',\{id:\$\{jsArg\(f\.id\)\},nome:val\('fl-nome'\),cidade:val\('fl-cidade'\),paineis:/.test(fs.readFileSync(path.join(PASTA, 'Paineis.html'), 'utf8'));
+  afirmar(paginaMandaPaineis, 'o "Editar nome" da filial manda a copia dos paineis (o Filiais.gs anterior regravaria {} sem ela)');
+  for (const velho of arquivos) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-metade19-'));
+    try {
+      fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+      fs.writeFileSync(path.join(tmp, velho), velhos[velho]);
+      const pelo = (m, conta, fn, ...args) => chamarPeloNavegador(m, tmp, { contaGoogle: conta }, fn, args, OP);
+      const executar = (m, s, nome, params) => {
+        const r = pelo(m, s.email, 'executarAcao', { t: s.t, f: s.f }, nome, params || {});
+        if (!r.ok) throw new Error(r.erro.message);
+        const x = JSON.parse(r.valor);
+        if (x && x.ok === false) throw new Error(x.erro);
+        return x;
+      };
+      const entrarAqui = (m, email, pin) => {
+        let r = JSON.parse(pelo(m, email, 'entrar', email, pin, '', '', '').valor);
+        if (r.pedirCodigo) r = JSON.parse(pelo(m, email, 'entrar', email, pin, pin, '', codigoDoEmail(m, email)).valor);
+        else if (r.criarPin) r = JSON.parse(pelo(m, email, 'entrar', email, pin, pin, '', '').valor);
+        afirmar(r.token, velho + ' anterior: ' + email + ' entrou — ' + JSON.stringify(r).slice(0, 160));
+        return { t: r.token, f: r.filial.codigo, email, r };
+      };
+      const m = new Mundo({ dono: DONO });
+      const c = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); c._porta = true; c.instalar(DONO);
+      const c2 = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); c2._porta = true;
+      const admin = { email: DONO, perfil: 'ADMIN', permissoes: c2.permissoesDe('ADMIN') };
+      c2.acaoSalvarUsuario(admin, { email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+      const c3 = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); c3._porta = true;
+      c3.acaoSalvarUsuario(admin, { email: COORD, nome: 'Maria Souza', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenadora' });
+      const adm = entrarAqui(m, DONO, '4321');
+      const avisa = velho === 'Codigo.gs' ? adm.r.app.build !== buildNovo : adm.r.app.foraDaVersao.indexOf(velho) !== -1;
+      afirmar(avisa, velho + ' anterior: a faixa avisa — ' + JSON.stringify(adm.r.app));
+      for (const id of ['inicio', 'calendario', 'acoes', 'limpeza', 'config', 'filiais', 'acessos']) {
+        const t = pelo(m, DONO, 'carregarTela', { t: adm.t, f: adm.f }, id, {});
+        afirmar(t.ok, velho + ' anterior: tela ' + id + ' abre — ' + (t.erro && t.erro.message));
+      }
+      // "Editar nome" com o que a pagina manda: os paineis da filial ficam como estavam
+      const lerFiliais = () => { const x = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); x._porta = true; return x.listarFiliais(); };
+      const f0 = lerFiliais()[0], antes = JSON.stringify(f0.paineis);
+      executar(m, adm, 'salvarFilial', { id: f0.id, nome: f0.nome, cidade: f0.cidade, paineis: f0.paineis });
+      afirmar(JSON.stringify(lerFiliais()[0].paineis) === antes, velho + ' anterior: PAINEIS intacto depois do Editar nome');
+      // marcar pessoa: ou grava a marcacao, ou recusa — nunca promete acesso sem gravar
+      const ger = entrarAqui(m, GERENTE, '5555');
+      const id = executar(m, ger, 'salvarAcao', { acao: 'Porta do doca', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+      m.emails.length = 0;
+      let recusa = '';
+      try { executar(m, ger, 'comentarAcao', { id, texto: 'oi @Maria Souza', mencoes: [COORD] }); } catch (e) { recusa = e.message; }
+      const x = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); x._porta = true;
+      const cm = x.listar('COMENTARIOS').filter((k) => k.TEXTO === 'oi @Maria Souza')[0];
+      const prometeu = m.emails.some((e) => e.to === COORD && /passou a acompanhar/.test(e.htmlBody || e.body || ''));
+      afirmar(recusa || !prometeu || (cm && cm.MENCOES === COORD), velho + ' anterior: marcacao gravada ou recusada (' + (recusa || JSON.stringify(cm && cm.MENCOES)) + ')');
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

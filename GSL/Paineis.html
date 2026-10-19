@@ -252,10 +252,11 @@ function pintarFiliais(r) {
   el('pagina').innerHTML = `
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Como funciona</div>
-      <div class="pn-grade tres">
+      <div class="pn-grade quatro">
         <div><span class="pn-chip ok">Ativo</span><p class="dica">Aparece para todo mundo que tem o nível de acesso liberado para ele.</p></div>
         <div><span class="pn-chip atencao">Oculto</span><p class="dica">Só o administrador vê, com a etiqueta oculto. Bom para montar e testar (e ligar a planilha) antes de mostrar para a equipe.</p></div>
         <div><span class="pn-chip neutro">Desativado</span><p class="dica">Some do menu de todos, inclusive do administrador. Os dados continuam guardados — é só voltar para Ativo.</p></div>
+        <div><span class="pn-chip neutro">Não usar nesta filial</span><p class="dica">O painel não faz parte desta filial: some do menu de todos, como o Desativado. Os dados continuam guardados.</p></div>
       </div>
     </div>
     <div class="pn-grade duas">
@@ -314,6 +315,9 @@ function formPessoasFilial(codigo) {
     <button class="botao" onclick="agir('salvarPessoasFilial',{codigo:${jsArg(codigo)},emails:[...document.querySelectorAll('.pf-pessoa')].filter((c)=>c.checked&&!c.disabled).map((c)=>c.value)},'Acessos da filial salvos').catch(()=>{})">Salvar</button>`);
 }
 
+/* Editar nome: os paineis vao junto SO para o Filiais.gs de antes de 19/10 (colado pela metade), que
+   regravava PAINEIS com o que viesse — sem eles, gravava {} e a filial perdia todos os paineis. O
+   Filiais.gs de agora ignora esse campo na edicao: os paineis mudam um a um, em alterarPainel. */
 function formFilial(codigo) {
   const d = DADOS;
   const f = codigo ? d.filiais.find((x) => x.codigo === codigo) : null;
@@ -325,7 +329,7 @@ function formFilial(codigo) {
       </div>
       <p class="dica">O código (${esc(f.codigo)}) não muda. Os painéis se ajustam direto no cartão da filial.</p>`, `
       <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade')},'Filial salva').catch(()=>{})">Salvar</button>`);
+      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade'),paineis:${esc(JSON.stringify(f.paineis))}},'Filial salva').catch(()=>{})">Salvar</button>`);
   }
   abrirJanela('Nova filial', `
     <p class="dica" style="margin:0 0 14px">O GSL cria uma planilha de banco só para esta filial, na mesma pasta

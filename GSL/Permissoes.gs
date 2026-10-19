@@ -299,7 +299,9 @@ function modulosDe(usuario) {
 }
 
 function exigirTela(usuario, idTela) {
-  if (usuario.permissoes.telas.indexOf(idTela) === -1) {
+  // A tela fora do nivel, ou sem a capacidade que ela exige (Configuracao, Pessoas, Filiais, Relatos): e o nivel, nao o painel.
+  const tela = TELAS.filter(function (t) { return t.id === idTela; })[0];
+  if (usuario.permissoes.telas.indexOf(idTela) === -1 || (tela && tela.exige && !podeFazer(usuario, tela.exige))) {
     throw new Error('Seu perfil (' + usuario.perfil + ') nao tem acesso a tela "' + idTela + '".');
   }
   if (!podeAbrir(usuario, idTela)) {

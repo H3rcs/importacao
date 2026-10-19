@@ -168,8 +168,9 @@ class Mundo {
     this.pastas.set(p.id, p); return p;
   }
   novoArquivo(nome, mime, bytes, pai) {
+    // criado no relogio do script (agora): a idade do arquivo bate com o Date.now() do servidor
     const a = { id: this.novoId('arq'), nome: nome, mime: mime || 'application/octet-stream', bytes: bytes || Buffer.alloc(0),
-      pais: new Set([pai || this.raiz]), lixo: false, criado: new Date(), descricao: '' };
+      pais: new Set([pai || this.raiz]), lixo: false, criado: new Date(Date.now() + (this.desvioRelogio || 0)), descricao: '' };
     this.arquivos.set(a.id, a); return a;
   }
   novaPlanilha(nome, linhas, colunas) {

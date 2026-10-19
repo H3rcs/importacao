@@ -922,6 +922,7 @@ function montarSessao(r) {
   // Bolinhas: a pagina da reserva ja traz; pelo canal normal vem depois do menu (atualizarPendencias).
   PENDENCIAS = r.pendencias ? { filial: FILIAL, quando: Date.now(), modulos: r.pendencias } : null;
   esquecerTelas();
+  MENU_EM_USO = ++MENU_PEDIDOS;             // sessao nova: o menu dela vale mais que qualquer resposta ainda no caminho
   moduloAtual = null;
   filtroAtivo = null; filtroTurno = null;   // filtro do calendario era da filial/pessoa anterior
   montarMenu(r.telas);
@@ -1009,7 +1010,7 @@ function conferirVersao(r) {
   if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.14b') faltam.push('Paineis.html');
   if (carimboCss('--gsl-paineis-estilo') !== '2026.10.14b') faltam.push('PaineisEstilo.html');
   if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.10.09c') faltam.push('Aprendiz.html (e a linha dele no Index.html)');
-  if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar') || !el('lateral-alternar')) faltam.push('Index.html');
+  if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar') || !el('lateral-alternar') || !el('entrar-p')) faltam.push('Index.html');
   if (carimboDoEstilo() !== '2026.10.14') faltam.push('Estilo.html');
   let faixa = el('aviso-versao');
   if (!faltam.length) { if (faixa) faixa.remove(); return; }
@@ -1327,6 +1328,15 @@ function abrirConfig(id) {
   abrir(id);
 }
 
+/* Menu sem cartao: quem liga os paineis ganha o caminho; os demais, a quem pedir. */
+function menuVazioHtml() {
+  if (!(SESSAO.telas || []).some((t) => t.id === 'filiais')) {
+    return '<div class="vazio">Nenhum módulo liberado para você nesta filial. Fale com o administrador.</div>';
+  }
+  return '<div class="vazio">Nenhum painel ligado nesta filial. ' +
+    '<button class="botao-texto" onclick="abrirConfig(\'filiais\')">Ligar em Configuração › Filiais e painéis</button></div>';
+}
+
 /** Tela inicial: os holocards. Nao chama o servidor. */
 function abrirModulos() {
   if (!SESSAO || !SESSAO.usuario) {
@@ -1360,8 +1370,7 @@ function abrirModulos() {
               <span class="holo-seta">\u2192</span>
             </div>
             <span class="holo-marca">${ICONES[m.icone] || ''}</span>
-          </button>`).join('') ||
-          '<div class="vazio">Nenhum modulo liberado para o seu perfil.</div>'}
+          </button>`).join('') || menuVazioHtml()}
       </div>
     </div>`;
   // O menu ja esta na tela; os numeros so vao ao servidor se estiverem velhos (por tras, sem segurar o clique).
@@ -1431,10 +1440,11 @@ async function atualizarPendencias() {
   PENDENCIAS_PEDIDO = filial;
   try {
     if (!(await filaLivre(10))) return;
+    const pedido = ++MENU_PEDIDOS;
     const r = await executarAcaoSrv('pendencias', {});
     if (filial !== FILIAL || !SESSAO || !r || !r.pendencias) return;
     PENDENCIAS = { filial: FILIAL, quando: Date.now(), modulos: r.pendencias };
-    if (!aplicarMenu(r.menu)) pintarBolinhas();      // menu novo: os cartoes ja voltam com as bolinhas
+    if (!aplicarMenu(r.menu, pedido)) pintarBolinhas();      // menu novo: os cartoes ja voltam com as bolinhas
   } catch (e) {
     // A bolinha e um extra: sem ela o menu funciona igual. Codigo.gs antigo nao conhece a acao: para de pedir.
     // (Acoes.gs antigo com Codigo.gs novo: "aponta para acaoPendencias, que nao existe".)
@@ -1446,10 +1456,18 @@ async function atualizarPendencias() {
  * MENU NOVO (19/10). Vem do servidor depois de uma gravacao que muda paineis,
  * filiais ou acessos (executarAcaoETela) e junto com a bolinha (pendencias).
  * Sessao, barra lateral e cartoes ficam em dia sem F5; a tela que saiu do
- * menu leva de volta a ele, com o aviso. Devolve true quando o menu mudou.
+ * menu leva de volta a ele, com o aviso (o de quem sabe a causa, ou o neutro).
+ * Devolve true quando o menu mudou.
+ * pedido: a ordem em que o pedido saiu. A resposta atrasada de um pedido mais
+ * velho que o menu em uso nao volta com o painel recem-desligado (ou sem o
+ * recem-ligado): a bolinha calculada antes de um alterarPainel, ou duas
+ * gravacoes com as respostas trocadas.
  */
-function aplicarMenu(m) {
+let MENU_PEDIDOS = 0, MENU_EM_USO = 0;
+function aplicarMenu(m, pedido, aviso) {
   if (!SESSAO || !m || (m.filial && m.filial !== FILIAL)) return false;   // de outra filial: nao e este menu
+  if (pedido < MENU_EM_USO) return false;                                  // retrato de antes do menu em uso
+  MENU_EM_USO = pedido;
   if (Array.isArray(m.filiais)) atualizarFiliais(m.filiais);
   if (!Array.isArray(m.telas) || !Array.isArray(m.modulos)) return false;
   if (JSON.stringify([m.telas, m.modulos]) === JSON.stringify([SESSAO.telas, SESSAO.modulos])) return false;
@@ -1459,7 +1477,7 @@ function aplicarMenu(m) {
   Object.keys(CACHE_TELAS).forEach((k) => { if (!vivas[k.split('|')[1]]) delete CACHE_TELAS[k]; });
   envelhecerTelas();                      // as que ficaram revalidam ao abrir (ex.: Filiais e paineis mudada em outra aba)
   if (paginaAtual === 'modulos') abrirModulos();
-  else if (!vivas[paginaAtual]) voltarAoMenuComAviso();
+  else if (!vivas[paginaAtual]) voltarAoMenuComAviso(aviso);
   else {
     montarMenu(m.telas);
     document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === paginaAtual));
@@ -1475,33 +1493,51 @@ function atualizarFiliais(filiais) {
   pintarCaixaFilial();
 }
 
-/* O administrador desligou a filial em que estava: nada dela vale mais — ele escolhe outra. */
-function filialDesligada(filiais) {
+/*
+ * A filial em uso deixou de valer: nada dela vale mais — a pessoa escolhe outra.
+ * motivo (menuDaSessao_): 'desligada' pelo administrador ou 'semAcesso' (ela saiu
+ * da filial no proprio cadastro). Sem nenhuma filial ativa, a tela de sem acesso.
+ */
+function filialDesligada(filiais, motivo) {
   esquecerTelas();
   SESSAO.filiais = filiais || [];
+  if (!SESSAO.filiais.length) {
+    return mostrarSemAcesso({ entrada: 'SEM_FILIAL', conta: SESSAO.usuario && SESSAO.usuario.email,
+      motivo: 'Seu cadastro não está ligado a nenhuma filial ativa. Fale com o administrador.' });
+  }
   mostrarEscolhaFilial(SESSAO.filiais, SESSAO.usuario);
-  avisar('Esta filial foi desligada. Escolha outra para continuar.', true);
+  avisar(motivo === 'semAcesso' ? 'Você não tem mais acesso a esta filial. Escolha outra para continuar.'
+    : 'Esta filial foi desligada. Escolha outra para continuar.', true);
 }
 
 /*
  * PAINEL QUE SAIU com a pessoa dentro (19/10): o servidor recusou a tela ou a
- * acao porque o painel foi desligado na filial — e o cartao e a tela guardada
- * ainda estavam aqui. Em vez da caixa de erro (ou da tela velha), o menu e
- * relido e a pessoa volta para ele com o aviso. false: e outra recusa.
+ * acao porque o painel foi desligado na filial (ou o acesso da pessoa a ele
+ * saiu) — e o cartao e a tela guardada ainda estavam aqui. Em vez da caixa de
+ * erro (ou da tela velha), o menu e relido e a pessoa volta para ele com o
+ * aviso da causa: painel desligado, ou acesso retirado (Sem acesso, nivel). O
+ * menu novo sem a tela, que nao sabe a causa, usa o aviso neutro. false: e
+ * outra recusa (a mensagem do servidor, como sempre).
  */
 const RECUSA_DE_PAINEL = /painel não está ligado|não tem acesso ao módulo/i;
 const AVISO_PAINEL_SAIU = 'Este painel foi desligado nesta filial.';
-const avisoDaRecusa = (msg) => (RECUSA_DE_PAINEL.test(String(msg || '')) ? AVISO_PAINEL_SAIU : String(msg || ''));
-function voltarAoMenuComAviso() { fecharJanela(); abrirModulos(); avisar(AVISO_PAINEL_SAIU, true); }
+const AVISO_SEM_ACESSO = 'Este painel não está mais liberado para você nesta filial.';
+const avisoDaRecusa = (msg) => {
+  const m = String(msg || '');
+  return /painel não está ligado/i.test(m) ? AVISO_PAINEL_SAIU : /não tem acesso ao módulo/i.test(m) ? AVISO_SEM_ACESSO : m;
+};
+function voltarAoMenuComAviso(aviso) { fecharJanela(); abrirModulos(); avisar(aviso || AVISO_SEM_ACESSO, true); }
 
 async function painelSaiu(e, idTela) {
-  if (!RECUSA_DE_PAINEL.test(String((e && e.message) || e || ''))) return false;
+  const msg = String((e && e.message) || e || '');
+  if (!RECUSA_DE_PAINEL.test(msg)) return false;
   esquecerTela(idTela);
   try {
+    const pedido = ++MENU_PEDIDOS;
     const s = await chamarJSON('abrirFilial', ctx());
-    if (s && s.ok && s.entrada === 'APP') aplicarMenu({ filial: s.filial.codigo, telas: s.telas, modulos: s.modulos, filiais: s.filiais });
+    if (s && s.ok && s.entrada === 'APP') aplicarMenu({ filial: s.filial.codigo, telas: s.telas, modulos: s.modulos, filiais: s.filiais }, pedido, avisoDaRecusa(msg));
   } catch (x) { /* sem o menu novo, volta assim mesmo: o aviso explica */ }
-  if (paginaAtual === idTela) voltarAoMenuComAviso();
+  if (paginaAtual === idTela) voltarAoMenuComAviso(avisoDaRecusa(msg));
   return true;
 }
 
@@ -1811,6 +1847,7 @@ async function agir(acao, params, recado) {
      */
     const paramsTela = paramsAtual || {};
     const filialDoClique = FILIAL;
+    const pedidoMenu = ++MENU_PEDIDOS;
     let r, tela = null, menu = null;
     if (SEM_ACAO_E_TELA) r = await executarAcaoSrv(acao, params);
     else {
@@ -1824,8 +1861,8 @@ async function agir(acao, params, recado) {
       }
     }
     if (menu && FILIAL === filialDoClique) {
-      if (menu.semFilial) { fecharJanela(); filialDesligada(menu.filiais); return r; }
-      aplicarMenu(menu);
+      if (menu.semFilial) { fecharJanela(); filialDesligada(menu.filiais, menu.motivo); return r; }
+      aplicarMenu(menu, pedidoMenu);
     }
 
     /*
@@ -1982,12 +2019,20 @@ function janelaAutorizarEmail(msg) {
     <button class="botao" onclick="window.open('https:\/\/myaccount.google.com/permissions','_blank')">Abrir página de autorização</button>`);
 }
 
+/*
+ * O recado fica o tempo de ler: ~60 ms por letra, no minimo 2,6 s (7 s o de
+ * erro) e no maximo 15 s. Um recado novo leva o tempo dele — antes sumia no
+ * prazo do anterior, que ainda corria.
+ */
+let RECADO_TEMPO = 0;
 function avisar(texto, erro) {
   const r = el('recado');
   r.textContent = texto;
   r.className = 'recado' + (erro ? ' erro' : '');
   r.classList.remove('oculto');
-  setTimeout(() => r.classList.add('oculto'), erro ? 7000 : 2600);
+  clearTimeout(RECADO_TEMPO);
+  RECADO_TEMPO = setTimeout(() => r.classList.add('oculto'),
+    Math.min(15000, Math.max(erro ? 7000 : 2600, 1200 + String(texto || '').length * 60)));
 }
 
 function abrirJanela(titulo, corpo, rodape) {
@@ -5304,7 +5349,7 @@ function abrirComentarios(id, podeComentar) {
     </div>`).join('');
   const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}
     ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>` : '';
-  fotosLimpar('cm');
+  fotosLimpar('cm', a.id);
   MENCAO.acao = a; MENCAO.escolhidas = []; MENCAO.tiradas = []; mencaoFechar();
   marcarComentVisto(a);
   abrirJanela('Comentários — ' + a.acao, `
@@ -5353,7 +5398,7 @@ function formAcao(id) {
   });
   // Acao que veio da tabela antiga da limpeza: o responsavel era so um nome, sem e-mail.
   const antigo = a && !(a.responsaveisEmails || []).length && a.responsavel ? a.responsavel : '';
-  fotosLimpar('ac');
+  fotosLimpar('ac', a ? a.id : '');
 
   abrirJanela(a ? 'Editar ação' : 'Nova ação', `
     <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
@@ -5446,7 +5491,7 @@ function excluirAcao(id) {
 
 function formConcluirAcao(id) {
   const a = planoAcaoPorId(id) || {};
-  fotosLimpar('cc');
+  fotosLimpar('cc', id);
   abrirJanela('Concluir ação', `
     <div class="campo"><label>Ação</label><input value="${esc(a.acao || '')}" readonly></div>
     <div class="campo"><label>O que foi feito (opcional)</label>
@@ -5475,8 +5520,12 @@ const FOTOS_PENDENTES = {};          // por formulário: 'ac' (ação), 'cm' (co
 const FOTOS_PREPARANDO = {};         // formulário com foto ainda sendo reduzida
 const FOTO_LADO_MAX = 1600;
 const fotosPorVez = () => (planoD().fotos && planoD().fotos.porVez) || 5;
+const FOTOS_CONTEXTO = {};           // onde a foto vai: o servidor so converte a HEIC para quem pode anexar ali
 
-function fotosLimpar(chave) { FOTOS_PENDENTES[chave] = []; FOTOS_PREPARANDO[chave] = 0; }
+function fotosLimpar(chave, idAcao) {
+  FOTOS_PENDENTES[chave] = []; FOTOS_PREPARANDO[chave] = 0;
+  FOTOS_CONTEXTO[chave] = { plano: PLANO.id, uso: chave, id: idAcao || '' };
+}
 /* Foto ainda sendo reduzida: nao envia pela metade — avisa e a janela fica aberta. */
 function fotosProntas(chave) {
   if (!FOTOS_PREPARANDO[chave]) return true;
@@ -5489,19 +5538,23 @@ function fotosParaEnviar(chave) {
 
 /*
  * No Windows o filtro "Arquivos de imagem" do Chrome nao lista .heic: as
- * extensoes vao no accept. No Android, nao — extensao no accept derruba o
- * seletor de fotos do sistema (e o HEIF aparece nele assim mesmo). O
- * asterisco vai com a barra invertida: regra do HtmlService.
+ * extensoes vao no accept. No celular e no tablet, nao: no Android a extensao
+ * derruba o seletor de fotos do sistema (e o HEIF aparece nele assim mesmo);
+ * no iPhone e no iPad ela pode fazer o iOS mandar a HEIC crua em vez de
+ * converter para JPEG sozinho. O iPadOS se diz Mac: o toque (maxTouchPoints)
+ * o separa do Mac de verdade. O asterisco vai com a barra invertida: regra do
+ * HtmlService.
  */
-const ACEITA_FOTOS = /Android/i.test(navigator.userAgent) ? 'image/\*' : 'image/\*,.heic,.heif';
-const fotosDica = () => 'até ' + fotosPorVez() + ' por vez · JPG, PNG ou HEIC (iPhone)';
+const ACEITA_FOTOS = (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)) ? 'image/\*' : 'image/\*,.heic,.heif';
+const fotosDica = () => 'até ' + fotosPorVez() + ' por vez · JPG, PNG ou HEIC';
 
 function fotosCampoHtml(chave, rotulo) {
   return `<div class="campo"><label>${esc(rotulo)}</label>
     <label class="botao secundario fotos-escolher">&#128247; Escolher ou tirar foto
       <input type="file" id="${chave}-fotos" accept="${ACEITA_FOTOS}" multiple style="display:none"
              onchange="fotosEscolhidas(this, ${jsArg(chave)})"></label>
-    <span class="dica" id="${chave}-fotos-situacao">${fotosDica()}</span>
+    <span class="dica" id="${chave}-fotos-situacao" role="status" aria-live="polite">${fotosDica()}</span>
     <div class="fotos-previas" id="${chave}-previas"></div></div>`;
 }
 
@@ -5510,25 +5563,43 @@ async function fotosEscolhidas(input, chave) {
   const arquivos = [...(input.files || [])];
   input.value = '';
   const situacao = el(chave + '-fotos-situacao');
+  // A escolha vale enquanto a janela dela esta aberta: Cancelar, Fechar, o clique fora ou outra janela
+  // no lugar param tudo (a HEIC leva segundos no servidor) — sem foto e sem recado por cima de outra janela.
+  const vale = () => FOTOS_PENDENTES[chave] === lista && input.isConnected && !el('janela').classList.contains('oculto');
   FOTOS_PREPARANDO[chave] = (FOTOS_PREPARANDO[chave] || 0) + 1;
   try {
-  for (const arquivo of arquivos) {
-    // A janela fechou (ou abriu outra) no meio: a HEIC leva segundos no servidor — para aqui.
-    if (FOTOS_PENDENTES[chave] !== lista) break;
-    if (lista.length >= fotosPorVez()) { avisar('No máximo ' + fotosPorVez() + ' fotos de cada vez.', true); break; }
-    const heic = await ehHeic(arquivo);
-    if (!heic && String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif)$/i.test(arquivo.name || '')) {
-      avisar('"' + arquivo.name + '" não é uma foto. Envie JPG, PNG ou HEIC.', true); continue;
-    }
-    if (situacao) situacao.textContent = heic ? 'Convertendo ' + arquivo.name + ' (foto do iPhone) — leva alguns segundos…' : 'Preparando ' + arquivo.name + '…';
-    try { lista.push(await comprimirFoto(arquivo, heic)); }
-    catch (e) { avisar(e.message || String(e), true); }
+  for (const [k, arquivo] of arquivos.entries()) {
+    if (!vale()) break;
+    // A vaga e reservada antes da espera: as fotos que outra escolha ainda prepara ja contam no limite.
+    if (lista.length + (lista.reservadas || 0) >= fotosPorVez()) { avisar('No máximo ' + fotosPorVez() + ' fotos de cada vez.', true); break; }
+    lista.reservadas = (lista.reservadas || 0) + 1;
+    let foto = null, erro = null;
+    try {
+      const heic = await ehHeic(arquivo);
+      if (!heic && String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif)$/i.test(arquivo.name || '')) {
+        throw new Error('"' + arquivo.name + '" não é uma foto. Envie JPG, PNG ou HEIC.');
+      }
+      // O "Preparando" (instantaneo) so quando nenhuma outra escolha esta em andamento: a conversao dela fica na situacao.
+      if (situacao && heic) {
+        situacao.textContent = 'Convertendo ' + arquivo.name + ' para JPG' +
+          (arquivos.length > 1 ? ' (' + (k + 1) + ' de ' + arquivos.length + ')' : '') + ' — leva alguns segundos…';
+      } else if (situacao && FOTOS_PREPARANDO[chave] === 1) situacao.textContent = 'Preparando ' + arquivo.name + '…';
+      foto = await comprimirFoto(arquivo, heic, FOTOS_CONTEXTO[chave]);
+    } catch (e) { erro = e; }
+    finally { lista.reservadas--; }
+    if (!vale()) break;
+    if (erro) { avisar(erro.message || String(erro), true); continue; }
+    lista.push(foto);
+    if (foto.aviso) avisar(foto.aviso, true);
   }
   } finally {
     // So a contagem desta janela: a de uma janela aberta depois (fotosLimpar) nao e desta escolha.
     if (FOTOS_PENDENTES[chave] === lista) FOTOS_PREPARANDO[chave] = Math.max(0, (FOTOS_PREPARANDO[chave] || 1) - 1);
   }
-  if (situacao) situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : fotosDica();
+  // Outra escolha ainda preparando: a situacao e dela (o "Convertendo…") ate ela terminar.
+  if (situacao && !(FOTOS_PENDENTES[chave] === lista && FOTOS_PREPARANDO[chave] > 0)) {
+    situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : fotosDica();
+  }
   fotosPintarPrevias(chave);
 }
 
@@ -5560,32 +5631,36 @@ async function ehHeic(arquivo) {
 }
 
 /*
- * HEIC que o navegador nao abre (Chrome): sobe sozinha, uma por chamada, e o
- * servidor devolve a miniatura de 1600 px do Drive, que segue como qualquer
- * outra foto (com previa). O Google sem a miniatura ainda: a foto vai como
- * veio e o visor converte quando alguem abrir. Servidor de antes desta
- * versao (sem converterFoto): vai como ia antes.
+ * HEIC que o navegador nao abre (Chrome): sobe sozinha, uma por chamada, com o
+ * contexto da janela (plano, uso e acao: o servidor confere quem pode anexar
+ * ali), e o servidor devolve a miniatura de 1600 px do Drive, que segue como
+ * qualquer outra foto (com previa). O Google sem a miniatura ainda, ou a rede
+ * que piscou: a foto vai como veio, com o aviso (quem mostra e fotosEscolhidas,
+ * se a janela ainda for a mesma), e o visor converte quando alguem abrir.
+ * Servidor de antes desta versao (sem converterFoto): vai como ia antes. Canal
+ * barrado: foto nenhuma passa — a explicacao de sempre.
  */
-async function converterHeicNoServidor(arquivo) {
+async function converterHeicNoServidor(arquivo, contexto) {
   if (arquivo.size > 10 * 1024 * 1024) throw new Error('A foto "' + arquivo.name + '" passa de 10 MB.');
   const dados = await lerBase64(arquivo);
   const comoVeio = { nome: arquivo.name, tipo: 'image/heic', dados: dados, previa: '', heic: true };
+  const vaiComoEsta = (porque) => Object.assign(comoVeio,
+    { aviso: 'A foto "' + arquivo.name + '" vai como está: ' + porque + ' Ela aparece normalmente quando alguém abrir a ação.' });
   let r;
-  try { r = await executarAcaoSrv('converterFoto', { foto: { nome: arquivo.name, tipo: 'image/heic', dados: dados } }); }
+  try { r = await executarAcaoSrv('converterFoto', Object.assign({}, contexto, { foto: { nome: arquivo.name, tipo: 'image/heic', dados: dados } })); }
   catch (e) {
     if (/desconhecida|que nao existe/i.test(String((e && e.message) || e))) return comoVeio;
+    if (canalBarradoDeVez(e)) throw new Error(SEM_CANAL_PARA_ARQUIVO);
+    if (falhaPassageira(e)) return vaiComoEsta('a conexão com o Google falhou na conversão.');
     throw e;
   }
-  if (!r || !r.dados) {
-    avisar('A foto "' + arquivo.name + '" vai como está: o Google ainda não terminou de convertê-la. Ela aparece normalmente quando alguém abrir a ação.', true);
-    return comoVeio;
-  }
+  if (!r || !r.dados) return vaiComoEsta('o Google ainda não terminou de convertê-la.');
   const bytes = Uint8Array.from(atob(r.dados), (c) => c.charCodeAt(0));
   return comprimirFoto(new File([bytes], arquivo.name, { type: r.tipo || 'image/jpeg' }), false);    // sai IMG_0001.jpg
 }
 
 /* Reduz para JPEG (lado maior 1600 px). A HEIC que o navegador nao abre vai antes ao servidor. */
-async function comprimirFoto(arquivo, heic) {
+async function comprimirFoto(arquivo, heic, contexto) {
   const url = URL.createObjectURL(arquivo);
   try {
     const img = await new Promise((ok, erro) => {
@@ -5605,7 +5680,7 @@ async function comprimirFoto(arquivo, heic) {
     return { nome: String(arquivo.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg', tipo: 'image/jpeg',
              dados: dataUrl.split(',')[1], previa: dataUrl };
   } catch (e) {
-    if (heic) return converterHeicNoServidor(arquivo);
+    if (heic) return converterHeicNoServidor(arquivo, contexto);
     throw new Error('"' + arquivo.name + '" não abre como foto neste navegador. Envie JPG, PNG ou HEIC.');
   } finally {
     URL.revokeObjectURL(url);
@@ -5682,8 +5757,10 @@ async function visorMostrar() {
     try {
       const r = await executarAcaoSrv(V.acaoFoto, { id: V.idAcao, arquivo: f.id });
       url = 'data:' + (r.tipo || 'image/jpeg') + ';base64,' + r.dados;
-      // A HEIC que o Google ainda nao converteu fica fora do cache: a proxima abertura tenta de novo.
-      if (!ehUrlHeic(url)) FOTO_CACHE.set(f.id, url);
+      // HEIC sem converter: o porque vai para o texto do visor. So a que o Google ainda esta preparando
+      // fica fora do cache — a proxima abertura tenta de novo; as outras nao baixam a HEIC a cada clique.
+      if (ehUrlHeic(url)) HEIC_SEM_PREVIA[f.id] = !r.semMiniatura ? 'servidor' : r.desistiu ? 'desistiu' : 'preparando';
+      if (!ehUrlHeic(url) || HEIC_SEM_PREVIA[f.id] !== 'preparando') FOTO_CACHE.set(f.id, url);
       if (FOTO_CACHE.size > 24) FOTO_CACHE.delete(FOTO_CACHE.keys().next().value);
     } catch (e) {
       if (VISOR === V && V.pedido === pedido) alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
@@ -5691,13 +5768,23 @@ async function visorMostrar() {
     }
   }
   if (VISOR !== V || V.pedido !== pedido) return;      // trocou de foto ou fechou no meio
-  alvo.innerHTML = ehUrlHeic(url)
-    ? '<div class="vazio">O Google ainda está preparando esta foto do iPhone (HEIC). Feche e abra de novo em alguns segundos — ou use <b>Baixar</b>.</div>'
+  alvo.innerHTML = ehUrlHeic(url) ? `<div class="vazio">${HEIC_SEM_PREVIA_TEXTO[HEIC_SEM_PREVIA[f.id]] || HEIC_SEM_PREVIA_TEXTO.servidor}</div>`
     : `<img src="${url}" alt="${esc(f.nome || 'foto')}">`;
   V.url = url;          // o Baixar usa a foto que esta na tela (o cache pode ja ter soltado ela)
   const b = el('visor-baixar'); if (b) b.disabled = false;
 }
 const ehUrlHeic = (url) => /^data:image\/hei[cf]/i.test(url);
+/*
+ * A HEIC que chegou sem converter, por foto: 'preparando' (o Google ainda gera
+ * a miniatura), 'desistiu' (teve tempo e nao gerou) ou 'servidor' (Acoes.gs de
+ * antes desta versao, que nao converte).
+ */
+const HEIC_SEM_PREVIA = {};
+const HEIC_SEM_PREVIA_TEXTO = {
+  preparando: 'O Google ainda está preparando esta foto HEIC. Feche e abra de novo em alguns segundos — ou use <b>Baixar</b>.',
+  desistiu: 'O Google não conseguiu converter esta foto HEIC para mostrar aqui. Use <b>Baixar</b> para abrir no computador.',
+  servidor: 'Este navegador não mostra fotos HEIC. Use <b>Baixar</b> para abrir no computador.'
+};
 
 function visorBaixar() {
   if (!VISOR) return;

@@ -353,26 +353,30 @@ caso('fotos: tipo errado, grande demais e mais de 5 de uma vez sao recusados; fa
  */
 const heic = (nome) => ({ nome: nome || 'IMG_0001.HEIC', tipo: 'image/heic', dados: HEIC_MINI });
 
-caso('fotos HEIC: converterFoto devolve a miniatura do Drive em JPEG (=s1600, com o token) e a pasta temporaria vai para a lixeira; sem miniatura a tempo, pendente (9 consultas contadas, nao pelo relogio)', () => {
+caso('fotos HEIC: converterFoto devolve a miniatura do Drive em JPEG (=s1600, com o token) e a pasta temporaria sai de vez pela API do Drive (recusado o DELETE, lixeira); sem miniatura a tempo, pendente (9 consultas contadas, nao pelo relogio)', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m, { atraso: 2 });
   const r = acao(m, adm, 'converterFoto', { foto: heic() });
   afirmar(r.dados === JPEG_MINI && r.tipo === 'image/jpeg' && r.nome === 'IMG_0001.jpg' && !r.pendente, 'convertida: ' + JSON.stringify(r).slice(0, 120));
-  afirmar(drive.log.join(' | ') === 'files.get #1 sem link (Bearer) | files.get #2 sem link (Bearer) | files.get #3 link (Bearer) | miniatura =s1600 (Bearer)',
+  afirmar(drive.log.join(' | ') === 'files.get #1 sem link (Bearer) | files.get #2 sem link (Bearer) | files.get #3 link (Bearer) | miniatura =s1600 (Bearer) | files.delete (Bearer)',
     'caminho: ' + drive.log.join(' | '));
-  let pastas = pastasDeConversao(m);
-  afirmar(pastas.length === 1 && pastas[0].lixo, 'pasta temporaria na lixeira: ' + JSON.stringify(pastas.map((p) => [p.nome, p.lixo])));
-  const gravada = [...m.arquivos.values()].filter((a) => a.pais.has(pastas[0].id));
-  afirmar(gravada.length === 1 && gravada[0].mime === 'image/heic', 'a HEIC vai ao Drive como image/heic (para ele gerar a miniatura): ' + JSON.stringify(gravada.map((a) => a.mime)));
+  // a HEIC foi ao Drive como image/heic (para ele gerar a miniatura) e a pasta saiu de vez: nem na lixeira (a cota do dono)
+  afirmar(drive.apagadas.length === 1 && /^heic-/.test(drive.apagadas[0].nome) && drive.apagadas[0].arquivos.join() === 'IMG_0001.HEIC image/heic' &&
+    !pastasDeConversao(m).length, 'pasta temporaria apagada de vez: ' + JSON.stringify([drive.apagadas, pastasDeConversao(m).map((p) => [p.nome, p.lixo])]));
   drive.roteiro.nunca = true; drive.log.length = 0;
   const p = acao(m, adm, 'converterFoto', { foto: heic('IMG_0002.HEIC') });
   afirmar(p.pendente === true && !p.dados, 'pendente: ' + JSON.stringify(p));
-  afirmar(drive.log.length === 9 && drive.log.every((l) => /^files\.get #\d sem link \(Bearer\)$/.test(l)), 'consultas: ' + drive.log.join(' | '));
-  pastas = pastasDeConversao(m);
-  afirmar(pastas.length === 2 && pastas.every((x) => x.lixo), 'as duas pastas na lixeira');
+  afirmar(drive.log.length === 10 && drive.log.slice(0, 9).every((l) => /^files\.get #\d sem link \(Bearer\)$/.test(l)) && drive.log[9] === 'files.delete (Bearer)',
+    'consultas: ' + drive.log.join(' | '));
+  afirmar(drive.apagadas.length === 2 && !pastasDeConversao(m).length, 'a da pendente tambem saiu de vez');
+  // a API recusa o DELETE (sem permissao, API desligada): a pasta vai para a lixeira, como antes
+  drive.roteiro.apagar = false;
+  acao(m, adm, 'converterFoto', { foto: heic('IMG_0003.HEIC') });
+  const sobrou = pastasDeConversao(m);
+  afirmar(drive.apagadas.length === 2 && sobrou.length === 1 && sobrou[0].lixo, 'DELETE recusado: lixeira — ' + JSON.stringify(sobrou.map((x) => [x.nome, x.lixo])));
 });
 
-caso('fotos HEIC: a miniatura e conferida pelos bytes (pagina de login nao vira foto; PNG vem como PNG); link com outro tamanho ou sem tamanho vira =s1600; rede caindo da pendente; Drive falhando da o erro — a pasta sempre vai para a lixeira', () => {
+caso('fotos HEIC: a miniatura e conferida pelos bytes (pagina de login nao vira foto; PNG vem como PNG); link com outro tamanho ou sem tamanho vira =s1600; rede caindo da pendente; Drive falhando da o erro — a pasta sempre sai (de vez pela API ou, sem rede, para a lixeira)', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m, { imagem: 'html' });
   afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).pendente === true, 'pagina HTML com HTTP 200 nao vira foto');
@@ -382,16 +386,17 @@ caso('fotos HEIC: a miniatura e conferida pelos bytes (pagina de login nao vira 
   for (const link of ['w200-h190-p-k-nu', 's220?authuser=0', '']) {
     Object.assign(drive.roteiro, { imagem: 'jpeg', link: link }); drive.log.length = 0;
     afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).tipo === 'image/jpeg', 'link "' + link + '"');
-    afirmar(drive.log.slice(-1)[0] === 'miniatura =s1600 (Bearer)', 'link "' + link + '": ' + drive.log.join(' | '));
+    afirmar(drive.log.slice(-2).join(' | ') === 'miniatura =s1600 (Bearer) | files.delete (Bearer)', 'link "' + link + '": ' + drive.log.join(' | '));
   }
+  afirmar(drive.apagadas.length === 5 && !pastasDeConversao(m).length, 'apagadas de vez: ' + drive.apagadas.length);
   drive.roteiro.lancar = true;
   afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).pendente === true, 'rede caindo: pendente');
-  afirmar(pastasDeConversao(m).length === 6 && pastasDeConversao(m).every((p) => p.lixo), 'pastas: ' + JSON.stringify(pastasDeConversao(m).map((p) => [p.nome, p.lixo])));
+  afirmar(pastasDeConversao(m).length === 1 && pastasDeConversao(m).every((p) => p.lixo), 'sem rede o DELETE nao sai: lixeira — ' + JSON.stringify(pastasDeConversao(m).map((p) => [p.nome, p.lixo])));
   const novoArquivo = m.novoArquivo;
   m.novoArquivo = function (nome) { if (/^IMG_/.test(nome)) throw new Error('Drive cheio'); return novoArquivo.apply(this, arguments); };
   try { afirmar(/Drive cheio/.test(erroDe(() => acao(m, adm, 'converterFoto', { foto: heic() }))), 'o erro do Drive sobe'); }
   finally { m.novoArquivo = novoArquivo; }
-  afirmar(pastasDeConversao(m).length === 7 && pastasDeConversao(m).every((p) => p.lixo), 'a da falha tambem foi para a lixeira');
+  afirmar(drive.apagadas.length === 5 && pastasDeConversao(m).length === 2 && pastasDeConversao(m).every((p) => p.lixo), 'a da falha tambem saiu (lixeira: a rede continua fora)');
 });
 
 caso('fotos HEIC: converterFoto recusa o que nao e HEIC pelos bytes, mais de 10 MB e sem foto (sem criar nada no Drive); a porta e de quem ve o calendario OU a limpeza', () => {
@@ -404,13 +409,69 @@ caso('fotos HEIC: converterFoto recusa o que nao e HEIC pelos bytes, mais de 10 
   afirmar(/não é uma foto/.test(erroDe(() => acao(m, adm, 'converterFoto', { foto: { nome: 'a.pdf', tipo: 'application/pdf', dados: HEIC_MINI } }))), 'tipo');
   afirmar(erroDe(() => acao(m, adm, 'converterFoto', {})) === 'converterFoto: Nenhuma foto chegou.', 'sem foto');
   afirmar(m.arquivos.size + m.pastas.size === antes, 'nada criado no Drive');
+  // a porta e a dos dois planos; o contexto da janela diz qual (acao nova da Limpeza, conclusao da propria acao)
   acao(m, adm, 'salvarUsuario', { email: SUP, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
-  afirmar(acao(m, entrar(m, SUP, '2222'), 'converterFoto', { foto: heic() }).dados === JPEG_MINI, 'supervisor (so a limpeza) converte');
-  afirmar(acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic() }).dados === JPEG_MINI, 'coordenadora (so o calendario) converte');
+  afirmar(acao(m, entrar(m, SUP, '2222'), 'converterFoto', { foto: heic(), plano: 'LIMPEZA', uso: 'ac', id: '' }).dados === JPEG_MINI, 'supervisor (so a limpeza) converte');
+  const daMaria = acao(m, adm, 'salvarAcao', { acao: 'Doca 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  afirmar(acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic(), plano: 'CALENDARIO', uso: 'cc', id: daMaria }).dados === JPEG_MINI, 'coordenadora (so o calendario) converte');
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
   acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'calendario', modo: 'NAO' });
-  const e2 = erroDe(() => acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic() }));
+  const e2 = erroDe(() => acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic(), plano: 'CALENDARIO', uso: 'cc', id: daMaria }));
   afirmar(/não tem acesso ao módulo/.test(e2), 'sem calendario e sem limpeza: ' + e2);
+});
+
+/*
+ * 19/10 (revisao): converter e o primeiro passo de anexar. Antes, qualquer um que visse o Calendario
+ * ou a Limpeza — ate a CONSULTA, pelo console — subia ate 10 MB por chamada ao Drive do dono.
+ */
+caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o plano; comentario: responsavel, gestao ou marcado; conclusao: responsavel ou gestao) — CONSULTA sem contexto e recusada, marcada converte; no maximo 30 por pessoa a cada 10 min', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m);
+  const CARLA = 'carla.dias@bartofil.com.br';
+  acao(m, adm, 'salvarUsuario', { email: CARLA, nome: 'Carla Dias', perfil: 'CONSULTA', turno: '', filiais: '*', papel: 'Qualidade' });
+  const daMaria = acao(m, adm, 'salvarAcao', { acao: 'Doca 1', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const doDono = acao(m, adm, 'salvarAcao', { acao: 'Doca 2', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+  acao(m, adm, 'comentarAcao', { id: doDono, texto: 'Carla, confere a doca 2?', mencoes: [CARLA] });
+  const carla = entrar(m, CARLA, '7777'), maria = entrar(m, COORD, '1234');
+  const conv = (s, contexto) => erroDe(() => afirmar(acao(m, s, 'converterFoto', Object.assign({ foto: heic() }, contexto)).dados === JPEG_MINI, 'converteu'));
+  const noDrive = () => m.arquivos.size + m.pastas.size + drive.apagadas.length;
+  const antes = noDrive();
+  afirmar(/nao pode executar/.test(conv(carla, {})), 'CONSULTA sem contexto (o console): recusada');
+  afirmar(/nao pode executar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'CONSULTA nao cria acao: recusada');
+  afirmar(/Só os responsáveis pela ação, quem foi marcado nela ou a gestão podem comentar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), 'CONSULTA no comentario de uma acao em que nao foi marcada: recusada');
+  afirmar(/Ação não encontrada/.test(conv(carla, { plano: 'LIMPEZA', uso: 'cm', id: doDono })), 'pela porta do outro plano a acao nao existe');
+  afirmar(noDrive() === antes, 'as recusas nao subiram nada ao Drive');
+  afirmar(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: doDono }) === '', 'CONSULTA marcada converte no comentario da acao');
+  afirmar(conv(maria, { plano: 'CALENDARIO', uso: 'cc', id: daMaria }) === '', 'a responsavel converte na conclusao da acao dela');
+  afirmar(/Só o responsável pela ação anexa a foto da conclusão/.test(conv(maria, { plano: 'CALENDARIO', uso: 'cc', id: doDono })), 'conclusao da acao de outro: recusada');
+  afirmar(/nao pode executar/.test(conv(maria, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'coordenadora nao cria acao: recusada');
+  // o limite e por pessoa: a 31a do dono em 10 min e recusada antes de subir; a coordenadora continua
+  for (let i = 0; i < 30; i++) afirmar(conv(adm, { plano: 'CALENDARIO', uso: 'ac', id: '' }) === '', 'conversao ' + (i + 1));
+  const depois = noDrive();
+  const e = conv(adm, { plano: 'CALENDARIO', uso: 'ac', id: '' });
+  afirmar(e === 'converterFoto: Muitas fotos HEIC convertidas em pouco tempo. Espere alguns minutos e tente de novo.', 'a 31a e recusada: ' + e);
+  afirmar(noDrive() === depois, 'a recusada nao subiu nada');
+  afirmar(conv(maria, { plano: 'CALENDARIO', uso: 'cc', id: daMaria }) === '', 'o limite de um nao trava o outro');
+});
+
+caso('fotos HEIC: API do Drive desligada, politica do dominio, token recusado ou arquivo sumido desistem na 1a consulta (com o motivo no log); cota e erro do Google esperam como sempre', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m);
+  const tenta = (recusa) => {
+    drive.roteiro.recusa = recusa; drive.log.length = 0;
+    const r = acao(m, adm, 'converterFoto', { foto: heic(), plano: 'CALENDARIO', uso: 'ac', id: '' });
+    return (r.pendente ? 'pendente' : 'convertida') + ' ' + drive.log.filter((l) => /^files\.get/.test(l)).length;
+  };
+  [[403, 'accessNotConfigured'], [403, 'domainPolicy'], [401, 'authError'], [404, 'notFound'], [400, 'badRequest']].forEach(([codigo, motivo]) => {
+    const avisos = m.logs.filter((l) => /^\[warn\] Miniatura do Drive recusada/.test(l)).length;
+    afirmar(tenta({ codigo, motivo }) === 'pendente 1', codigo + ' ' + motivo + ': ' + drive.log.join(' | '));
+    const novos = m.logs.filter((l) => /^\[warn\] Miniatura do Drive recusada/.test(l)).slice(avisos);
+    afirmar(novos.length === 1 && novos[0].indexOf('HTTP ' + codigo) !== -1 && novos[0].indexOf(motivo) !== -1, 'um aviso no log com o motivo: ' + novos.join(' | '));
+  });
+  [[429, 'rateLimitExceeded'], [403, 'userRateLimitExceeded'], [403, 'rateLimitExceeded'], [500, 'backendError'], [503, '']].forEach(([codigo, motivo]) => {
+    afirmar(tenta({ codigo, motivo }) === 'pendente 9', codigo + ' ' + motivo + ' espera (9 consultas): ' + drive.log.join(' | '));
+  });
+  afirmar(tenta(null) === 'convertida 1', 'sem recusa converte');
 });
 
 caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou miniatura que nao estava pronta) — acao e comentario, nos dois planos; sem miniatura vai a original; a JPEG nao passa pela miniatura', () => {
@@ -438,6 +499,22 @@ caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou min
   afirmar(/não é desta ação/.test(erroDe(() => acao(m, adm, 'fotoAcao', { id: r.id, arquivo: al.fotos[0].id }))), 'foto de outra acao continua barrada');
 });
 
+caso('fotos HEIC: a HEIC gravada que o Google nao miniaturiza — a 2a abertura em 10 min consulta uma vez (sem os 6 s); gravada ha mais de 10 min, o servidor desiste (a tela para de prometer)', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m, { nunca: true });
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 4', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [heic('IMG_0020.HEIC'), foto(1)] });
+  const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === r.id);
+  const abrir = (arquivo) => { drive.log.length = 0; const v = acao(m, adm, 'fotoAcao', { id: r.id, arquivo }); return [v.tipo, !!v.semMiniatura, !!v.desistiu, drive.log.length].join(' '); };
+  afirmar(abrir(a.fotos[0].id) === 'image/heic true false 5', 'primeira: espera a miniatura (5 consultas, 6 s)');
+  afirmar(abrir(a.fotos[0].id) === 'image/heic true false 1', 'segunda, em 10 min: uma consulta so, sem esperar');
+  m.arquivos.get(a.fotos[0].id).criado = new Date(Date.now() - 11 * 60 * 1000);
+  afirmar(abrir(a.fotos[0].id) === 'image/heic true true 1', 'gravada ha mais de 10 min e sem miniatura: desistiu');
+  afirmar(/^image\/\w+ false false 0$/.test(abrir(a.fotos[1].id)), 'a que nao e HEIC nao consulta nem leva semMiniatura');
+  drive.roteiro.nunca = false;
+  const v = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[0].id });
+  afirmar(v.convertida && v.dados === JPEG_MINI, 'o Google gerou a miniatura: converte na hora');
+});
+
 caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esquecido ou da entrega anterior aparece na faixa', () => {
   const c = ctx(new Mundo({ dono: DONO }));
   afirmar(c.arquivosForaDaVersao_().length === 0, 'fora da versao: ' + c.arquivosForaDaVersao_().join());
@@ -452,8 +529,14 @@ caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esque
   afirmar(ler('PaineisEstilo.html').match(/--gsl-paineis-estilo: '([^']+)'/)[1] === esperaPE, 'PaineisEstilo.html no carimbo que o App.html espera (' + esperaPE + ')');
   const esperaEstilo = app.match(/carimboDoEstilo\(\) !== '([^']+)'/)[1];
   afirmar(ler('Estilo.html').match(/--gsl-estilo: '([^']+)'/)[1] === esperaEstilo, 'Estilo.html no carimbo que o App.html espera (' + esperaEstilo + ')');
-  afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')) && /id="lateral-alternar"/.test(ler('Index.html')),
+  afirmar(/var GSL_T0 = Date\.now\(\)/.test(ler('Index.html')) && /id="entrar-continuar"/.test(ler('Index.html')) && /id="lateral-alternar"/.test(ler('Index.html')) && /id="entrar-p"/.test(ler('Index.html')),
     'Index.html com o que o App.html confere');
+  // o Index.html de antes de 19/10 (sem o #entrar-p do link de mencao) cai na faixa: falta nele um dos ids que o App.html confere
+  const idsDoIndex = [...((app.match(/[^\n]*faltam\.push\('Index\.html'\)/) || [''])[0]).matchAll(/el\('([\w-]+)'\)/g)].map((x) => x[1]);
+  let indexVelho = '';
+  try { indexVelho = require('child_process').execSync('git show 2b60bb2:GSL/Index.html', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+  catch (e) { console.log('        (sem o historico do git: o Index.html de antes nao foi conferido)'); }
+  afirmar(!indexVelho || idsDoIndex.some((id) => indexVelho.indexOf('id="' + id + '"') === -1), 'o Index.html de antes de 19/10 aparece na faixa: ' + idsDoIndex.join());
   const esperaPaineis = app.match(/BUILD_PAINEIS !== '([^']+)'/)[1];
   afirmar(ler('Paineis.html').match(/BUILD_PAINEIS = '([^']+)'/)[1] === esperaPaineis, 'Paineis.html no carimbo que o App.html espera (' + esperaPaineis + ')');
   const m = mundo(); const s = entrar(m, DONO, '4321');
@@ -700,7 +783,7 @@ caso('painel Desativado ou "Nao usar nesta filial" some para todos, inclusive o 
   });
   acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
   afirmar(/não está ligado na filial CD Feira de Santana/.test(erroDe(() => tela(m, s, 'nobreaks'))), 'ADMIN: tela recusada');
-  afirmar(/não tem acesso ao módulo Nobreaks/.test(erroDe(() => acao(m, s, 'semanaNobreak', {}))), 'ADMIN: acao recusada');
+  afirmar(/não está ligado na filial CD Feira de Santana/.test(erroDe(() => acao(m, s, 'semanaNobreak', {}))), 'ADMIN: acao recusada');
   afirmar(!tela(m, s, 'inicio').atalhos.some((t) => t.id === 'nobreaks'), 'ADMIN: sem o atalho na Central');
   // bolinha: o Calendario desativado com acao em aberto nao conta nem para o ADMIN
   acao(m, s, 'salvarAcao', { acao: 'Lâmpadas do flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
@@ -720,7 +803,8 @@ caso('alterarPainel devolve o menu novo: o cartao sai e volta sem F5, o recado d
   x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'ATIVO' });
   afirmar(/(^|,)nobreaks(,|$)/.test(cartoes(x.menu)) && x.r.recado === 'Painel Nobreaks ativo em CD Feira de Santana: aparece para quem tem o nível liberado.', 'ativo: ' + cartoes(x.menu) + ' / ' + x.r.recado);
   x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'REMOVER' });
-  afirmar(cartoes(x.menu).indexOf('nobreaks') === -1 && x.r.recado === 'Painel Nobreaks fora de CD Feira de Santana: saiu do menu de todos.', 'nao usar: ' + x.r.recado);
+  afirmar(cartoes(x.menu).indexOf('nobreaks') === -1 &&
+    x.r.recado === 'Painel Nobreaks não é mais usado em CD Feira de Santana: saiu do menu de todos, inclusive do seu. Os dados continuam guardados.', 'nao usar: ' + x.r.recado);
   // outra filial: o recado diz qual, e o menu (o da filial em uso) nao muda
   acao(m, s, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO', nobreaks: 'ATIVO' } });
   const antes = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'ATIVO' }).menu;
@@ -729,7 +813,67 @@ caso('alterarPainel devolve o menu novo: o cartao sai e volta sem F5, o recado d
   afirmar(x.menu.filiais.map((f) => f.codigo).join() === 'FSA,SSA', 'filiais no menu: ' + JSON.stringify(x.menu.filiais));
   // dentro da SSA, o ADMIN desliga a propria SSA: o menu diz que a filial nao vale mais
   x = gravarNaTela(m, Object.assign({}, s, { f: 'SSA' }), 'alternarFilial', { codigo: 'SSA' });
-  afirmar(x.menu && x.menu.semFilial === true && x.menu.filiais.map((f) => f.codigo).join() === 'FSA', 'semFilial: ' + JSON.stringify(x.menu));
+  afirmar(x.menu && x.menu.semFilial === true && x.menu.motivo === 'desligada' && x.menu.filiais.map((f) => f.codigo).join() === 'FSA', 'semFilial: ' + JSON.stringify(x.menu));
+});
+
+/* P2 (19/10): duas mudancas de painel quase juntas (dois selects, duas abas, dois administradores) — nenhuma se perde. */
+const paineisDaPrincipal = (m) => { const c = ctx(m); return JSON.parse(c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL)).PAINEIS); };
+caso('alterarPainel le e grava o PAINEIS dentro da trava: a outra mudanca gravada enquanto esta esperava a trava fica; a copia velha da chave "filiais" no cache nao desfaz nenhuma', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  // A le o cadastro; B grava a Limpeza inteira antes de A pegar a trava (o Apps Script roda as duas em paralelo)
+  const a = novaExecucao(m, PASTA, { contaGoogle: DONO }, OP);
+  const travaDeVerdade = a.comTrava;
+  let rodouB = false;
+  a.comTrava = function (fn, espera) {
+    if (!rodouB) { rodouB = true; acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'limpeza', estado: 'DESATIVADO' }); }
+    return travaDeVerdade.call(this, fn, espera);
+  };
+  const ra = JSON.parse(a.executarAcao({ t: s.t, f: s.f }, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' }));
+  let p = paineisDaPrincipal(m);
+  afirmar(rodouB && p.limpeza === 'DESATIVADO' && p.nobreaks === 'DESATIVADO', 'as duas ficaram: ' + JSON.stringify(p));
+  afirmar(/^Painel Nobreaks desativado em CD Feira de Santana/.test(ra.recado), 'recado de A: ' + ra.recado);
+  // um leitor atrasado regrava a copia de antes de uma gravacao na chave 'filiais' (que nao leva geracao)
+  tela(m, s, 'filiais');
+  const velha = m.cache.get('filiais');
+  afirmar(velha, 'a copia do cadastro esta no cache');
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'quadro', estado: 'OCULTO' });
+  m.cache.set('filiais', velha);
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'estoque', estado: 'DESATIVADO' });
+  p = paineisDaPrincipal(m);
+  afirmar(p.quadro === 'OCULTO' && p.estoque === 'DESATIVADO' && p.limpeza === 'DESATIVADO' && p.nobreaks === 'DESATIVADO', 'a copia velha nao desfez nada: ' + JSON.stringify(p));
+});
+
+/* P4 (19/10): a filial continua ligada e a pessoa saiu dela no proprio cadastro — o aviso nao culpa a filial. */
+caso('menu da gravacao: quem tira a si mesmo da filial em que esta recebe semFilial com motivo semAcesso (a filial continua ligada); sem filial ativa nenhuma, a lista vem vazia', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321'), g = entrar(m, GERENTE, '5555');      // dentro da FSA
+  acao(m, adm, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO' } });
+  const idDe = (email) => ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === email).ID;
+  const ficha = (filiais) => ({ id: idDe(GERENTE), email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais, papel: 'Gerente' });
+  let x = gravarNaTela(m, g, 'salvarUsuario', ficha('SSA'), 'acessos');
+  afirmar(x.menu && x.menu.semFilial === true && x.menu.motivo === 'semAcesso' && x.menu.filiais.map((f) => f.codigo).join() === 'SSA', 'so SSA: ' + JSON.stringify(x.menu));
+  x = gravarNaTela(m, Object.assign({}, g, { f: 'SSA' }), 'salvarUsuario', ficha('NENHUMA'), 'acessos');
+  afirmar(x.menu && x.menu.semFilial === true && x.menu.motivo === 'semAcesso' && !x.menu.filiais.length, 'nenhuma: ' + JSON.stringify(x.menu));
+});
+
+/*
+ * P5 (19/10): a recusa diz a causa. "Este painel nao esta ligado" so quando o painel nao aparece para a
+ * pessoa na filial; o nivel (a tela que exige uma capacidade) e o ajuste da pessoa (Sem acesso) tem a frase deles.
+ */
+caso('recusas: o nivel sem a capacidade da tela e o "Sem acesso" da pessoa nao viram "painel nao esta ligado"; o painel desligado sim (tela e acao)', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321'); const g = entrar(m, GERENTE, '5555');
+  tela(m, g, 'config');
+  const linha = ctx(m).listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
+  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'PODE_PROGRAMAR', valor: false });
+  const e1 = erroDe(() => tela(m, g, 'config'));
+  afirmar(/Seu perfil \(GERENTE\) nao tem acesso a tela "config"/.test(e1), 'Configuracao sem PROGRAMAR: ' + e1);
+  const maria = entrar(m, COORD, '1234');
+  const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'nobreaks', modo: 'NAO' });
+  const e2 = erroDe(() => acao(m, maria, 'semanaNobreak', {}));
+  afirmar(/Você não tem acesso ao módulo Nobreaks na filial CD Feira de Santana/.test(e2), 'Sem acesso (o painel continua ativo): ' + e2);
+  acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  afirmar(/Este painel não está ligado na filial CD Feira de Santana/.test(erroDe(() => acao(m, maria, 'semanaNobreak', {}))), 'painel desligado: a acao');
+  afirmar(/Este painel não está ligado na filial CD Feira de Santana/.test(erroDe(() => tela(m, g, 'nobreaks'))), 'painel desligado: a tela');
 });
 
 caso('"Editar nome" da filial grava so o nome e a cidade: a copia velha dos paineis (outra aba) nao religa o painel desativado', () => {
@@ -741,6 +885,67 @@ caso('"Editar nome" da filial grava so o nome e a cidade: a copia velha dos pain
   const c = ctx(m), pr = c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL));
   afirmar(JSON.parse(pr.PAINEIS).nobreaks === 'DESATIVADO' && pr.NOME === 'CD Feira', 'PAINEIS=' + pr.PAINEIS + ' NOME=' + pr.NOME);
   afirmar(x.menu.filiais.find((f) => f.codigo === 'FSA').nome === 'CD Feira' && cartoes(x.menu).indexOf('nobreaks') === -1, 'menu com o nome novo: ' + JSON.stringify(x.menu.filiais));
+});
+
+/*
+ * O "Salvar" do "Editar nome" como o Paineis.html o monta: o onclick do botao (o template do formFilial,
+ * com o esc e o jsArg do App.html), rodado com um agir que so anota o pedido.
+ */
+function pedidoDoEditarNome(f, nome) {
+  const fonte = require('fs').readFileSync(path.join(PASTA, 'Paineis.html'), 'utf8');
+  const modelo = /onclick="(agir\('salvarFilial',\{id:[^"]*)"/.exec(fonte)[1];
+  const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const jsArg = (v) => esc(JSON.stringify(v == null ? '' : String(v)));
+  const onclick = new Function('f', 'esc', 'jsArg', 'return `' + modelo + '`;')(f, esc, jsArg)
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  let pedido = null;
+  new Function('agir', 'val', onclick)((nomeAcao, params) => { pedido = { acao: nomeAcao, params: params }; return Promise.resolve(); },
+    (id) => ({ 'fl-nome': nome, 'fl-cidade': f.cidade })[id]);
+  return pedido;
+}
+
+/*
+ * P1 (19/10): o Paineis.html desta entrega com o Filiais.gs de antes (colado pela metade). O de antes
+ * regrava PAINEIS com o que vier no "Editar nome": sem a copia da pagina, gravava {} e a filial
+ * perdia todos os paineis. O de agora ignora o campo (caso acima).
+ */
+caso('"Editar nome" com o Filiais.gs de antes de 19/10 (colado pela metade): a tela manda a copia dos paineis e a filial nao perde nenhum', () => {
+  const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+  afirmar(/onclick="agir\('salvarFilial',\{id:[^"]*paineis:/.test(fs.readFileSync(path.join(PASTA, 'Paineis.html'), 'utf8')), 'o "Editar nome" do Paineis.html leva paineis:');
+  const m0 = mundo(); const s0 = entrar(m0, DONO, '4321');
+  const fsa0 = tela(m0, s0, 'filiais').filiais.find((f) => f.codigo === 'FSA');
+  const p0 = pedidoDoEditarNome(fsa0, 'CD Feira');
+  afirmar(p0.acao === 'salvarFilial' && p0.params.id === fsa0.id && p0.params.nome === 'CD Feira' &&
+    JSON.stringify(p0.params.paineis) === JSON.stringify(fsa0.paineis), 'o pedido da tela leva os paineis da pagina: ' + JSON.stringify(p0));
+  let velho;
+  try { velho = execSync('git show 2b60bb2:GSL/Filiais.gs', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+  catch (e) { console.log('        (sem o historico do git: o Filiais.gs de antes nao foi rodado)'); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-filiais-antes-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.writeFileSync(path.join(tmp, 'Filiais.gs'), velho);
+    const m = new Mundo({ dono: DONO });
+    const c = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); c._porta = true; c.instalar(DONO);
+    const pela = (fn, ...args) => {
+      const r = chamarPeloNavegador(m, tmp, { contaGoogle: DONO }, fn, args, OP);
+      if (!r.ok) throw new Error(fn + ': ' + r.erro.message);
+      const x = JSON.parse(r.valor);
+      if (x && x.ok === false) throw new Error(fn + ': ' + x.erro);
+      return x;
+    };
+    const e = pela('entrar', DONO, '4321', '4321', '', '');
+    const s = { t: e.token, f: e.filial.codigo };
+    pela('executarAcao', s, 'alterarPainel', { codigo: 'FSA', painel: 'quadro', estado: 'OCULTO' });
+    pela('executarAcao', s, 'alterarPainel', { codigo: 'FSA', painel: 'aprendiz', estado: 'DESATIVADO' });
+    const linha = () => { const k = novaExecucao(m, tmp, { contaGoogle: DONO }, OP); k._porta = true; return k.listar('FILIAIS').find((l) => k.marcado(l.PRINCIPAL)); };
+    const antes = JSON.parse(linha().PAINEIS);
+    const fsa = pela('carregarTela', s, 'filiais', {}).dados.filiais.find((f) => f.codigo === 'FSA');
+    const pedido = pedidoDoEditarNome(fsa, 'CD Feira');
+    pela('executarAcao', s, pedido.acao, pedido.params);
+    const depois = linha();
+    afirmar(JSON.stringify(JSON.parse(depois.PAINEIS)) === JSON.stringify(antes) && antes.quadro === 'OCULTO' && antes.aprendiz === 'DESATIVADO' && depois.NOME === 'CD Feira',
+      'PAINEIS intacto: ' + JSON.stringify(antes) + ' -> ' + depois.PAINEIS + ' (NOME ' + depois.NOME + ')');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 caso('bolinha (pendencias) traz o menu de agora: quem ja estava dentro ve o painel desligado ao voltar ao menu; mexer no proprio acesso devolve o menu', () => {

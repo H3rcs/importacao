@@ -931,7 +931,8 @@ function fotosDaCelula_(valor) {
  * Drive nao passa por aqui.
  * HEIC (iPhone) gravada sem converter — foto de antes de 19/10, ou o Google
  * ainda nao tinha a miniatura na hora do envio: vai a miniatura de 1600 px,
- * que o navegador abre. Sem miniatura ainda, vai a original (a tela explica).
+ * que o navegador abre. Sem miniatura, vai a original com semMiniatura (o
+ * servidor tentou) e desistiu (o Google teve tempo e nao gerou): a tela explica.
  */
 function fotoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
@@ -943,12 +944,13 @@ function fotoDoPlano_(plano, usuario, params) {
     (comentariosPorAcao_(origensDoPlano_(plano.id))[id] || []).map(function (c) { return c.fotos.filter(estaFoto)[0]; }).filter(Boolean)[0];
   if (!arquivo || !foto) throw new Error('Esta foto não é desta ação.');
   const heic = /^image\/hei[cf]/i.test(foto.tipo || '') || /\.hei[cf]$/i.test(foto.nome || '');
-  const img = heic ? heicGravadaConvertida_(arquivo) : null;
+  const conv = heic ? heicGravadaConvertida_(arquivo) : { img: null, desistiu: false };
+  const img = conv.img;
   if (img) return { ok: true, nome: img.getName(), tipo: img.getContentType(), dados: Utilities.base64Encode(img.getBytes()), convertida: true };
   let b;
   try { b = baixarAnexo(arquivo); }
   catch (e) { throw new Error('A foto não está mais no Drive (foi apagada ou movida).'); }
-  return { ok: true, nome: b.nome, tipo: b.tipo, dados: b.dados };
+  return { ok: true, nome: b.nome, tipo: b.tipo, dados: b.dados, semMiniatura: heic, desistiu: conv.desistiu };
 }
 
 /* Tirar uma foto da acao (as dos comentarios ficam: o historico nao se apaga). */
@@ -973,38 +975,96 @@ function removerFotoDoPlano_(plano, usuario, params) {
 
 const LADO_DA_MINIATURA = 1600;     // o mesmo lado maior das fotos reduzidas na tela (FOTO_LADO_MAX)
 const MARCAS_HEIC_ = ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1'];
+const DRIVE_ARQUIVOS_ = 'https://www.googleapis.com/drive/v3/files/';   // a API do Drive, com o token do dono
+// Por pessoa, a cada 10 min: cada conversao sobe ate 10 MB ao Drive do dono e prende uma execucao por segundos.
+const CONVERSOES_HEIC_POR_JANELA = 30;
 
 /*
  * Converter UMA foto HEIC na hora em que ela e escolhida (a tela so manda
- * quando o navegador nao abre o arquivo). Grava numa pasta temporaria, pega
- * a miniatura do Drive e devolve a imagem, que segue na tela como qualquer
- * outra foto. Nada fica: a pasta vai para a lixeira na hora (e a faxina
- * diaria, limparTemporariosEntrega, pega o que escapar). So aceita HEIC de
+ * quando o navegador nao abre o arquivo). So para quem pode anexar a foto
+ * onde ela vai (exigirQuemAnexaFoto_), e no maximo CONVERSOES_HEIC_POR_JANELA
+ * por pessoa a cada 10 min. Grava numa pasta temporaria, pega a miniatura do
+ * Drive e devolve a imagem, que segue na tela como qualquer outra foto. Nada
+ * fica: a pasta sai de vez na hora (apagarPastaTemporaria_). So aceita HEIC de
  * verdade, pelos bytes: nao vira conversor de qualquer arquivo. Miniatura
  * que o Google ainda nao gerou: pendente — a foto vai como veio e o visor
  * converte quando alguem abrir.
  */
 function acaoConverterFoto(usuario, params) {
   exigirPorta_();
+  exigirQuemAnexaFoto_(usuario, params);
   const f = fotosDoPedido_({ fotos: [params.foto] })[0];
   if (!f) throw new Error('Nenhuma foto chegou.');
   const bytes = Utilities.base64Decode(f.dados);
   if (!ehHeicPelosBytes_(bytes)) throw new Error('"' + f.nome + '" não é uma foto HEIC.');
+  contarConversaoHeic_(usuario);
   const pasta = subpasta(pastaAnexos(), PASTA_TMP_ENTREGA).createFolder('heic-' + Utilities.getUuid().slice(0, 8));
   try {
     const img = miniaturaDoDrive_(pasta.createFile(Utilities.newBlob(bytes, 'image/heic', f.nome)), 25000);
     if (!img) return { ok: true, pendente: true };
     return { ok: true, nome: img.getName(), tipo: img.getContentType(), dados: Utilities.base64Encode(img.getBytes()) };
   } finally {
-    try { pasta.setTrashed(true); } catch (e) { /* a faxina diaria pega */ }
+    apagarPastaTemporaria_(pasta);
   }
 }
 
-/* A HEIC gravada na acao, convertida — null se o Google ainda nao tem a miniatura (ou se ela sumiu: o baixar explica). */
+/*
+ * Converter e o primeiro passo de anexar: so quem pode anexar a foto onde ela
+ * vai. A tela diz onde (plano, uso e acao); o servidor confere como no gravar:
+ * comentario ('cm': responsavel, gestao ou quem foi marcado na acao), conclusao
+ * ('cc': responsavel ou gestao) ou a propria acao, nova ou editada (quem gere o plano).
+ */
+function exigirQuemAnexaFoto_(usuario, params) {
+  const plano = String(params.plano || '').toUpperCase() === PLANOS.LIMPEZA.id ? PLANOS.LIMPEZA : PLANOS.CALENDARIO;
+  exigirModuloDaAcao_(usuario, { modulo: plano.modulo });
+  const id = String(params.id || '').trim();
+  if (params.uso === 'cm') return exigirQuemComenta_(plano, usuario, acaoDoPlano_(plano, id));
+  if (params.uso === 'cc') return exigirResponsavelOuGestor_(plano, usuario, acaoDoPlano_(plano, id), 'Só o responsável pela ação anexa a foto da conclusão.');
+  exigirCapacidade(usuario, plano.cap);
+}
+
+/* Conta a conversao da pessoa (janelas de 10 min no cache) antes de subir qualquer coisa ao Drive do dono. */
+function contarConversaoHeic_(usuario) {
+  const cache = CacheService.getScriptCache();
+  const chave = 'heic-conv|' + usuario.email + '|' + Math.floor(Date.now() / 600000);
+  const feitas = Number(cache.get(chave) || 0);
+  if (feitas >= CONVERSOES_HEIC_POR_JANELA) {
+    throw new Error('Muitas fotos HEIC convertidas em pouco tempo. Espere alguns minutos e tente de novo.');
+  }
+  cache.put(chave, String(feitas + 1), 600);
+}
+
+/*
+ * A pasta temporaria sai DE VEZ pela API do Drive (o mesmo token da miniatura):
+ * na lixeira, a HEIC ocupava a cota do dono por 30 dias. Resposta que nao e 204
+ * (API desligada, sem permissao, rede): lixeira, como antes — e a faxina diaria
+ * (limparTemporariosEntrega) pega o que escapar.
+ */
+function apagarPastaTemporaria_(pasta) {
+  try {
+    const r = UrlFetchApp.fetch(DRIVE_ARQUIVOS_ + pasta.getId() + '?supportsAllDrives=true',
+      { method: 'delete', headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (r.getResponseCode() === 204) return;
+  } catch (e) { /* rede ou cota do UrlFetch: a lixeira */ }
+  try { pasta.setTrashed(true); } catch (e) { /* a faxina diaria pega */ }
+}
+
+/*
+ * A HEIC gravada na acao, convertida. img null: o Google ainda nao tem a
+ * miniatura (ou o arquivo sumiu: o baixar explica). Uma tentativa sem
+ * miniatura fica lembrada por 10 min: as aberturas seguintes consultam uma vez
+ * so, sem os 6 s de espera. desistiu: gravada ha mais de 10 min e ainda sem
+ * miniatura — o Google nao vai gerar, e a tela para de prometer.
+ */
 function heicGravadaConvertida_(idArquivo) {
   let arq;
-  try { arq = DriveApp.getFileById(idArquivo); } catch (e) { return null; }
-  return miniaturaDoDrive_(arq, 6000);
+  try { arq = DriveApp.getFileById(idArquivo); } catch (e) { return { img: null, desistiu: false }; }
+  const marca = 'heic-sem-miniatura|' + idArquivo;
+  let cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { /* sem cache: espera como antes */ }
+  const img = miniaturaDoDrive_(arq, cache && cache.get(marca) ? 0 : 6000);
+  if (!img && cache) { try { cache.put(marca, '1', 600); } catch (e) { /* so perde o atalho */ } }
+  return { img: img, desistiu: !img && Date.now() - arq.getDateCreated().getTime() > 10 * 60 * 1000 };
 }
 
 /*
@@ -1035,20 +1095,34 @@ function miniaturaDoDrive_(arquivo, esperaMs) {
 /*
  * O thumbnailLink, esperando o Google gera-lo: pausas crescentes (0,7 s,
  * 1 s, 1,6 s... ate 4 s cada) CONTADAS ate somar esperaMs — nao pelo
- * relogio, que contaria tambem o tempo das consultas.
+ * relogio, que contaria tambem o tempo das consultas. So vale esperar pela
+ * miniatura que ainda nao saiu, pela cota e por erro do Google (esperarAdianta_):
+ * API do Drive desligada, politica do dominio, token recusado ou arquivo sumido
+ * nao mudam com o tempo — desiste na hora e deixa o motivo no log do dono.
  */
 function linkDaMiniatura_(id, comToken, esperaMs) {
-  const api = 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=thumbnailLink&supportsAllDrives=true';
+  const api = DRIVE_ARQUIVOS_ + id + '?fields=thumbnailLink&supportsAllDrives=true';
   let pausa = 700, esperou = 0;
   for (;;) {
     const r = UrlFetchApp.fetch(api, comToken);
-    const link = r.getResponseCode() === 200 ? JSON.parse(r.getContentText()).thumbnailLink : '';
+    const codigo = r.getResponseCode();
+    const link = codigo === 200 ? JSON.parse(r.getContentText()).thumbnailLink : '';
     if (link) return link;
+    if (codigo !== 200 && !esperarAdianta_(codigo, r)) {
+      console.warn('Miniatura do Drive recusada (HTTP ' + codigo + '): ' + String(r.getContentText()).slice(0, 300));
+      return '';
+    }
     if (esperou + pausa > esperaMs) return '';
     Utilities.sleep(pausa);
     esperou += pausa;
     pausa = Math.min(Math.round(pausa * 1.5), 4000);
   }
+}
+
+/* Vale consultar de novo: cota (429, 403 de rateLimitExceeded ou userRateLimitExceeded) e erro do Google (5xx). */
+function esperarAdianta_(codigo, r) {
+  if (codigo === 429 || codigo >= 500) return true;
+  return codigo === 403 && /ratelimitexceeded/i.test(String(r.getContentText()));
 }
 
 /* JPEG, PNG ou WEBP pelos primeiros bytes; null para o resto. */

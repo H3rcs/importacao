@@ -74,6 +74,8 @@ const bloqueadas = [
   ['menuDaSessao_', ctx],
   // 19/10: foto HEIC — as pecas do conversor (o Drive e a API do Drive com o token do dono)
   ['miniaturaDoDrive_', 'x', 25000], ['heicGravadaConvertida_', 'x'],
+  // revisao de 19/10: quem pode converter, o limite por pessoa e o DELETE da pasta temporaria (com o token do dono)
+  ['exigirQuemAnexaFoto_', FALSO, { plano: 'CALENDARIO', uso: 'ac' }], ['contarConversaoHeic_', FALSO], ['apagarPastaTemporaria_', 'x'],
   // 19/10: marcar pessoa no comentario — a lista de quem pode ser marcado (com quem ve tudo), o aviso e a porta direta
   ['pessoasParaAcao', { id: 'CALENDARIO', modulo: 'calendario', cap: 'GERIR_ACOES' }],
   ['acaoComentarAcao', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }], ['acaoComentarAcaoLimpeza', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }],

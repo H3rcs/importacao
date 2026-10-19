@@ -1961,8 +1961,9 @@ tr:last-child td { border-bottom: 0; }
 }
 .area-envio { border: 1px dashed var(--linha-forte); border-radius: var(--raio); padding: 16px; text-align: center; }
 
+/* O recado e so texto: o toque passa para o que esta embaixo (o Cancelar da janela, no celular). */
 .recado {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 60;
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 60; pointer-events: none;
   background: linear-gradient(140deg, var(--azul) 0%, var(--azul-vivo) 100%); color: #fff;
   padding: 12px 22px; border-radius: 24px; font-size: 13px;
   box-shadow: 0 12px 32px rgba(17, 23, 133, .42); animation: subir .25s ease;
@@ -2213,11 +2214,13 @@ tr:last-child td { border-bottom: 0; }
 }
 .aviso-identidade strong { display: block; margin-bottom: 5px; color: var(--laranja-escuro); }
 
-/* Campo que virou informacao: nao parece editavel, porque nao e. */
+/* Campo que virou informacao: nao parece editavel, porque nao e. A --tinta a 6%,
+   em rgba: o Chrome 109 do CD nao tem color-mix e jogava fora a regra inteira. */
 input.travado {
-  background: color-mix(in srgb, var(--tinta) 6%, transparent) !important;
+  background: rgba(15, 23, 42, .06) !important;
   color: var(--tinta-media) !important; cursor: default;
 }
+[data-tema="escuro"] input.travado { background: rgba(248, 250, 252, .06) !important; }
 
 /* --- O botao de entrar com o Google ---
    Segue a especificacao visual do Google: fundo branco, texto escuro,

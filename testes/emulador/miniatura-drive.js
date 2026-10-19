@@ -8,7 +8,8 @@
  *   ... converterFoto ...
  *   drive.log  -> ['files.get #1 sem link (Bearer)', 'files.get #2 link (Bearer)', 'miniatura =s1600 (Bearer)']
  *   drive.roteiro.nunca = true;          (o roteiro muda no meio do teste)
- *   pastasDeConversao(mundo)             as pastas Anexos/_TEMPORARIO/heic-... (tem que estar na lixeira)
+ *   drive.apagadas -> [{ nome: 'heic-…', arquivos: ['IMG_0001.HEIC image/heic'] }]   (as pastas que o DELETE da API apagou de vez)
+ *   pastasDeConversao(mundo)             as pastas Anexos/_TEMPORARIO/heic-... que sobraram (so na lixeira)
  *
  * Roteiro:
  *   atraso: n       consultas de cada arquivo sem o thumbnailLink antes de ele sair (o Google gerando)
@@ -16,6 +17,9 @@
  *   link: 's220'    o tamanho no fim do link: 's220', 'w200-h190-p-k-nu' ou '' (link sem tamanho)
  *   imagem: 'jpeg'  o que o link devolve: 'jpeg', 'png' ou 'html' (pagina de login, com HTTP 200)
  *   lancar: true    o UrlFetch lanca (rede caindo, cota do dia)
+ *   recusa: { codigo: 403, motivo: 'accessNotConfigured' }   o files.get responde com erro (API desligada,
+ *                   politica do dominio, token recusado, arquivo sumido, cota: 'rateLimitExceeded', 429, 5xx)
+ *   apagar: false   a API recusa o DELETE da pasta temporaria (403): ela fica so na lixeira
  *
  * HEIC_MINI: uma HEIC de verdade (HEVC, 160x120, 1,3 KB, feita com pillow-heif/libheif).
  * JPEG_MINI: o JPEG que faz o papel da miniatura (a mesma imagem, 160x120).
@@ -69,16 +73,30 @@ const JPEG_MINI = [
 const PNG_1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 function miniaturaDrive(mundo, roteiro) {
-  const drive = { roteiro: Object.assign({ atraso: 0, nunca: false, link: 's220', imagem: 'jpeg', lancar: false }, roteiro), log: [] };
+  const drive = { roteiro: Object.assign({ atraso: 0, nunca: false, link: 's220', imagem: 'jpeg', lancar: false, recusa: null, apagar: true }, roteiro),
+    log: [], apagadas: [] };
   const consultas = new Map();
   mundo.opcoes.urlFetch = (url, op) => {
     const r = drive.roteiro;
     const token = /^Bearer \S/.test(((op || {}).headers || {}).Authorization || '') ? ' (Bearer)' : '';
     if (r.lancar) { drive.log.push('rede caiu'); throw new Error('Address unavailable: ' + url); }
+    const apagar = /drive\/v3\/files\/([^?]+)\?supportsAllDrives=true$/.exec(url);
+    if (apagar && String((op || {}).method || '').toLowerCase() === 'delete') {
+      drive.log.push('files.delete' + token);
+      if (!r.apagar) return { codigo: 403, texto: JSON.stringify({ error: { code: 403, message: 'The user does not have sufficient permissions for this file.' } }) };
+      const pasta = mundo.pastas.get(apagar[1]);
+      if (!pasta) return { codigo: 404, texto: '' };
+      drive.apagadas.push(apagarDeVez(mundo, pasta));
+      return { codigo: 204, texto: '' };
+    }
     const api = /drive\/v3\/files\/([^?]+)\?fields=thumbnailLink/.exec(url);
     if (api) {
       const n = (consultas.get(api[1]) || 0) + 1;
       consultas.set(api[1], n);
+      if (r.recusa) {
+        drive.log.push('files.get #' + n + ' HTTP ' + r.recusa.codigo + token);
+        return { codigo: r.recusa.codigo, texto: JSON.stringify({ error: { code: r.recusa.codigo, message: r.recusa.motivo || '', errors: [{ reason: r.recusa.motivo || '' }] } }) };
+      }
       const pronto = !r.nunca && n > r.atraso;
       drive.log.push('files.get #' + n + (pronto ? ' link' : ' sem link') + token);
       const link = 'https://lh3.googleusercontent.com/drive-storage/AJQ' + api[1].slice(-6) + (r.link ? '=' + r.link : '');
@@ -94,7 +112,15 @@ function miniaturaDrive(mundo, roteiro) {
   return drive;
 }
 
-/* As pastas que o converterFoto criou (Anexos/_TEMPORARIO/heic-...). */
+/* O DELETE da API: a pasta e o que esta dentro dela somem do Drive (nem na lixeira ficam). */
+function apagarDeVez(mundo, pasta) {
+  const dentro = [...mundo.arquivos.values()].filter((a) => a.pais.has(pasta.id));
+  dentro.forEach((a) => mundo.arquivos.delete(a.id));
+  mundo.pastas.delete(pasta.id);
+  return { nome: pasta.nome, arquivos: dentro.map((a) => a.nome + ' ' + a.mime) };
+}
+
+/* As pastas que o converterFoto criou e que sobraram (Anexos/_TEMPORARIO/heic-...). */
 function pastasDeConversao(mundo) {
   const tmp = [...mundo.pastas.values()].filter((p) => p.nome === '_TEMPORARIO').map((p) => p.id);
   return [...mundo.pastas.values()].filter((p) => /^heic-/.test(p.nome) && [...p.pais].some((id) => tmp.includes(id)));

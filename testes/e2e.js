@@ -433,6 +433,39 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  /*
+   * Revisao de 19/10 (experiencia X5): os recados novos (rotina, painel, foto HEIC) tem 90 a 120 letras e
+   * sumiam em 2,6 s; um recado novo sumia no prazo do anterior; o leitor de tela nao anunciava; no celular
+   * o recado de erro cobria o Cancelar da janela. E o input.travado usava color-mix, que o Chrome 109 nao tem.
+   */
+  await cenario('recado: o texto longo fica o tempo de ler e um recado novo nao some no prazo do anterior; o leitor de tela anuncia e o toque passa para o botao de baixo; campo travado com o fundo de informacao sem color-mix (Chrome 109)', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, GERAL);
+    const f = await frame(aba);
+    const visivel = () => f.evaluate(() => !document.getElementById('recado').classList.contains('oculto'));
+    const longo = 'Painel Nobreaks desativado em CD Feira de Santana: saiu do menu de todos, inclusive do seu. Os dados continuam guardados.';
+    await f.evaluate((t) => avisar(t), longo);
+    await aba.page.waitForTimeout(3500);
+    afirmar(await visivel(), 'o recado de ' + longo.length + ' letras continua na tela depois de 3,5 s');
+    await f.evaluate(() => avisar('Pronto'));
+    await aba.page.waitForTimeout(1800);
+    await f.evaluate((t) => avisar(t), longo);
+    await aba.page.waitForTimeout(1500);                // 3,3 s depois do "Pronto": o prazo dele (2,6 s) ja passou
+    afirmar(await visivel(), 'o recado novo nao sumiu no prazo do anterior');
+    const recado = await f.evaluate(() => { const r = document.getElementById('recado'); return [r.getAttribute('role'), r.getAttribute('aria-live'), r.getAttribute('aria-atomic'), getComputedStyle(r).pointerEvents].join(' '); });
+    afirmar(recado === 'status polite true none', 'recado anunciado e sem pegar o toque: ' + recado);
+    const fundo = await f.evaluate(() => {
+      const i = document.createElement('input'); i.className = 'travado'; document.body.appendChild(i);
+      const claro = getComputedStyle(i).backgroundColor;
+      aplicarTema('escuro'); const escuro = getComputedStyle(i).backgroundColor; aplicarTema('claro');
+      i.remove();
+      return claro + ' / ' + escuro;
+    });
+    afirmar(fundo === 'rgba(15, 23, 42, 0.06) / rgba(248, 250, 252, 0.06)', 'input.travado nos dois temas: ' + fundo);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('instalacao pela tela, pelo dono', async () => {
     const s = await subir();
     const aba = await abrirAba(s, DONO);
@@ -1083,7 +1116,15 @@ async function rodar() {
     await f.evaluate(() => formAcao(null));
     const aceita = await f.getAttribute('#ac-fotos', 'accept');
     afirmar(aceita === 'image/*,.heic,.heif', 'accept no computador (o filtro do Windows mostra .heic): ' + aceita);
-    afirmar(await texto(aba, 'ac-fotos-situacao') === 'até 5 por vez · JPG, PNG ou HEIC (iPhone)', 'dica: ' + await texto(aba, 'ac-fotos-situacao'));
+    afirmar(await texto(aba, 'ac-fotos-situacao') === 'até 5 por vez · JPG, PNG ou HEIC', 'dica: ' + await texto(aba, 'ac-fotos-situacao'));
+    afirmar(await f.evaluate(() => { const x = document.getElementById('ac-fotos-situacao'); return x.getAttribute('role') === 'status' && x.getAttribute('aria-live') === 'polite'; }),
+      'a situacao das fotos e anunciada ao leitor de tela');
+    // cada conversao leva onde a foto vai (o servidor so converte para quem pode anexar ali): aqui, uma acao nova do Calendario
+    const contextos = [];
+    aba.page.on('request', (q) => {
+      if (!/__gsr$/.test(q.url())) return;
+      try { const j = JSON.parse(q.postData()); if (j.args[1] === 'converterFoto') contextos.push([j.args[2].plano, j.args[2].uso, j.args[2].id].join('/')); } catch (e) { /* outra chamada */ }
+    });
     // o servidor demora: a tela diz o que esta fazendo e o Criar espera
     await aba.contexto.addCookies([{ name: 'gas_atraso', value: '1500', url: s.url }]);
     pedidas.length = 0;
@@ -1094,7 +1135,7 @@ async function rodar() {
     ]);
     await f.waitForFunction(() => /^Convertendo /.test(document.getElementById('ac-fotos-situacao').textContent), null, { timeout: 10000 });
     const situacao = await texto(aba, 'ac-fotos-situacao');
-    afirmar(situacao === 'Convertendo IMG_0001.HEIC (foto do iPhone) — leva alguns segundos…', 'situacao: ' + situacao);
+    afirmar(situacao === 'Convertendo IMG_0001.HEIC para JPG (1 de 3) — leva alguns segundos…', 'situacao: ' + situacao);
     await f.click('.janela .botao >> text=Criar ação');
     afirmar(await texto(aba, 'recado') === 'Espere as fotos terminarem de ser preparadas e clique de novo.', 'o Criar espera: ' + await texto(aba, 'recado'));
     await aba.contexto.addCookies([{ name: 'gas_atraso', value: '0', url: s.url }]);
@@ -1104,8 +1145,8 @@ async function rodar() {
     afirmar(await f.evaluate(() => document.querySelectorAll('#ac-previas img').length) === 3, 'tres previas');
     afirmar(pedidas.filter((n) => n === 'converterFoto').length === 3, 'uma chamada por foto: ' + pedidas.join());
     afirmar(drive.log.filter((l) => l === 'miniatura =s1600 (Bearer)').length === 3 && drive.log.every((l) => / \(Bearer\)$/.test(l)), 'miniatura do Drive: ' + drive.log.join(' | '));
-    const pastas = pastasDeConversao(s.mundo);
-    afirmar(pastas.length === 3 && pastas.every((p) => p.lixo), 'uma pasta por foto, todas na lixeira: ' + JSON.stringify(pastas.map((p) => [p.nome, p.lixo])));
+    afirmar(drive.apagadas.length === 3 && !pastasDeConversao(s.mundo).length, 'uma pasta por foto, todas apagadas de vez: ' + JSON.stringify(drive.apagadas));
+    afirmar(contextos.join() === 'CALENDARIO/ac/,CALENDARIO/ac/,CALENDARIO/ac/', 'contexto de cada conversao: ' + contextos.join());
     // TIFF e PDF: recusados na hora, sem ir ao servidor; a JPEG e reduzida aqui, como sempre
     pedidas.length = 0;
     await escolherFotos(f, 'ac', { name: 'scan.tif', mimeType: 'image/tiff', buffer: Buffer.from('49492a000800000000000000', 'hex') });
@@ -1155,8 +1196,8 @@ async function rodar() {
     afirmar(recado === 'A foto "IMG_0004.HEIC" vai como está: o Google ainda não terminou de convertê-la. Ela aparece normalmente quando alguém abrir a ação.', 'aviso: ' + recado);
     const previa = await f.evaluate(() => document.getElementById('ac-previas').innerText.replace(/\s+/g, ' ').trim());
     afirmar(/^HEIC · IMG_0004\.HEIC/.test(previa) && await f.evaluate(() => FOTOS_PENDENTES.ac[0].tipo === 'image/heic'), 'previa: ' + previa);
-    const pastas = pastasDeConversao(s.mundo);
-    afirmar(drive.log.length === 9 && pastas.length === 1 && pastas[0].lixo, 'esperou a miniatura (9 consultas) e a pasta foi para a lixeira: ' + drive.log.length);
+    afirmar(drive.log.filter((l) => /^files\.get/.test(l)).length === 9 && drive.apagadas.length === 1 && !pastasDeConversao(s.mundo).length,
+      'esperou a miniatura (9 consultas) e a pasta saiu de vez: ' + drive.log.join(' | '));
     await f.fill('#ac-acao', 'Banheiro da doca sem papel');
     await f.check('.ac-resp[value="' + DONO + '"]');
     await f.fill('#ac-prazo', '2026-12-01');
@@ -1169,7 +1210,7 @@ async function rodar() {
     await f.evaluate((id) => verFotosDaAcao(id), nova.id);
     await f.waitForFunction(() => /preparando/.test(document.getElementById('visor-imagem').textContent), null, { timeout: 15000 });
     const aviso = await f.evaluate(() => document.getElementById('visor-imagem').innerText.trim());
-    afirmar(aviso === 'O Google ainda está preparando esta foto do iPhone (HEIC). Feche e abra de novo em alguns segundos — ou use Baixar.', 'visor: ' + aviso);
+    afirmar(aviso === 'O Google ainda está preparando esta foto HEIC. Feche e abra de novo em alguns segundos — ou use Baixar.', 'visor: ' + aviso);
     afirmar(await f.evaluate((id) => !FOTO_CACHE.has(id), nova.fotos[0].id), 'a HEIC nao fica no cache do visor');
     // a miniatura ficou pronta: abrir de novo mostra a foto
     drive.roteiro.nunca = false;
@@ -1182,6 +1223,196 @@ async function rodar() {
     afirmar(baixado.suggestedFilename() === 'IMG_0100.jpg', 'Baixar: ' + baixado.suggestedFilename());
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
+  });
+
+  /*
+   * REVISAO DE 19/10 — FOTO HEIC. A conversao leva segundos no servidor: a janela pode fechar ou ser
+   * trocada no meio (H1), a rede ou o canal podem cair (H2), a pessoa pode escolher mais fotos (H3).
+   */
+  const fotosHeic = (n) => Array.from({ length: n }, (x, i) => ({ name: 'IMG_000' + (i + 1) + '.HEIC', mimeType: 'image/heic', buffer: Buffer.from(HEIC_MINI, 'base64') }));
+  /* Os recados que aparecem, com a janela em que apareceram ("fechada" quando nenhuma). */
+  const vigiarRecados = (f) => f.evaluate(() => {
+    window.__recados = [];
+    const r = document.getElementById('recado');
+    new MutationObserver(() => {
+      if (r.classList.contains('oculto') || !r.textContent) return;
+      const janela = document.getElementById('janela');
+      window.__recados.push('[' + (janela.classList.contains('oculto') ? 'fechada' : document.getElementById('janela-titulo').textContent) + '] ' + r.textContent);
+    }).observe(r, { attributes: true, childList: true, characterData: true, subtree: true });
+  });
+  async function planoComHeic(s, conta, pin) {
+    const aba = await abrirAba(s, conta);
+    await entrar(aba, conta, pin, true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes', { situacao: 'TODAS' }); });
+    await f.waitForFunction(paginaPronta, 'acoes', { timeout: 15000 });
+    return { aba, f };
+  }
+
+  await cenario('foto HEIC: Cancelar, os Comentarios de outra acao ou outra Nova acao no lugar durante a conversao param tudo — nenhuma conversao a mais, nenhum recado por cima da outra janela; o Criar da janela nova grava sem foto', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { nunca: true });           // o "vai como esta" sairia de cada conversao
+    const c = s.contexto(DONO); c._porta = true;
+    const outra = c.acaoSalvarAcao({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') },
+      { acao: 'Empilhadeira 7 com vazamento', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    const pedidas = acoesPedidas(aba);
+    let respondidas = 0;
+    aba.page.on('response', (r) => { try { if (/__gsr$/.test(r.url()) && JSON.parse(r.request().postData()).args[1] === 'converterFoto') respondidas++; } catch (e) { /* outra */ } });
+    await vigiarRecados(f);
+    for (const [rotulo, trocar] of [['Cancelar', () => f.click('#janela-rodape .botao.secundario >> text=Cancelar')],
+      ['Comentarios de outra acao', () => f.evaluate((id) => abrirComentarios(id, true), outra)],
+      ['outra Nova acao', () => f.evaluate(() => formAcao(null))]]) {
+      await f.evaluate(() => formAcao(null));
+      await aba.contexto.addCookies([{ name: 'gas_atraso', value: '1500', url: s.url }]);
+      pedidas.length = 0; respondidas = 0;
+      await f.setInputFiles('#ac-fotos', fotosHeic(3));
+      await f.waitForFunction(() => /^Convertendo IMG_0001\.HEIC para JPG \(1 de 3\)/.test(document.getElementById('ac-fotos-situacao').textContent), null, { timeout: 10000 });
+      await trocar();
+      // a conversao que ja estava no servidor volta; espera mais que o atraso de outra ida
+      for (let i = 0; i < 100 && !respondidas; i++) await aba.page.waitForTimeout(100);
+      await aba.page.waitForTimeout(2500);
+      const conv = pedidas.filter((n) => n === 'converterFoto').length;
+      const recados = await f.evaluate(() => window.__recados.filter((x) => /HEIC/.test(x)));
+      afirmar(respondidas === 1 && conv === 1 && !recados.length, rotulo + ': ' + conv + ' conversao(oes), recados ' + JSON.stringify(recados));
+    }
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '0', url: s.url }]);
+    afirmar(await f.evaluate(() => !FOTOS_PENDENTES.ac.length && !FOTOS_PREPARANDO.ac && document.getElementById('ac-previas').innerHTML === ''), 'a janela nova nao tem foto nem espera');
+    await f.fill('#ac-acao', 'Doca 3 sem luz');
+    await f.check('.ac-resp[value="' + DONO + '"]');
+    await f.fill('#ac-prazo', '2026-12-01');
+    await f.click('.janela .botao >> text=Criar ação');
+    await f.waitForFunction(() => (planoD().lista || []).some((a) => a.acao === 'Doca 3 sem luz'), null, { timeout: 20000 });
+    afirmar(await f.evaluate(() => planoD().lista.find((a) => a.acao === 'Doca 3 sem luz').fotos.length) === 0, 'a acao nova foi gravada sem foto');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('foto HEIC: a conexao cai na conversao (HTTP 500) — a foto vai como esta, com o aviso em portugues; canal barrado (HTTP 403) — a explicacao de sempre e nenhuma foto', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { atraso: 1 });
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await f.evaluate(() => formAcao(null));
+    await aba.contexto.addCookies([{ name: 'gas_falha', value: 'executarAcao:500:1', url: s.url }]);
+    let recado = await recadoDe(f, () => escolherFotos(f, 'ac', fotosHeic(1)));
+    afirmar(recado === '[ERRO] A foto "IMG_0001.HEIC" vai como está: a conexão com o Google falhou na conversão. Ela aparece normalmente quando alguém abrir a ação.', 'HTTP 500: ' + recado);
+    const r = await f.evaluate(() => ({ fotos: FOTOS_PENDENTES.ac.map((x) => x.nome + ' ' + x.tipo).join(' | '), previa: document.getElementById('ac-previas').innerText.trim(), barrado: CANAL_BARRADO }));
+    afirmar(r.fotos === 'IMG_0001.HEIC image/heic' && /^HEIC · IMG_0001\.HEIC/.test(r.previa) && !r.barrado, 'foi como veio: ' + JSON.stringify(r));
+    await f.evaluate(() => formAcao(null));
+    await aba.contexto.addCookies([{ name: 'gas_403', value: '1', url: s.url }]);
+    recado = await recadoDe(f, () => escolherFotos(f, 'ac', fotosHeic(1)));
+    afirmar(recado === '[ERRO] ' + await f.evaluate(() => SEM_CANAL_PARA_ARQUIVO), 'HTTP 403: ' + recado);
+    afirmar(await f.evaluate(() => !FOTOS_PENDENTES.ac.length && CANAL_BARRADO), 'canal barrado: nenhuma foto');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('foto HEIC: segunda escolha durante a conversao — a vaga da HEIC ja conta (5 no maximo, a sexta e recusada na hora) e o "N foto(s) prontas" espera a conversao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { atraso: 1 });
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await f.evaluate(() => formAcao(null));
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '2500', url: s.url }]);
+    await f.setInputFiles('#ac-fotos', fotosHeic(1));
+    await f.waitForFunction(() => /^Convertendo IMG_0001\.HEIC para JPG — /.test(document.getElementById('ac-fotos-situacao').textContent), null, { timeout: 10000 });
+    const jpeg = Buffer.from(JPEG_MINI, 'base64');
+    const recado = await recadoDe(f, () => f.setInputFiles('#ac-fotos', [1, 2, 3, 4, 5].map((i) => ({ name: 'doca' + i + '.jpg', mimeType: 'image/jpeg', buffer: jpeg }))));
+    afirmar(recado === '[ERRO] No máximo 5 fotos de cada vez.', 'a sexta: ' + recado);
+    await f.waitForFunction(() => FOTOS_PENDENTES.ac.length === 4 && FOTOS_PREPARANDO.ac === 1, null, { timeout: 10000 });
+    const durante = await texto(aba, 'ac-fotos-situacao');
+    afirmar(/^Convertendo IMG_0001\.HEIC para JPG — /.test(durante), 'a situacao continua a da conversao: ' + durante);
+    await f.waitForFunction(() => !FOTOS_PREPARANDO.ac, null, { timeout: 30000 });
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '0', url: s.url }]);
+    const fim = await f.evaluate(() => ({ fotos: FOTOS_PENDENTES.ac.map((x) => x.nome).join(','), situacao: document.getElementById('ac-fotos-situacao').textContent }));
+    afirmar(fim.fotos === 'doca1.jpg,doca2.jpg,doca3.jpg,doca4.jpg,IMG_0001.jpg' && fim.situacao === '5 foto(s) prontas para enviar', 'no fim: ' + JSON.stringify(fim));
+    await f.fill('#ac-acao', 'Doca 3 com piso solto');
+    await f.check('.ac-resp[value="' + DONO + '"]');
+    await f.fill('#ac-prazo', '2026-12-01');
+    await f.click('.janela .botao >> text=Criar ação');
+    await f.waitForFunction(() => (planoD().lista || []).some((a) => a.acao === 'Doca 3 com piso solto' && a.fotos.length === 5), null, { timeout: 20000 });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('visor da HEIC sem miniatura: "preparando" (fica fora do cache); gravada ha mais de 10 min, o Google desistiu (usar Baixar, e fica guardada); com o Acoes.gs de antes, o texto de sempre', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { nunca: true });
+    const c = s.contexto(DONO); c._porta = true;
+    const id = c.acaoSalvarAcao({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') }, { acao: 'Três fotos do iPhone', prazo: '2026-12-01', turno: 'A',
+      responsaveisEmails: [DONO], fotos: ['IMG_0300.HEIC', 'IMG_0301.HEIC', 'IMG_0302.HEIC'].map((n) => ({ nome: n, tipo: 'image/heic', dados: HEIC_MINI })) }).id;
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    const fotos = await f.evaluate((i) => planoD().lista.find((a) => a.id === i).fotos.map((x) => x.id), id);
+    s.mundo.arquivos.get(fotos[1]).criado = new Date(Date.now() - 11 * 60 * 1000);     // gravada ha 11 min
+    // a terceira como o Acoes.gs de antes devolve: a HEIC crua, sem dizer se tentou converter
+    await aba.page.route('**/__gsr', async (route) => {
+      let j = {}; try { j = JSON.parse(route.request().postData() || '{}'); } catch (e) { /* nao e chamada */ }
+      if (!(j.fn === 'executarAcao' && j.args && j.args[1] === 'fotoAcao' && j.args[2].arquivo === fotos[2])) return route.continue();
+      const r = JSON.parse(await (await route.fetch()).text());
+      const v = JSON.parse(r.valor); delete v.semMiniatura; delete v.desistiu; r.valor = JSON.stringify(v);
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) });
+    });
+    const textoDoVisor = async (n) => {
+      await f.waitForFunction((x) => VISOR && VISOR.i === x && !!VISOR.url, n, { timeout: 15000 });
+      return f.evaluate(() => document.getElementById('visor-imagem').innerText.trim());
+    };
+    await f.evaluate((i) => verFotosDaAcao(i), id);
+    afirmar(await textoDoVisor(0) === 'O Google ainda está preparando esta foto HEIC. Feche e abra de novo em alguns segundos — ou use Baixar.', 'preparando');
+    await f.evaluate(() => visorAndar(1));
+    afirmar(await textoDoVisor(1) === 'O Google não conseguiu converter esta foto HEIC para mostrar aqui. Use Baixar para abrir no computador.', 'desistiu');
+    await f.evaluate(() => visorAndar(1));
+    afirmar(await textoDoVisor(2) === 'Este navegador não mostra fotos HEIC. Use Baixar para abrir no computador.', 'Acoes.gs de antes');
+    const cache = await f.evaluate((ids) => ids.map((x) => FOTO_CACHE.has(x)).join(','), fotos);
+    afirmar(cache === 'false,true,true', 'so a que o Google ainda prepara fica fora do cache: ' + cache);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('foto HEIC da coordenadora (que nao cria acao): converte no comentario e na conclusao da acao dela — a tela manda o plano, o uso e a acao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { atraso: 1 });
+    const dono = criarPin(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, COORD, '1234');
+    const r = s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'salvarAcao', { acao: 'Doca 7 sem luz', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    const id = JSON.parse(r.valor).id;
+    const aba = await abrirAba(s, GERAL);
+    const contextos = [];
+    aba.page.on('request', (q) => {
+      if (!/__gsr$/.test(q.url())) return;
+      try { const j = JSON.parse(q.postData()); if (j.args[1] === 'converterFoto') contextos.push([j.args[2].plano, j.args[2].uso, j.args[2].id === id ? 'ID' : j.args[2].id].join('/')); } catch (e) { /* outra */ }
+    });
+    await entrar(aba, COORD, '1234');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForFunction(paginaPronta, 'acoes', { timeout: 15000 });
+    await f.evaluate((i) => abrirComentarios(i, true), id);
+    await escolherFotos(f, 'cm', fotosHeic(1));
+    afirmar(await f.evaluate(() => FOTOS_PENDENTES.cm.map((x) => x.nome + ' ' + x.tipo).join()) === 'IMG_0001.jpg image/jpeg', 'convertida no comentario');
+    await f.evaluate((i) => { fecharJanela(); formConcluirAcao(i); }, id);
+    await escolherFotos(f, 'cc', fotosHeic(1));
+    afirmar(await f.evaluate(() => FOTOS_PENDENTES.cc.map((x) => x.nome + ' ' + x.tipo).join()) === 'IMG_0001.jpg image/jpeg', 'convertida na conclusao');
+    afirmar(contextos.join() === 'CALENDARIO/cm/ID,CALENDARIO/cc/ID', 'contextos: ' + contextos.join());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  /* No iPhone e no iPad o proprio iOS converte a HEIC para JPEG — se o accept nao listar .heic. O iPadOS se diz Mac: o toque o separa. */
+  await cenario('foto no iPhone e no iPad (o iPadOS se diz Mac, com toque): accept so image/*; no Mac sem toque, as extensoes', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
+    for (const [rotulo, ua, toques, esperado] of [['iPhone', IPHONE, 5, 'image/*'], ['iPad', MAC, 5, 'image/*'], ['Mac sem toque', MAC, 0, 'image/*,.heic,.heif']]) {
+      const contexto = await navegador.newContext({ userAgent: ua });
+      await contexto.addInitScript((n) => { Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => n, configurable: true }); }, toques);
+      const aba = await abrirAba(s, DONO, { contexto });
+      const f = await frame(aba);
+      const aceita = await f.evaluate(() => /accept="([^"]*)"/.exec(fotosCampoHtml('ac', 'Fotos'))[1]);
+      afirmar(aceita === esperado, rotulo + ': ' + aceita);
+      afirmar(!aba.erros.length, rotulo + ': erros ' + aba.erros.join(' | '));
+      await contexto.close();
+    }
+    await s.fechar();
   });
 
   /* Implantacao pela metade: a tela nova com o Codigo.gs (ou o Acoes.gs) de antes, que nao converte. */
@@ -2498,7 +2729,11 @@ async function rodar() {
     afirmar(recado === 'Painel Nobreaks desativado em CD Feira de Santana: saiu do menu de todos, inclusive do seu. Os dados continuam guardados.', 'recado: ' + recado);
     const como = await f.evaluate(() => document.querySelector('#pagina .cartao').innerText.replace(/\s+/g, ' '));
     afirmar(/Oculto Só o administrador vê, com a etiqueta oculto\. Bom para montar e testar \(e ligar a planilha\) antes de mostrar para a equipe\./.test(como) &&
-      /Desativado Some do menu de todos, inclusive do administrador\. Os dados continuam guardados — é só voltar para Ativo\./.test(como), 'como funciona: ' + como);
+      /Desativado Some do menu de todos, inclusive do administrador\. Os dados continuam guardados — é só voltar para Ativo\./.test(como) &&
+      /Não usar nesta filial O painel não faz parte desta filial: some do menu de todos, como o Desativado\. Os dados continuam guardados\./.test(como), 'como funciona: ' + como);
+    // os quatro estados lado a lado (ou 2 e 2): nunca 3 numa linha e 1 sobrando
+    const colunas = await f.evaluate(() => getComputedStyle(document.querySelector('#pagina .pn-grade.quatro')).gridTemplateColumns.split(' ').length);
+    afirmar(colunas === 4 || colunas === 2, 'colunas do "Como funciona": ' + colunas);
     const sessao = await f.evaluate(() => ({ modulos: SESSAO.modulos.map((m) => m.id).join(','), guardada: Object.keys(CACHE_TELAS).some((k) => k.split('|')[1] === 'nobreaks') }));
     afirmar(!/nobreaks/.test(sessao.modulos) && !sessao.guardada, 'sem F5, a sessao e as telas guardadas ja estao sem o Nobreaks: ' + JSON.stringify(sessao));
     await f.click('.voltar-modulos');
@@ -2515,7 +2750,7 @@ async function rodar() {
     afirmar(/(^|,)nobreaks(,|$)/.test(await cartoesDoMenu(f)), 'ativo, sem a etiqueta: ' + await cartoesDoMenu(f));
     // "Nao usar nesta filial" tambem tira, e o F5 confirma
     recado = await mudarPainelPelaTela(f, 'nobreaks', 'REMOVER');
-    afirmar(recado === 'Painel Nobreaks fora de CD Feira de Santana: saiu do menu de todos.', 'recado: ' + recado);
+    afirmar(recado === 'Painel Nobreaks não é mais usado em CD Feira de Santana: saiu do menu de todos, inclusive do seu. Os dados continuam guardados.', 'recado: ' + recado);
     await aba.page.reload({ waitUntil: 'domcontentloaded' });
     await esperarTela(aba, ['aplicacao'], 20000);
     f = await frame(aba);
@@ -2540,6 +2775,90 @@ async function rodar() {
     await fl.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Este painel foi desligado nesta filial.', null, { timeout: 15000 });
     afirmar(!aba.erros.length && !link.erros.length, 'erros: ' + aba.erros.concat(link.erros).join(' | '));
     await link.contexto.close(); await aba.contexto.close(); await s.fechar();
+  });
+
+  /*
+   * P3 (revisao de 19/10): o menu vem com a bolinha e com cada gravacao, e as respostas podem chegar fora
+   * de ordem (execucoes em paralelo, partida a frio). A resposta de um pedido mais velho que o menu em uso
+   * nao vale: antes, o cartao do painel recem-desativado voltava e o clique dava "Este painel foi desligado".
+   */
+  await cenario('menu na ordem dos pedidos: a bolinha calculada antes de desativar o painel e entregue depois nao traz o cartao de volta; duas gravacoes com as respostas trocadas ficam com o menu da ultima', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.waitForFunction(() => paginaAtual === 'modulos', null, { timeout: 15000 });
+    /* Segura a resposta do primeiro pedido que casar: o servidor ja respondeu (o retrato e de antes), a tela recebe quando soltar. */
+    const segurar = async (casa) => {
+      let soltar, chegou, entregou;
+      const solta = new Promise((ok) => { soltar = ok; });
+      const pegou = new Promise((ok) => { chegou = ok; });
+      const entregue = new Promise((ok) => { entregou = ok; });
+      let feito = false;
+      await aba.page.route('**/__gsr', async (route) => {
+        let j = {}; try { j = JSON.parse(route.request().postData() || '{}'); } catch (e) { /* nao e chamada */ }
+        if (feito || !casa(j)) return route.continue();
+        feito = true;
+        const corpo = await (await route.fetch()).text();
+        chegou();
+        await solta;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: corpo });
+        entregou();
+      });
+      return { pegou, soltar: async () => { soltar(); await entregue; await aba.page.unroute('**/__gsr'); } };
+    };
+    const modulos = () => f.evaluate(() => SESSAO.modulos.map((m) => m.id).join(','));
+    // 1. a bolinha sai com o Nobreaks ainda ativo; a resposta chega depois do Desativado
+    const bolinha = await segurar((j) => j.fn === 'executarAcao' && j.args && j.args[1] === 'pendencias');
+    await f.evaluate(() => { PENDENCIAS = null; abrirModulos(); });
+    await bolinha.pegou;
+    await mudarPainelPelaTela(f, 'nobreaks', 'DESATIVADO');
+    afirmar(!/nobreaks/.test(await modulos()), 'o Desativado tirou o Nobreaks: ' + await modulos());
+    await bolinha.soltar();
+    await f.waitForFunction(() => PENDENCIAS_PEDIDO === '' && !!PENDENCIAS, null, { timeout: 15000 });
+    await f.evaluate(() => abrirModulos());
+    afirmar(!/nobreaks/.test(await modulos()) && !/nobreaks/.test(await cartoesDoMenu(f)), 'a bolinha atrasada nao trouxe o cartao: ' + await cartoesDoMenu(f));
+    // 2. duas gravacoes em voo: a resposta da primeira (Nobreaks ativo de novo) chega depois da segunda (Limpeza desativada)
+    await mudarPainelPelaTela(f, 'nobreaks', 'ATIVO');
+    const primeira = await segurar((j) => j.fn === 'executarAcaoETela' && j.args && j.args[1] === 'alterarPainel' && j.args[2].painel === 'nobreaks');
+    const seletor = (nome) => 'xpath=(//tr[.//strong[normalize-space()="' + nome + '"]]//select)[1]';
+    await f.selectOption(seletor('Nobreaks'), 'DESATIVADO');
+    await primeira.pegou;
+    await f.selectOption(seletor('Limpeza CD'), 'DESATIVADO');
+    await f.waitForFunction(() => /^Painel Limpeza CD desativado/.test(document.getElementById('recado').textContent), null, { timeout: 15000 });
+    await primeira.soltar();
+    // o recado da primeira sai depois do menu dela ser decidido (aplicado ou deixado de lado)
+    await f.waitForFunction(() => /^Painel Nobreaks desativado/.test(document.getElementById('recado').textContent), null, { timeout: 15000 });
+    afirmar(!/nobreaks|limpeza/.test(await modulos()), 'ficou o menu da ultima gravacao: ' + await modulos());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  /* P6 (revisao de 19/10): o menu sem nenhum cartao diz o porque e, para quem liga os paineis, o caminho. */
+  await cenario('menu sem cartao: o ADMIN com todos os paineis desligados ve "Nenhum painel ligado nesta filial." e o botao abre Filiais e paineis; a coordenadora sem modulo ve a quem pedir', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = criarPin(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, COORD, '1234');
+    ['calendario', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'].forEach((p) =>
+      afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'alterarPainel', { codigo: 'FSA', painel: p, estado: 'DESATIVADO' }).ok, p + ' desativado'));
+    const vazio = (fr) => fr.evaluate(() => document.querySelector('.grade-modulos .vazio').innerText.replace(/\s+/g, ' ').trim());
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    const f = await frame(aba);
+    await f.waitForFunction(() => paginaAtual === 'modulos' && !!document.querySelector('.grade-modulos .vazio'), null, { timeout: 15000 });
+    afirmar(await vazio(f) === 'Nenhum painel ligado nesta filial. Ligar em Configuração › Filiais e painéis', 'ADMIN: ' + await vazio(f));
+    await f.click('.grade-modulos .vazio .botao-texto');
+    await f.waitForFunction(paginaPronta, 'filiais', { timeout: 15000 });
+    const coord = await abrirAba(s, GERAL);
+    await entrar(coord, COORD, '1234');
+    await esperarTela(coord, ['aplicacao'], 20000);
+    const fc = await frame(coord);
+    await fc.waitForFunction(() => paginaAtual === 'modulos' && !!document.querySelector('.grade-modulos .vazio'), null, { timeout: 15000 });
+    afirmar(await vazio(fc) === 'Nenhum módulo liberado para você nesta filial. Fale com o administrador.', 'coordenadora: ' + await vazio(fc));
+    afirmar(!aba.erros.length && !coord.erros.length, 'erros: ' + aba.erros.concat(coord.erros).join(' | '));
+    await coord.contexto.close(); await aba.contexto.close(); await s.fechar();
   });
 
   await cenario('painel desligado com a coordenadora dentro: o cartao velho (com e sem tela guardada), a acao e o F5 voltam ao menu com o aviso; a volta ao menu tira e devolve o cartao', async () => {
@@ -2610,6 +2929,45 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  /*
+   * P5 (revisao de 19/10): o aviso diz a causa. O "Sem acesso" de uma pessoa (o painel continua ativo para os
+   * outros) nao e "painel desligado"; a tela que o nivel perdeu (Configuracao sem PROGRAMAR) nem painel e.
+   */
+  await cenario('"Sem acesso" da pessoa com ela dentro: a acao recusada volta ao menu com "Este painel não está mais liberado para você nesta filial."; o nivel sem a capacidade da tela: a mensagem do servidor, sem o aviso de painel', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = criarPin(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, COORD, '1234');
+    criarPin(s, GERENTE, GERENTE, '5555');
+    const pelaPorta = (acao, params) => afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, acao, params).ok, acao);
+    const c = s.contexto(DONO); c._porta = true;
+    const idDe = (email) => c.listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === email).ID;
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '1234');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    const f = await frame(aba);
+    await f.click('.holocard[data-modulo="nobreaks"]');
+    await f.waitForFunction(paginaPronta, 'nobreaks', { timeout: 15000 });
+    pelaPorta('definirModuloPessoa', { id: idDe(COORD), modulo: 'nobreaks', modo: 'NAO' });
+    await f.evaluate(() => agir('semanaNobreak', {}).catch(() => {}));
+    await f.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Este painel não está mais liberado para você nesta filial.', null, { timeout: 15000 });
+    afirmar(await cartoesDoMenu(f) === 'calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
+    // o gerente na Configuracao; o administrador tira o PROGRAMAR do nivel GERENTE
+    const ger = await abrirAba(s, GERENTE);
+    await entrar(ger, GERENTE, '5555');
+    await esperarTela(ger, ['aplicacao'], 20000);
+    const fg = await frame(ger);
+    await fg.evaluate(() => abrirConfig('config'));
+    await fg.waitForFunction(paginaPronta, 'config', { timeout: 15000 });
+    const nivel = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
+    pelaPorta('alterarPermissao', { id: nivel.ID, coluna: 'PODE_PROGRAMAR', valor: false });
+    await fg.evaluate(() => { document.getElementById('recado').textContent = ''; esquecerTelas(); abrir('config'); });
+    await fg.waitForFunction(() => !!document.querySelector('#pagina .erro-caixa'), null, { timeout: 15000 });
+    const r = await fg.evaluate(() => ({ pagina: paginaAtual, erro: document.querySelector('#pagina .erro-caixa').textContent, recado: document.getElementById('recado').textContent }));
+    afirmar(r.pagina === 'config' && r.erro === 'Seu perfil (GERENTE) nao tem acesso a tela "config".' && !/painel/i.test(r.recado), 'nivel: ' + JSON.stringify(r));
+    afirmar(!aba.erros.length && !ger.erros.length, 'erros: ' + aba.erros.concat(ger.erros).join(' | '));
+    await ger.contexto.close(); await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('filiais e paineis: o administrador desliga a filial em que esta e vai para a escolha de filial, com o aviso', async () => {
     const s = await subir(); instalarComPessoas(s);
     const dono = criarPin(s, DONO, DONO, '4321');
@@ -2631,6 +2989,41 @@ async function rodar() {
     await f.click('.cartao-filial:has-text("CD Feira de Santana")');
     await esperarTela(aba, ['aplicacao'], 20000);
     await f.waitForFunction(() => paginaAtual === 'modulos' && SESSAO.filial.codigo === 'FSA' && document.querySelectorAll('.grade-modulos .holocard').length > 0, null, { timeout: 15000 });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  /* P4 (revisao de 19/10): a filial continua ligada — foi a pessoa que saiu dela no proprio cadastro. */
+  await cenario('filiais: o gerente tira a si mesmo da filial em que esta — escolha de filial com "Você não tem mais acesso a esta filial"; sem filial ativa nenhuma, a tela de sem acesso explica', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = criarPin(s, DONO, DONO, '4321');
+    afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'salvarFilial',
+      { nome: 'CD Salvador', cidade: 'Salvador - BA', codigo: 'SSA', paineis: { calendario: 'ATIVO' } }).ok, 'filial SSA criada');
+    criarPin(s, GERENTE, GERENTE, '5555');
+    const c = s.contexto(DONO); c._porta = true;
+    const id = c.listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === GERENTE).ID;
+    const aba = await abrirAba(s, GERENTE);
+    await entrar(aba, GERENTE, '5555');
+    await esperarTela(aba, ['escolher-filial'], 20000);
+    const f = await frame(aba);
+    await f.click('.cartao-filial:has-text("CD Feira de Santana")');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    // a ficha dele em Pessoas e acessos, gravada como a tela grava (agir)
+    const salvarFicha = (filiais) => f.evaluate(([i, fl, email]) => agir('salvarUsuario', { id: i, email: email, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: fl, papel: 'Gerente' }).catch(() => {}), [id, filiais, GERENTE]);
+    await salvarFicha('SSA');
+    await esperarTela(aba, ['escolher-filial'], 15000);
+    let r = await f.evaluate(() => ({ recado: document.getElementById('recado').textContent,
+      cartoes: [...document.querySelectorAll('#grade-filiais .cartao-filial .holo-marca')].map((x) => x.textContent).join(',') }));
+    afirmar(r.recado === 'Você não tem mais acesso a esta filial. Escolha outra para continuar.' && r.cartoes === 'SSA', 'so a SSA: ' + JSON.stringify(r));
+    await f.click('.cartao-filial:has-text("CD Salvador")');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    await f.waitForFunction(() => SESSAO && SESSAO.filial && SESSAO.filial.codigo === 'SSA', null, { timeout: 15000 });
+    await salvarFicha('NENHUMA');
+    await esperarTela(aba, ['sem-acesso'], 15000);
+    r = await f.evaluate(() => ({ titulo: document.getElementById('sem-acesso-titulo').textContent, texto: document.getElementById('sem-acesso-texto').textContent,
+      conta: document.getElementById('sem-acesso-conta').textContent }));
+    afirmar(r.titulo === 'Nenhuma filial liberada' && r.texto === 'Seu cadastro não está ligado a nenhuma filial ativa. Fale com o administrador.' && r.conta === GERENTE,
+      'sem filial nenhuma: ' + JSON.stringify(r));
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

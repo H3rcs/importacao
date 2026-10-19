@@ -567,7 +567,8 @@ const ACOES = {
   // Fotos (4.2.2): ver confere se a pessoa enxerga a acao; tirar e da gestao.
   fotoAcao:            { capacidade: null,            funcao: 'acaoFotoAcao', modulo: 'calendario' },
   removerFotoAcao:     { capacidade: 'GERIR_ACOES',   funcao: 'acaoRemoverFotoAcao', modulo: 'calendario' },
-  // Foto HEIC (iPhone) que o navegador nao abre: o servidor converte na hora da escolha (os dois planos usam).
+  // Foto HEIC (iPhone) que o navegador nao abre: o servidor converte na hora da escolha (os dois planos usam),
+  // so para quem pode anexar a foto onde ela vai — a funcao confere (exigirQuemAnexaFoto_, no Acoes.gs).
   converterFoto:       { capacidade: null,            funcao: 'acaoConverterFoto', modulo: ['calendario', 'limpeza'] },
 
   // Conversas saiu na 4.2 (projeto para depois). As mensagens antigas
@@ -842,8 +843,9 @@ function executarAcaoETela(ctx, nomeAcao, params, idTela, paramsTela) {
 
 /*
  * O menu da pessoa (telas, modulos e filiais) relido DEPOIS da gravacao. A
- * filial em uso que deixou de valer (o administrador desligou a filial em que
- * estava) volta como semFilial: a tela leva a escolha de outra filial.
+ * filial em uso que deixou de valer volta como semFilial: a tela leva a escolha
+ * de outra filial. motivo: 'desligada' (o administrador desligou a filial) ou
+ * 'semAcesso' (a filial continua ligada; a pessoa saiu dela no proprio cadastro).
  */
 function menuDaSessao_(ctx) {
   esquecerFiliais(); esquecerUsuario();
@@ -851,7 +853,8 @@ function menuDaSessao_(ctx) {
   const filiais = filiaisDoUsuario(usuario);
   const codigo = String((ctx && ctx.f) || '').toUpperCase().trim();
   if (codigo && !filiais.some(function (f) { return f.codigo === codigo; })) {
-    return { filial: codigo, semFilial: true, filiais: resumoDasFiliais_(filiais) };
+    const f = filialPorCodigo(codigo);
+    return { filial: codigo, semFilial: true, motivo: f && f.ativa ? 'semAcesso' : 'desligada', filiais: resumoDasFiliais_(filiais) };
   }
   const filial = entrarNaFilial(usuario, codigo);
   return { filial: filial.codigo, telas: telasDe(usuario), modulos: modulosDe(usuario), filiais: resumoDasFiliais_(filiais) };
@@ -883,6 +886,8 @@ function executarAcao(ctx, nomeAcao, params) {
  * ou numa filial com o painel desativado continuava lendo e gravando nele
  * chamando a acao direto — a tela sumia, a porta ficava aberta.
  * `modulo` pode ser um id ou uma lista (basta enxergar um deles).
+ * A frase diz a causa: nenhum painel da acao ligado na filial (a tela volta ao
+ * menu com "painel desligado") ou o nivel / o ajuste da pessoa (Sem acesso).
  */
 function exigirModuloDaAcao_(usuario, acao) {
   if (!acao.modulo) return;
@@ -890,6 +895,9 @@ function exigirModuloDaAcao_(usuario, acao) {
   const telas = telasDe(usuario);
   const ve = lista.some(function (m) { return telas.some(function (t) { return t.modulo === m; }); });
   if (!ve) {
+    if (!lista.some(function (m) { return painelVisivel(usuario, m); })) {
+      throw new Error('Este painel não está ligado na filial ' + filialAtual().nome + '.');
+    }
     const nome = (MODULOS.filter(function (m) { return m.id === lista[0]; })[0] || {}).nome || lista[0];
     throw new Error('Você não tem acesso ao módulo ' + nome + ' na filial ' + filialAtual().nome + '.');
   }

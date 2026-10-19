@@ -63,6 +63,10 @@ tr.lp-atrasada td:first-child { padding-left: 10px; }
 .pn-grade { display: grid; gap: 14px; }
 .pn-grade.duas { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 .pn-grade.tres { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+/* Quatro itens (o "Como funciona" de Filiais e paineis): 4 lado a lado, 2 e 2 ou um embaixo do outro — nunca 3 e 1 sobrando. */
+.pn-grade.quatro { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1280px) { .pn-grade.quatro { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .pn-grade.quatro { grid-template-columns: 1fr; } }
 .pn-linha { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
 .pn-linha .campo { margin-bottom: 0; }
 .pn-chip {

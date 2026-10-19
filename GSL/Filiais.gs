@@ -453,17 +453,27 @@ function acaoAlterarPainel(usuario, params) {
   const painel = PAINEIS.filter(function (p) { return p.id === String(params.painel || '').toLowerCase(); })[0];
   if (!painel) throw new Error('Painel desconhecido.');
   const estado = String(params.estado || '').toUpperCase().trim();
+  if (estado && estado !== 'REMOVER' && ESTADOS_PAINEL.indexOf(estado) === -1) throw new Error('Estado inválido.');
 
-  const paineis = JSON.parse(JSON.stringify(f.paineis || {}));
-  if (estado === 'REMOVER' || !estado) delete paineis[painel.id];
-  else if (ESTADOS_PAINEL.indexOf(estado) !== -1) paineis[painel.id] = estado;
-  else throw new Error('Estado inválido.');
-
-  atualizar('FILIAIS', f.id, { PAINEIS: JSON.stringify(paineis) }, usuario.email);
+  /*
+   * Ler e gravar DENTRO da trava, da linha da planilha (a copia da tabela leva a
+   * geracao; a chave 'filiais' do cache nao). Dois selects quase juntos, duas abas
+   * ou dois administradores liam o mesmo PAINEIS e o segundo gravava por cima do
+   * primeiro: o painel recem-desligado voltava.
+   */
+  const novo = comTrava(function () {
+    const linha = obter('FILIAIS', f.id);
+    if (!linha) throw new Error('Filial não encontrada.');
+    const paineis = lerPaineis_(linha.PAINEIS);
+    if (estado === 'REMOVER' || !estado) delete paineis[painel.id];
+    else paineis[painel.id] = estado;
+    atualizar('FILIAIS', f.id, { PAINEIS: JSON.stringify(paineis) }, usuario.email);
+    return paineis[painel.id] || '';
+  });
   limparCache('FILIAIS');
   esquecerFiliais();
   // invalidarTudo: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
-  return { ok: true, invalidarTudo: true, recado: recadoDoPainel_(painel.nome, f.nome, paineis[painel.id] || '') };
+  return { ok: true, invalidarTudo: true, recado: recadoDoPainel_(painel.nome, f.nome, novo) };
 }
 
 /* O recado do clique: o painel, a filial e quem passa a ver. */
@@ -474,7 +484,7 @@ function recadoDoPainel_(painel, filial, estado) {
   if (estado === PAINEL_DESATIVADO) {
     return p + ' desativado em ' + filial + ': saiu do menu de todos, inclusive do seu. Os dados continuam guardados.';
   }
-  return p + ' fora de ' + filial + ': saiu do menu de todos.';
+  return p + ' não é mais usado em ' + filial + ': saiu do menu de todos, inclusive do seu. Os dados continuam guardados.';
 }
 
 /** Liga ou desliga a filial inteira (some da escolha de entrada). */

@@ -25,6 +25,9 @@
  *   gas_sem_storage=1       sessionStorage/localStorage barrados (cookie de terceiros bloqueado)
  * O google.script.history.replace mexe no historico da janela de cima, como
  * o do Google: depois dele o F5 e um GET (e nao o reenvio do POST).
+ *
+ * criarServidor({ agora: '2026-10-19T10:00:00-03:00' }) (19/10): o relogio do
+ * script comeca nesse instante e anda dali (ver Mundo, em gas.js).
  */
 'use strict';
 const http = require('http');
@@ -133,7 +136,7 @@ function embrulhar(saida, base, extras) {
 function criarServidor(opcoes) {
   opcoes = Object.assign({ pasta: null, porta: 0, contaPadrao: 'geral@bartofil.com.br', dono: 'dono@bartofil.com.br',
     apagarComentarios: 'simples' }, opcoes || {});
-  const mundo = opcoes.mundo || new Mundo({ dono: opcoes.dono });
+  const mundo = opcoes.mundo || new Mundo({ dono: opcoes.dono, agora: opcoes.agora });
   const execOpcoes = { apagarComentarios: opcoes.apagarComentarios, ordem: opcoes.ordem };
   const registro = [];
   const falhasFeitas = new Map();          // gas_falha com limite: quantas ja falharam

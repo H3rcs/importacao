@@ -82,7 +82,7 @@ function doGet(e) {
    * entrava como a pessoa anterior, sem digitar PIN. A reserva agora e
    * um POST (ver doPost), que nao deixa o codigo em lugar nenhum.
    */
-  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p, aba: pedido.aba }));
+  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p, aba: pedido.aba, acao: pedido.acao }));
 }
 
 /*
@@ -148,8 +148,8 @@ function doPost_(p) {
     // Entrou: o bilhete queima de vez (sem a folga de 15 s) — reenviar este
     // POST pelo historico nao pode abrir a sessao de novo.
     if (r && r.ok) queimarBilhete_(p.bilhete);
-    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada.
-    if (r && r.ok && r.entrada === 'APP' && p.tela) embutirTela_(r, r.token, p.tela, '');
+    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (com os filtros do link, em p).
+    if (r && r.ok && r.entrada === 'APP' && p.tela) embutirTela_(r, r.token, p.tela, p.p);
     carga = (r && r.ok) ? r : { ok: true, instalado: true, entrada: 'ENTRAR',
       erroEntrada: (r && r.erro) || '', recado: (r && !r.erro && r.recado) || '',
       criarPin: !!(r && r.criarPin), pedirCodigo: !!(r && r.pedirCodigo),
@@ -248,6 +248,9 @@ function cargaDaPagina_(pedido) {
           carga.filialDepois = String(pedido.filial || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
           // aba=1: o endereco que a pagina da reserva pos na barra (F5), nao um link — a posicao da aba vale mais.
           if (pedido.aba) carga.destinoDaAba = true;
+          // E-mail de quem foi marcado num comentario (19/10): ?tela=acoes&acao=ID (ou tela=limpeza) abre o historico da acao.
+          const telaDePlano = Object.keys(PLANOS).some(function (k) { return PLANOS[k].tela === destino; });
+          if (telaDePlano && /^[A-Za-z0-9_-]{3,40}$/.test(String(pedido.acao || ''))) carga.acaoDepois = String(pedido.acao);
         }
         // Veio com sessao e ela acabou (1 h parada, ou saiu): a tela diz por que.
         if (pedido.t) carga.erroEntrada = 'Sua sessão terminou. Entre de novo com o seu e-mail e PIN.';
@@ -556,7 +559,7 @@ const ACOES = {
    */
   salvarAcao:          { capacidade: 'GERIR_ACOES',   funcao: 'acaoSalvarAcao', modulo: 'calendario' },
   concluirAcao:        { capacidade: null,            funcao: 'acaoConcluirAcao', modulo: 'calendario' },
-  // Comentar: o responsavel (ou a gestao) registra o andamento — ver Acoes.gs.
+  // Comentar: o responsavel (ou a gestao) registra o andamento; quem foi marcado num comentario responde — ver Acoes.gs.
   comentarAcao:        { capacidade: null,            funcao: 'acaoComentarAcao', modulo: 'calendario' },
   reabrirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoReabrirAcao', modulo: 'calendario' },
   cancelarAcao:        { capacidade: 'GERIR_ACOES',   funcao: 'acaoCancelarAcao', modulo: 'calendario' },
@@ -564,6 +567,8 @@ const ACOES = {
   // Fotos (4.2.2): ver confere se a pessoa enxerga a acao; tirar e da gestao.
   fotoAcao:            { capacidade: null,            funcao: 'acaoFotoAcao', modulo: 'calendario' },
   removerFotoAcao:     { capacidade: 'GERIR_ACOES',   funcao: 'acaoRemoverFotoAcao', modulo: 'calendario' },
+  // Foto HEIC (iPhone) que o navegador nao abre: o servidor converte na hora da escolha (os dois planos usam).
+  converterFoto:       { capacidade: null,            funcao: 'acaoConverterFoto', modulo: ['calendario', 'limpeza'] },
 
   // Conversas saiu na 4.2 (projeto para depois). As mensagens antigas
   // continuam na aba MENSAGENS; so nao ha mais tela nem acao para elas.
@@ -580,8 +585,10 @@ const ACOES = {
   // configuracao
   salvarSetor:         { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarSetor' },
   excluirSetor:        { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirSetor' },
-  salvarRotina:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarRotina' },
-  excluirRotina:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirRotina' },
+  // Rotinas (19/10): gravar, desativar/ativar e remover acertam tambem as atividades ja geradas do calendario.
+  salvarRotina:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarRotina', modulo: ['calendario', 'config'] },
+  alternarRotina:      { capacidade: 'PROGRAMAR',     funcao: 'acaoAlternarRotina', modulo: ['calendario', 'config'] },
+  excluirRotina:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirRotina', modulo: ['calendario', 'config'] },
   salvarParametro:     { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarParametro' },
   corrigirFuso:        { capacidade: 'GERIR_ACESSOS', funcao: 'acaoCorrigirFuso' },
   ligarGatilhos:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoLigarGatilhos' },
@@ -815,14 +822,37 @@ const TABELAS_AQUECIDAS = ['ATIVIDADES', 'SETORES', 'ROTINAS', 'PARAMETROS', 'CO
  * "Carregando…". Aqui sao as duas portas de sempre — executarAcao e
  * carregarTela, cada uma com as suas conferencias — numa execucao so. A tela
  * e montada depois de a trava publicar a gravacao, entao ja mostra o que mudou.
+ * 19/10: a gravacao que muda o menu (paineis, filiais e niveis: invalidarTudo;
+ * a pessoa mexendo no proprio acesso: menuMudou) devolve tambem o menu novo —
+ * o cartao some ou volta na hora, sem F5.
  */
 function executarAcaoETela(ctx, nomeAcao, params, idTela, paramsTela) {
   const r = JSON.parse(executarAcao(ctx, nomeAcao, params)) || {};
-  let tela = null;
+  let tela = null, menu = null;
   if (!r.invalidarTudo && idTela && idTela !== 'modulos') {
     try { esquecerUsuario(); tela = JSON.parse(carregarTela(ctx, idTela, paramsTela || {})); } catch (e) { tela = null; }
   }
-  return JSON.stringify({ r: r, tela: tela });
+  if (r.invalidarTudo || r.menuMudou) {
+    try { menu = menuDaSessao_(ctx); } catch (e) { menu = null; }   // sem menu, a tela fica como esta (F5 corrige)
+  }
+  return JSON.stringify({ r: r, tela: tela, menu: menu });
+}
+
+/*
+ * O menu da pessoa (telas, modulos e filiais) relido DEPOIS da gravacao. A
+ * filial em uso que deixou de valer (o administrador desligou a filial em que
+ * estava) volta como semFilial: a tela leva a escolha de outra filial.
+ */
+function menuDaSessao_(ctx) {
+  esquecerFiliais(); esquecerUsuario();
+  const usuario = usuarioAtual();
+  const filiais = filiaisDoUsuario(usuario);
+  const codigo = String((ctx && ctx.f) || '').toUpperCase().trim();
+  if (codigo && !filiais.some(function (f) { return f.codigo === codigo; })) {
+    return { filial: codigo, semFilial: true, filiais: resumoDasFiliais_(filiais) };
+  }
+  const filial = entrarNaFilial(usuario, codigo);
+  return { filial: filial.codigo, telas: telasDe(usuario), modulos: modulosDe(usuario), filiais: resumoDasFiliais_(filiais) };
 }
 
 function executarAcao(ctx, nomeAcao, params) {

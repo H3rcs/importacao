@@ -212,7 +212,8 @@ function permissoesDe(perfil) {
    * (4.2.2). Banco que veio de versao antiga podia ter a linha ADMIN sem as
    * colunas novas marcadas (TELA_NOBREAKS, TELA_LIMPEZA, TELA_QUADRO,
    * TELA_ESTOQUE, PODE_GERIR_FILIAIS...) e o administrador nao via os
-   * paineis nem a tela de Filiais.
+   * paineis nem a tela de Filiais. Os paineis seguem o estado de cada filial
+   * (painelVisivel): desativado some ate para ele.
    */
   if (nome === 'ADMIN') {
     const base = perfis.ADMIN || PERFIL_MINIMO;
@@ -283,7 +284,7 @@ function telasDe(usuario) {
               .map(function (t) { return { id: t.id, nome: t.nome, cor: t.cor, modulo: t.modulo }; });
 }
 
-/* O estado do painel vai junto para a tela marcar o que esta oculto. */
+/* O estado do painel vai junto para a tela marcar o que esta oculto (so o administrador o recebe). */
 
 /** Modulos que a pessoa enxerga: os que tem ao menos uma tela liberada. */
 function modulosDe(usuario) {
@@ -292,7 +293,7 @@ function modulosDe(usuario) {
     return telas.some(function (t) { return t.modulo === m.id; });
   }).map(function (m) {
     return { id: m.id, nome: m.nome, frase: m.frase, acao: m.acao, icone: m.icone, cor: m.cor,
-             oculto: m.id !== 'config' && estadoDoPainel(m.id) !== PAINEL_ATIVO,
+             oculto: m.id !== 'config' && estadoDoPainel(m.id) === PAINEL_OCULTO,
              telas: telas.filter(function (t) { return t.modulo === m.id; }).map(function (t) { return t.id; }) };
   });
 }

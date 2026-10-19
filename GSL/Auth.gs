@@ -305,11 +305,11 @@ function acaoSalvarUsuario(usuario, params) {
   if (params.id) {
     const alvo = obter('ACESSOS', params.id);
     protegerAdmin_(usuario, alvo && alvo.PERFIL, campos.PERFIL);
-    if (alvo && String(alvo.EMAIL || '').toLowerCase() === usuario.email && campos.ATIVO === 'NAO') {
-      throw new Error('Você não pode desativar o próprio acesso.');
-    }
+    const proprio = !!alvo && String(alvo.EMAIL || '').toLowerCase() === usuario.email;
+    if (proprio && campos.ATIVO === 'NAO') throw new Error('Você não pode desativar o próprio acesso.');
     const r = atualizar('ACESSOS', params.id, campos, usuario.email);
     limparCache('ACESSOS');
+    r.menuMudou = proprio;   // o proprio nivel, filiais ou modulos: a resposta leva o menu novo (executarAcaoETela)
     return r;
   }
 
@@ -341,7 +341,8 @@ function acaoDefinirModuloPessoa(usuario, params) {
   else throw new Error('Opção inválida.');
   atualizar('ACESSOS', params.id, { MODULOS: Object.keys(atuais).length ? JSON.stringify(atuais) : '' }, usuario.email);
   limparCache('ACESSOS');
-  return { ok: true };
+  // O proprio modulo: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
+  return { ok: true, menuMudou: String(alvo.EMAIL || '').toLowerCase() === usuario.email };
 }
 
 /** Liga/desliga o acesso sem apagar a pessoa. */
@@ -828,12 +829,12 @@ function mandarCodigoPorEmail_(email, nome) {
  *   primeiro acesso     -> { criarPin: true } ate a pessoa repetir o PIN
  *   errado 5 vezes      -> 10 minutos de espera para aquele e-mail
  */
-function entrar(email, pin, confirmacao, filial, codigo, tela) {
+function entrar(email, pin, confirmacao, filial, codigo, tela, p) {
   _porta = true;
   try {
     const r = entrar_(email, pin, confirmacao, filial, codigo);
-    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (uma ida so).
-    if (r && r.ok && r.entrada === 'APP' && tela && typeof embutirTela_ === 'function') embutirTela_(r, r.token, tela, '');
+    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (uma ida so), com os filtros do link (p).
+    if (r && r.ok && r.entrada === 'APP' && tela && typeof embutirTela_ === 'function') embutirTela_(r, r.token, tela, p || '');
     return JSON.stringify(r);
   } catch (erro) {
     return JSON.stringify({ ok: false, erro: String(erro.message || erro) });

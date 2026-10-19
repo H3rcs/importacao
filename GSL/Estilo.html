@@ -1370,6 +1370,42 @@ input[type="file"] { border: 0; background: none; padding: 0; font-size: 12px; c
 .linha-apres .apres-link { flex: 1 1 260px; min-width: 0; }
 .linha-apres .botao { flex-shrink: 0; }
 
+/* --- Configuracao > Rotinas (19/10): o dia em botoes, nao em numero ---
+   Radios de verdade (teclado, setas e leitor de tela), com o circulo
+   escondido e o rotulo em forma de pilula. Prefixo rot-: ".dia" ja e a
+   celula do calendario. */
+.rot-grupo { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.rot-grupo legend {
+  padding: 0; margin-bottom: 7px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--tinta-media);
+}
+.rot-pilulas { display: flex; flex-wrap: wrap; gap: 6px; }
+.rot-pilulas label { position: relative; cursor: pointer; }
+.rot-pilulas input[type="radio"] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; }
+.rot-pilulas span {
+  display: inline-block; min-width: 46px; padding: 8px 12px; text-align: center; user-select: none;
+  border: 1.5px solid var(--linha-forte); border-radius: 10px; background: var(--campo);
+  font-size: 13px; font-weight: 700; color: var(--tinta);
+}
+.rot-dias span { min-width: 48px; padding: 8px 6px; }
+.rot-pilulas label:hover span { border-color: var(--azul-vivo); }
+.rot-pilulas input:checked + span { background: var(--azul-vivo); border-color: var(--azul-vivo); color: #fff; }
+[data-tema="escuro"] .rot-pilulas input:checked + span { background: #4F46E5; border-color: #4F46E5; }
+.rot-pilulas input:focus-visible + span { outline: 2px solid var(--azul-vivo); outline-offset: 2px; }
+.rot-grupo .marcador { margin: 6px 0; }
+.rot-fixo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rot-fixo select { width: auto; min-width: 72px; }
+.rot-opcao { align-items: flex-start; margin-top: 10px; line-height: 1.5; color: var(--tinta-media); }
+.rot-opcao input { margin-top: 3px; flex-shrink: 0; }
+.rot-opcao b { color: var(--tinta); }
+.rot-agora { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--azul-tenue); color: var(--tinta); }
+.rot-texto { margin: 0 0 14px; line-height: 1.7; color: var(--tinta-media); }
+.rot-texto b { color: var(--tinta); }
+.rot-botoes { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (forced-colors: active) {
+  .rot-pilulas input:checked + span { outline: 2px solid Highlight; outline-offset: 1px; }
+}
+
 /* =========================================================
    BARRAS, TABELAS, ETIQUETAS
    ========================================================= */
@@ -2016,8 +2052,10 @@ tr:last-child td { border-bottom: 0; }
 .cartao-acao.cancelada { border-left-color: var(--tinta-fraca); opacity: .55; }
 .cartao-acao.pendente  { border-left-color: var(--azul-vivo); }
 
-.acao-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.acao-titulo { font-size: 15px; font-weight: 700; color: var(--tinta); line-height: 1.4; }
+/* Com o selo de comentario (e o "@ voce") o topo nao cabe numa linha no celular: os selos descem para
+   baixo do titulo em vez de espremer o titulo numa coluna e vazar do cartao (19/10). */
+.acao-topo { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 12px; }
+.acao-titulo { flex: 1 1 220px; min-width: 0; font-size: 15px; font-weight: 700; color: var(--tinta); line-height: 1.4; }
 .acao-descricao { margin-top: 6px; color: var(--tinta-media); line-height: 1.65; font-size: 13.5px; }
 .acao-meta {
   display: flex; flex-wrap: wrap; gap: 6px 18px;
@@ -2222,7 +2260,7 @@ input.travado {
 .coment-depende { margin-top: 4px; font-size: 12.5px; color: #B45309; font-weight: 600; }
 
 /* --- Fotos nas acoes e nos comentarios (4.2.2) --- */
-.acao-selos { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.acao-selos { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex-shrink: 0; max-width: 100%; }
 .selo-foto {
   display: inline-flex; align-items: center; gap: 4px; border: 0; cursor: pointer;
   font: inherit; font-size: 11.5px; font-weight: 600; color: var(--azul-vivo);
@@ -2230,6 +2268,44 @@ input.travado {
 }
 .selo-foto:hover { filter: brightness(.95); text-decoration: underline; }
 .coment-item .selo-foto { margin-top: 6px; }
+
+/* --- Comentarios: o selo do cartao e a marcacao de pessoas (19/10) --- */
+.selo-coment, .selo-mencao {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;
+  font: inherit; font-size: 11.5px; font-weight: 700; color: var(--azul-vivo);
+  background: var(--azul-tenue); border: 1px solid var(--linha-forte); padding: 2px 9px; border-radius: 999px;
+}
+.selo-coment:hover, .selo-mencao:hover { text-decoration: underline; }
+.selo-coment:focus-visible, .selo-mencao:focus-visible { outline: 2px solid var(--azul-vivo); outline-offset: 2px; }
+/* "novo": cheio, e a palavra no selo (nunca so a cor). No escuro, o azul do tema com branco ficava em 3:1. */
+.selo-coment.novo { background: var(--azul-vivo); border-color: var(--azul-vivo); color: #fff; }
+[data-tema="escuro"] .selo-coment.novo { background: #4F46E5; border-color: #4F46E5; }
+.selo-novo { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.selo-mencao { background: var(--laranja-tenue); border-color: var(--laranja); color: var(--laranja-escuro); }
+.coment-mencao { font-weight: 700; color: var(--azul-vivo); background: var(--azul-tenue); border-radius: 4px; padding: 0 3px; }
+.coment-mencao.para-voce { color: var(--laranja-escuro); background: var(--laranja-tenue); }
+.coment-mencoes { margin-top: 4px; font-size: 12px; color: var(--tinta-media); }
+.mencao-campo { position: relative; }
+.mencao-sugestoes {
+  position: absolute; left: 0; right: 0; z-index: 5; margin-top: 4px; max-height: 240px; overflow-y: auto;
+  background: var(--vidro-alto); border: 1px solid var(--linha-forte); border-radius: 10px; box-shadow: var(--sombra-alta);
+}
+.mencao-opcao { padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--tinta); border-bottom: 1px solid var(--linha); }
+.mencao-opcao.ativa, .mencao-opcao:hover { background: var(--azul-tenue); }
+.mencao-papel { color: var(--tinta-media); font-size: 12px; }
+.mencao-acesso { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--laranja-escuro); }
+.mencao-vazia { padding: 8px 12px; font-size: 12.5px; color: var(--tinta-media); }
+.mencao-barra { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin-top: 6px; }
+.mencao-escolhidas { margin-top: 6px; font-size: 12.5px; color: var(--tinta-media); }
+.mencao-chip {
+  display: inline-flex; align-items: center; gap: 2px; margin: 2px 4px 2px 0; padding: 1px 2px 1px 9px; border-radius: 999px;
+  background: var(--azul-tenue); color: var(--azul-vivo); font-weight: 700;
+}
+.mencao-tirar { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 6px; }
+@media (forced-colors: active) {
+  .selo-coment, .selo-mencao, .coment-mencao, .mencao-chip { border: 1px solid CanvasText; }
+  .mencao-opcao.ativa { outline: 2px solid Highlight; outline-offset: -2px; }
+}
 /* O botao de escolher foto e um <label> (abre o seletor de arquivo); sem isto, pegava o estilo de rotulo do campo. */
 .campo label.fotos-escolher {
   display: inline-flex; align-items: center; gap: 6px; width: auto; cursor: pointer; margin: 0 8px 0 0;

@@ -125,18 +125,22 @@ const ESQUEMA = {
    * PLANO (4.2.2): vazio/CALENDARIO = o do Calendario; LIMPEZA = o da Limpeza CD
    * (que usa tambem ZONA, LOCAL, CRITICIDADE e ABERTA_EM).
    * ANEXOS: lista JSON das fotos da acao (no Drive, em Anexos/ACOES/<ID>/).
+   * MARCADOS (8.10): e-mails de quem foi marcado num comentario e nao e
+   * responsavel — ve e responde esta acao.
    */
   ACOES:      ['ACAO', 'DESCRICAO', 'RESPONSAVEL', 'RESPONSAVEL_EMAIL', 'TURNO',
                'ORIGEM', 'PRAZO', 'SITUACAO', 'CONCLUIDO_EM', 'CONCLUIDO_POR', 'OBSERVACAO',
-               'ANDAMENTO', 'DEPENDE', 'PLANO', 'ZONA', 'LOCAL', 'CRITICIDADE', 'ABERTA_EM', 'ANEXOS'],
+               'ANDAMENTO', 'DEPENDE', 'PLANO', 'ZONA', 'LOCAL', 'CRITICIDADE', 'ABERTA_EM', 'ANEXOS',
+               'MARCADOS'],
   /*
    * HISTORICO DE COMENTARIOS das acoes (4.2.2) — dos dois planos (ORIGEM
    * ACOES; LP_ACOES nos que vieram da tabela antiga da limpeza). Cada
    * comentario guarda o que avancou, a situacao em que a acao ficou, o que
-   * ela espera para concluir e as fotos (ANEXOS, lista JSON).
+   * ela espera para concluir e as fotos (ANEXOS, lista JSON). MENCOES (8.10):
+   * e-mails de quem foi marcado no comentario, separados por virgula.
    */
   COMENTARIOS: ['ORIGEM', 'ACAO_ID', 'TEXTO', 'SITUACAO', 'DEPENDE', 'AUTOR', 'AUTOR_NOME',
-                'AUTOR_PAPEL', 'TIPO', 'ANEXOS'],
+                'AUTOR_PAPEL', 'TIPO', 'ANEXOS', 'MENCOES'],
 
   /*
    * CONVERSA — uma linha por mensagem.
@@ -291,7 +295,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.9';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz (a proxima e 8.10: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.10';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) (a proxima e 8.11: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a

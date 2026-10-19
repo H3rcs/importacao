@@ -11,6 +11,7 @@
 process.env.TZ = 'America/Bahia';
 const path = require('path');
 const { Mundo, novaExecucao, chamarPeloNavegador } = require('./emulador/gas.js');
+const { miniaturaDrive, pastasDeConversao, HEIC_MINI, JPEG_MINI } = require('./emulador/miniatura-drive.js');
 
 const PASTA = path.resolve(process.argv[2] || path.join(__dirname, '..', 'GSL'));
 const OP = { apagarComentarios: 'nenhum' };
@@ -344,6 +345,99 @@ caso('fotos: tipo errado, grande demais e mais de 5 de uma vez sao recusados; fa
   afirmar(novas.length === 2 && novas.every((x) => x.lixo), 'fotos na lixeira: ' + JSON.stringify(novas.map((x) => [x.nome, x.lixo])));
 });
 
+/*
+ * FOTO HEIC (19/10): o Chrome nao abre a foto do iPhone. A tela manda cada HEIC
+ * sozinha para o converterFoto, que devolve a miniatura do Drive; a HEIC que ja
+ * esta gravada sai convertida no visor (fotoAcao). A miniatura e roteirizada
+ * pelo UrlFetch (emulador/miniatura-drive.js).
+ */
+const heic = (nome) => ({ nome: nome || 'IMG_0001.HEIC', tipo: 'image/heic', dados: HEIC_MINI });
+
+caso('fotos HEIC: converterFoto devolve a miniatura do Drive em JPEG (=s1600, com o token) e a pasta temporaria vai para a lixeira; sem miniatura a tempo, pendente (9 consultas contadas, nao pelo relogio)', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m, { atraso: 2 });
+  const r = acao(m, adm, 'converterFoto', { foto: heic() });
+  afirmar(r.dados === JPEG_MINI && r.tipo === 'image/jpeg' && r.nome === 'IMG_0001.jpg' && !r.pendente, 'convertida: ' + JSON.stringify(r).slice(0, 120));
+  afirmar(drive.log.join(' | ') === 'files.get #1 sem link (Bearer) | files.get #2 sem link (Bearer) | files.get #3 link (Bearer) | miniatura =s1600 (Bearer)',
+    'caminho: ' + drive.log.join(' | '));
+  let pastas = pastasDeConversao(m);
+  afirmar(pastas.length === 1 && pastas[0].lixo, 'pasta temporaria na lixeira: ' + JSON.stringify(pastas.map((p) => [p.nome, p.lixo])));
+  const gravada = [...m.arquivos.values()].filter((a) => a.pais.has(pastas[0].id));
+  afirmar(gravada.length === 1 && gravada[0].mime === 'image/heic', 'a HEIC vai ao Drive como image/heic (para ele gerar a miniatura): ' + JSON.stringify(gravada.map((a) => a.mime)));
+  drive.roteiro.nunca = true; drive.log.length = 0;
+  const p = acao(m, adm, 'converterFoto', { foto: heic('IMG_0002.HEIC') });
+  afirmar(p.pendente === true && !p.dados, 'pendente: ' + JSON.stringify(p));
+  afirmar(drive.log.length === 9 && drive.log.every((l) => /^files\.get #\d sem link \(Bearer\)$/.test(l)), 'consultas: ' + drive.log.join(' | '));
+  pastas = pastasDeConversao(m);
+  afirmar(pastas.length === 2 && pastas.every((x) => x.lixo), 'as duas pastas na lixeira');
+});
+
+caso('fotos HEIC: a miniatura e conferida pelos bytes (pagina de login nao vira foto; PNG vem como PNG); link com outro tamanho ou sem tamanho vira =s1600; rede caindo da pendente; Drive falhando da o erro — a pasta sempre vai para a lixeira', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m, { imagem: 'html' });
+  afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).pendente === true, 'pagina HTML com HTTP 200 nao vira foto');
+  drive.roteiro.imagem = 'png';
+  const png = acao(m, adm, 'converterFoto', { foto: heic() });
+  afirmar(png.tipo === 'image/png' && png.nome === 'IMG_0001.png', 'png: ' + png.tipo + ' ' + png.nome);
+  for (const link of ['w200-h190-p-k-nu', 's220?authuser=0', '']) {
+    Object.assign(drive.roteiro, { imagem: 'jpeg', link: link }); drive.log.length = 0;
+    afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).tipo === 'image/jpeg', 'link "' + link + '"');
+    afirmar(drive.log.slice(-1)[0] === 'miniatura =s1600 (Bearer)', 'link "' + link + '": ' + drive.log.join(' | '));
+  }
+  drive.roteiro.lancar = true;
+  afirmar(acao(m, adm, 'converterFoto', { foto: heic() }).pendente === true, 'rede caindo: pendente');
+  afirmar(pastasDeConversao(m).length === 6 && pastasDeConversao(m).every((p) => p.lixo), 'pastas: ' + JSON.stringify(pastasDeConversao(m).map((p) => [p.nome, p.lixo])));
+  const novoArquivo = m.novoArquivo;
+  m.novoArquivo = function (nome) { if (/^IMG_/.test(nome)) throw new Error('Drive cheio'); return novoArquivo.apply(this, arguments); };
+  try { afirmar(/Drive cheio/.test(erroDe(() => acao(m, adm, 'converterFoto', { foto: heic() }))), 'o erro do Drive sobe'); }
+  finally { m.novoArquivo = novoArquivo; }
+  afirmar(pastasDeConversao(m).length === 7 && pastasDeConversao(m).every((p) => p.lixo), 'a da falha tambem foi para a lixeira');
+});
+
+caso('fotos HEIC: converterFoto recusa o que nao e HEIC pelos bytes, mais de 10 MB e sem foto (sem criar nada no Drive); a porta e de quem ve o calendario OU a limpeza', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  miniaturaDrive(m);
+  const antes = m.arquivos.size + m.pastas.size;
+  const e1 = erroDe(() => acao(m, adm, 'converterFoto', { foto: { nome: 'x.heic', tipo: 'image/heic', dados: JPEG_MINI } }));
+  afirmar(e1 === 'converterFoto: "x.heic" não é uma foto HEIC.', 'JPEG fingindo HEIC: ' + e1);
+  afirmar(/passa de 10 MB/.test(erroDe(() => acao(m, adm, 'converterFoto', { foto: { nome: 'g.heic', tipo: 'image/heic', dados: 'A'.repeat(14 * 1024 * 1024) } }))), 'grande');
+  afirmar(/não é uma foto/.test(erroDe(() => acao(m, adm, 'converterFoto', { foto: { nome: 'a.pdf', tipo: 'application/pdf', dados: HEIC_MINI } }))), 'tipo');
+  afirmar(erroDe(() => acao(m, adm, 'converterFoto', {})) === 'converterFoto: Nenhuma foto chegou.', 'sem foto');
+  afirmar(m.arquivos.size + m.pastas.size === antes, 'nada criado no Drive');
+  acao(m, adm, 'salvarUsuario', { email: SUP, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
+  afirmar(acao(m, entrar(m, SUP, '2222'), 'converterFoto', { foto: heic() }).dados === JPEG_MINI, 'supervisor (so a limpeza) converte');
+  afirmar(acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic() }).dados === JPEG_MINI, 'coordenadora (so o calendario) converte');
+  const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'calendario', modo: 'NAO' });
+  const e2 = erroDe(() => acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic() }));
+  afirmar(/não tem acesso ao módulo/.test(e2), 'sem calendario e sem limpeza: ' + e2);
+});
+
+caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou miniatura que nao estava pronta) — acao e comentario, nos dois planos; sem miniatura vai a original; a JPEG nao passa pela miniatura', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const drive = miniaturaDrive(m);
+  // como a versao anterior gravava: a HEIC crua, image/heic
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [heic('IMG_0009.HEIC'), foto(1)] });
+  acao(m, adm, 'comentarAcao', { id: r.id, texto: 'Antes do conserto', fotos: [heic('IMG_0010.HEIC')] });
+  const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === r.id);
+  const v = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[0].id });
+  afirmar(v.convertida && v.tipo === 'image/jpeg' && v.dados === JPEG_MINI && v.nome === 'IMG_0009.jpg', 'da acao: ' + JSON.stringify(v).slice(0, 120));
+  const vc = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.comentarios[0].fotos[0].id });
+  afirmar(vc.convertida && vc.dados === JPEG_MINI && vc.nome === 'IMG_0010.jpg', 'do comentario: ' + JSON.stringify(vc).slice(0, 120));
+  drive.log.length = 0;
+  const j = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[1].id });
+  afirmar(j.dados === PNG_1x1 && !j.convertida && !drive.log.length, 'a JPEG vai como esta, sem consulta: ' + drive.log.join(' | '));
+  drive.roteiro.nunca = true;
+  const o = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[0].id });
+  afirmar(o.tipo === 'image/heic' && o.dados === HEIC_MINI && !o.convertida && drive.log.length === 5, 'sem miniatura (5 consultas, 6 s): ' + o.tipo + ' ' + drive.log.length);
+  drive.roteiro.nunca = false;
+  const l = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE], fotos: [heic('IMG_0011.HEIC')] });
+  const al = tela(m, adm, 'limpeza').plano.lista.find((x) => x.id === l.id);
+  const vl = acao(m, adm, 'fotoAcaoLimpeza', { id: l.id, arquivo: al.fotos[0].id });
+  afirmar(vl.convertida && vl.dados === JPEG_MINI && vl.nome === 'IMG_0011.jpg', 'limpeza: ' + JSON.stringify(vl).slice(0, 120));
+  afirmar(/não é desta ação/.test(erroDe(() => acao(m, adm, 'fotoAcao', { id: r.id, arquivo: al.fotos[0].id }))), 'foto de outra acao continua barrada');
+});
+
 caso('versao: cada arquivo traz o carimbo da entrega em que mudou; arquivo esquecido ou da entrega anterior aparece na faixa', () => {
   const c = ctx(new Mundo({ dono: DONO }));
   afirmar(c.arquivosForaDaVersao_().length === 0, 'fora da versao: ' + c.arquivosForaDaVersao_().join());
@@ -498,6 +592,27 @@ caso('rotinas: sigla repetida e dia semanal invalido sao recusados', () => {
   acao(m, s, 'salvarRotina', { id: reu.ID, tipo: 'REU', atividade: reu.ATIVIDADE + ' (editada)', frequencia: reu.FREQUENCIA, dia: String(reu.DIA), ativo: true });
 });
 
+caso('rotinas pela porta (19/10): a Configuracao traz as pendentes da rotina e os meses gerados; Desativar exige PROGRAMAR e tira a rotina do calendario', () => {
+  const m = new Mundo({ dono: DONO, agora: '2026-10-19T10:00:00-03:00' });
+  ctx(m).instalar(DONO);
+  const c = ctx(m);
+  c.acaoSalvarUsuario({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') }, { email: COORD, nome: 'Maria Souza', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenadora' });
+  const adm = entrar(m, DONO, '4321');
+  tela(m, adm, 'calendario', { competencia: 'OUT 2026' });      // abrir o mes gera, como o gerente faz
+  tela(m, adm, 'calendario', { competencia: 'NOV 2026' });
+  const r = acao(m, adm, 'salvarRotina', { tipo: 'RON', atividade: 'Ronda', frequencia: 'SEMANAL', dia: '3', porTurno: false, ativo: true });
+  afirmar(r.invalidarTudo && r.recado === 'Rotina salva. No calendário: 2 criadas em OUT 2026 e 4 em NOV 2026 (de hoje em diante).', r.recado);
+  const cfg = tela(m, adm, 'config');
+  const ron = cfg.rotinas.find((x) => x.tipo === 'RON');
+  afirmar(ron.pendentes.total === 6 && ron.temAtividades && cfg.mesesGerados.join() === 'OUT 2026,NOV 2026', JSON.stringify([ron, cfg.mesesGerados]));
+  const coord = entrar(m, COORD, '1234');
+  afirmar(/nao pode executar/.test(erroDe(() => acao(m, coord, 'alternarRotina', { id: ron.id, ativo: false }))), 'coordenador recusado');
+  const d = acao(m, adm, 'alternarRotina', { id: ron.id, ativo: false });
+  afirmar(d.invalidarTudo && d.recado === 'Rotina desativada. 6 atividades pendentes canceladas (OUT 2026: 2 · NOV 2026: 4).', d.recado);
+  afirmar(!tela(m, adm, 'calendario', { competencia: 'NOV 2026' }).atividades.some((a) => a.tipo === 'RON'), 'NOV sem a rotina');
+  afirmar(tela(m, adm, 'config').rotinas.find((x) => x.tipo === 'RON').ativo === false, 'parada na lista');
+});
+
 caso('DE-PARA: codigo repetido e recusado (a linha que aparece na tela e a que vale)', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321');
   acao(m, s, 'salvarDePara', { codigo: 'X9', descricao: 'Teste', categoria: 'Outros', ausencia: false });
@@ -527,31 +642,120 @@ caso('atualizacao de versao nao religa o Estoque que o administrador desligou na
 });
 
 /* ------------------------------------------------------------------ */
-/* ADMIN VE TUDO · ESTOQUE CD/LOJA · TROCAR PIN                        */
+/* PAINEL DESATIVADO SOME DE TODOS (19/10) · ESTOQUE · TROCAR PIN      */
 /* ------------------------------------------------------------------ */
 
-caso('ADMIN ve todas as telas e paineis mesmo com PERFIS e paineis da filial incompletos (banco antigo)', () => {
-  const m = mundo(); let c = ctx(m);
-  // banco antigo: linha ADMIN sem as telas/capacidades novas; principal so com calendario e assiduidade
+const sessaoDe = (m, s) => JSON.parse(chamar(m, s.email, 'retomarSessao', { t: s.t, f: s.f }).valor);
+const cartoes = (menu) => menu.modulos.map((q) => q.id + (q.oculto ? '(oculto)' : '')).join(',');
+/* A gravacao como a tela faz (agir): a acao e a tela de Filiais e paineis numa ida so — com o menu novo. */
+const gravarNaTela = (m, s, nome, params, idTela) =>
+  JSON.parse(chamar(m, s.email, 'executarAcaoETela', { t: s.t, f: s.f }, nome, params, idTela || 'filiais', {}).valor);
+
+/*
+ * 19/10 (substitui o "ADMIN ve todas as telas e paineis" da 4.2.2): o ADMIN continua com todas as
+ * telas e permissoes sem depender da tabela PERFIS, mas nos paineis vale o estado da filial.
+ */
+caso('ADMIN com PERFIS incompleto (banco antigo) nunca fica trancado fora da Configuracao; painel fora da filial some ate para ele e volta ao ligar (Oculto com a etiqueta)', () => {
+  const m = mundo(); const c = ctx(m);
+  // banco antigo: linha ADMIN sem nenhuma permissao e sem as telas da Configuracao; principal so com calendario e assiduidade
   const adm = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'ADMIN');
   const apaga = {};
-  Object.keys(adm).forEach((k) => { if (/^TELA_(NOBREAKS|LIMPEZA|QUADRO|ESTOQUE|FILIAIS)$|^PODE_(GERIR_FILIAIS|GERIR_ESTOQUE|GERIR_LIMPEZA|LANCAR_NOBREAK)$/.test(k)) apaga[k] = 'NAO'; });
+  Object.keys(adm).forEach((k) => { if (/^TELA_(NOBREAKS|LIMPEZA|QUADRO|ESTOQUE|CONFIG|ACESSOS|FILIAIS|RELATOS)$|^PODE_/.test(k)) apaga[k] = 'NAO'; });
   c.atualizar('PERFIS', adm.ID, apaga, DONO);
   const pr = c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL));
   c.atualizar('FILIAIS', pr.ID, { PAINEIS: JSON.stringify({ calendario: 'ATIVO', assiduidade: 'ATIVO' }) }, DONO);
   m.cache.clear();
   const s = entrar(m, DONO, '4321');
-  const r = JSON.parse(chamar(m, DONO, 'retomarSessao', { t: s.t, f: s.f }).valor);
-  const telas = r.telas.map((t) => t.id);
-  ['filiais', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'config', 'acessos'].forEach((id) => afirmar(telas.indexOf(id) !== -1, 'ADMIN sem a tela ' + id + ': ' + telas.join(',')));
-  const mods = r.modulos || [];
-  const est = mods.find((x) => x.id === 'estoque');
-  afirmar(!mods.length || (est && est.oculto), 'estoque aparece marcado como oculto para o admin');
-  tela(m, s, 'estoque'); tela(m, s, 'filiais'); tela(m, s, 'quadro');
-  // quem nao e admin continua sem os paineis desligados
+  let r = sessaoDe(m, s);
+  const telas = r.telas.map((t) => t.id).join(',');
+  afirmar(telas === 'inicio,calendario,acoes,assiduidade,config,acessos,filiais,relatos', 'ADMIN: ' + telas);
+  const capacidades = Object.keys(adm).filter((k) => /^PODE_/.test(k)).map((k) => k.slice(5));
+  afirmar(capacidades.length >= 14 && capacidades.every((k) => r.usuario.podes.indexOf(k) !== -1), 'todas as permissoes: ' + r.usuario.podes.join(','));
+  afirmar(cartoes(r) === 'calendario,assiduidade,config', 'cartoes: ' + cartoes(r));
+  ['config', 'acessos', 'filiais', 'relatos'].forEach((id) => tela(m, s, id));
+  afirmar(/não está ligado na filial/.test(erroDe(() => tela(m, s, 'estoque'))), 'estoque fora da filial nao abre nem para o ADMIN');
+  // ele liga em Filiais e paineis: Ativo para todos, Oculto so para ele (com a etiqueta)
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'estoque', estado: 'ATIVO' });
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'quadro', estado: 'OCULTO' });
+  r = sessaoDe(m, s);
+  afirmar(cartoes(r) === 'calendario,assiduidade,quadro(oculto),estoque,config', 'depois de ligar: ' + cartoes(r));
+  tela(m, s, 'estoque'); tela(m, s, 'quadro');
   const g = entrar(m, GERENTE, '5555');
-  const rg = JSON.parse(chamar(m, GERENTE, 'retomarSessao', { t: g.t, f: g.f }).valor);
-  afirmar(!rg.telas.some((t) => t.id === 'estoque' || t.id === 'nobreaks'), 'gerente: ' + rg.telas.map((t) => t.id).join(','));
+  afirmar(cartoes(sessaoDe(m, g)) === 'calendario,assiduidade,estoque,config', 'gerente (sem o oculto): ' + cartoes(sessaoDe(m, g)));
+});
+
+caso('painel Desativado ou "Nao usar nesta filial" some para todos, inclusive o ADMIN (menu, tela, acao, atalho e bolinha); Oculto so o ADMIN ve', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321'), g = entrar(m, GERENTE, '5555');
+  const nobreaks = (x) => x.modulos.filter((q) => q.id === 'nobreaks').map((q) => 'nobreaks' + (q.oculto ? '(oculto)' : '')).join('');
+  const esperado = { ATIVO: ['nobreaks', 'nobreaks'], OCULTO: ['nobreaks(oculto)', ''], DESATIVADO: ['', ''], REMOVER: ['', ''] };
+  Object.keys(esperado).forEach((estado) => {
+    acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado });
+    const ra = sessaoDe(m, s), rg = sessaoDe(m, g);
+    afirmar(nobreaks(ra) === esperado[estado][0] && nobreaks(rg) === esperado[estado][1], estado + ': admin "' + nobreaks(ra) + '", gerente "' + nobreaks(rg) + '"');
+    afirmar(ra.telas.some((t) => t.id === 'nobreaks') === !!esperado[estado][0], estado + ': tela no menu do admin');
+  });
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  afirmar(/não está ligado na filial CD Feira de Santana/.test(erroDe(() => tela(m, s, 'nobreaks'))), 'ADMIN: tela recusada');
+  afirmar(/não tem acesso ao módulo Nobreaks/.test(erroDe(() => acao(m, s, 'semanaNobreak', {}))), 'ADMIN: acao recusada');
+  afirmar(!tela(m, s, 'inicio').atalhos.some((t) => t.id === 'nobreaks'), 'ADMIN: sem o atalho na Central');
+  // bolinha: o Calendario desativado com acao em aberto nao conta nem para o ADMIN
+  acao(m, s, 'salvarAcao', { acao: 'Lâmpadas do flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  afirmar(acao(m, s, 'pendencias').pendencias.calendario.abertas === 1, 'antes: bolinha do calendario');
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'DESATIVADO' });
+  const p = acao(m, s, 'pendencias');
+  afirmar(!p.pendencias.calendario && !p.menu.telas.some((t) => t.modulo === 'calendario'), 'calendario desativado: ' + JSON.stringify(p.pendencias));
+});
+
+caso('alterarPainel devolve o menu novo: o cartao sai e volta sem F5, o recado diz o painel e a filial; outra filial nao mexe no menu; desligar a filial em que esta da semFilial', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  let x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  afirmar(x.menu && x.menu.filial === 'FSA' && !x.menu.telas.some((t) => t.id === 'nobreaks') && cartoes(x.menu).indexOf('nobreaks') === -1, 'desativado: ' + (x.menu && cartoes(x.menu)));
+  afirmar(x.r.recado === 'Painel Nobreaks desativado em CD Feira de Santana: saiu do menu de todos, inclusive do seu. Os dados continuam guardados.', 'recado: ' + x.r.recado);
+  x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'OCULTO' });
+  afirmar(/nobreaks\(oculto\)/.test(cartoes(x.menu)) && x.r.recado === 'Painel Nobreaks oculto em CD Feira de Santana: só administradores veem, com a etiqueta oculto.', 'oculto: ' + cartoes(x.menu) + ' / ' + x.r.recado);
+  x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'ATIVO' });
+  afirmar(/(^|,)nobreaks(,|$)/.test(cartoes(x.menu)) && x.r.recado === 'Painel Nobreaks ativo em CD Feira de Santana: aparece para quem tem o nível liberado.', 'ativo: ' + cartoes(x.menu) + ' / ' + x.r.recado);
+  x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'REMOVER' });
+  afirmar(cartoes(x.menu).indexOf('nobreaks') === -1 && x.r.recado === 'Painel Nobreaks fora de CD Feira de Santana: saiu do menu de todos.', 'nao usar: ' + x.r.recado);
+  // outra filial: o recado diz qual, e o menu (o da filial em uso) nao muda
+  acao(m, s, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO', nobreaks: 'ATIVO' } });
+  const antes = gravarNaTela(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'ATIVO' }).menu;
+  x = gravarNaTela(m, s, 'alterarPainel', { codigo: 'SSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  afirmar(JSON.stringify([x.menu.telas, x.menu.modulos]) === JSON.stringify([antes.telas, antes.modulos]) && /^Painel Nobreaks desativado em CD Salvador:/.test(x.r.recado), 'outra filial: ' + x.r.recado);
+  afirmar(x.menu.filiais.map((f) => f.codigo).join() === 'FSA,SSA', 'filiais no menu: ' + JSON.stringify(x.menu.filiais));
+  // dentro da SSA, o ADMIN desliga a propria SSA: o menu diz que a filial nao vale mais
+  x = gravarNaTela(m, Object.assign({}, s, { f: 'SSA' }), 'alternarFilial', { codigo: 'SSA' });
+  afirmar(x.menu && x.menu.semFilial === true && x.menu.filiais.map((f) => f.codigo).join() === 'FSA', 'semFilial: ' + JSON.stringify(x.menu));
+});
+
+caso('"Editar nome" da filial grava so o nome e a cidade: a copia velha dos paineis (outra aba) nao religa o painel desativado', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const fsa = tela(m, s, 'filiais').filiais.find((f) => f.codigo === 'FSA');
+  const copiaVelha = JSON.parse(JSON.stringify(fsa.paineis));               // nobreaks: ATIVO
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  const x = gravarNaTela(m, s, 'salvarFilial', { id: fsa.id, nome: 'CD Feira', cidade: fsa.cidade, paineis: copiaVelha });
+  const c = ctx(m), pr = c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL));
+  afirmar(JSON.parse(pr.PAINEIS).nobreaks === 'DESATIVADO' && pr.NOME === 'CD Feira', 'PAINEIS=' + pr.PAINEIS + ' NOME=' + pr.NOME);
+  afirmar(x.menu.filiais.find((f) => f.codigo === 'FSA').nome === 'CD Feira' && cartoes(x.menu).indexOf('nobreaks') === -1, 'menu com o nome novo: ' + JSON.stringify(x.menu.filiais));
+});
+
+caso('bolinha (pendencias) traz o menu de agora: quem ja estava dentro ve o painel desligado ao voltar ao menu; mexer no proprio acesso devolve o menu', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321'), maria = entrar(m, COORD, '1234');
+  const antes = acao(m, maria, 'pendencias').menu;
+  afirmar(antes.filial === 'FSA' && cartoes(antes) === 'calendario,nobreaks', 'antes: ' + cartoes(antes));
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
+  const depois = acao(m, maria, 'pendencias').menu;
+  afirmar(cartoes(depois) === 'calendario' && !depois.telas.some((t) => t.id === 'nobreaks'), 'depois: ' + cartoes(depois));
+  afirmar(/não está ligado na filial/.test(erroDe(() => tela(m, maria, 'nobreaks'))), 'a tela velha e recusada');
+  // o gerente (GERIR_ACESSOS) tira o proprio Estoque: a resposta ja traz o menu sem ele; o de outra pessoa nao
+  const g = entrar(m, GERENTE, '5555');
+  const idDe = (email) => ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === email).ID;
+  const x = gravarNaTela(m, g, 'definirModuloPessoa', { id: idDe(GERENTE), modulo: 'estoque', modo: 'NAO' }, 'acessos');
+  afirmar(x.menu && cartoes(x.menu).indexOf('estoque') === -1 && x.tela && x.tela.tela === 'acessos', 'o proprio modulo: ' + (x.menu && cartoes(x.menu)));
+  const y = gravarNaTela(m, g, 'definirModuloPessoa', { id: idDe(COORD), modulo: 'estoque', modo: 'VER' }, 'acessos');
+  afirmar(y.menu === null && y.tela, 'o acesso de outra pessoa nao rele o menu: ' + JSON.stringify(y.menu));
+  const z = gravarNaTela(m, g, 'salvarUsuario', { id: idDe(GERENTE), email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' }, 'acessos');
+  afirmar(z.menu && cartoes(z.menu).indexOf('estoque') === -1, 'salvar a propria ficha tambem devolve o menu: ' + JSON.stringify(z.menu));
 });
 
 caso('estoque de TI: estoque, minimo (alerta) e ideal; saida com data, setor e usuario', () => {
@@ -1346,6 +1550,213 @@ caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadast
   chamar(m, DONO, 'encerrarSimulacao', { t: adm.t, f: adm.f });
   const c = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === outra.id).comentarios[0];
   afirmar(c && c.autor === DONO && !/Simulando/.test(c.nome) && /simulando COORDENADOR/.test(c.papel), 'simulacao: ' + JSON.stringify(c));
+});
+
+/* ------------------------------------------------------------------ */
+/* COMENTARIOS: O SELO E MARCAR PESSOA (19/10)                         */
+/* ------------------------------------------------------------------ */
+const PEDRO = 'pedro.alves@bartofil.com.br', CONSULTA = 'carla.dias@bartofil.com.br';
+/* O mundo de sempre + Pedro (coordenador do turno B), a supervisora da limpeza e a Carla (CONSULTA). */
+function mundoComMencoes() {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarUsuario', { email: PEDRO, nome: 'Pedro Alves', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coordenador' });
+  acao(m, adm, 'salvarUsuario', { email: SUP, nome: 'Sueli Ramos', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisora' });
+  acao(m, adm, 'salvarUsuario', { email: CONSULTA, nome: 'Carla Dias', perfil: 'CONSULTA', turno: '', filiais: '*', papel: 'Qualidade' });
+  return { m, adm };
+}
+const linkDoEmail = (e) => ((e.htmlBody || '').match(/href="([^"]+)"/) || [])[1] || '';
+const cargaDe = (saida) => JSON.parse(/CARGA_INICIAL\s*=\s*(\{.*?\});/s.exec(saida.getContent())[1].replace(/\\u002f/g, '/').replace(/\\u003c/g, '<'));
+/* A pagina como o computador do CD a recebe: GET (link de e-mail) e POST (reserva), com bilhete novo. */
+const paginaGet = (m, parametros) => cargaDe(ctx(m, 'computador.cd@bartofil.com.br').doGet({ parameter: parametros }));
+const paginaPost = (m, campos) => cargaDe(ctx(m, 'computador.cd@bartofil.com.br').doPost({ parameter: Object.assign({ bilhete: paginaGet(m, {}).bilhete }, campos) }));
+
+caso('comentarios: concluir, reabrir e cancelar SEM texto sao registros automaticos (o selo e o "Comentarios (N)" nao contam); com texto, sao de alguem', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  const maria = entrar(m, COORD, '1234');
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Almoxarifado', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  acao(m, maria, 'concluirAcao', { id });
+  acao(m, adm, 'reabrirAcao', { id });
+  acao(m, adm, 'cancelarAcao', { id });
+  const h = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((a) => a.id === id).comentarios;
+  afirmar(h.length === 3 && h.every((c) => c.automatico === true), 'automaticos: ' + JSON.stringify(h.map((c) => [c.tipo, c.texto, c.automatico])));
+  const id2 = acao(m, adm, 'salvarAcao', { acao: 'Doca', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  acao(m, maria, 'comentarAcao', { id: id2, texto: 'Ação concluída.' });
+  acao(m, maria, 'concluirAcao', { id: id2, observacao: 'Feito com a manutenção' });
+  acao(m, adm, 'reabrirAcao', { id: id2, motivo: 'Faltou a doca 4' });
+  acao(m, adm, 'cancelarAcao', { id: id2, motivo: 'Obra nova' });
+  const h2 = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((a) => a.id === id2).comentarios;
+  afirmar(h2.length === 4 && h2.every((c) => c.automatico === false), 'escritos: ' + JSON.stringify(h2.map((c) => [c.tipo, c.texto, c.automatico])));
+});
+
+caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail por marcado (o autor nao) com o comentario escapado e o link que abre a acao; o recado conta os avisados', () => {
+  const { m } = mundoComMencoes();
+  const ger = entrar(m, GERENTE, '5555');
+  const id = acao(m, ger, 'salvarAcao', { acao: 'Iluminação do Flow', descricao: 'Trocar as lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const e0 = m.emails.length;
+  const r = acao(m, ger, 'comentarAcao', { id, texto: '@Pedro Alves tem extintor <b>sobrando</b> & pronto?', situacao: 'Aguardando', depende: 'extintores do turno B',
+    mencoes: [PEDRO, DONO, GERENTE, PEDRO.toUpperCase()] });
+  afirmar(r.recado === 'Comentário registrado. 2 pessoas marcadas foram avisadas por e-mail.' && !r.avisoEmail, 'recado: ' + JSON.stringify(r));
+  const c = ctx(m);
+  const linha = c.listar('COMENTARIOS').find((x) => x.ACAO_ID === id);
+  afirmar(linha.MENCOES === PEDRO + ',' + DONO, 'MENCOES (sem repetir e sem o autor): ' + linha.MENCOES);
+  afirmar(c.obter('ACOES', id).MARCADOS === PEDRO + ',' + DONO && c.obter('ACOES', id).ANDAMENTO === 'Aguardando', 'MARCADOS: ' + c.obter('ACOES', id).MARCADOS);
+  const mails = m.emails.slice(e0);
+  afirmar(mails.map((e) => e.to).sort().join() === [DONO, PEDRO].sort().join(), 'um e-mail por marcado: ' + mails.map((e) => e.to).join());
+  const mp = mails.find((e) => e.to === PEDRO), md = mails.find((e) => e.to === DONO);
+  afirmar(mp.subject === 'João Lima marcou você numa ação: Iluminação do Flow', 'assunto: ' + mp.subject);
+  afirmar(/&lt;b&gt;sobrando&lt;\/b&gt; &amp; pronto\?/.test(mp.htmlBody) && !/<b>sobrando/.test(mp.htmlBody), 'comentario escapado');
+  afirmar(/João Lima<\/b> \(Gerente\) marcou você num comentário do Plano de Ação/.test(mp.htmlBody) && /Trocar as lâmpadas/.test(mp.htmlBody) &&
+    /extintores do turno B/.test(mp.htmlBody) && /Aguardando/.test(mp.htmlBody), 'corpo com a acao: ' + mp.htmlBody.slice(0, 300));
+  afirmar(new RegExp('[?&]tela=acoes&acao=' + id + '$').test(linkDoEmail(mp)) && />Abrir a ação no GSL</.test(mp.htmlBody), 'link: ' + linkDoEmail(mp));
+  afirmar(/passou a acompanhar/.test(mp.htmlBody) && !/passou a acompanhar/.test(md.htmlBody), 'so quem nao via a acao recebe o "passou a acompanhar"');
+  const a = tela(m, ger, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
+  afirmar(JSON.stringify(a.comentarios[0].mencoes) === JSON.stringify([{ email: PEDRO, nome: 'Pedro Alves' }, { email: DONO, nome: a.comentarios[0].mencoes[1].nome }]) &&
+    a.marcados.map((x) => x.nome).join() === a.comentarios[0].mencoes.map((x) => x.nome).join(), 'nomes do servidor: ' + JSON.stringify([a.comentarios[0].mencoes, a.marcados]));
+  // Limpeza: o assunto diz "da limpeza", o link abre a Limpeza e o local vai no corpo
+  const idL = acao(m, ger, 'salvarAcaoLimpeza', { acao: 'Banheiro sem papel', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE], zona: 'Z7', local: 'Banheiro da central' }).id;
+  const rl = acao(m, ger, 'comentarAcaoLimpeza', { id: idL, texto: '@Sueli Ramos pode repor?', mencoes: [SUP] });
+  afirmar(rl.recado === 'Comentário registrado. 1 pessoa marcada foi avisada por e-mail.', 'recado limpeza: ' + rl.recado);
+  const ml = m.emails.slice(-1)[0];
+  afirmar(ml.to === SUP && ml.subject === 'João Lima marcou você numa ação da limpeza: Banheiro sem papel' && /Plano de Ação da Limpeza CD/.test(ml.htmlBody) &&
+    /Z7 · Banheiro da central/.test(ml.htmlBody) && new RegExp('[?&]tela=limpeza&acao=' + idL + '$').test(linkDoEmail(ml)), 'e-mail da limpeza: ' + ml.subject + ' ' + linkDoEmail(ml));
+});
+
+caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordenador na Limpeza, so de outra filial, inativo, sem cadastro), recusa o comentario inteiro — nada gravado, enviado ou subido', () => {
+  const { m, adm } = mundoComMencoes();
+  acao(m, adm, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO' } });
+  acao(m, adm, 'salvarUsuario', { email: 'davi@bartofil.com.br', nome: 'Davi Souza', perfil: 'COORDENADOR', turno: 'C', filiais: 'SSA', papel: 'Coord' });
+  acao(m, adm, 'salvarUsuario', { email: 'ines@bartofil.com.br', nome: 'Inês Prado', perfil: 'COORDENADOR', turno: 'C', filiais: '*', papel: 'Coord', ativo: false });
+  const idC = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const idL = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro sem papel', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], zona: 'Z7' }).id;
+  const n0 = ctx(m).listar('COMENTARIOS').length, e0 = m.emails.length, d0 = m.arquivos.size;
+  const recusa = (nome, id, mencoes) => erroDe(() => acao(m, adm, nome, { id, texto: 'Vejam isto', mencoes, fotos: [foto(1)] }));
+  const casos = [
+    ['comentarAcaoLimpeza', idL, [COORD], 'Não dá para marcar quem não abre o Plano de Ação da Limpeza nesta filial: Maria Souza.'],
+    ['comentarAcao', idC, ['davi@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Davi Souza.'],
+    ['comentarAcao', idC, [PEDRO, 'ines@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Inês Prado.'],
+    ['comentarAcao', idC, ['fulano.tal@bartofil.com.br'], 'Não dá para marcar quem não abre o Plano de Ação nesta filial: Fulano Tal.'],
+    ['comentarAcao', idC, Array.from({ length: 11 }, (x, i) => 'p' + i + '@bartofil.com.br'), 'Marque no máximo 10 pessoas por comentário.']
+  ];
+  casos.forEach(([nome, id, mencoes, msg]) => {
+    const e = recusa(nome, id, mencoes);
+    afirmar(e.slice(-msg.length) === msg, nome + ' ' + mencoes.join() + ': ' + e);
+  });
+  const c = ctx(m);
+  afirmar(c.listar('COMENTARIOS').length === n0 && m.emails.length === e0 && m.arquivos.size === d0, 'nada gravado, enviado ou subido');
+  afirmar(!c.obter('ACOES', idC).MARCADOS && !c.obter('ACOES', idL).MARCADOS, 'ninguem marcado');
+});
+
+caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em aberto, bolinha e foto) e a responder — sem concluir nem mudar a situacao; "Sob sua responsabilidade" nao muda; editar a acao mantem os marcados', () => {
+  const { m, adm } = mundoComMencoes();
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1)] }).id;
+  const outra = acao(m, adm, 'salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const pedro = entrar(m, PEDRO, '2222');
+  afirmar(!tela(m, pedro, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.id === id), 'antes da mencao o Pedro nao ve a acao da Maria');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id, texto: 'oi' }))), 'antes da mencao nao comenta');
+  const antes = tela(m, pedro, 'acoes').contagens;
+  acao(m, adm, 'comentarAcao', { id, texto: '@Pedro Alves tem extintor sobrando?', situacao: 'Aguardando', depende: 'extintores', mencoes: [PEDRO] });
+  const d = tela(m, pedro, 'acoes');
+  const a = d.lista.find((x) => x.id === id);
+  afirmar(a && a.marcadosEmails.join() === PEDRO && a.marcados[0].nome === 'Pedro Alves', 've a acao como marcado: ' + JSON.stringify(a && a.marcados));
+  afirmar(!d.lista.some((x) => x.id === outra), 'a outra acao da Maria continua fora');
+  afirmar(d.contagens.minhas === antes.minhas && d.contagens.abertas === antes.abertas + 1, 'contagens: ' + JSON.stringify([antes, d.contagens]));
+  afirmar(acao(m, pedro, 'pendencias').pendencias.calendario.abertas === d.contagens.abertas, 'a bolinha continua igual ao Em aberto');
+  afirmar(acao(m, pedro, 'fotoAcao', { id, arquivo: a.fotos[0].id }).dados === PNG_1x1, 've a foto da acao');
+  afirmar(/Só o responsável/.test(erroDe(() => acao(m, pedro, 'concluirAcao', { id }))), 'nao conclui pelo botao');
+  const r = acao(m, pedro, 'comentarAcao', { id, texto: 'Tenho dois, mando amanhã', situacao: 'Concluída', depende: 'nada' });
+  afirmar(r.recado === 'Comentário registrado.', 'responde: ' + r.recado);
+  const depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
+  afirmar(depois.situacao === 'PENDENTE' && depois.andamento === 'Aguardando' && depois.depende === 'extintores', 'a situacao fica com os responsaveis: ' + JSON.stringify([depois.situacao, depois.andamento, depois.depende]));
+  const ult = depois.comentarios.slice(-1)[0];
+  afirmar(ult.autor === PEDRO && ult.tipo === 'COMENTARIO' && !ult.situacao && !ult.depende, 'registro do marcado: ' + JSON.stringify(ult));
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD] });
+  afirmar(ctx(m).obter('ACOES', id).MARCADOS === PEDRO && tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'editar a acao mantem o marcado');
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, PEDRO] });
+  afirmar(!tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id).marcados.length, 'virou responsavel: sai de "Marcados" (sem repetir no cartao)');
+});
+
+caso('marcar pessoa: quem ja via tudo (gestao, CONSULTA) entra em MARCADOS sem o "passou a acompanhar"; a CONSULTA passa a responder so naquela acao; a lista de pessoas diz quem ja ve todas', () => {
+  const { m, adm } = mundoComMencoes();
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const outra = acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const pessoas = tela(m, adm, 'acoes').pessoas;
+  const ve = (e) => (pessoas.find((p) => p.email === e) || {}).veTodas;
+  afirmar(ve(GERENTE) === true && ve(CONSULTA) === true && ve(DONO) === true && ve(PEDRO) === false && ve(COORD) === false, 'veTodas: ' + JSON.stringify(pessoas.map((p) => [p.email, p.veTodas])));
+  const carla = entrar(m, CONSULTA, '7777');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'oi' }))), 'a CONSULTA nao comentava');
+  const e0 = m.emails.length;
+  acao(m, entrar(m, COORD, '1234'), 'comentarAcao', { id, texto: '@Carla Dias @João Lima confere na auditoria?', mencoes: [CONSULTA, GERENTE] });
+  const mails = m.emails.slice(e0);
+  afirmar(mails.length === 2 && mails.every((e) => !/passou a acompanhar/.test(e.htmlBody)), 'sem "passou a acompanhar": ' + mails.map((e) => e.to).join());
+  afirmar(ctx(m).obter('ACOES', id).MARCADOS === CONSULTA + ',' + GERENTE, 'MARCADOS: ' + ctx(m).obter('ACOES', id).MARCADOS);
+  afirmar(acao(m, carla, 'comentarAcao', { id, texto: 'Conferido' }).recado === 'Comentário registrado.', 'a CONSULTA responde');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
+});
+
+caso('marcar pessoa: o e-mail recusado nao desfaz o comentario — volta o avisoEmail (tambem pela reserva por POST); o recado conta so quem recebeu', () => {
+  const { m, adm } = mundoComMencoes();
+  acao(m, adm, 'salvarUsuario', { email: 'joana.invalido@bartofil.com.br', nome: 'Joana Prado', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const r = acao(m, adm, 'comentarAcao', { id, texto: '@Joana Prado @Pedro Alves vejam', mencoes: ['joana.invalido@bartofil.com.br', PEDRO] });
+  afirmar(/^Comentário registrado, mas o aviso por e-mail não saiu para: joana\.invalido@bartofil\.com\.br \(/.test(r.avisoEmail || ''), 'avisoEmail: ' + r.avisoEmail);
+  afirmar(r.recado === 'Comentário registrado. 1 pessoa marcada foi avisada por e-mail.', 'recado: ' + r.recado);
+  const c = ctx(m);
+  afirmar(c.listar('COMENTARIOS').some((x) => x.ACAO_ID === id && x.MENCOES === 'joana.invalido@bartofil.com.br,' + PEDRO) &&
+    c.obter('ACOES', id).MARCADOS === 'joana.invalido@bartofil.com.br,' + PEDRO, 'o comentario e os marcados ficaram');
+  afirmar(m.emails.some((e) => e.to === PEDRO && /marcou você/.test(e.subject)), 'o outro recebeu');
+  // a mesma gravacao pela reserva (canal barrado): o avisoEmail chega na pagina
+  const pg = paginaPost(m, { t: adm.t, filial: adm.f, tela: 'acoes', acao: 'comentarAcao', idem: '11111111-2222-4333-8444-555555555555',
+    ap: JSON.stringify({ id, texto: 'pela reserva', mencoes: ['joana.invalido@bartofil.com.br'] }) });
+  afirmar(pg.resultadoAcao && pg.resultadoAcao.ok && /não saiu para: joana\.invalido/.test(pg.resultadoAcao.avisoEmail) &&
+    pg.resultadoAcao.recado === 'Comentário registrado.', 'pela reserva: ' + JSON.stringify(pg.resultadoAcao));
+});
+
+caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas colunas na entrada e a mencao grava', () => {
+  const m = mundo(); const c = ctx(m);
+  const banco = m.planilhas.get(c.prop('ID_BANCO'));
+  [['ACOES', 'MARCADOS'], ['COMENTARIOS', 'MENCOES']].forEach(([aba, coluna]) => {
+    const a = banco.abas.find((x) => x.nome === aba);
+    const col = a.dados[0].indexOf(coluna);
+    afirmar(col !== -1, coluna + ' criada na instalacao');
+    a.dados.forEach((l) => l.splice(col, 1));
+  });
+  c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.9');
+  m.cache.clear();
+  const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
+  const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
+  afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.10', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
+  const c2 = ctx(m);
+  afirmar(c2.obter('ACOES', id).MARCADOS === GERENTE && c2.listar('COMENTARIOS')[0].MENCOES === GERENTE, 'a mencao gravou');
+});
+
+caso('marcar pessoa: pela porta do outro plano a acao "nao existe" — nada gravado nem enviado', () => {
+  const { m, adm } = mundoComMencoes();
+  const idL = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro sem papel', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], zona: 'Z7' }).id;
+  const e0 = m.emails.length;
+  const e = erroDe(() => acao(m, adm, 'comentarAcao', { id: idL, texto: '@João Lima', mencoes: [GERENTE] }));
+  afirmar(/Ação não encontrada/.test(e), 'porta do Calendario: ' + e);
+  afirmar(!ctx(m).listar('COMENTARIOS').length && !ctx(m).obter('ACOES', idL).MARCADOS && m.emails.length === e0, 'nada gravado nem enviado');
+});
+
+caso('link do e-mail de mencao: ?tela=acoes&acao=ID volta como acaoDepois (so tela de plano e ID valido); a entrada com o link (canal e formulario da reserva) traz o plano com os filtros dele', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321'); entrar(m, GERENTE, '5555');
+  afirmar(paginaGet(m, { tela: 'acoes', acao: 'ACO-MVFE5X6Y-0YD' }).acaoDepois === 'ACO-MVFE5X6Y-0YD', 'acoes');
+  afirmar(paginaGet(m, { tela: 'limpeza', acao: 'ACO-1A' }).acaoDepois === 'ACO-1A', 'limpeza');
+  afirmar(!paginaGet(m, { tela: 'calendario', acao: 'ACO-1A' }).acaoDepois, 'tela que nao e de plano');
+  afirmar(!paginaGet(m, { tela: 'acoes', acao: '<script>' }).acaoDepois && !paginaGet(m, { tela: 'acoes', acao: 'A'.repeat(41) }).acaoDepois, 'ID invalido');
+  afirmar(!paginaGet(m, { acao: 'ACO-1A' }).acaoDepois, 'sem tela');
+  // a acao do link pode estar concluida: o plano vem com todas, numa ida so
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Concluída antes do clique', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+  acao(m, adm, 'concluirAcao', { id });
+  const r = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '5555', '', '', '', 'acoes', '{"situacao":"TODAS"}').valor);
+  afirmar(r.telaEmbutida && r.telaEmbutida.params.situacao === 'TODAS' && r.telaEmbutida.resposta.dados.lista.some((a) => a.id === id), 'entrar: ' + JSON.stringify(r.telaEmbutida && r.telaEmbutida.params));
+  const pg = paginaPost(m, { email: GERENTE, pin: '5555', tela: 'acoes', p: '{"situacao":"TODAS"}' });
+  afirmar(pg.entrada === 'APP' && pg.telaEmbutida && pg.telaEmbutida.params.situacao === 'TODAS' && pg.telaEmbutida.resposta.dados.lista.some((a) => a.id === id),
+    'formulario da reserva: ' + JSON.stringify(pg.telaEmbutida && pg.telaEmbutida.params));
 });
 
 /* ------------------------------------------------------------------ */

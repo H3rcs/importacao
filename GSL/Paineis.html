@@ -254,8 +254,8 @@ function pintarFiliais(r) {
       <div class="cartao-titulo">Como funciona</div>
       <div class="pn-grade tres">
         <div><span class="pn-chip ok">Ativo</span><p class="dica">Aparece para todo mundo que tem o nível de acesso liberado para ele.</p></div>
-        <div><span class="pn-chip atencao">Oculto</span><p class="dica">Só o administrador vê. Bom para montar e testar antes de mostrar para a equipe.</p></div>
-        <div><span class="pn-chip neutro">Desativado</span><p class="dica">Ninguém vê. Os dados continuam guardados — é só voltar para Ativo.</p></div>
+        <div><span class="pn-chip atencao">Oculto</span><p class="dica">Só o administrador vê, com a etiqueta oculto. Bom para montar e testar (e ligar a planilha) antes de mostrar para a equipe.</p></div>
+        <div><span class="pn-chip neutro">Desativado</span><p class="dica">Some do menu de todos, inclusive do administrador. Os dados continuam guardados — é só voltar para Ativo.</p></div>
       </div>
     </div>
     <div class="pn-grade duas">
@@ -325,7 +325,7 @@ function formFilial(codigo) {
       </div>
       <p class="dica">O código (${esc(f.codigo)}) não muda. Os painéis se ajustam direto no cartão da filial.</p>`, `
       <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade'),paineis:${esc(JSON.stringify(f.paineis))}},'Filial salva').catch(()=>{})">Salvar</button>`);
+      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade')},'Filial salva').catch(()=>{})">Salvar</button>`);
   }
   abrirJanela('Nova filial', `
     <p class="dica" style="margin:0 0 14px">O GSL cria uma planilha de banco só para esta filial, na mesma pasta
@@ -360,23 +360,9 @@ function criarFilial() {
   document.querySelectorAll('.fl-painel').forEach((c) => { if (c.checked) paineis[c.value] = val('fl-estado-' + c.value); });
   if (!Object.keys(paineis).length) return avisar('Marque pelo menos um painel.', true);
   avisar('Criando o banco da filial — pode levar alguns segundos…');
+  // A lista de filiais da sessao (e o "Trocar filial") vem em dia com a resposta (aplicarMenu, no App).
   agir('salvarFilial', { codigo: val('fl-codigo'), nome: val('fl-nome'), cidade: val('fl-cidade'),
-    copiarDe: val('fl-copiar'), paineis: paineis }, 'Filial criada').then(atualizarFiliaisDaSessao).catch(() => {});
-}
-
-/* A lista de filiais da barra lateral e da troca vem da sessao; depois de
-   criar ou mudar uma filial ela precisa ser relida. */
-async function atualizarFiliaisDaSessao() {
-  try {
-    const s = await chamarJSON('abrirFilial', ctx());
-    if (s && s.ok && s.entrada === 'APP') {
-      SESSAO.filiais = s.filiais; SESSAO.modulos = s.modulos; SESSAO.telas = s.telas;
-      const caixa = el('filial-atual');
-      if (caixa && s.filiais.length > 1 && caixa.innerHTML.indexOf('Trocar') === -1) {
-        caixa.insertAdjacentHTML('beforeend', '<button class="botao-texto" onclick="trocarFilial()">Trocar filial</button>');
-      }
-    }
-  } catch (e) { /* a proxima abertura corrige */ }
+    copiarDe: val('fl-copiar'), paineis: paineis }, 'Filial criada').catch(() => {});
 }
 
 /* =====================================================================
@@ -1032,6 +1018,7 @@ function pintarLimpeza(r) {
     ' produto(s) no estoque' + (repor ? ' · ' + repor + ' para repor' : '');
   const abas = [['gestao', 'Gestão'], ['plano', 'Plano de Ação'], ['estoque', 'Estoque'], ['movimentos', 'Movimentações']]
     .concat(d.estoque.permissoes.cadastrar ? [['inventario', 'Inventário']] : []);
+  if (ACAO_DO_LINK) ABA_LP = 'plano';                // link do e-mail de mencao: a acao abre na aba do plano
   if (!abas.some((a) => a[0] === ABA_LP)) ABA_LP = 'gestao';
   el('pagina').innerHTML = pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
   pintarAbaLP(d);
@@ -1061,7 +1048,7 @@ function pintarAbaLP(d) {
   EST = EST_LP; PLANO = PLANO_LP;
   lpBotoesTopo(d);
   try {
-    if (ABA_LP === 'plano') { alvo.innerHTML = planoHtml(d.plano); return; }
+    if (ABA_LP === 'plano') { alvo.innerHTML = planoHtml(d.plano); abrirAcaoDoLink(); return; }
     if (ABA_LP === 'gestao') { alvo.innerHTML = lpGestao(d); return; }
     if (!d.estoque.itens.length && ABA_LP !== 'movimentos') { alvo.innerHTML = lpEstoqueVazio(d); return; }
     if (ABA_LP === 'estoque') alvo.innerHTML = estItens(d.estoque);
@@ -1106,7 +1093,7 @@ function lpGestao(d) {
           <button class="botao-texto" onclick="trocarAbaLP('plano')">Abrir o plano →</button></div>
         ${vencem.length ? `<table><tbody>${vencem.map((a) => `<tr class="${a.status === 'Atrasada' ? 'lp-atrasada' : ''}">
           <td style="white-space:nowrap"><strong>${esc(a.prazo || '—')}</strong><div class="lp-sub">${planoPrazoTexto(a)}</div></td>
-          <td><strong>${esc(a.acao)}</strong><div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
+          <td><strong>${esc(a.acao)}</strong> ${seloComentarios(a, podeComentarAcao(a, pl.permissoes))}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
           <td>${a.criticidade ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
           : '<div class="vazio">Nenhuma ação em aberto. 👍</div>'}
       </div>

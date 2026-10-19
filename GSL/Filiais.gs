@@ -17,7 +17,10 @@
  */
 
 /* Os paineis que podem ir para uma filial. Configuracao nao entra: ela
-   existe em toda filial, para quem tem permissao. */
+   existe em toda filial, para quem tem permissao.
+   Painel novo numa versao futura: a migracao tem que liga-lo na principal
+   (adicionarPaineisNovosNaPrincipal_), senao ele nasce fora de todas as
+   filiais e nem o administrador o ve. */
 const PAINEIS = [
   { id: 'calendario',   nome: 'Calendário',        frase: 'Atividades do mês, entregas e plano de ação.' },
   { id: 'assiduidade',  nome: 'Assiduidade',       frase: 'Faltas, atestados e desempenho a partir da folha do RH.' },
@@ -31,7 +34,7 @@ const PAINEIS = [
 
 const PAINEL_ATIVO = 'ATIVO';
 const PAINEL_OCULTO = 'OCULTO';           // so o administrador ve — para montar e testar
-const PAINEL_DESATIVADO = 'DESATIVADO';   // ninguem ve; os dados continuam guardados
+const PAINEL_DESATIVADO = 'DESATIVADO';   // ninguem ve, nem o administrador; os dados continuam guardados
 const ESTADOS_PAINEL = [PAINEL_ATIVO, PAINEL_OCULTO, PAINEL_DESATIVADO];
 
 /*
@@ -236,14 +239,17 @@ function estadoDoPainel(idPainel) {
   return (f && f.paineis && f.paineis[idPainel]) || '';
 }
 
+/*
+ * Ativo: todos com o nivel liberado. Oculto: so o administrador (com a
+ * etiqueta "oculto"). Desativado ou fora da filial: ninguem, nem ele (19/10)
+ * — antes o ADMIN via todos e o painel desativado nao saia do menu dele.
+ * Ele nao fica trancado: Filiais e paineis e do modulo config (nunca e
+ * painel), e permissoesDe('ADMIN') nao depende da tabela PERFIS.
+ */
 function painelVisivel(usuario, idPainel) {
   const estado = estadoDoPainel(idPainel);
   if (estado === PAINEL_ATIVO) return true;
-  // O administrador ve todos os paineis em toda filial (4.2.2): os que nao
-  // estao ativos aparecem para ele marcados como ocultos, para montar e
-  // ligar. Antes um painel que nunca tinha sido ligado na filial (banco
-  // antigo) sumia ate para o ADMIN — e ele nao tinha como achar.
-  return ehAdministrador(usuario);
+  return estado === PAINEL_OCULTO && ehAdministrador(usuario);
 }
 
 /* ------------------------------------------------------------------ */
@@ -367,21 +373,14 @@ function acaoSalvarFilial(usuario, params) {
   exigirCapacidade(usuario, 'GERIR_FILIAIS');
   const nome = String(params.nome || '').trim();
   const cidade = String(params.cidade || '').trim();
-  const paineis = {};
-  const pedidos = params.paineis || {};
-  PAINEIS.forEach(function (p) {
-    const e = String(pedidos[p.id] || '').toUpperCase().trim();
-    if (ESTADOS_PAINEL.indexOf(e) !== -1) paineis[p.id] = e;
-  });
   if (!nome) throw new Error('Informe o nome da filial (ex.: CD Salvador).');
 
-  // EDICAO
+  // EDICAO: so o nome e a cidade. Os paineis mudam um a um (acaoAlterarPainel): regravar a
+  // copia que a pagina tinha (outra aba, outro administrador) religava o painel recem-desligado.
   if (params.id) {
     const f = listarFiliais().filter(function (x) { return x.id === params.id; })[0];
     if (!f) throw new Error('Filial não encontrada.');
-    atualizar('FILIAIS', params.id, {
-      NOME: nome, CIDADE: cidade, PAINEIS: JSON.stringify(paineis)
-    }, usuario.email);
+    atualizar('FILIAIS', params.id, { NOME: nome, CIDADE: cidade }, usuario.email);
     limparCache('FILIAIS');
     esquecerFiliais();
     return { ok: true, invalidarTudo: true };
@@ -394,6 +393,12 @@ function acaoSalvarFilial(usuario, params) {
   }
   garantirFilialPrincipalGravada_();
   if (filialPorCodigo(codigo)) throw new Error('Já existe uma filial com o código ' + codigo + '.');
+  const paineis = {};
+  const pedidos = params.paineis || {};
+  PAINEIS.forEach(function (p) {
+    const e = String(pedidos[p.id] || '').toUpperCase().trim();
+    if (ESTADOS_PAINEL.indexOf(e) !== -1) paineis[p.id] = e;
+  });
   if (!Object.keys(paineis).length) throw new Error('Escolha pelo menos um painel para a filial.');
 
   const origem = String(params.copiarDe || '').toUpperCase().trim();
@@ -445,19 +450,31 @@ function acaoAlterarPainel(usuario, params) {
   garantirFilialPrincipalGravada_();
   const f = filialPorCodigo(params.codigo);
   if (!f) throw new Error('Filial não encontrada.');
-  const painel = String(params.painel || '').toLowerCase();
-  if (!PAINEIS.some(function (p) { return p.id === painel; })) throw new Error('Painel desconhecido.');
+  const painel = PAINEIS.filter(function (p) { return p.id === String(params.painel || '').toLowerCase(); })[0];
+  if (!painel) throw new Error('Painel desconhecido.');
   const estado = String(params.estado || '').toUpperCase().trim();
 
   const paineis = JSON.parse(JSON.stringify(f.paineis || {}));
-  if (estado === 'REMOVER' || !estado) delete paineis[painel];
-  else if (ESTADOS_PAINEL.indexOf(estado) !== -1) paineis[painel] = estado;
+  if (estado === 'REMOVER' || !estado) delete paineis[painel.id];
+  else if (ESTADOS_PAINEL.indexOf(estado) !== -1) paineis[painel.id] = estado;
   else throw new Error('Estado inválido.');
 
   atualizar('FILIAIS', f.id, { PAINEIS: JSON.stringify(paineis) }, usuario.email);
   limparCache('FILIAIS');
   esquecerFiliais();
-  return { ok: true, invalidarTudo: true };
+  // invalidarTudo: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
+  return { ok: true, invalidarTudo: true, recado: recadoDoPainel_(painel.nome, f.nome, paineis[painel.id] || '') };
+}
+
+/* O recado do clique: o painel, a filial e quem passa a ver. */
+function recadoDoPainel_(painel, filial, estado) {
+  const p = 'Painel ' + painel;
+  if (estado === PAINEL_ATIVO) return p + ' ativo em ' + filial + ': aparece para quem tem o nível liberado.';
+  if (estado === PAINEL_OCULTO) return p + ' oculto em ' + filial + ': só administradores veem, com a etiqueta oculto.';
+  if (estado === PAINEL_DESATIVADO) {
+    return p + ' desativado em ' + filial + ': saiu do menu de todos, inclusive do seu. Os dados continuam guardados.';
+  }
+  return p + ' fora de ' + filial + ': saiu do menu de todos.';
 }
 
 /** Liga ou desliga a filial inteira (some da escolha de entrada). */

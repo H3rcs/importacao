@@ -47,15 +47,24 @@ function dadosConfig(usuario) {
   };
   parametros.forEach(function (p) { p.grupo = grupo(p.chave); });
 
+  const rotinas = listar('ROTINAS');
+  const noCalendario = calendarioDasRotinas_(rotinas);
+
   return {
     setores: listar('SETORES').map(function (s) {
       return { id: s.ID, setor: s.SETOR, ativo: marcado(s.ATIVO) };
     }),
-    rotinas: listar('ROTINAS').map(function (r) {
-      return { id: r.ID, tipo: r.TIPO, atividade: r.ATIVIDADE, frequencia: r.FREQUENCIA,
-               dia: r.DIA, porTurno: marcado(r.POR_TURNO), exigeSetor: marcado(r.EXIGE_SETOR),
-               quantidade: r.QUANTIDADE, ativo: marcado(r.ATIVO) };
+    rotinas: rotinas.map(function (r) {
+      const regra = regraDaRotina_(r.FREQUENCIA, r.DIA, r.QUANTIDADE);
+      const cal = noCalendario[siglaDaRotina_(r)];
+      // pendentes e temAtividades: a confirmacao da tela e a trava da sigla, sem ir ao servidor.
+      return { id: r.ID, tipo: siglaDaRotina_(r), atividade: r.ATIVIDADE, frequencia: regra.FREQUENCIA,
+               dia: regra.DIA, porTurno: marcado(r.POR_TURNO), exigeSetor: marcado(r.EXIGE_SETOR),
+               quantidade: regra.QUANTIDADE, ativo: marcado(r.ATIVO),
+               pendentes: cal.pendentes, temAtividades: cal.temAtividades, problema: erroNaRegra_(regra) };
     }),
+    // Onde mudar uma rotina mexe nas atividades que ja existem (os textos da tela dizem quais meses).
+    mesesGerados: mesesGeradosDeHojeEmDiante_(),
     parametros: parametros.filter(function (p) { return p.grupo !== 'oculto'; }),
     parametrosTodos: parametros.map(function (p) { return { chave: p.chave, valor: p.valor }; }),
     arquivosRH: arquivosRH(),
@@ -127,40 +136,167 @@ function acaoSalvarSetor(usuario, params) {
 
 function acaoExcluirSetor(usuario, params) { return excluir('SETORES', params.id, usuario.email); }
 
-function acaoSalvarRotina(usuario, params) {
-  const campos = {
-    TIPO: String(params.tipo || '').toUpperCase().trim().substring(0, 3),
-    ATIVIDADE: String(params.atividade || '').trim(),
-    FREQUENCIA: String(params.frequencia || 'SEMANAL').toUpperCase().trim(),
-    DIA: params.dia,
-    POR_TURNO: params.porTurno ? 'SIM' : 'NAO',
-    EXIGE_SETOR: params.exigeSetor ? 'SIM' : 'NAO',
-    QUANTIDADE: params.quantidade || '',
-    ATIVO: params.ativo ? 'SIM' : 'NAO'
-  };
-  if (!campos.TIPO) throw new Error('Informe a sigla do tipo (3 letras) — ela entra no ID da atividade.');
-  if (!campos.ATIVIDADE) throw new Error('Descreva a atividade.');
-  // A sigla forma o ID da atividade (mes-semana-SIGLA-turno): duas rotinas
-  // com a mesma sigla na mesma semana viram UM ID e a segunda nunca nasce.
-  const mesmaSigla = listar('ROTINAS').filter(function (r) {
-    return String(r.TIPO || '').toUpperCase().trim() === campos.TIPO && String(r.ID) !== String(params.id || '');
-  })[0];
-  if (mesmaSigla) throw new Error('A sigla ' + campos.TIPO + ' já é da rotina "' + mesmaSigla.ATIVIDADE + '". Use outra sigla.');
-  if (campos.FREQUENCIA === 'SEMANAL' && ['1', '2', '3', '4', '5', '6', '7'].indexOf(String(campos.DIA || '').trim()) === -1) {
-    throw new Error('Rotina semanal: o "Quando" é o dia da semana em número — 1 (segunda) a 5 (sexta); 6 e 7 são sábado e domingo.');
-  }
-  if (campos.FREQUENCIA === 'MENSAL') {
-    const regra = String(campos.DIA || '').toUpperCase().trim();
-    const n = Number(regra);
-    if (['PRIMEIRA_SEGUNDA', 'ULTIMA_SEXTA'].indexOf(regra) === -1 && !(n >= 1 && n <= 31 && n === Math.floor(n))) {
-      throw new Error('Rotina mensal: o "Quando" é um dia de 1 a 31 (dia que o mês não tem vira o último dia do mês).');
-    }
-  }
-  return params.id ? atualizar('ROTINAS', params.id, campos, usuario.email)
-                   : { ok: true, id: inserir('ROTINAS', campos, usuario.email) };
+/*
+ * ROTINAS (19/10). O "Quando" era um campo de texto que pedia numero, e
+ * salvar so gravava a linha de ROTINAS: mudar o dia, desativar ou remover
+ * nao chegava nas atividades dos meses ja gerados. Agora a tela escolhe o dia
+ * em botoes, o servidor normaliza e confere a regra, e cada gravacao acerta o
+ * calendario na mesma trava (sincronizarRotina_, Calendario.gs).
+ * ajustarCalendario: false grava so a rotina — vale a partir do proximo mes gerado.
+ */
+const FREQUENCIAS_ROTINA = ['SEMANAL', 'MENSAL', 'AVULSA'];
+
+/* A regra como a planilha guarda: maiusculas, aparada, dia do mes sem zero a esquerda, vagas em numero. */
+function regraDaRotina_(frequencia, dia, quantidade) {
+  const freq = String(frequencia || '').toUpperCase().trim();
+  let d = freq === 'AVULSA' ? '' : String(dia == null ? '' : dia).toUpperCase().trim();
+  if (freq === 'MENSAL' && /^\d+$/.test(d)) d = String(Number(d));
+  return { FREQUENCIA: freq, DIA: d,
+           QUANTIDADE: freq === 'AVULSA' ? Number(String(quantidade == null ? '' : quantidade).trim()) : '' };
 }
 
-function acaoExcluirRotina(usuario, params) { return excluir('ROTINAS', params.id, usuario.email); }
+/* O que esta errado na regra ('' = nada). Tambem marca, na Configuracao, a rotina gravada a mao na planilha. */
+function erroNaRegra_(regra) {
+  const n = Number(regra.DIA), vagas = regra.QUANTIDADE;
+  if (FREQUENCIAS_ROTINA.indexOf(regra.FREQUENCIA) === -1) return 'Escolha como a rotina se repete: toda semana, todo mês ou vagas sem data.';
+  if (regra.FREQUENCIA === 'SEMANAL' && !/^[1-7]$/.test(regra.DIA)) return 'Escolha o dia da semana.';
+  if (regra.FREQUENCIA === 'MENSAL' && ['PRIMEIRA_SEGUNDA', 'ULTIMA_SEXTA'].indexOf(regra.DIA) === -1 &&
+      !(/^\d+$/.test(regra.DIA) && n >= 1 && n <= 31)) return 'Rotina mensal: escolha 1ª segunda, última sexta ou um dia de 1 a 31.';
+  if (regra.FREQUENCIA === 'AVULSA' && !(vagas >= 1 && vagas <= 10 && vagas === Math.floor(vagas))) return 'Rotina avulsa: informe de 1 a 10 vagas por mês.';
+  return '';
+}
+
+/* Os campos da rotina vindos da tela, normalizados e conferidos. */
+function camposDaRotina_(params) {
+  const campos = Object.assign({
+    TIPO: String(params.tipo || '').toUpperCase().trim(),
+    ATIVIDADE: String(params.atividade || '').trim(),
+    POR_TURNO: params.porTurno ? 'SIM' : 'NAO',
+    EXIGE_SETOR: params.exigeSetor ? 'SIM' : 'NAO',
+    ATIVO: params.ativo ? 'SIM' : 'NAO'
+  }, regraDaRotina_(params.frequencia, params.dia, params.quantidade));
+  if (!/^[A-Z0-9]{2,3}$/.test(campos.TIPO)) throw new Error('A sigla tem 2 ou 3 letras ou números (ela entra no código da atividade).');
+  if (campos.TIPO === SIGLA_AVULSA) throw new Error('A sigla AV é das atividades avulsas criadas no calendário. Use outra.');
+  if (!campos.ATIVIDADE) throw new Error('Descreva a atividade.');
+  const erro = erroNaRegra_(campos);
+  if (erro) throw new Error(erro);
+  return campos;
+}
+
+/*
+ * A sigla forma o ID da atividade (mes-semana-SIGLA-turno): duas rotinas com a
+ * mesma sigla viram UM ID e a segunda nunca nasce; e trocar a sigla de quem ja
+ * gerou dobrava o mes (IDs novos ao lado dos antigos).
+ */
+function conferirSigla_(sigla, antes) {
+  const mesma = listar('ROTINAS').filter(function (r) {
+    return siglaDaRotina_(r) === sigla && (!antes || String(r.ID) !== String(antes.ID));
+  })[0];
+  if (mesma) throw new Error('A sigla ' + sigla + ' já é da rotina "' + mesma.ATIVIDADE + '". Use outra sigla.');
+  const velha = siglaDaRotina_(antes);
+  if (velha && velha !== sigla && siglaTemAtividades_(velha)) {
+    throw new Error('A sigla não muda depois que a rotina gerou atividades — ela está no código delas. Crie uma rotina nova e desative esta.');
+  }
+}
+
+function acaoSalvarRotina(usuario, params) {
+  const campos = camposDaRotina_(params);
+  return comTrava(function () {
+    const antes = params.id ? obter('ROTINAS', params.id) : null;
+    if (params.id && !antes) throw new Error('Rotina não encontrada.');
+    conferirSigla_(campos.TIPO, antes);
+    const r = antes ? atualizar('ROTINAS', params.id, campos, usuario.email)
+                    : { ok: true, id: inserir('ROTINAS', campos, usuario.email) };
+    const nota = params.ajustarCalendario === false ? null : sincronizarRotina_(antes, campos, usuario.email);
+    return resultadoDaRotina_(r, antes, campos, nota);
+  });
+}
+
+/* Desativar / Ativar da lista: so o ATIVO muda (a tela nao reenvia os outros campos). */
+function acaoAlternarRotina(usuario, params) {
+  const ativar = params.ativo === true;
+  return comTrava(function () {
+    const antes = obter('ROTINAS', params.id);
+    if (!antes) throw new Error('Rotina não encontrada.');
+    const erro = ativar ? erroNaRegra_(regraDaRotina_(antes.FREQUENCIA, antes.DIA, antes.QUANTIDADE)) : '';
+    if (erro) throw new Error('Corrija a rotina em Editar antes de ativá-la: ' + erro);
+    const campos = { ATIVO: ativar ? 'SIM' : 'NAO' };
+    const depois = comCampos_(antes, campos);
+    const r = atualizar('ROTINAS', params.id, campos, usuario.email);
+    return resultadoDaRotina_(r, antes, depois, sincronizarRotina_(antes, depois, usuario.email));
+  });
+}
+
+/* Remover: as pendentes de hoje em diante saem do calendario (canceladas); o historico fica. */
+function acaoExcluirRotina(usuario, params) {
+  return comTrava(function () {
+    const antes = obter('ROTINAS', params.id);
+    if (!antes) throw new Error('Rotina não encontrada.');
+    const nota = sincronizarRotina_(antes, null, usuario.email);
+    return resultadoDaRotina_(excluir('ROTINAS', params.id, usuario.email), antes, null, nota);
+  });
+}
+
+/*
+ * O que volta para a tela: o recado com o que mudou no calendario e, quando
+ * o calendario mudou, invalidarTudo — sem ele o calendario abria primeiro a
+ * copia guardada (sem a mudanca) e parecia que nada tinha acontecido.
+ */
+function resultadoDaRotina_(r, antes, depois, nota) {
+  const mudou = !!nota && (nota.movidas + nota.canceladas + nota.criadas + nota.reativadas + nota.renomeadas > 0);
+  r.calendario = nota;
+  r.recado = nota ? recadoDaRotina_(antes, depois, nota)
+    : 'Rotina salva. As atividades já geradas não mudaram; vale a partir de ' + primeiroMesAGerar_() + '.';
+  // O "Exige setor" tambem esta no calendario (tiposComSetor).
+  r.invalidarTudo = mudou || marcado((antes || {}).EXIGE_SETOR) !== marcado((depois || {}).EXIGE_SETOR);
+  return r;
+}
+
+/* "1 criada" / "2 criadas": a quantidade com a palavra no singular ou no plural. */
+function quantos_(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
+
+/* "OUT 2026: 2 · NOV 2026: 4" — uma contagem do acerto, mes a mes. */
+function porMesDoAcerto_(nota, chave) {
+  return Object.keys(nota.porMes).filter(function (c) { return nota.porMes[c][chave]; })
+    .map(function (c) { return c + ': ' + nota.porMes[c][chave]; }).join(' · ');
+}
+
+/* " Ficaram como estavam: 1 entregue, 1 remarcada à mão." — so o que a mudanca alcancaria (de hoje em diante). */
+function ficaramComoEstavam_(m) {
+  const lista = [m.entregues && quantos_(m.entregues, 'entregue', 'entregues'),
+                 m.remarcadas && quantos_(m.remarcadas, 'remarcada à mão', 'remarcadas à mão'),
+                 m.agendadas && quantos_(m.agendadas, 'vaga já agendada', 'vagas já agendadas'),
+                 m.semanaPassou && m.semanaPassou + ' desta semana (o dia novo já passou)'].filter(Boolean);
+  return lista.length ? ' Ficaram como estavam: ' + lista.join(', ') + '.' : '';
+}
+
+/* "Rotina salva. No calendário: 6 mudaram para sexta · 1 cancelada · 1 criada." (+ o que ficou como estava) */
+function recadoDaRotina_(antes, depois, nota) {
+  const fim = ficaramComoEstavam_(nota.mantidas);
+  const canceladas = nota.canceladas ? ' ' + quantos_(nota.canceladas, 'atividade pendente cancelada', 'atividades pendentes canceladas') : '';
+  if (!depois) return 'Rotina removida.' + (canceladas ? canceladas + '.' : '') + fim;
+  const estava = !!antes && marcado(antes.ATIVO), esta = marcado(depois.ATIVO);
+  if (estava && !esta) return 'Rotina desativada.' + (canceladas ? canceladas + ' (' + porMesDoAcerto_(nota, 'canceladas') + ').' : '') + fim;
+  const voltaram = nota.reativadas + nota.criadas;
+  if (antes && !estava && esta && !nota.movidas && !nota.canceladas) {
+    return 'Rotina ativada.' + (voltaram ? ' ' + quantos_(voltaram, 'atividade de volta ao calendário.', 'atividades de volta ao calendário.') : '') + fim;
+  }
+  const inicio = (antes && !estava && esta) ? 'Rotina ativada.' : 'Rotina salva.';
+  // So nasceram (rotina nova, mes ja gerado): "2 criadas em OUT 2026 e 4 em NOV 2026 (de hoje em diante)."
+  if (nota.criadas && !nota.movidas && !nota.canceladas && !nota.reativadas && !nota.renomeadas) {
+    return inicio + ' No calendário: ' + Object.keys(nota.porMes).map(function (c, i) {
+      const q = nota.porMes[c].criadas;
+      return (i ? q : quantos_(q, 'criada', 'criadas')) + ' em ' + c;
+    }).join(' e ') + ' (de hoje em diante).' + fim;
+  }
+  const dia = String(depois.FREQUENCIA).toUpperCase() === 'SEMANAL' ? 'para ' + DIAS_DA_ROTINA[Number(depois.DIA)] : 'de dia';
+  const partes = [nota.movidas && nota.movidas + (nota.movidas === 1 ? ' mudou ' : ' mudaram ') + dia,
+                  nota.canceladas && quantos_(nota.canceladas, 'cancelada', 'canceladas'),
+                  nota.criadas && quantos_(nota.criadas, 'criada', 'criadas'),
+                  nota.reativadas && quantos_(nota.reativadas, 'voltou ao calendário', 'voltaram ao calendário'),
+                  nota.renomeadas && nota.renomeadas + ' com o nome novo'].filter(Boolean);
+  return inicio + (partes.length ? ' No calendário: ' + partes.join(' · ') + '.' : '') + fim;
+}
 
 /*
  * Salva um parametro. Antes exigia o ID da linha — se a linha ainda nao

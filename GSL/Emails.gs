@@ -237,6 +237,14 @@ function avisarValidacao(a, validacao, usuario) {
 
 function avisarSetorDefinido(a) {
   if (!a.setor) return;
+  // Outras rotinas com "Exige setor" (19/10): o aviso fala da atividade, nao do checklist da vistoria.
+  if (a.tipo !== 'VIS') {
+    enviar(emailsDoTurno(a), 'Setor definido — ' + a.atividade + ' (' + a.semana + '): ' + a.setor,
+      '<p>O gerente definiu o setor desta atividade:</p>' + bloco(a) +
+      '<p>Faça a atividade no setor <b>' + htmlSeguro(a.setor) + '</b> e anexe a entrega pelo sistema.</p>' +
+      rodapeLink('calendario'));
+    return;
+  }
   enviar(emailsDoTurno(a), 'Setor definido para a vistoria da ' + a.semana + ': ' + a.setor,
     '<p>O gerente definiu o setor da sua vistoria semanal:</p>' + bloco(a) +
     '<p>Imprima o checklist, faca a inspecao no setor <b>' + htmlSeguro(a.setor) +
@@ -407,18 +415,21 @@ function caixa(titulo, texto, corBarra, fundo) {
  * Botao do e-mail. Com `tela` (4.2.2), o link leva direto para a tela do
  * assunto (calendario, acoes...): depois do e-mail e do PIN, o sistema abre
  * nela em vez da tela inicial. O e-mail de uma filial leva para a filial.
+ * Com `acao` (19/10, o aviso de quem foi marcado num comentario), a tela do
+ * plano abre ja com o historico daquela acao.
  */
-function rodapeLink(tela) {
+function rodapeLink(tela, acao) {
   let url = urlDoApp_();       // respeita a propriedade URL_APP (ver Codigo.gs)
   const partes = [];
   try { if (!ehFilialPrincipal()) partes.push('filial=' + encodeURIComponent(filialAtual().codigo)); } catch (e) {}
   if (tela) partes.push('tela=' + encodeURIComponent(tela));
+  if (tela && acao) partes.push('acao=' + encodeURIComponent(acao));
   if (partes.length) url += '?' + partes.join('&');
   const nomes = { calendario: 'Abrir o Calendário no GSL', acoes: 'Abrir o Plano de Ação no GSL',
                   limpeza: 'Abrir a Limpeza CD no GSL' };
   return '<p style="margin-top:18px"><a href="' + url +
     '" style="background:' + COR_AZUL + ';color:#fff;padding:9px 16px;text-decoration:none;' +
-    'border-radius:6px;display:inline-block">' + (nomes[tela] || 'Abrir o GSL Bartofil') + '</a></p>';
+    'border-radius:6px;display:inline-block">' + (acao ? 'Abrir a ação no GSL' : (nomes[tela] || 'Abrir o GSL Bartofil')) + '</a></p>';
 }
 
 function emailsDoTurno(a) {

@@ -80,14 +80,16 @@ function hidratarAcao(r) {
   let dias = null;
   if (prazoISO) dias = diaNumISO(prazoISO) - hojeNum();
 
+  // Acao conjunta: RESPONSAVEL_EMAIL guarda um ou mais e-mails separados por virgula.
+  const responsaveis = emailsDaAcao_(r.RESPONSAVEL_EMAIL);
+
   return {
     id: String(r.ID || ''),
     acao: String(r.ACAO || '').trim(),
     descricao: String(r.DESCRICAO || '').trim(),
     responsavel: String(r.RESPONSAVEL || '').trim(),
-    // Acao conjunta: RESPONSAVEL_EMAIL guarda um ou mais e-mails separados por virgula.
-    responsaveisEmails: emailsDaAcao_(r.RESPONSAVEL_EMAIL),
-    responsavelEmail: emailsDaAcao_(r.RESPONSAVEL_EMAIL)[0] || '',
+    responsaveisEmails: responsaveis,
+    responsavelEmail: responsaveis[0] || '',
     turno: String(r.TURNO || '').trim(),
     origem: String(r.ORIGEM || '').trim(),
     prazo: formatarData(prazo),
@@ -108,7 +110,9 @@ function hidratarAcao(r) {
     local: String(r.LOCAL || '').trim(),
     criticidade: String(r.CRITICIDADE || '').trim(),
     abertaEm: isoDe_(r.ABERTA_EM) || isoDoCarimbo_(r.CRIADO_EM),
-    fotos: fotosDaCelula_(r.ANEXOS)
+    fotos: fotosDaCelula_(r.ANEXOS),
+    // Marcados num comentario (19/10): veem e respondem esta acao. Quem virou responsavel depois sai daqui.
+    marcadosEmails: emailsDaAcao_(r.MARCADOS).filter(function (e) { return responsaveis.indexOf(e) === -1; })
   };
 }
 
@@ -128,6 +132,10 @@ function ehDonoDaAcao_(acao, email) {
   return acao.responsaveisEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
 }
 
+function ehMarcadoNaAcao_(acao, email) {
+  return acao.marcadosEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
+}
+
 /*
  * As acoes de UM plano so com o que a linha tem (sem comentarios nem nomes).
  * E o que a contagem precisa: a bolinha do menu usa so isto; a tela usa isto
@@ -143,9 +151,12 @@ function listarAcoes(idPlano) {
   const plano = PLANOS[idPlano] ? idPlano : 'CALENDARIO';
   const coment = comentariosPorAcao_(origensDoPlano_(plano));
   const pessoas = pessoasPorEmail_();
+  // Marcados e mencoes vao com o nome do cadastro: a tela destaca o @Nome e lista os marcados (19/10).
+  const comNome = function (e) { return { email: e, nome: nomeDoEmail_(pessoas, e) }; };
   return acoesDoPlano_(plano).map(function (a) {
-    a.comentarios = coment[a.id] || [];
+    a.comentarios = (coment[a.id] || []).map(function (c) { c.mencoes = c.mencoes.map(comNome); return c; });
     a.criadoPorNome = nomeDoEmail_(pessoas, a.criadoPor);
+    a.marcados = a.marcadosEmails.map(comNome);
     return a;
   });
 }
@@ -177,13 +188,20 @@ function nomeDoEmail_(pessoas, email) {
 const ANDAMENTOS_ACAO = ['Em andamento', 'Aguardando', 'Concluída'];
 
 /*
+ * O registro que o sistema escreve sozinho ao concluir, reabrir ou cancelar
+ * sem texto. Nao e comentario de ninguem: o selo e o "Comentarios (N)" da
+ * tela nao contam (antes "Comentarios (1)" aparecia sem ninguem ter escrito).
+ */
+const TEXTOS_AUTOMATICOS = { CONCLUSAO: 'Ação concluída.', REABERTURA: 'Ação reaberta.', CANCELAMENTO: 'Ação cancelada.' };
+
+/*
  * Os comentarios das acoes da limpeza que vieram da tabela antiga (LP_ACOES)
  * continuam gravados com aquela ORIGEM — a acao manteve o mesmo ID ao passar
  * para o Plano de Acao, entao basta ler as duas origens.
  */
 function origensDoPlano_(idPlano) { return idPlano === 'LIMPEZA' ? ['ACOES', 'LP_ACOES'] : ['ACOES']; }
 
-/* { idDaAcao: [ {em, autor, nome, texto, situacao, depende, fotos}, ... mais antigo primeiro ] } */
+/* { idDaAcao: [ {em, autor, nome, texto, situacao, depende, fotos, mencoes, automatico}, ... mais antigo primeiro ] } */
 function comentariosPorAcao_(origens) {
   const aceitas = [].concat(origens || 'ACOES');
   const mapa = {};
@@ -192,15 +210,17 @@ function comentariosPorAcao_(origens) {
   linhas.forEach(function (c) {
     if (aceitas.indexOf(String(c.ORIGEM || '')) === -1) return;
     const id = String(c.ACAO_ID || '');
+    const tipo = String(c.TIPO || 'COMENTARIO').toUpperCase(), texto = String(c.TEXTO || '');
     (mapa[id] = mapa[id] || []).push({
       id: String(c.ID || ''), em: String(c.CRIADO_EM || ''),
       // Quem comentou: e-mail da SESSAO (nunca vem da tela), nome e funcao do cadastro.
       autor: String(c.AUTOR || c.CRIADO_POR || ''),
       nome: String(c.AUTOR_NOME || '') || nomeDaPessoa(String(c.AUTOR || c.CRIADO_POR || ''), ''),
       papel: String(c.AUTOR_PAPEL || ''),
-      tipo: String(c.TIPO || 'COMENTARIO').toUpperCase(),
-      texto: String(c.TEXTO || ''), situacao: String(c.SITUACAO || ''), depende: String(c.DEPENDE || ''),
-      fotos: fotosDaCelula_(c.ANEXOS)
+      tipo: tipo, texto: texto, situacao: String(c.SITUACAO || ''), depende: String(c.DEPENDE || ''),
+      fotos: fotosDaCelula_(c.ANEXOS),
+      mencoes: emailsDaAcao_(c.MENCOES),                    // quem foi marcado neste comentario (19/10)
+      automatico: TEXTOS_AUTOMATICOS[tipo] === texto
     });
   });
   Object.keys(mapa).forEach(function (k) {
@@ -230,29 +250,87 @@ function autorDoComentario_(usuario) {
   return { email: email, nome: nome, papel: papel };
 }
 
-/* tipo: COMENTARIO · CONCLUSAO · REABERTURA · CANCELAMENTO · STATUS. fotos: metadados ja gravados no Drive. */
-function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende, tipo, fotos) {
+/*
+ * tipo: COMENTARIO · CONCLUSAO · REABERTURA · CANCELAMENTO · STATUS. fotos: metadados ja gravados no Drive.
+ * mencoes: e-mails de quem foi marcado no comentario (19/10). Devolve o autor (o aviso de mencao usa).
+ */
+function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende, tipo, fotos, mencoes) {
   const autor = autorDoComentario_(usuario);
   inserir('COMENTARIOS', {
     ORIGEM: origem, ACAO_ID: idAcao, TEXTO: texto, SITUACAO: situacao || '', DEPENDE: depende || '',
     AUTOR: autor.email, AUTOR_NOME: autor.nome, AUTOR_PAPEL: autor.papel, TIPO: tipo || 'COMENTARIO',
-    ANEXOS: fotos && fotos.length ? JSON.stringify(fotos) : ''
+    ANEXOS: fotos && fotos.length ? JSON.stringify(fotos) : '',
+    MENCOES: (mencoes || []).join(',')
   }, autor.email);
+  return autor;
+}
+
+/* Responsavel pela acao ou quem gere o plano: conclui, muda a situacao e comenta. */
+function ehResponsavelOuGestor_(plano, usuario, registro) {
+  const eu = String(usuario.email || '').toLowerCase().trim();
+  return emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) !== -1 || podeFazer(usuario, plano.cap);
 }
 
 /* So os responsaveis pela acao ou quem gere o plano. */
 function exigirResponsavelOuGestor_(plano, usuario, registro, mensagem) {
+  if (!ehResponsavelOuGestor_(plano, usuario, registro)) throw new Error(mensagem);
+}
+
+/* Comentar: os responsaveis, a gestao e quem foi marcado num comentario desta acao (19/10). */
+function exigirQuemComenta_(plano, usuario, registro) {
   const eu = String(usuario.email || '').toLowerCase().trim();
-  if (emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) === -1 && !podeFazer(usuario, plano.cap)) {
-    throw new Error(mensagem);
+  if (!ehResponsavelOuGestor_(plano, usuario, registro) && emailsDaAcao_(registro.MARCADOS).indexOf(eu) === -1) {
+    throw new Error('Só os responsáveis pela ação, quem foi marcado nela ou a gestão podem comentar.');
   }
+}
+
+const MENCOES_POR_COMENTARIO = 10;
+
+/*
+ * MARCAR PESSOA (19/10). Quem foi marcado no comentario, conferido antes de
+ * tudo: so quem abre o modulo do plano nesta filial (a mesma lista do campo
+ * Responsaveis). Fora dela o comentario inteiro e recusado — a tela so
+ * oferece essa lista. Devolve as pessoas como pessoasParaAcao as da
+ * (veTodas: ja enxergava a acao antes de ser marcada). Marcar a si mesmo nao conta.
+ */
+function mencoesDoPedido_(plano, usuario, params) {
+  const eu = String(usuario.email || '').toLowerCase().trim();
+  const emails = emailsDaAcao_([].concat(params.mencoes || []).join(','))
+    .filter(function (e) { return e !== eu; });
+  if (emails.length > MENCOES_POR_COMENTARIO) throw new Error('Marque no máximo ' + MENCOES_POR_COMENTARIO + ' pessoas por comentário.');
+  if (!emails.length) return [];
+  const podem = pessoasParaAcao(plano);
+  const achar = function (e) { return podem.filter(function (p) { return p.email === e; })[0]; };
+  const fora = emails.filter(function (e) { return !achar(e); });
+  if (fora.length) {
+    const conhecidos = pessoasPorEmail_();
+    throw new Error('Não dá para marcar quem não abre o ' + plano.nome + ' nesta filial: ' +
+      fora.map(function (e) { return nomeDoEmail_(conhecidos, e); }).join(', ') + '.');
+  }
+  return emails.map(achar);
+}
+
+/* O que o comentario de quem cuida da acao muda nela: o andamento, o "depende de" ou a conclusao. */
+function camposDoComentario_(usuario, atual, texto, situacao, depende) {
+  const campos = {};
+  if (situacao && situacao !== 'Concluída') campos.ANDAMENTO = situacao;
+  if (situacao !== 'Concluída') campos.DEPENDE = situacao === 'Em andamento' && !depende ? '' : depende;
+  if (situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA) {
+    campos.SITUACAO = ACOES_SITUACAO.CONCLUIDA; campos.CONCLUIDO_EM = agoraTexto(); campos.CONCLUIDO_POR = usuario.email;
+    campos.OBSERVACAO = texto; campos.ANDAMENTO = 'Concluída'; campos.DEPENDE = '';
+  }
+  return campos;
 }
 
 /*
  * Comentar uma acao do Plano: quem avancou registra o que fez, em que
  * situacao a acao ficou e do que ela depende para concluir — com foto, se
- * quiser. Pode comentar quem e responsavel por ela ou quem gere o plano.
+ * quiser. Pode comentar quem e responsavel por ela, quem gere o plano e
+ * quem foi marcado num comentario dela (19/10) — este so comenta: a
+ * situacao e o "depende de" ficam com os responsaveis e a gestao.
  * "Concluída" conclui a acao (mesma regra do botao Concluir).
+ * Marcar pessoas (mencoes): elas passam a ver e responder a acao (MARCADOS,
+ * gravado na trava) e recebem um e-mail cada uma, depois da trava.
  */
 function comentarAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
@@ -262,35 +340,60 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
   if (!texto) throw new Error('Escreva o comentário: o que avançou, o que foi feito.');
   if (situacao && ANDAMENTOS_ACAO.indexOf(situacao) === -1) throw new Error('Situação inválida: ' + situacao);
   const fotos = fotosDoPedido_(params);
+  const marcadas = mencoesDoPedido_(plano, usuario, params);
+  const emailDe = function (p) { return p.email; };
 
   // Confere ANTES de subir as fotos (o Drive e lento e fica fora da trava)...
   const antes = acaoDoPlano_(plano, id);
-  exigirResponsavelOuGestor_(plano, usuario, antes, 'Só os responsáveis pela ação (ou a gestão) podem comentar nela.');
+  exigirQuemComenta_(plano, usuario, antes);
   if (String(antes.SITUACAO || '').toUpperCase().trim() === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
   const gravadas = gravarFotos_(usuario, id, fotos);
 
   // ...e de novo na trava, que e onde vale: a tela pode estar velha.
+  let feito;
   try {
-    return comTrava(function () {
+    feito = comTrava(function () {
       const registro = acaoDoPlano_(plano, id);
-      exigirResponsavelOuGestor_(plano, usuario, registro, 'Só os responsáveis pela ação (ou a gestão) podem comentar nela.');
+      exigirQuemComenta_(plano, usuario, registro);
       const atual = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
       if (atual === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
-      const campos = {};
-      if (situacao && situacao !== 'Concluída') campos.ANDAMENTO = situacao;
-      if (situacao !== 'Concluída') campos.DEPENDE = situacao === 'Em andamento' && !depende ? '' : depende;
-      if (situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA) {
-        campos.SITUACAO = ACOES_SITUACAO.CONCLUIDA; campos.CONCLUIDO_EM = agoraTexto(); campos.CONCLUIDO_POR = usuario.email;
-        campos.OBSERVACAO = texto; campos.ANDAMENTO = 'Concluída'; campos.DEPENDE = '';
-      }
+      const cuida = ehResponsavelOuGestor_(plano, usuario, registro);
+      const campos = cuida ? camposDoComentario_(usuario, atual, texto, situacao, depende) : {};
+      const concluiu = campos.SITUACAO === ACOES_SITUACAO.CONCLUIDA;
+      // Marcada que ainda nao era responsavel nem marcada passa a ver e a responder a acao.
+      const jaMarcados = emailsDaAcao_(registro.MARCADOS), responsaveis = emailsDaAcao_(registro.RESPONSAVEL_EMAIL);
+      const novas = marcadas.filter(function (p) { return jaMarcados.indexOf(p.email) === -1 && responsaveis.indexOf(p.email) === -1; });
+      if (novas.length) campos.MARCADOS = jaMarcados.concat(novas.map(emailDe)).join(',');
       // A acao primeiro, o historico depois: se a acao nao gravar, nada fica apontando para fotos jogadas fora.
       if (Object.keys(campos).length) atualizar('ACOES', id, campos, usuario.email);
-      gravarComentario_(usuario, 'ACOES', id, texto, situacao, situacao === 'Concluída' ? '' : depende,
-        situacao === 'Concluída' && atual !== ACOES_SITUACAO.CONCLUIDA ? 'CONCLUSAO' : 'COMENTARIO', gravadas);
-      return { recado: (situacao === 'Concluída' ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.') +
-        (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') };
+      const autor = gravarComentario_(usuario, 'ACOES', id, texto, cuida ? situacao : '',
+        cuida && situacao !== 'Concluída' ? depende : '', concluiu ? 'CONCLUSAO' : 'COMENTARIO', gravadas, marcadas.map(emailDe));
+      return { autor: autor, acao: Object.assign({}, registro, campos), concluiu: concluiu,
+               passaramAVer: novas.filter(function (p) { return !p.veTodas; }).map(emailDe) };
     });
   } catch (e) { jogarFotosFora_(gravadas); throw e; }
+
+  const falhas = avisarMarcadas_(plano, feito, texto, marcadas);
+  const avisadas = marcadas.length - falhas.length;
+  const r = { recado: (feito.concluiu ? 'Comentário registrado e ação concluída.' : 'Comentário registrado.') +
+    (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') +
+    (avisadas === 1 ? ' 1 pessoa marcada foi avisada por e-mail.' : avisadas > 1 ? ' ' + avisadas + ' pessoas marcadas foram avisadas por e-mail.' : '') };
+  if (falhas.length) r.avisoEmail = 'Comentário registrado, mas o aviso por e-mail não saiu para: ' + falhas.join('; ');
+  return r;
+}
+
+/*
+ * Um e-mail para cada pessoa marcada, DEPOIS da trava (o comentario ja esta
+ * gravado). A falha nao derruba o comentario — mas tambem nao some calada
+ * (a regra da acao nova): volta a lista de quem ficou sem o aviso.
+ */
+function avisarMarcadas_(plano, feito, texto, marcadas) {
+  const falhas = [];
+  marcadas.forEach(function (p) {
+    try { avisarMencao_(plano, feito.acao, feito.autor, texto, p.email, feito.passaramAVer.indexOf(p.email) !== -1); }
+    catch (e) { falhas.push(p.email + ' (' + (e.message || e) + ')'); }
+  });
+  return falhas;
 }
 
 /**
@@ -299,12 +402,14 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
  * Quem gere o plano (GERIR_ACOES) ou tem escopo TODOS (gerencia, consulta)
  * ve tudo. Os demais — o coordenador — veem SO as acoes em que sao
  * responsaveis (sozinhos ou junto com outros): cada um cuida das suas.
+ * E as em que foram marcados num comentario (19/10): marcar e chamar a
+ * pessoa para a conversa daquela acao (ver e responder; concluir, nao).
  */
 function acoesNoAlcance(usuario, todas, plano) {
   plano = plano || PLANOS.CALENDARIO;
   if (podeFazer(usuario, plano.cap) || escopoDe(usuario).tipo === 'TODOS') return todas;
   const email = String(usuario.email || '').toLowerCase().trim();
-  return todas.filter(function (a) { return ehDonoDaAcao_(a, email); });
+  return todas.filter(function (a) { return ehDonoDaAcao_(a, email) || ehMarcadoNaAcao_(a, email); });
 }
 
 /* A mesma regra, para UMA acao (foto pedida pela tela). */
@@ -404,9 +509,14 @@ function pendenciasDoUsuario_(usuario) {
   return saida;
 }
 
-/* Porta da bolinha (executarAcao 'pendencias'): so leitura, sem capacidade — cada um ve os proprios numeros. */
+/*
+ * Porta da bolinha (executarAcao 'pendencias'): so leitura, sem capacidade — cada um ve os proprios
+ * numeros. O menu vai junto (19/10): quem ja estava dentro quando um painel foi ligado ou desligado
+ * ve a mudanca ao voltar ao menu, sem F5.
+ */
 function acaoPendencias(usuario) {
-  return { ok: true, pendencias: pendenciasDoUsuario_(usuario) };
+  return { ok: true, pendencias: pendenciasDoUsuario_(usuario),
+           menu: { filial: filialAtual().codigo, telas: telasDe(usuario), modulos: modulosDe(usuario) } };
 }
 
 /** Dados da tela Plano de Acao (o do Calendario). */
@@ -471,32 +581,38 @@ function dadosPlano_(plano, usuario, params) {
 /*
  * Quem pode ser responsavel: gente ativa no cadastro de acessos que
  * ENXERGA o modulo do plano. Acao da limpeza dada a quem nao ve a Limpeza
- * chegava por e-mail e a pessoa nao tinha onde abrir.
+ * chegava por e-mail e a pessoa nao tinha onde abrir. A mesma lista e a de
+ * quem pode ser marcado num comentario (19/10); veTodas diz quem ja ve todas
+ * as acoes do plano (a tela avisa "passa a ver esta ação" para os outros).
  */
 function pessoasParaAcao(plano) {
-  const modulo = plano ? plano.modulo : '';
   return pessoasDaFilial()
     .filter(function (p) {
       return marcado(p.ATIVO) &&
              String(p.SITUACAO || '').toUpperCase().trim() !== 'RECUSADO';
     })
-    .filter(function (p) {
-      if (!modulo) return true;
-      const perfil = String(p.PERFIL || '').toUpperCase().trim();
-      if (!perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO) return false;
-      const u = montarUsuario({ perfil: perfil, modulos: String(p.MODULOS || '').trim() });
-      return modoEfetivo(u.permissoes, modulo) !== 'NAO';
-    })
-    .map(function (p) {
+    .map(function (p) { return { linha: p, u: usuarioDoCadastro_(p) }; })
+    .filter(function (x) { return !plano || (x.u && modoEfetivo(x.u.permissoes, plano.modulo) !== 'NAO'); })
+    .map(function (x) {
+      const p = x.linha;
       return {
         email: String(p.EMAIL || '').toLowerCase().trim(),
         nome: String(p.NOME || '').trim() || String(p.EMAIL || '').split('@')[0],
         turno: String(p.TURNO || '').toUpperCase().trim(),
-        papel: String(p.PAPEL || '').trim()
+        papel: String(p.PAPEL || '').trim(),
+        // A mesma regra de acoesNoAlcance.
+        veTodas: !!(plano && x.u) && (podeFazer(x.u, plano.cap) || escopoDe(x.u).tipo === 'TODOS')
       };
     })
     .filter(function (p) { return !!p.email; })
     .sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+}
+
+/* O usuario que o cadastro monta (nivel e ajustes por modulo); null para quem ainda nao tem nivel. */
+function usuarioDoCadastro_(p) {
+  const perfil = String(p.PERFIL || '').toUpperCase().trim();
+  if (!perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO) return null;
+  return montarUsuario({ perfil: perfil, modulos: String(p.MODULOS || '').trim() });
 }
 
 /* ------------------------------------------------------------------ */
@@ -653,7 +769,7 @@ function concluirAcaoDoPlano_(plano, usuario, params) {
         ANDAMENTO: 'Concluída', DEPENDE: ''
       }, usuario.email);
       // A conclusao entra no historico, com quem concluiu (e a foto, se veio).
-      gravarComentario_(usuario, 'ACOES', id, obs || 'Ação concluída.', 'Concluída', '', 'CONCLUSAO', gravadas);
+      gravarComentario_(usuario, 'ACOES', id, obs || TEXTOS_AUTOMATICOS.CONCLUSAO, 'Concluída', '', 'CONCLUSAO', gravadas);
 
       return { recado: 'Ação concluída.' + (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') };
     });
@@ -670,7 +786,7 @@ function reabrirAcaoDoPlano_(plano, usuario, params) {
       SITUACAO: ACOES_SITUACAO.PENDENTE,
       CONCLUIDO_EM: '', CONCLUIDO_POR: '', ANDAMENTO: 'Em andamento'
     }, usuario.email);
-    gravarComentario_(usuario, 'ACOES', id, String(params.motivo || '').trim() || 'Ação reaberta.', 'Em andamento', '', 'REABERTURA');
+    gravarComentario_(usuario, 'ACOES', id, String(params.motivo || '').trim() || TEXTOS_AUTOMATICOS.REABERTURA, 'Em andamento', '', 'REABERTURA');
     return { recado: 'Ação reaberta.' };
   });
 }
@@ -686,7 +802,7 @@ function cancelarAcaoDoPlano_(plano, usuario, params) {
       SITUACAO: ACOES_SITUACAO.CANCELADA,
       OBSERVACAO: motivo, DEPENDE: ''
     }, usuario.email);
-    gravarComentario_(usuario, 'ACOES', id, motivo ? 'Cancelada: ' + motivo : 'Ação cancelada.', 'Cancelada', '', 'CANCELAMENTO');
+    gravarComentario_(usuario, 'ACOES', id, motivo ? 'Cancelada: ' + motivo : TEXTOS_AUTOMATICOS.CANCELAMENTO, 'Cancelada', '', 'CANCELAMENTO');
     return { recado: 'Ação cancelada.' };
   });
 }
@@ -769,17 +885,22 @@ function fotosDaCelula_(valor) {
  * Ver uma foto. So quem enxerga a acao (a mesma regra da lista), e so foto
  * que e da acao ou de um comentario dela — o ID de um arquivo qualquer do
  * Drive nao passa por aqui.
+ * HEIC (iPhone) gravada sem converter — foto de antes de 19/10, ou o Google
+ * ainda nao tinha a miniatura na hora do envio: vai a miniatura de 1600 px,
+ * que o navegador abre. Sem miniatura ainda, vai a original (a tela explica).
  */
 function fotoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   const arquivo = String(params.arquivo || '').trim();
   const registro = acaoDoPlano_(plano, id);
   if (!podeVerAcao_(plano, usuario, hidratarAcao(registro))) throw new Error('Ação não encontrada. Atualize a tela.');
-  const daAcao = lerAnexos_(registro.ANEXOS).some(function (a) { return a.id === arquivo; });
-  const deComentario = !daAcao && (comentariosPorAcao_(origensDoPlano_(plano.id))[id] || []).some(function (c) {
-    return c.fotos.some(function (a) { return a.id === arquivo; });
-  });
-  if (!arquivo || (!daAcao && !deComentario)) throw new Error('Esta foto não é desta ação.');
+  const estaFoto = function (a) { return a.id === arquivo; };
+  const foto = lerAnexos_(registro.ANEXOS).filter(estaFoto)[0] ||
+    (comentariosPorAcao_(origensDoPlano_(plano.id))[id] || []).map(function (c) { return c.fotos.filter(estaFoto)[0]; }).filter(Boolean)[0];
+  if (!arquivo || !foto) throw new Error('Esta foto não é desta ação.');
+  const heic = /^image\/hei[cf]/i.test(foto.tipo || '') || /\.hei[cf]$/i.test(foto.nome || '');
+  const img = heic ? heicGravadaConvertida_(arquivo) : null;
+  if (img) return { ok: true, nome: img.getName(), tipo: img.getContentType(), dados: Utilities.base64Encode(img.getBytes()), convertida: true };
   let b;
   try { b = baixarAnexo(arquivo); }
   catch (e) { throw new Error('A foto não está mais no Drive (foi apagada ou movida).'); }
@@ -795,6 +916,111 @@ function removerFotoDoPlano_(plano, usuario, params) {
     removerAnexo(usuario, 'ACOES', id, params.arquivo);
     return { ok: true, recado: 'Foto removida.' };
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* HEIC (iPhone) — o Chrome nao abre: o servidor converte (19/10)       */
+/*                                                                     */
+/* Pela miniatura do proprio Drive, o mesmo caminho que a Entrega usa  */
+/* desde o codigo original (_viaMiniaturaDrive). Na hora em que a foto */
+/* e escolhida (converterFoto) e, para a HEIC que ja esta gravada, na  */
+/* hora de ver (fotoDoPlano_).                                         */
+/* ------------------------------------------------------------------ */
+
+const LADO_DA_MINIATURA = 1600;     // o mesmo lado maior das fotos reduzidas na tela (FOTO_LADO_MAX)
+const MARCAS_HEIC_ = ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1'];
+
+/*
+ * Converter UMA foto HEIC na hora em que ela e escolhida (a tela so manda
+ * quando o navegador nao abre o arquivo). Grava numa pasta temporaria, pega
+ * a miniatura do Drive e devolve a imagem, que segue na tela como qualquer
+ * outra foto. Nada fica: a pasta vai para a lixeira na hora (e a faxina
+ * diaria, limparTemporariosEntrega, pega o que escapar). So aceita HEIC de
+ * verdade, pelos bytes: nao vira conversor de qualquer arquivo. Miniatura
+ * que o Google ainda nao gerou: pendente — a foto vai como veio e o visor
+ * converte quando alguem abrir.
+ */
+function acaoConverterFoto(usuario, params) {
+  exigirPorta_();
+  const f = fotosDoPedido_({ fotos: [params.foto] })[0];
+  if (!f) throw new Error('Nenhuma foto chegou.');
+  const bytes = Utilities.base64Decode(f.dados);
+  if (!ehHeicPelosBytes_(bytes)) throw new Error('"' + f.nome + '" não é uma foto HEIC.');
+  const pasta = subpasta(pastaAnexos(), PASTA_TMP_ENTREGA).createFolder('heic-' + Utilities.getUuid().slice(0, 8));
+  try {
+    const img = miniaturaDoDrive_(pasta.createFile(Utilities.newBlob(bytes, 'image/heic', f.nome)), 25000);
+    if (!img) return { ok: true, pendente: true };
+    return { ok: true, nome: img.getName(), tipo: img.getContentType(), dados: Utilities.base64Encode(img.getBytes()) };
+  } finally {
+    try { pasta.setTrashed(true); } catch (e) { /* a faxina diaria pega */ }
+  }
+}
+
+/* A HEIC gravada na acao, convertida — null se o Google ainda nao tem a miniatura (ou se ela sumiu: o baixar explica). */
+function heicGravadaConvertida_(idArquivo) {
+  let arq;
+  try { arq = DriveApp.getFileById(idArquivo); } catch (e) { return null; }
+  return miniaturaDoDrive_(arq, 6000);
+}
+
+/*
+ * A miniatura do arquivo em 1600 px. A de um arquivo recem-criado leva
+ * alguns segundos para existir: espera ate esperaMs e devolve null se ainda
+ * nao houver — quem chamou decide. O formato vem dos bytes (JPEG, PNG ou
+ * WEBP): pagina de erro ou de login nao vira "foto". Rede ou cota do
+ * UrlFetch tambem dao null.
+ */
+function miniaturaDoDrive_(arquivo, esperaMs) {
+  const comToken = { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  let resposta;
+  try {
+    const link = linkDaMiniatura_(arquivo.getId(), comToken, esperaMs);
+    if (!link) return null;
+    // o tamanho vem no fim do link (=s220, =w200-h190-p-k-nu): troca por 1600; link sem tamanho ganha um
+    const url = /=[sw]\d+[^/]*$/.test(link) ? link.replace(/=[sw]\d+[^/]*$/, '=s' + LADO_DA_MINIATURA) : link + '=s' + LADO_DA_MINIATURA;
+    resposta = UrlFetchApp.fetch(url, comToken);
+    if (resposta.getResponseCode() !== 200) resposta = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  } catch (e) { return null; }
+  if (resposta.getResponseCode() !== 200) return null;
+  const blob = resposta.getBlob();
+  const formato = formatoDaImagem_(blob.getBytes());
+  if (!formato) return null;
+  return blob.setContentType(formato.tipo).setName(String(arquivo.getName()).replace(/\.[^.]+$/, '') + formato.ext);
+}
+
+/*
+ * O thumbnailLink, esperando o Google gera-lo: pausas crescentes (0,7 s,
+ * 1 s, 1,6 s... ate 4 s cada) CONTADAS ate somar esperaMs — nao pelo
+ * relogio, que contaria tambem o tempo das consultas.
+ */
+function linkDaMiniatura_(id, comToken, esperaMs) {
+  const api = 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=thumbnailLink&supportsAllDrives=true';
+  let pausa = 700, esperou = 0;
+  for (;;) {
+    const r = UrlFetchApp.fetch(api, comToken);
+    const link = r.getResponseCode() === 200 ? JSON.parse(r.getContentText()).thumbnailLink : '';
+    if (link) return link;
+    if (esperou + pausa > esperaMs) return '';
+    Utilities.sleep(pausa);
+    esperou += pausa;
+    pausa = Math.min(Math.round(pausa * 1.5), 4000);
+  }
+}
+
+/* JPEG, PNG ou WEBP pelos primeiros bytes; null para o resto. */
+function formatoDaImagem_(bytes) {
+  const b = bytes.slice(0, 12).map(function (x) { return x & 255; });
+  const txt = String.fromCharCode.apply(null, b);
+  if (b[0] === 0xFF && b[1] === 0xD8) return { tipo: 'image/jpeg', ext: '.jpg' };
+  if (b[0] === 0x89 && txt.slice(1, 4) === 'PNG') return { tipo: 'image/png', ext: '.png' };
+  if (txt.slice(0, 4) === 'RIFF' && txt.slice(8, 12) === 'WEBP') return { tipo: 'image/webp', ext: '.webp' };
+  return null;
+}
+
+/* HEIC/HEIF pelos primeiros bytes: 'ftyp' e uma marca da familia HEIF. */
+function ehHeicPelosBytes_(bytes) {
+  const txt = String.fromCharCode.apply(null, bytes.slice(0, 12).map(function (x) { return x & 255; }));
+  return txt.slice(4, 8) === 'ftyp' && MARCAS_HEIC_.indexOf(txt.slice(8, 12)) !== -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -859,5 +1085,32 @@ function avisarAcaoNova(campos, email, nova, id, plano) {
     (campos.ORIGEM ? '<p style="color:#666">Origem: ' + htmlSeguro(campos.ORIGEM) + '</p>' : '') +
     rodapeLink(plano.tela);
 
+  enviar([email], assunto, corpo);
+}
+
+/*
+ * Quem foi marcado num comentario (19/10) recebe o comentario, a acao e o
+ * botao que abre o historico dela no GSL (?tela=...&acao=ID). r: a linha da
+ * acao ja com o que o comentario mudou. passouAVer: a pessoa nao enxergava
+ * a acao antes (o coordenador de outro turno) — o e-mail diz que agora ve.
+ */
+function avisarMencao_(plano, r, autor, texto, email, passouAVer) {
+  const limpeza = plano.id === 'LIMPEZA';
+  const quem = autor.nome || autor.email;
+  const onde = [r.ZONA, r.LOCAL].filter(Boolean).join(' · ');
+  const situacao = String(r.SITUACAO || '').toUpperCase().trim() === ACOES_SITUACAO.CONCLUIDA ? 'Concluída' : (r.ANDAMENTO || 'Em aberto');
+  const assunto = quem + ' marcou você numa ação' + (limpeza ? ' da limpeza' : '') + ': ' + r.ACAO;
+  const corpo =
+    '<p><b>' + htmlSeguro(quem) + '</b>' + (autor.papel ? ' (' + htmlSeguro(autor.papel) + ')' : '') +
+    ' marcou você num comentário do ' + (limpeza ? 'Plano de Ação da Limpeza CD' : 'Plano de Ação') + ':</p>' +
+    caixa('Comentário:', texto, COR_AZUL, '#EEF0FF') +
+    '<p style="font-size:16px;margin-top:16px"><strong>' + htmlSeguro(r.ACAO) + '</strong></p>' +
+    (r.DESCRICAO ? '<p>' + htmlSeguro(r.DESCRICAO) + '</p>' : '') +
+    '<table style="border-collapse:collapse;margin:10px 0;font-size:13px">' +
+    linha('Responsável', r.RESPONSAVEL || '—') + linha('Entregar até', formatarData(paraData(r.PRAZO)) || '—') +
+    linha('Situação', situacao) + (r.DEPENDE ? linha('Depende de', r.DEPENDE) : '') +
+    (limpeza && onde ? linha('Local', onde) : '') + '</table>' +
+    (passouAVer ? '<p style="color:#475569">Você passou a acompanhar esta ação no GSL: pode ver o histórico e responder.</p>' : '') +
+    rodapeLink(plano.tela, r.ID);
   enviar([email], assunto, corpo);
 }

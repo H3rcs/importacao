@@ -86,7 +86,7 @@ function telaDaAba() {
   // Link de e-mail vale mais. O ?tela= que a propria pagina da reserva poe na barra (daAba) e o da
   // tela que ELA abriu: a aba pode ter andado depois (outra tela, filtros) — vale a posicao da aba.
   const d = destinoDoLink(), onde = lerSs(CHAVE_ONDE);
-  if (d && d.tela && !(d.daAba && onde)) return { tela: d.tela, p: '', f: d.filial || '' };
+  if (d && d.tela && !(d.daAba && onde)) return { tela: d.tela, p: paramsDoLinkJson(d), f: d.filial || '' };
   if (d && d.daAba) esquecerDestinoDoLink();      // senao o menu (montarSessao) abriria a tela velha do endereco
   try { return JSON.parse(onde || '{}') || {}; } catch (e) { return {}; }
 }
@@ -432,7 +432,7 @@ async function retomarOuPedirEntrada(inicio) {
       const r = await chamarJSON('retomarSessao', { t: TOKEN, f: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' });
       // Erro do servidor (banco se atualizando, trava): a sessao continua; o clique tenta de novo.
       if (r && r.ok === false && !r.entrada) return mostrarContinuar({ erroEntrada: r.erro || 'O servidor não respondeu.' });
-      if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
+      if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
       return tratarEntrada(r);
     } catch (e) {
       if (canalBarradoDeVez(e) && URL_APP) { lembrarCanalBarrado(); return mostrarContinuar(); }
@@ -472,7 +472,7 @@ async function continuarSessao() {
   try {
     const r = await chamarJSON('retomarSessao', { t: TOKEN, f: campos.filial, tela: campos.tela, p: campos.p });
     if (r && r.ok === false && !r.entrada) throw new Error(r.erro || 'O servidor não respondeu.');
-    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
+    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
     esconderContinuar();
     tratarEntrada(r);
   } catch (e) {
@@ -563,8 +563,9 @@ async function entrarNoSistema(ev) {
   // A filial da ultima pessoa neste computador NAO vai junto: quem tem mais
   // de uma escolhe (antes caia direto na filial de quem usou antes).
   el('entrar-filial').value = (destinoDoLink() || {}).filial || '';
-  // Link de e-mail (?tela=...): a tela ja volta montada junto com a entrada (uma ida so).
+  // Link de e-mail (?tela=...): a tela ja volta montada junto com a entrada (uma ida so), com os filtros do link.
   if (el('entrar-tela')) el('entrar-tela').value = (destinoDoLink() || {}).tela || '';
+  if (el('entrar-p')) el('entrar-p').value = paramsDoLinkJson(destinoDoLink());
   el('entrar-bilhete').value = bilheteDaPagina();
   // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
   if (CANAL_BARRADO && URL_APP) { enviarFormEntrada(); return false; }
@@ -575,10 +576,11 @@ async function entrarNoSistema(ev) {
     // A sonda (disparada quando a pagina abriu) corre junto com o entrar: se ela acusar o canal
     // barrado enquanto o clique ainda vale, a entrada vai por POST na hora (catch abaixo).
     const r = await Promise.race([
-      chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || ''),
+      chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || '',
+        paramsDoLinkJson(destinoDoLink())),
       canalBarradoPelaSonda(clique)
     ]);
-    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(); }
+    if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
       el('entrar-codigo-caixa').classList.toggle('oculto', !r.pedirCodigo);
@@ -887,7 +889,7 @@ function escolherFilial(codigo) {
 
 function irParaFilial(codigo) {
   const destino = destinoDoLink();
-  if (!navegarPelaPagina({ t: TOKEN, filial: codigo, tela: (destino && destino.tela) || '' })) {
+  if (!navegarPelaPagina({ t: TOKEN, filial: codigo, tela: (destino && destino.tela) || '', p: paramsDoLinkJson(destino) })) {
     mostrarFalha('Não consegui abrir a filial e não sei o endereço do sistema para recarregar.');
   }
 }
@@ -930,15 +932,7 @@ function montarSessao(r) {
     .filter(Boolean).join(' · ');
   el('usuario-papel').title = u.email;
   el('usuario-conta').innerHTML = `<span class="selo-verificado">&#128274; ${esc(u.email)}</span>`;
-
-  const caixaFilial = el('filial-atual');
-  if (caixaFilial) {
-    const varias = (r.filiais || []).length > 1;
-    caixaFilial.innerHTML = r.filial ? `
-      <span class="filial-rotulo">Filial</span>
-      <strong>${esc(r.filial.nome)}</strong>
-      ${varias ? '<button class="botao-texto" onclick="trocarFilial()">Trocar filial</button>' : ''}` : '';
-  }
+  pintarCaixaFilial();
 
   const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
   conferirVersao(r);
@@ -951,7 +945,7 @@ function montarSessao(r) {
   // Tela que ja veio pronta no HTML (navegacao de reserva, link de e-mail, F5): abre direto.
   if (r.telaEmbutida && r.telaEmbutida.resposta) {
     const destino = destinoDoLink();
-    if (destino && destino.tela === r.telaEmbutida.id) esquecerDestinoDoLink();
+    if (destino && destino.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true);
     const p = r.telaEmbutida.params || {};
     CACHE_TELAS[chaveTela(r.telaEmbutida.id, p)] = { resposta: r.telaEmbutida.resposta, quando: Date.now() };
     return abrir(r.telaEmbutida.id, p);
@@ -959,12 +953,24 @@ function montarSessao(r) {
   // Veio de um link de e-mail (?tela=calendario): abre direto nessa tela.
   const destino = destinoDoLink();
   if (destino) {
-    esquecerDestinoDoLink();
     // daAba: o endereco que a propria reserva escreveu — a aba ja decidiu onde estava (telaDaAba).
-    if (!destino.daAba && (r.telas || []).some((t) => t.id === destino.tela)) return abrir(destino.tela, {});
+    const abre = !destino.daAba && (r.telas || []).some((t) => t.id === destino.tela);
+    esquecerDestinoDoLink(abre);
+    if (abre) return abrir(destino.tela, paramsDoLink(destino));
   }
   abrirModulos();
-  if (r.avisoTela) avisar(r.avisoTela, true);
+  if (r.avisoTela) avisar(avisoDaRecusa(r.avisoTela), true);    // F5 ou link numa tela que nao abre mais
+}
+
+/* A filial em uso na barra lateral, com o "Trocar filial" para quem tem mais de uma. */
+function pintarCaixaFilial() {
+  const caixa = el('filial-atual');
+  if (!caixa) return;
+  const f = SESSAO && SESSAO.filial;
+  caixa.innerHTML = f ? `
+    <span class="filial-rotulo">Filial</span>
+    <strong>${esc(f.nome)}</strong>
+    ${(SESSAO.filiais || []).length > 1 ? '<button class="botao-texto" onclick="trocarFilial()">Trocar filial</button>' : ''}` : '';
 }
 
 /*
@@ -980,7 +986,7 @@ function mostrarResultadoAcao(x) {
   if (x.ok === false) {
     const msg = String(x.erro || 'Não consegui gravar.');
     if (/MailApp|send_mail|autoriz/i.test(msg)) return janelaAutorizarEmail(msg);
-    return avisar(msg, true);
+    return avisar(avisoDaRecusa(msg), true);
   }
   if (x.avisoEmail) avisar(x.avisoEmail, true);
   else if (x.aviso) avisar(x.aviso, /NÃO atualizad/i.test(x.aviso));     // atualizarRH: meses que falharam
@@ -1024,19 +1030,40 @@ function conferirVersao(r) {
 /*
  * DESTINO DO LINK DE E-MAIL. Guardado na aba (sessionStorage) para valer
  * tambem depois da entrada pelo formulario de reserva (que recarrega a
- * pagina). Usado uma vez so.
+ * pagina). Usado uma vez so. acao (19/10): o e-mail de quem foi marcado
+ * num comentario leva tambem o ID da acao, e o plano abre o historico dela.
  */
 function destinoDoLink() {
   try {
     const c = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) || {};
     if (c.telaDepois) {
-      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: c.telaDepois, filial: c.filialDepois || '', daAba: !!c.destinoDaAba }));
+      sessionStorage.setItem('gsl_destino', JSON.stringify({ tela: c.telaDepois, filial: c.filialDepois || '',
+        daAba: !!c.destinoDaAba, acao: c.acaoDepois || '' }));
       c.telaDepois = '';
     }
     return JSON.parse(sessionStorage.getItem('gsl_destino') || 'null');
   } catch (e) { return null; }
 }
-function esquecerDestinoDoLink() { try { sessionStorage.removeItem('gsl_destino'); } catch (e) {} }
+/*
+ * usar: a tela do link esta sendo aberta agora. A acao do link fica para
+ * abrirAcaoDoLink (o plano abre o historico dela) e sai do endereco — o F5
+ * volta na posicao da aba, sem abrir o historico de novo.
+ */
+let ACAO_DO_LINK = '';
+function esquecerDestinoDoLink(usar) {
+  const d = usar ? destinoDoLink() : null;
+  try { sessionStorage.removeItem('gsl_destino'); } catch (e) {}
+  if (!d || d.daAba || !d.acao) return;
+  ACAO_DO_LINK = String(d.acao);
+  try { google.script.history.replace(null, Object.assign({ tela: d.tela, aba: '1' }, d.filial ? { filial: d.filial } : {}), ''); } catch (e) {}
+}
+/*
+ * A acao do link pode ja estar concluida: no Calendario (o filtro e do
+ * servidor) o plano do link abre com todas — numa ida so, tambem pela
+ * reserva, onde uma segunda ida pediria outro clique.
+ */
+const paramsDoLink = (d) => (d && d.acao && !d.daAba && d.tela === 'acoes' ? { situacao: 'TODAS' } : {});
+function paramsDoLinkJson(d) { const p = paramsDoLink(d); return Object.keys(p).length ? JSON.stringify(p) : ''; }
 
 /*
  * RESERVA DE LEITURA. Se o canal google.script.run for barrado nesta
@@ -1405,12 +1432,75 @@ async function atualizarPendencias() {
     const r = await executarAcaoSrv('pendencias', {});
     if (filial !== FILIAL || !SESSAO || !r || !r.pendencias) return;
     PENDENCIAS = { filial: FILIAL, quando: Date.now(), modulos: r.pendencias };
-    pintarBolinhas();
+    if (!aplicarMenu(r.menu)) pintarBolinhas();      // menu novo: os cartoes ja voltam com as bolinhas
   } catch (e) {
     // A bolinha e um extra: sem ela o menu funciona igual. Codigo.gs antigo nao conhece a acao: para de pedir.
     // (Acoes.gs antigo com Codigo.gs novo: "aponta para acaoPendencias, que nao existe".)
     if (/desconhecida|que nao existe/i.test(String((e && e.message) || e))) PENDENCIAS_SEM_PORTA = true;
   } finally { if (PENDENCIAS_PEDIDO === filial) PENDENCIAS_PEDIDO = ''; }
+}
+
+/*
+ * MENU NOVO (19/10). Vem do servidor depois de uma gravacao que muda paineis,
+ * filiais ou acessos (executarAcaoETela) e junto com a bolinha (pendencias).
+ * Sessao, barra lateral e cartoes ficam em dia sem F5; a tela que saiu do
+ * menu leva de volta a ele, com o aviso. Devolve true quando o menu mudou.
+ */
+function aplicarMenu(m) {
+  if (!SESSAO || !m || (m.filial && m.filial !== FILIAL)) return false;   // de outra filial: nao e este menu
+  if (Array.isArray(m.filiais)) atualizarFiliais(m.filiais);
+  if (!Array.isArray(m.telas) || !Array.isArray(m.modulos)) return false;
+  if (JSON.stringify([m.telas, m.modulos]) === JSON.stringify([SESSAO.telas, SESSAO.modulos])) return false;
+  SESSAO.telas = m.telas; SESSAO.modulos = m.modulos;
+  const vivas = {};
+  m.telas.forEach((t) => { vivas[t.id] = true; });
+  Object.keys(CACHE_TELAS).forEach((k) => { if (!vivas[k.split('|')[1]]) delete CACHE_TELAS[k]; });
+  envelhecerTelas();                      // as que ficaram revalidam ao abrir (ex.: Filiais e paineis mudada em outra aba)
+  if (paginaAtual === 'modulos') abrirModulos();
+  else if (!vivas[paginaAtual]) voltarAoMenuComAviso();
+  else {
+    montarMenu(m.telas);
+    document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === paginaAtual));
+  }
+  return true;
+}
+
+/* Filial criada, renomeada ou desligada: a troca de filial e a caixa da barra lateral em dia. */
+function atualizarFiliais(filiais) {
+  SESSAO.filiais = filiais;
+  const atual = filiais.find((f) => f.codigo === FILIAL);
+  if (atual && SESSAO.filial) { SESSAO.filial.nome = atual.nome; SESSAO.filial.cidade = atual.cidade; }
+  pintarCaixaFilial();
+}
+
+/* O administrador desligou a filial em que estava: nada dela vale mais — ele escolhe outra. */
+function filialDesligada(filiais) {
+  esquecerTelas();
+  SESSAO.filiais = filiais || [];
+  mostrarEscolhaFilial(SESSAO.filiais, SESSAO.usuario);
+  avisar('Esta filial foi desligada. Escolha outra para continuar.', true);
+}
+
+/*
+ * PAINEL QUE SAIU com a pessoa dentro (19/10): o servidor recusou a tela ou a
+ * acao porque o painel foi desligado na filial — e o cartao e a tela guardada
+ * ainda estavam aqui. Em vez da caixa de erro (ou da tela velha), o menu e
+ * relido e a pessoa volta para ele com o aviso. false: e outra recusa.
+ */
+const RECUSA_DE_PAINEL = /painel não está ligado|não tem acesso ao módulo/i;
+const AVISO_PAINEL_SAIU = 'Este painel foi desligado nesta filial.';
+const avisoDaRecusa = (msg) => (RECUSA_DE_PAINEL.test(String(msg || '')) ? AVISO_PAINEL_SAIU : String(msg || ''));
+function voltarAoMenuComAviso() { fecharJanela(); abrirModulos(); avisar(AVISO_PAINEL_SAIU, true); }
+
+async function painelSaiu(e, idTela) {
+  if (!RECUSA_DE_PAINEL.test(String((e && e.message) || e || ''))) return false;
+  esquecerTela(idTela);
+  try {
+    const s = await chamarJSON('abrirFilial', ctx());
+    if (s && s.ok && s.entrada === 'APP') aplicarMenu({ filial: s.filial.codigo, telas: s.telas, modulos: s.modulos, filiais: s.filiais });
+  } catch (x) { /* sem o menu novo, volta assim mesmo: o aviso explica */ }
+  if (paginaAtual === idTela) voltarAoMenuComAviso();
+  return true;
 }
 
 function entrarModulo(id) {
@@ -1479,7 +1569,7 @@ async function abrir(idTela, params) {
   if (idTela === 'modulos') return abrirModulos();
   if (!(SESSAO.telas || []).some((t) => t.id === idTela)) {
     abrirModulos();
-    return avisar('O seu nível de acesso não abre esta tela.', true);
+    return avisar('Esta tela não está liberada para você nesta filial.', true);   // pelo nivel ou pelo painel
   }
   paginaAtual = idTela; paramsAtual = params || {};
   lembrarTelaDaAba(idTela, paramsAtual);
@@ -1528,6 +1618,7 @@ async function abrir(idTela, params) {
     paginaAnterior = idTela;
   } catch (e) {
     if (canalBloqueado(e) && abrirPorNavegacao(idTela, paramsAtual)) return;
+    if (await painelSaiu(e, idTela)) return;
     el('pagina').innerHTML = `<div class="erro-caixa">${esc(explicarErro(e))}</div>`;
   } finally {
     pedidosDoUsuario--;
@@ -1587,7 +1678,7 @@ async function revalidar(idTela, params, chave) {
     // Se o usuario ja saiu desta tela, atualiza so o cache.
     if (paginaAtual !== idTela || chaveTela(paginaAtual, paramsAtual) !== chave) return;
     if (!antes || !mesmaResposta(antes.resposta, r)) pintar(idTela, r, true);
-  } catch (e) { /* revalidacao e silenciosa: a tela em uso continua valida */ }
+  } catch (e) { painelSaiu(e, idTela); /* fora o painel desligado, e calada: a tela em uso continua valida */ }
 }
 
 /*
@@ -1707,26 +1798,31 @@ async function agir(acao, params, recado) {
   }
 
   pedidosDoUsuario++;
+  const idTela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
   try {
     /*
      * 10/10 — UMA IDA SO: a acao e a tela atual ja atualizada voltam juntas
      * (executarAcaoETela), e a lista nao pisca em "Carregando…". Codigo.gs
      * antigo (sem essa porta): nada foi gravado, vai pelo caminho de antes.
+     * 19/10: a gravacao que muda o menu (painel, filial, acesso) traz o menu novo.
      */
-    const idTela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
     const paramsTela = paramsAtual || {};
     const filialDoClique = FILIAL;
-    let r, tela = null;
+    let r, tela = null, menu = null;
     if (SEM_ACAO_E_TELA) r = await executarAcaoSrv(acao, params);
     else {
       try {
         const x = await chamarJSON('executarAcaoETela', ctx(), acao, params || {}, idTela, paramsTela);
-        r = x && x.r; tela = x && x.tela;
+        r = x && x.r; tela = x && x.tela; menu = x && x.menu;
       } catch (e) {
         if (!/executarAcaoETela/.test(String((e && e.message) || e))) throw e;
         SEM_ACAO_E_TELA = true;
         r = await executarAcaoSrv(acao, params);
       }
+    }
+    if (menu && FILIAL === filialDoClique) {
+      if (menu.semFilial) { fecharJanela(); filialDesligada(menu.filiais); return r; }
+      aplicarMenu(menu);
     }
 
     /*
@@ -1759,6 +1855,7 @@ async function agir(acao, params, recado) {
     await abrir(paginaAtual, paramsAtual);
     return r;
   } catch (e) {
+    if (idTela && await painelSaiu(e, idTela)) throw e;      // o painel saiu da filial: menu e aviso, sem a caixa de erro
     let msg = e.message || String(e);
     // "Acao desconhecida" e implantacao pela metade (Codigo.gs antigo com telas novas).
     // O Codigo.gs antigo nao explica isso — entao a tela explica.
@@ -1811,7 +1908,7 @@ function gerarProximoMes() {
   abrirJanela('Gerar um mês', `
     <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
       Cria as atividades do mês escolhido a partir das rotinas, sem esperar a geração automática do dia 20.
-      Se o mês já existe, só cria o que estiver faltando — nada é duplicado.
+      Se o mês já existe, só cria o que estiver faltando, de hoje em diante — nada é duplicado.
     </p>
     <div class="campo"><label>Mes</label>
       <select id="gm-comp">${opcoes.map((c) => `<option>${c}</option>`).join('')}</select></div>`, `
@@ -2187,9 +2284,11 @@ function abrirAtividade(id) {
        </a>`
     : '<div class="dica">Nenhum arquivo entregue ainda.</div>';
 
-  const setor = p.programar && a.tipo === 'VIS' ? `
+  // "Exige setor" das rotinas (19/10). Servidor de antes (sem tiposComSetor): so a Vistoria, como era.
+  const comSetor = (d.tiposComSetor || ['VIS']).indexOf(a.tipo) !== -1;
+  const setor = p.programar && comSetor ? `
     <div class="campo">
-      <label>Setor da vistoria</label>
+      <label>${a.tipo === 'VIS' ? 'Setor da vistoria' : 'Setor'}</label>
       <select id="a-setor" onchange="agir('definirSetor',{id:${jsArg(a.id)},setor:this.value},'Setor definido — coordenador avisado')">
         <option value="">Escolher…</option>
         ${d.setores.map((s) => `<option ${a.setor === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
@@ -3431,7 +3530,10 @@ async function previa(id) {
    sistema, tudo empilhado numa tela so. Agora sao quatro abas, cada uma
    com um assunto — e as PESSOAS saíram daqui para uma tela propria.
    =============================================== */
-let ABA_CFG = 'rh';   // rh | calendario | apresentacao | sistema
+// rh | calendario | apresentacao | sistema. Guardada na aba (19/10): com o canal barrado, gravar uma
+// rotina recarrega a pagina, e ela voltava em "Fontes do RH" em vez de na lista que acabou de mudar.
+const CHAVE_ABA_CFG = 'gsl_aba_cfg';
+let ABA_CFG = lerSs(CHAVE_ABA_CFG) || 'rh';
 
 function seloRotinas(r) {
   if (!r) return '';
@@ -3463,6 +3565,7 @@ function pintarConfig(r) {
 
 function trocarAbaCfg(aba) {
   ABA_CFG = aba;
+  gravarSs(CHAVE_ABA_CFG, aba);
   const botoes = document.querySelectorAll('.abas .aba');
   const ordem = ['rh', 'calendario', 'apresentacao', 'sistema'];
   botoes.forEach((b) => b.classList.remove('ativa'));
@@ -3577,18 +3680,22 @@ function cfgCalendario(d) {
       <table><thead><tr><th>Sigla</th><th>Atividade</th><th>Quando</th><th>Por turno</th><th>Ativa</th><th></th></tr></thead>
       <tbody>${d.rotinas.map((t) => `<tr>
         <td class="mono">${esc(t.tipo)}</td><td>${esc(t.atividade)}</td>
-        <td>${descreverQuando(t)}</td><td>${t.porTurno ? 'sim' : '—'}</td>
+        <td>${esc(descreverQuando(t))}${t.problema ? ` <span class="etiqueta atrasada" title="${esc(t.problema)}">revisar</span>` : ''}</td>
+        <td>${t.porTurno ? 'sim' : '—'}</td>
         <td>${t.ativo ? '<span class="selo-entrega">ativa</span>' : '<span class="pendente-entrega">parada</span>'}</td>
-        <td><button class="icone-botao" onclick="formRotina(${jsArg(t.id)})">Editar</button>
-            <button class="icone-botao perigo" onclick="agir('excluirRotina',{id:${jsArg(t.id)}},'Rotina removida')">Remover</button></td></tr>`).join('')}
+        <td><div class="rot-botoes">
+          <button class="icone-botao" onclick="formRotina(${jsArg(t.id)})">Editar</button>
+          <button class="icone-botao" onclick="alternarRotina(${jsArg(t.id)})">${t.ativo ? 'Desativar' : 'Ativar'}</button>
+          <button class="icone-botao perigo" onclick="removerRotina(${jsArg(t.id)})">Remover</button></div></td></tr>`).join('') ||
+        '<tr><td colspan="6" class="vazio">Nenhuma rotina cadastrada.</td></tr>'}
       </tbody></table></div>
-      <p class="dica">Remover uma rotina não apaga as atividades já geradas.</p>
+      <p class="dica">${esc(dicaRotinas(d))}</p>
     </div>
 
     <div class="grade grade-dupla">
       <div class="cartao">
         <div class="cartao-titulo">Setores do CD</div>
-        <p class="dica" style="margin:-4px 0 10px">São as opções do campo “setor da vistoria”.</p>
+        <p class="dica" style="margin:-4px 0 10px">São as opções do campo “setor” das rotinas que exigem setor (como a Vistoria).</p>
         ${d.setores.map((s) => `<div class="anexo"><span class="anexo-nome">${esc(s.setor)}</span>
           <button class="icone-botao perigo" onclick="agir('excluirSetor',{id:${jsArg(s.id)}},'Setor removido')">Remover</button></div>`).join('')}
         <div class="campo" style="margin-top:12px"><input id="novo-setor" placeholder="Novo setor"></div>
@@ -3713,12 +3820,22 @@ function cfgSistema(d) {
 const valorPar = (d, chave) =>
   ((d.parametrosTodos || d.parametros || []).find((p) => p.chave === chave) || {}).valor;
 
+/* "toda quarta", "todo sábado", "1ª segunda do mês", "todo dia 15", "5 vagas sem data". */
+const DIAS_ROTINA = ['', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo'];
 function descreverQuando(t) {
-  const dias = { 1: 'segunda', 2: 'terça', 3: 'quarta', 4: 'quinta', 5: 'sexta' };
-  if (t.frequencia === 'SEMANAL') return 'toda ' + (dias[Number(t.dia)] || t.dia);
-  if (t.frequencia === 'MENSAL') return t.dia === 'PRIMEIRA_SEGUNDA' ? '1ª segunda do mês'
-    : t.dia === 'ULTIMA_SEXTA' ? 'última sexta do mês' : 'dia ' + t.dia;
-  return t.quantidade + ' vaga(s) sem data';
+  const f = String(t.frequencia || '').toUpperCase(), d = String(t.dia == null ? '' : t.dia).toUpperCase().trim();
+  if (f === 'SEMANAL') return /^[1-7]$/.test(d) ? (Number(d) >= 6 ? 'todo ' : 'toda ') + DIAS_ROTINA[d] : 'sem dia da semana';
+  if (f === 'MENSAL') return d === 'PRIMEIRA_SEGUNDA' ? '1ª segunda do mês' : d === 'ULTIMA_SEXTA' ? 'última sexta do mês' : 'todo dia ' + d;
+  const q = Number(t.quantidade) || 1;
+  return q + (q === 1 ? ' vaga sem data' : ' vagas sem data');
+}
+
+/* A dica embaixo da lista: onde mudar uma rotina mexe nas atividades que ja existem. */
+function dicaRotinas(d) {
+  const m = d.mesesGerados || [];
+  const meses = m.length > 1 ? m.slice(0, -1).join(', ') + ' e ' + m[m.length - 1] : m.join('');
+  return 'Mudar o dia, desativar ou remover vale de hoje em diante' + (meses ? ', também nos meses já gerados (' + meses + ')' : '') +
+    '. Entregues, validadas e datas que já passaram não mudam.';
 }
 
 function formArquivoRH(id) {
@@ -3748,27 +3865,225 @@ function formArquivoRH(id) {
     <button class="botao" onclick="agir('salvarArquivoRH',{id:${jsArg(id || '')},competencia:val('rh-comp'),link:val('rh-link'),aba:val('rh-aba'),situacao:val('rh-situacao'),observacao:val('rh-obs')},'Competência salva')">Salvar</button>`);
 }
 
-function formRotina(id) {
-  // Sem id = rotina nova.
-  const t = (id ? DADOS.rotinas.find((x) => x.id === id) : null) ||
-            { id: '', tipo: '', atividade: '', frequencia: 'SEMANAL', dia: '',
-              quantidade: '', porTurno: false, exigeSetor: false, ativo: true };
+/* ---- Rotinas (19/10) ----
+   O "Quando" era um campo de texto que pedia numero ("1 a 5"), e salvar so
+   gravava a rotina: o calendario ja gerado ficava como estava. Agora o dia sai
+   de botoes (radios de verdade: teclado e leitor de tela), a janela mostra as
+   proximas datas e, quando a rotina tem pendentes no calendario, confirma o
+   que vai mudar antes de gravar. Os numeros da confirmacao ja vieram com a
+   Configuracao: com o canal barrado, so a gravacao (agir) chega ao servidor. */
+const DIAS_ROTINA_CURTOS = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+const nomeDoDia = (n) => DIAS_ROTINA[n] + (n >= 6 ? '' : '-feira');
+let ROT_FORM = null;      // a janela aberta: { id, escolha: o dia (ou vagas) escolhido em cada "Repete" }
+let ROT_PEDIDO = null;    // o que a janela de confirmacao grava: { acao, params, recado, rascunho }
+
+const rotinaDaLista = (id) => (id && DADOS && DADOS.rotinas || []).find((x) => x.id === id) || null;
+const pendentesDe = (t) => (t && t.pendentes && t.pendentes.total) || 0;
+const porMesDe = (t) => Object.keys(t.pendentes.porMes).map((c) => c + ': ' + t.pendentes.porMes[c]).join(' · ');
+
+function formRotina(id, rascunho) {
+  // Sem id = rotina nova. rascunho = o que a pessoa ja tinha escolhido (Voltar da confirmacao).
+  const salva = rotinaDaLista(id);
+  const t = rascunho || salva || { id: '', tipo: '', atividade: '', frequencia: 'SEMANAL', dia: '',
+                                   quantidade: 5, porTurno: false, exigeSetor: false, ativo: true };
+  const freq = ['SEMANAL', 'MENSAL', 'AVULSA'].indexOf(t.frequencia) === -1 ? 'SEMANAL' : t.frequencia;
+  ROT_FORM = { id: id || '', escolha: { SEMANAL: '', MENSAL: '', AVULSA: String(t.quantidade || 5) } };
+  if (freq !== 'AVULSA') ROT_FORM.escolha[freq] = String(t.dia || '');
+  const travada = !!(salva && salva.temAtividades);
+  const n = pendentesDe(salva);
   abrirJanela(id ? 'Editar rotina' : 'Nova rotina', `
-    <div class="campo-duplo">
-      <div class="campo"><label>Sigla (entra no ID)</label><input id="ro-tipo" value="${esc(t.tipo)}" maxlength="3"></div>
-      <div class="campo"><label>Frequência</label>
-        <select id="ro-freq">${['SEMANAL', 'MENSAL', 'AVULSA'].map((f) =>
-          `<option ${t.frequencia === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
-    </div>
-    <div class="campo"><label>Atividade</label><input id="ro-atividade" value="${esc(t.atividade)}"></div>
-    <div class="campo"><label>Quando</label><input id="ro-dia" value="${esc(t.dia)}">
-      <p class="dica">Semanal: 1 a 5 (segunda a sexta). Mensal: PRIMEIRA_SEGUNDA, ULTIMA_SEXTA ou o numero do dia.</p></div>
-    <div class="campo"><label>Vagas (so para avulsa)</label><input id="ro-qtd" value="${esc(t.quantidade)}"></div>
-    <label class="marcador"><input type="checkbox" id="ro-turno" ${t.porTurno ? 'checked' : ''}> Uma por turno</label>
-    <label class="marcador" style="margin-top:8px"><input type="checkbox" id="ro-setor" ${t.exigeSetor ? 'checked' : ''}> Exige setor</label>
-    <label class="marcador" style="margin-top:8px"><input type="checkbox" id="ro-ativo" ${t.ativo ? 'checked' : ''}> Ativa</label>`, `
+    <div class="campo"><label for="ro-tipo">Sigla (2 ou 3 letras — entra no código)</label>
+      <input id="ro-tipo" value="${esc(t.tipo)}" maxlength="3" ${travada ? 'disabled' : ''}>
+      ${travada ? `<p class="dica">A sigla não muda depois que a rotina gerou atividades — ela está no código delas.
+        Para outra sigla, crie uma rotina nova e desative esta.</p>` : ''}</div>
+    <div class="campo"><label for="ro-atividade">Atividade</label><input id="ro-atividade" value="${esc(t.atividade)}"></div>
+    <fieldset class="rot-grupo"><legend>Repete</legend>
+      <div class="rot-pilulas">${[['SEMANAL', 'Toda semana'], ['MENSAL', 'Todo mês'], ['AVULSA', 'Vagas sem data']].map(([v, r]) => `
+        <label><input type="radio" name="ro-freq" value="${v}" ${v === freq ? 'checked' : ''} onchange="trocarRepeticao()"><span>${r}</span></label>`).join('')}
+      </div>
+    </fieldset>
+    <div id="ro-quando">${blocoQuando(freq)}</div>
+    <label class="marcador rot-opcao"><input type="checkbox" id="ro-turno" ${t.porTurno ? 'checked' : ''}>
+      <span><b>Uma por turno (A, B e C)</b> — desmarcado: uma só, para a gestão e os coordenadores (turno Todos)</span></label>
+    <label class="marcador rot-opcao"><input type="checkbox" id="ro-setor" ${t.exigeSetor ? 'checked' : ''}>
+      <span><b>Exige setor</b> — no calendário, o gerente escolhe o setor de cada atividade (como na Vistoria)</span></label>
+    <label class="marcador rot-opcao"><input type="checkbox" id="ro-ativo" ${t.ativo ? 'checked' : ''}>
+      <span><b>Ativa</b> — desmarcada, a rotina para de gerar e as pendentes de hoje em diante saem do calendário</span></label>
+    ${n ? `<p class="dica rot-agora">No calendário agora: ${n} ${n === 1 ? 'pendente' : 'pendentes'} de hoje em diante (${esc(porMesDe(salva))}).</p>` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
-    <button class="botao" onclick="agir('salvarRotina',{id:${jsArg(t.id)},tipo:val('ro-tipo'),atividade:val('ro-atividade'),frequencia:val('ro-freq'),dia:val('ro-dia'),quantidade:val('ro-qtd'),porTurno:marcado('ro-turno'),exigeSetor:marcado('ro-setor'),ativo:marcado('ro-ativo')},'Rotina salva')">Salvar</button>`);
+    <button class="botao" onclick="salvarRotina()">Salvar</button>`);
+  previaRotina();
+}
+
+/* O bloco do "quando" de cada "Repete": dia da semana, dia do mes ou numero de vagas. */
+function blocoQuando(freq) {
+  const e = ROT_FORM.escolha;
+  if (freq === 'SEMANAL') return `
+    <fieldset class="rot-grupo"><legend>Dia da semana</legend>
+      <div class="rot-pilulas rot-dias">${[1, 2, 3, 4, 5, 6, 7].map((n) => `
+        <label><input type="radio" name="ro-dia-semana" value="${n}" aria-label="${nomeDoDia(n)}" ${String(n) === e.SEMANAL ? 'checked' : ''}
+          onchange="escolherQuando()"><span>${DIAS_ROTINA_CURTOS[n]}</span></label>`).join('')}
+      </div>
+      <p class="dica" id="ro-previa" aria-live="polite"></p>
+    </fieldset>`;
+  if (freq === 'MENSAL') {
+    const fixo = /^\d+$/.test(e.MENSAL) ? e.MENSAL : '';
+    const opcao = (v, rotulo) => `<label class="marcador"><input type="radio" name="ro-dia-mes" value="${v}"
+      ${(v === 'FIXO' ? !!fixo : e.MENSAL === v) ? 'checked' : ''} onchange="escolherQuando()"> ${rotulo}</label>`;
+    return `
+    <fieldset class="rot-grupo"><legend>Dia do mês</legend>
+      ${opcao('PRIMEIRA_SEGUNDA', '1ª segunda-feira do mês')}
+      ${opcao('ULTIMA_SEXTA', 'Última sexta-feira do mês')}
+      <div class="rot-fixo">${opcao('FIXO', 'Dia fixo')}
+        <select id="ro-dia-fixo" aria-label="Dia fixo do mês" onchange="escolherDiaFixo()">${Array.from({ length: 31 }, (x, i) => i + 1)
+          .map((d) => `<option ${String(d) === (fixo || '15') ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+      <p class="dica">Se o mês não tiver esse dia (31 em setembro), vale o último dia do mês.</p>
+      <p class="dica" id="ro-previa" aria-live="polite"></p>
+    </fieldset>`;
+  }
+  return `
+    <div class="campo"><label for="ro-qtd">Vagas por mês</label>
+      <input id="ro-qtd" type="number" min="1" max="10" step="1" value="${esc(e.AVULSA)}" oninput="escolherQuando()">
+      <p class="dica">As vagas aparecem sem data em “Treinamentos e vagas”; o gerente agenda.</p></div>`;
+}
+
+const freqDoForm = () => (document.querySelector('input[name="ro-freq"]:checked') || {}).value || 'SEMANAL';
+function quandoDoForm(freq) {
+  if (freq === 'SEMANAL') return (document.querySelector('input[name="ro-dia-semana"]:checked') || {}).value || '';
+  if (freq === 'AVULSA') return val('ro-qtd');
+  const v = (document.querySelector('input[name="ro-dia-mes"]:checked') || {}).value || '';
+  return v === 'FIXO' ? val('ro-dia-fixo') : v;
+}
+function escolherQuando() { ROT_FORM.escolha[freqDoForm()] = quandoDoForm(freqDoForm()); previaRotina(); }
+function escolherDiaFixo() {
+  const fixo = document.querySelector('input[name="ro-dia-mes"][value="FIXO"]');
+  if (fixo) fixo.checked = true;
+  escolherQuando();
+}
+/* Trocar o "Repete" redesenha so o bloco do dia; a escolha de antes fica guardada (ROT_FORM.escolha). */
+function trocarRepeticao() { el('ro-quando').innerHTML = blocoQuando(freqDoForm()); previaRotina(); }
+
+/* A data cai na regra? A mesma conta do servidor (datasDaRotina), para a previa. */
+function caiNaRegra(freq, dia, d) {
+  if (freq === 'SEMANAL') return (d.getDay() || 7) === Number(dia);
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  if (dia === 'PRIMEIRA_SEGUNDA') return d.getDay() === 1 && d.getDate() <= 7;
+  if (dia === 'ULTIMA_SEXTA') return d.getDay() === 5 && d.getDate() + 7 > ultimo;
+  return d.getDate() === Math.min(Number(dia), ultimo);
+}
+
+/* "Toda quarta-feira · próximas: 21/10, 28/10, 04/11" — de hoje em diante. */
+function previaRotina() {
+  const alvo = el('ro-previa');
+  if (!alvo) return;
+  const freq = freqDoForm(), dia = quandoDoForm(freq);
+  if (!dia) { alvo.textContent = freq === 'SEMANAL' ? 'Escolha o dia da semana.' : 'Escolha o dia do mês.'; return; }
+  const hoje = new Date(), proximas = [];
+  for (let i = 0; i < 400 && proximas.length < 3; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + i);
+    if (caiNaRegra(freq, dia, d)) proximas.push(String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'));
+  }
+  const regra = freq === 'SEMANAL' ? (Number(dia) >= 6 ? 'Todo ' : 'Toda ') + nomeDoDia(Number(dia))
+    : descreverQuando({ frequencia: freq, dia: dia }).replace(/^./, (x) => x.toUpperCase());
+  alvo.textContent = regra + ' · próximas: ' + proximas.join(', ');
+}
+
+function paramsDaRotina() {
+  const freq = freqDoForm(), quando = quandoDoForm(freq);
+  return { id: ROT_FORM.id, tipo: val('ro-tipo'), atividade: val('ro-atividade'), frequencia: freq,
+           dia: freq === 'AVULSA' ? '' : quando, quantidade: freq === 'AVULSA' ? quando : '',
+           porTurno: marcado('ro-turno'), exigeSetor: marcado('ro-setor'), ativo: marcado('ro-ativo') };
+}
+
+const mudouARegra = (t, p) => t.frequencia !== p.frequencia || String(t.dia) !== String(p.dia) || !!t.porTurno !== !!p.porTurno ||
+  (p.frequencia === 'AVULSA' && Number(t.quantidade) !== Number(p.quantidade));
+
+/* Salvar: com pendentes no calendario, desativar ou mudar a regra passa antes pela confirmacao. */
+function salvarRotina() {
+  const p = paramsDaRotina();
+  if (p.frequencia === 'SEMANAL' && !p.dia) return avisar('Escolha o dia da semana.', true);
+  if (p.frequencia === 'MENSAL' && !p.dia) return avisar('Rotina mensal: escolha 1ª segunda, última sexta ou um dia de 1 a 31.', true);
+  const t = rotinaDaLista(p.id);
+  if (pendentesDe(t) && !p.ativo) return janelaDesativarRotina(t, p);
+  if (pendentesDe(t) && mudouARegra(t, p)) return janelaMudarRotina(t, p);
+  agir('salvarRotina', p, 'Rotina salva');
+}
+
+/* A regra em palavras; o turno entra so quando e ele que muda. */
+const regraEmPalavras = (a, b) => descreverQuando(a) +
+  (!!a.porTurno !== !!b.porTurno ? (a.porTurno ? ', uma por turno' : ', uma só (turno Todos)') : '');
+
+function janelaMudarRotina(t, p) {
+  ROT_PEDIDO = { acao: 'salvarRotina', params: p, recado: 'Rotina salva', rascunho: true };
+  const n = pendentesDe(t);
+  // So o dia da semana mudou: as pendentes vao para o dia novo da mesma semana.
+  const soODia = t.frequencia === 'SEMANAL' && p.frequencia === 'SEMANAL' && !!t.porTurno === !!p.porTurno;
+  const oDia = soODia ? (Number(p.dia) >= 6 ? 'o ' : 'a ') + DIAS_ROTINA[p.dia] : '';
+  const destino = soODia ? (n === 1 ? 'vai' : 'vão') + ' para ' + oDia + ' da mesma semana'
+    : (n === 1 ? 'segue' : 'seguem') + ' a regra nova: o que ela não gera é cancelado (fica no Arquivo de canceladas) e o que falta é criado, só de hoje em diante';
+  abrirJanela('Mudar a rotina no calendário?', `
+    <p class="rot-texto">“${esc(t.atividade)}” passa de <b>${esc(regraEmPalavras(t, p))}</b> para <b>${esc(regraEmPalavras(p, t))}</b>.
+      ${n === 1 ? 'A <b>única</b> atividade pendente' : 'As <b>' + n + '</b> atividades pendentes'} de hoje em diante
+      (${esc(porMesDe(t))}) ${destino}. Não mudam: as já entregues ou validadas, as remarcadas à mão e as de datas
+      que já passaram.${soODia ? ' Se ' + oDia + ' desta semana já passou, a desta semana fica como está.' : ''}</p>
+    <label class="marcador"><input type="checkbox" id="ro-ajustar" checked onchange="el('ro-confirmar').textContent = this.checked
+      ? 'Salvar e ajustar o calendário' : 'Salvar só a rotina'"> Ajustar também as atividades já geradas</label>
+    <p class="dica">Desmarcado: vale só para os meses que ainda vão ser gerados.</p>`, `
+    <button class="botao secundario" onclick="voltarDaConfirmacao()">Voltar</button>
+    <button class="botao" id="ro-confirmar" onclick="confirmarRotina()">Salvar e ajustar o calendário</button>`);
+}
+
+/* p = os campos do formulario (desmarcou "Ativa"); sem p, e o "Desativar" da lista. */
+function janelaDesativarRotina(t, p) {
+  ROT_PEDIDO = p ? { acao: 'salvarRotina', params: p, recado: 'Rotina salva', rascunho: true }
+                 : { acao: 'alternarRotina', params: { id: t.id, ativo: false }, recado: 'Rotina desativada' };
+  const n = pendentesDe(t);
+  abrirJanela('Desativar “' + t.atividade + '”?', `
+    <p class="rot-texto">A rotina para de gerar atividades. ${n === 1
+      ? 'A <b>única</b> pendente de hoje em diante (' + esc(porMesDe(t)) + ') será <b>cancelada</b>: sai do calendário e fica'
+      : 'As <b>' + n + '</b> pendentes de hoje em diante (' + esc(porMesDe(t)) + ') serão <b>canceladas</b>: saem do calendário e ficam'}
+      no Arquivo de canceladas do mês. Se você ativar a rotina de novo, ${n === 1 ? 'ela volta' : 'elas voltam'}.
+      Entregues, validadas e de datas que já passaram não mudam.</p>`, `
+    <button class="botao secundario" onclick="voltarDaConfirmacao()">Voltar</button>
+    <button class="botao perigo" onclick="confirmarRotina()">Desativar e cancelar ${n}</button>`);
+}
+
+/* Desativar / Ativar da lista. Ativar nao precisa de confirmacao: o que a rotina cancelou volta. */
+function alternarRotina(id) {
+  const t = rotinaDaLista(id);
+  if (!t) return;
+  if (!t.ativo) return agir('alternarRotina', { id: t.id, ativo: true }, 'Rotina ativada');
+  if (pendentesDe(t)) return janelaDesativarRotina(t, null);
+  agir('alternarRotina', { id: t.id, ativo: false }, 'Rotina desativada');
+}
+
+function removerRotina(id) {
+  const t = rotinaDaLista(id);
+  if (!t) return;
+  const n = pendentesDe(t);
+  ROT_PEDIDO = { acao: 'excluirRotina', params: { id: t.id }, recado: 'Rotina removida' };
+  abrirJanela('Remover “' + t.atividade + '”?', `
+    <p class="rot-texto">A rotina sai da lista e para de gerar atividades.${!n ? '' : n === 1
+      ? ' A <b>única</b> pendente de hoje em diante será cancelada (fica no Arquivo de canceladas).'
+      : ' As <b>' + n + '</b> pendentes de hoje em diante serão canceladas (ficam no Arquivo de canceladas).'}
+      O histórico — entregues, validadas e passadas — continua.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    <button class="botao perigo" onclick="confirmarRotina()">Remover rotina</button>`);
+}
+
+/* O botao da confirmacao grava (dentro do clique: com o canal barrado o agir vai pela pagina). */
+function confirmarRotina() {
+  const x = ROT_PEDIDO;
+  if (!x) return;
+  if (el('ro-ajustar')) x.params.ajustarCalendario = marcado('ro-ajustar');
+  agir(x.acao, x.params, x.recado);
+}
+
+/* Voltar da confirmacao: para o formulario com o que a pessoa escolheu, ou para a lista. */
+function voltarDaConfirmacao() {
+  const x = ROT_PEDIDO;
+  if (x && x.rascunho) formRotina(x.params.id, x.params);
+  else fecharJanela();
 }
 
 /* ---- DE-PARA ---- */
@@ -3941,7 +4256,7 @@ function blocoModulosPessoa(d) {
         <span><i style="background:var(--verde)"></i>vê e edita</span><span><i style="background:var(--azul-vivo)"></i>só vê</span>
         <span><i style="background:var(--tinta-fraca)"></i>sem acesso</span><span><b>negrito</b> = ajuste só desta pessoa</span>
       </div>
-      <p class="dica">O módulo também precisa estar ligado na filial (Configuração › Filiais e painéis). O nível ADMIN vê tudo.</p>
+      <p class="dica">O módulo também precisa estar ligado na filial (Configuração › Filiais e painéis). O nível ADMIN vê todos os módulos ligados na filial (os ocultos com a etiqueta oculto).</p>
     </div>`;
 }
 
@@ -4370,6 +4685,214 @@ function pintarAcoes(r) {
   el('acoes-topo').innerHTML = p.gerir
     ? `<button class="botao" onclick="formAcao()">+ Nova ação</button>` : '';
   el('pagina').innerHTML = planoHtml(d);
+  abrirAcaoDoLink();
+}
+
+/*
+ * LINK DO E-MAIL DE MENCAO (19/10): ?tela=acoes&acao=ID (ou tela=limpeza)
+ * abre o historico daquela acao, uma vez, assim que o plano aparece. A que a
+ * pessoa nao ve mais (excluida, de outra filial) vira so o aviso.
+ */
+function abrirAcaoDoLink() {
+  const id = ACAO_DO_LINK;
+  if (!id) return;
+  ACAO_DO_LINK = '';
+  const a = planoAcaoPorId(id);
+  if (!a) return avisar('Esta ação não está mais disponível para você.', true);
+  // Limpeza (o filtro e da tela): a acao concluida nao esta em "Em aberto" — a lista passa a mostrar todas.
+  if (PLANO.local && !planoFiltrarLista([a], PLANO.local).length) PLANO.filtrar({ situacao: 'TODAS' });
+  abrirComentarios(id, podeComentarAcao(a, planoD().permissoes));
+}
+
+/* ---------- O SELO DE COMENTARIO NO CARTAO (19/10) ---------- */
+
+/* So o que alguem ESCREVEU: o registro automatico de concluir, reabrir ou cancelar nao conta. */
+const comentariosEscritos = (a) => (a.comentarios || []).filter((c) => !c.automatico);
+const meuEmail = () => String((SESSAO && SESSAO.usuario && SESSAO.usuario.email) || '').toLowerCase();
+const ehMeu = (c) => String(c.autor || '').toLowerCase() === meuEmail();
+
+/* Responsavel pela acao ou gestao do plano: comenta e muda a situacao. */
+const cuidaDaAcao = (a, p) => (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1 || !!p.gerir;
+/* Comentam: quem cuida da acao e quem foi marcado num comentario dela — nunca na cancelada. */
+const podeComentarAcao = (a, p) => a.situacao !== 'CANCELADA' && (cuidaDaAcao(a, p) || (a.marcadosEmails || []).indexOf(p.email) !== -1);
+
+/*
+ * "NOVO" NESTE APARELHO. O que o aparelho ja abriu fica no localStorage so
+ * com IDs ({ idDaAcao: idDoUltimoRegistroVisto }) — nada que identifique a
+ * pessoa. Guarda as ultimas 400 acoes abertas (sai a aberta ha mais tempo):
+ * podar pela lista da tela apagaria as do outro plano e as concluidas que o
+ * filtro "Em aberto" esconde. Sem localStorage, o "novo" vale ate abrir.
+ */
+const CHAVE_VISTOS = 'gsl_coment_vistos', VISTOS_MAX = 400;
+const COMENT_NOVO_MS = 72 * 3600 * 1000;           // cobre o fim de semana
+function comentVistos() {
+  try { return JSON.parse(lerLocal(CHAVE_VISTOS) || '{}') || {}; } catch (e) { return {}; }
+}
+function marcarComentVisto(a) {
+  const lista = a.comentarios || [];
+  if (!lista.length) return;
+  const vistos = comentVistos();
+  delete vistos[a.id];                              // vai para o fim: a ultima aberta e a ultima a sair
+  vistos[a.id] = lista[lista.length - 1].id;
+  Object.keys(vistos).slice(0, -VISTOS_MAX).forEach((k) => { delete vistos[k]; });
+  gravarLocal(CHAVE_VISTOS, JSON.stringify(vistos));
+  document.querySelectorAll('.selo-coment.novo').forEach((b) => {
+    if (b.dataset.acao !== a.id) return;
+    b.classList.remove('novo');
+    const n = b.querySelector('.selo-novo'); if (n) n.remove();
+  });
+}
+/* 'dd/MM/yyyy HH:mm' (como o servidor grava) -> milissegundos. */
+function msDoCarimbo(em) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/.exec(String(em || ''));
+  return m ? new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime() : 0;
+}
+/* "novo": o ultimo comentario escrito por OUTRA pessoa, das ultimas 72 h, depois do que este aparelho abriu. */
+function temComentarioNovo(a) {
+  const ultimo = comentariosEscritos(a).filter((c) => !ehMeu(c)).pop();
+  if (!ultimo || Date.now() - msDoCarimbo(ultimo.em) > COMENT_NOVO_MS) return false;
+  const lista = a.comentarios || [], visto = comentVistos()[a.id];
+  return lista.findIndex((c) => c.id === visto) < lista.findIndex((c) => c.id === ultimo.id);
+}
+/* A mencao a mim que ainda espera resposta: a mais recente, se eu nao escrevi nada depois dela. */
+function mencaoParaMim(a) {
+  const lista = a.comentarios || [], eu = meuEmail();
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (ehMeu(lista[i])) return null;
+    if ((lista[i].mencoes || []).some((m) => m.email === eu)) return lista[i];
+  }
+  return null;
+}
+
+/*
+ * Os selos do topo do cartao: "@ voce" enquanto a pessoa marcada nao
+ * responde e "N" comentarios (cheio, com "novo", quando ha um de outra
+ * pessoa que este aparelho nao abriu). Sem comentario escrito, nada.
+ * Clicar abre o historico.
+ */
+function seloComentarios(a, podeComentar) {
+  const escritos = comentariosEscritos(a), n = escritos.length, mencao = mencaoParaMim(a);
+  const abre = `abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})`;
+  const quando = (c) => String(c.em || '').slice(0, 16);
+  let html = mencao ? `<button type="button" class="selo-mencao" onclick="${abre}" title="${esc(mencao.nome + ' marcou você em ' + quando(mencao))}">
+    <span aria-hidden="true">@</span> você<span class="so-leitor"> — ${esc(mencao.nome)} marcou você num comentário</span></button>` : '';
+  if (!n) return html;
+  const novo = temComentarioNovo(a), ultimo = escritos[n - 1];
+  const dica = n + (n === 1 ? ' comentário' : ' comentários') + ' — o último de ' + ultimo.nome + ' em ' + quando(ultimo);
+  return html + `<button type="button" class="selo-coment${novo ? ' novo' : ''}" data-acao="${esc(a.id)}" onclick="${abre}" title="${esc(dica)}">
+    <span aria-hidden="true">&#128172;</span> ${n}<span class="so-leitor"> ${n === 1 ? 'comentário' : 'comentários'}</span>${novo ? ' <span class="selo-novo">novo</span>' : ''}</button>`;
+}
+
+/* O texto do comentario com quem foi marcado em destaque — os nomes vem do servidor, nunca do texto. */
+function textoComMencoes(c) {
+  const html = esc(c.texto);
+  const porAlvo = {};
+  (c.mencoes || []).forEach((m) => { if (m.nome) porAlvo[esc('@' + m.nome)] = m; });
+  // O nome mais longo primeiro: "@Ana Paula" nao vira "@Ana" + " Paula".
+  const alvos = Object.keys(porAlvo).sort((x, y) => y.length - x.length);
+  if (!alvos.length) return html;
+  const re = new RegExp(alvos.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  return html.replace(re, (t) => `<span class="coment-mencao${porAlvo[t].email === meuEmail() ? ' para-voce' : ''}">${t}</span>`);
+}
+const linhaMarcou = (c) => ((c.mencoes || []).length ? `<div class="coment-mencoes">Marcou: ${c.mencoes.map((m) =>
+  `<span class="coment-mencao${m.email === meuEmail() ? ' para-voce' : ''}">@${esc(m.nome)}</span>`).join(' ')}</div>` : '');
+
+/*
+ * MARCAR PESSOA NO COMENTARIO (19/10). "@" no campo (no comeco ou depois de
+ * um espaco) abre as sugestoes; o botao "@ Marcar pessoa" faz o mesmo. A
+ * linha "Vai avisar por e-mail" e a verdade do que vai para o servidor: o
+ * "@Nome" no texto e so texto (apagar ou editar nao engana ninguem).
+ * Sugestoes: as pessoas do plano (as do campo Responsaveis), menos quem
+ * escreve e quem ja foi escolhido, por nome, funcao ou turno, sem acento.
+ */
+const MENCAO = { acao: null, escolhidas: [], lista: [], ativo: 0, inicio: -1 };
+const MENCOES_MAX = 10, SUGESTOES_MAX = 8;
+const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const pessoaDoPlano = (email) => (planoD().pessoas || []).find((p) => p.email === email) || { email: email, nome: email };
+
+function mencaoCandidatos(filtro) {
+  const a = MENCAO.acao || {}, eu = meuEmail(), f = semAcento(filtro);
+  const jaVeem = (a.responsaveisEmails || []).concat(a.marcadosEmails || []);
+  return (planoD().pessoas || [])
+    .filter((p) => p.email !== eu && MENCAO.escolhidas.indexOf(p.email) === -1)
+    .filter((p) => !f || semAcento([p.nome, p.papel, p.turno ? 'turno ' + p.turno : ''].join(' ')).indexOf(f) !== -1)
+    .slice(0, SUGESTOES_MAX)
+    .map((p) => Object.assign({}, p, { passaAVer: !p.veTodas && jaVeem.indexOf(p.email) === -1 }));
+}
+function mencaoPintarLista() {
+  const caixa = el('cm-sugestoes'), campo = el('cm-texto');
+  if (!caixa || !campo) return;
+  caixa.innerHTML = MENCAO.lista.length ? MENCAO.lista.map((p, i) => `
+    <div role="option" id="cm-sug-${i}" class="mencao-opcao${i === MENCAO.ativo ? ' ativa' : ''}" aria-selected="${i === MENCAO.ativo}"
+         onmousedown="event.preventDefault(); mencaoEscolher(${i})"><b>${esc(p.nome)}</b>
+      <span class="mencao-papel">${esc([p.papel, p.turno ? 'turno ' + p.turno : ''].filter(Boolean).join(' · '))}</span>
+      ${p.passaAVer ? '<span class="mencao-acesso">passa a ver esta ação</span>' : ''}</div>`).join('')
+    : '<div class="mencao-vazia">Ninguém com esse nome no plano.</div>';
+  caixa.classList.remove('oculto');
+  campo.setAttribute('aria-expanded', 'true');
+  if (MENCAO.lista.length) campo.setAttribute('aria-activedescendant', 'cm-sug-' + MENCAO.ativo);
+  else campo.removeAttribute('aria-activedescendant');
+}
+function mencaoFechar() {
+  MENCAO.inicio = -1; MENCAO.lista = [];
+  const caixa = el('cm-sugestoes'); if (caixa) { caixa.classList.add('oculto'); caixa.innerHTML = ''; }
+  const campo = el('cm-texto'); if (campo) { campo.setAttribute('aria-expanded', 'false'); campo.removeAttribute('aria-activedescendant'); }
+}
+/* A cada tecla: "@" + ate duas palavras antes do cursor abre (ou filtra) as sugestoes. */
+function mencaoDigitando(campo) {
+  const antes = campo.value.slice(0, campo.selectionStart);
+  const m = /(^|\s)@([^\s@]{0,30}(?: [^\s@]{0,30})?)$/.exec(antes);
+  if (!m) return mencaoFechar();
+  const lista = mencaoCandidatos(m[2]);
+  if (!lista.length && /\s/.test(m[2])) return mencaoFechar();      // a segunda palavra ja e o resto da frase
+  MENCAO.inicio = antes.length - m[2].length - 1;
+  MENCAO.lista = lista; MENCAO.ativo = 0;
+  mencaoPintarLista();
+}
+function mencaoTeclas(ev) {
+  if (MENCAO.inicio < 0) return;
+  if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); mencaoFechar(); return; }
+  if (!MENCAO.lista.length) return;
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    MENCAO.ativo = (MENCAO.ativo + (ev.key === 'ArrowDown' ? 1 : MENCAO.lista.length - 1)) % MENCAO.lista.length;
+    mencaoPintarLista();
+  } else if (ev.key === 'Enter' || ev.key === 'Tab') {
+    ev.preventDefault();
+    mencaoEscolher(MENCAO.ativo);
+  }
+}
+/* Troca o "@texto" digitado por "@Nome " e poe a pessoa na lista de quem vai ser avisado. */
+function mencaoEscolher(i) {
+  const p = MENCAO.lista[i], campo = el('cm-texto');
+  if (!p || !campo) return;
+  if (MENCAO.escolhidas.length >= MENCOES_MAX) { mencaoFechar(); return avisar('Marque no máximo ' + MENCOES_MAX + ' pessoas por comentário.', true); }
+  const fim = campo.selectionStart, ini = MENCAO.inicio >= 0 ? MENCAO.inicio : fim;
+  const nome = '@' + p.nome + ' ';
+  campo.value = campo.value.slice(0, ini) + nome + campo.value.slice(fim);
+  campo.selectionStart = campo.selectionEnd = ini + nome.length;
+  MENCAO.escolhidas.push(p.email);
+  mencaoFechar(); mencaoPintarEscolhidas(); campo.focus();
+}
+/* O botao "@ Marcar pessoa": poe o "@" no cursor e abre a lista inteira. */
+function mencaoBotao() {
+  const campo = el('cm-texto'); if (!campo) return;
+  const pos = campo.selectionStart, antes = campo.value.slice(0, pos);
+  const sep = antes && !/\s$/.test(antes) ? ' ' : '';
+  campo.value = antes + sep + '@' + campo.value.slice(pos);
+  campo.selectionStart = campo.selectionEnd = pos + sep.length + 1;
+  campo.focus(); mencaoDigitando(campo);
+}
+/* Saiu do campo (clique fora, Tab): a lista fecha — menos quando o foco voltou para ele (o botao "@ Marcar pessoa"). */
+function mencaoAoSair() { setTimeout(() => { if (document.activeElement !== el('cm-texto')) mencaoFechar(); }, 150); }
+function mencaoTirar(email) { MENCAO.escolhidas = MENCAO.escolhidas.filter((e) => e !== email); mencaoPintarEscolhidas(); }
+function mencaoPintarEscolhidas() {
+  const alvo = el('cm-marcados'); if (!alvo) return;
+  alvo.innerHTML = MENCAO.escolhidas.length ? 'Vai avisar por e-mail: ' + MENCAO.escolhidas.map((e) => {
+    const p = pessoaDoPlano(e);
+    return `<span class="mencao-chip">@${esc(p.nome)}<button type="button" class="mencao-tirar" onclick="mencaoTirar(${jsArg(e)})"
+      aria-label="Não marcar ${esc(p.nome)}">&times;</button></span>`;
+  }).join(' ') : '';
 }
 
 /* Filtro feito na tela (Limpeza): o servidor manda todas as ações que a pessoa enxerga. */
@@ -4480,7 +5003,8 @@ const seloFotos = (n, onclick) => n
 function cartaoAcao(a, p) {
   const minha = (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1;
   const podeConcluir = a.situacao === 'PENDENTE' && (minha || p.gerir);
-  const podeComentar = (minha || p.gerir) && a.situacao !== 'CANCELADA';
+  const podeComentar = podeComentarAcao(a, p);
+  const escritos = comentariosEscritos(a).length;
   const onde = [a.zona, a.local].filter(Boolean).join(' · ');
 
   let aviso = '';
@@ -4494,7 +5018,8 @@ function cartaoAcao(a, p) {
     <div class="cartao-acao ${classeStatus(a.status)}">
       <div class="acao-topo">
         <div class="acao-titulo">${esc(a.acao)}</div>
-        <span class="acao-selos">${a.criticidade && a.plano === 'LIMPEZA' ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}
+        <span class="acao-selos">${seloComentarios(a, podeComentar)}
+          ${a.criticidade && a.plano === 'LIMPEZA' ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}
           ${etiqueta(a.status)}</span>
       </div>
       ${a.descricao ? `<div class="acao-descricao">${esc(a.descricao)}</div>` : ''}
@@ -4503,6 +5028,8 @@ function cartaoAcao(a, p) {
         <span><b>Entregar até:</b> ${esc(a.prazo || '—')}</span>
         ${a.turno ? `<span><b>Turno:</b> ${esc(a.turno)}</span>` : ''}
         ${onde ? `<span><b>Local:</b> ${esc(onde)}</span>` : ''}
+        ${(a.marcados || []).length ? `<span><b>Marcados:</b> ${a.marcados.map((m) =>
+          esc(m.nome) + (m.email === p.email ? ' <span class="marca-voce">você</span>' : '')).join(', ')}</span>` : ''}
         ${aviso}
         ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
       </div>
@@ -4518,7 +5045,7 @@ function cartaoAcao(a, p) {
         </div>` : ''}
       <div class="acao-botoes">
         ${podeComentar || (a.comentarios || []).length
-          ? `<button class="botao secundario" onclick="abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})">Comentários${(a.comentarios || []).length ? ' (' + a.comentarios.length + ')' : ''}</button>` : ''}
+          ? `<button class="botao secundario" onclick="abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})">Comentários${escritos ? ' (' + escritos + ')' : ''}</button>` : ''}
         ${podeConcluir ? `<button class="botao" onclick="formConcluirAcao(${jsArg(a.id)})">Marcar como concluída</button>` : ''}
         ${p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir(${planoAcao('reabrir')},{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
         ${p.gerir ? `<button class="botao-texto" onclick="formAcao(${jsArg(a.id)})">Editar</button>` : ''}
@@ -4539,12 +5066,14 @@ const COMENT_TIPO = { CONCLUSAO: 'concluiu a ação', REABERTURA: 'reabriu a aç
 /*
  * Historico + novo comentario. Quem avancou registra o que fez, em que
  * situacao a acao ficou, o que ela ainda espera para concluir — e pode
- * anexar foto.
+ * anexar foto e marcar pessoas (19/10). Quem so foi marcado na acao comenta,
+ * mas a situacao e o "depende de" ficam com os responsaveis e a gestao.
  */
 function abrirComentarios(id, podeComentar) {
   const a = planoAcaoPorId(id);
   if (!a) return;
   const atual = a.andamento || 'Em andamento';
+  const cuida = cuidaDaAcao(a, planoD().permissoes || {});
   // Cada registro mostra QUEM fez (nome, funcao e e-mail da pessoa que estava
   // logada — vem da sessao, nao de um campo da tela) e QUANDO.
   const hist = (a.comentarios || []).map((c) => `
@@ -4555,28 +5084,37 @@ function abrirComentarios(id, podeComentar) {
         <span class="coment-quando">${esc((c.em || '').slice(0, 16))}</span>
         ${COMENT_TIPO[c.tipo] ? `<span class="coment-tipo">${COMENT_TIPO[c.tipo]}</span>` : ''}
         ${c.situacao ? `<span class="pill-andamento">${esc(c.situacao)}</span>` : ''}</div>
-      <div class="coment-texto">${esc(c.texto)}</div>
+      <div class="coment-texto">${textoComMencoes(c)}</div>
+      ${linhaMarcou(c)}
       ${c.depende ? `<div class="coment-depende">Depende de: ${esc(c.depende)}</div>` : ''}
       ${seloFotos((c.fotos || []).length, 'verFotosDoComentario(' + jsArg(a.id) + ',' + jsArg(c.id) + ')')}
     </div>`).join('');
   const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}
     ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>` : '';
   fotosLimpar('cm');
+  MENCAO.acao = a; MENCAO.escolhidas = []; mencaoFechar();
+  marcarComentVisto(a);
   abrirJanela('Comentários — ' + a.acao, `
     <div class="coment-historico">${criada}${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
     ${podeComentar ? `<p class="dica" style="margin:-6px 0 10px">O comentário fica registrado com o seu nome, a sua função, o seu e-mail e a data e hora — e não pode ser apagado.</p>` : ''}
     ${podeComentar ? `
-      <div class="campo"><label>O que avançou</label>
-        <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta"></textarea></div>
-      <div class="campo-duplo">
+      <div class="campo mencao-campo"><label for="cm-texto">O que avançou</label>
+        <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta. Digite @ para marcar alguém."
+          role="combobox" aria-autocomplete="list" aria-controls="cm-sugestoes" aria-expanded="false" aria-describedby="cm-dica-mencao"
+          oninput="mencaoDigitando(this)" onkeydown="mencaoTeclas(event)" onblur="mencaoAoSair()"></textarea>
+        <div id="cm-sugestoes" class="mencao-sugestoes oculto" role="listbox" aria-label="Pessoas para marcar"></div>
+        <div class="mencao-barra"><button type="button" class="botao-texto" onclick="mencaoBotao()">@ Marcar pessoa</button>
+          <span id="cm-dica-mencao" class="dica">Quem você marcar recebe um e-mail com esta ação e pode responder aqui.</span></div>
+        <div id="cm-marcados" class="mencao-escolhidas" aria-live="polite"></div></div>
+      ${cuida ? `<div class="campo-duplo">
         <div class="campo"><label>Situação da ação</label><select id="cm-sit">
           ${ANDAMENTOS_ACAO.map((x) => `<option ${x === atual ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
         <div class="campo"><label>Depende de (o que falta para concluir)</label>
           <input id="cm-dep" value="${esc(a.depende || '')}" placeholder="Ex.: chegada do material, liberação do SESMT"></div>
-      </div>
+      </div>` : `<p class="dica" style="margin:0 0 12px">Marcaram você nesta ação: o seu comentário entra no histórico, e a situação dela fica com os responsáveis.</p>`}
       ${fotosCampoHtml('cm', 'Foto (opcional) — do que foi feito, do antes e depois')}` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    ${podeComentar ? `<button class="botao" onclick="fotosProntas('cm') && agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm')}).catch(()=>{})">Registrar comentário</button>` : ''}`);
+    ${podeComentar ? `<button class="botao" onclick="fotosProntas('cm') && agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm'),mencoes:MENCAO.escolhidas.slice()}).catch(()=>{})">Registrar comentário</button>` : ''}`);
   const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
@@ -4712,7 +5250,8 @@ function formCancelarAcao(id) {
    subir: a do celular tem 4-8 MB e vira ~300 KB, sem perder o que importa.
    Fica no Drive, na pasta da ação (Anexos/ACOES/<id>), como os outros
    anexos do GSL. Para ver, a foto passa pelo servidor, que confere se a
-   pessoa enxerga aquela ação. */
+   pessoa enxerga aquela ação. A HEIC do iPhone, que o Chrome não abre,
+   passa antes pelo servidor, que a converte (19/10). */
 const FOTOS_PENDENTES = {};          // por formulário: 'ac' (ação), 'cm' (comentário), 'cc' (conclusão)
 const FOTOS_PREPARANDO = {};         // formulário com foto ainda sendo reduzida
 const FOTO_LADO_MAX = 1600;
@@ -4729,12 +5268,21 @@ function fotosParaEnviar(chave) {
   return (FOTOS_PENDENTES[chave] || []).map((f) => ({ nome: f.nome, tipo: f.tipo, dados: f.dados }));
 }
 
+/*
+ * No Windows o filtro "Arquivos de imagem" do Chrome nao lista .heic: as
+ * extensoes vao no accept. No Android, nao — extensao no accept derruba o
+ * seletor de fotos do sistema (e o HEIF aparece nele assim mesmo). O
+ * asterisco vai com a barra invertida: regra do HtmlService.
+ */
+const ACEITA_FOTOS = /Android/i.test(navigator.userAgent) ? 'image/\*' : 'image/\*,.heic,.heif';
+const fotosDica = () => 'até ' + fotosPorVez() + ' por vez · JPG, PNG ou HEIC (iPhone)';
+
 function fotosCampoHtml(chave, rotulo) {
   return `<div class="campo"><label>${esc(rotulo)}</label>
     <label class="botao secundario fotos-escolher">&#128247; Escolher ou tirar foto
-      <input type="file" id="${chave}-fotos" accept="image/\*" multiple style="display:none"
+      <input type="file" id="${chave}-fotos" accept="${ACEITA_FOTOS}" multiple style="display:none"
              onchange="fotosEscolhidas(this, ${jsArg(chave)})"></label>
-    <span class="dica" id="${chave}-fotos-situacao">até ${fotosPorVez()} por vez</span>
+    <span class="dica" id="${chave}-fotos-situacao">${fotosDica()}</span>
     <div class="fotos-previas" id="${chave}-previas"></div></div>`;
 }
 
@@ -4746,34 +5294,79 @@ async function fotosEscolhidas(input, chave) {
   FOTOS_PREPARANDO[chave] = (FOTOS_PREPARANDO[chave] || 0) + 1;
   try {
   for (const arquivo of arquivos) {
+    // A janela fechou (ou abriu outra) no meio: a HEIC leva segundos no servidor — para aqui.
+    if (FOTOS_PENDENTES[chave] !== lista) break;
     if (lista.length >= fotosPorVez()) { avisar('No máximo ' + fotosPorVez() + ' fotos de cada vez.', true); break; }
-    if (String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(arquivo.name || '')) {
-      avisar('"' + arquivo.name + '" não é uma foto.', true); continue;
+    const heic = await ehHeic(arquivo);
+    if (!heic && String(arquivo.type || '').toLowerCase().indexOf('image') !== 0 && !/\.(jpe?g|png|webp|gif)$/i.test(arquivo.name || '')) {
+      avisar('"' + arquivo.name + '" não é uma foto. Envie JPG, PNG ou HEIC.', true); continue;
     }
-    if (situacao) situacao.textContent = 'Preparando ' + arquivo.name + '…';
-    try { lista.push(await comprimirFoto(arquivo)); }
+    if (situacao) situacao.textContent = heic ? 'Convertendo ' + arquivo.name + ' (foto do iPhone) — leva alguns segundos…' : 'Preparando ' + arquivo.name + '…';
+    try { lista.push(await comprimirFoto(arquivo, heic)); }
     catch (e) { avisar(e.message || String(e), true); }
   }
-  } finally { FOTOS_PREPARANDO[chave] = Math.max(0, (FOTOS_PREPARANDO[chave] || 1) - 1); }
-  if (situacao) situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : 'até ' + fotosPorVez() + ' por vez';
+  } finally {
+    // So a contagem desta janela: a de uma janela aberta depois (fotosLimpar) nao e desta escolha.
+    if (FOTOS_PENDENTES[chave] === lista) FOTOS_PREPARANDO[chave] = Math.max(0, (FOTOS_PREPARANDO[chave] || 1) - 1);
+  }
+  if (situacao) situacao.textContent = lista.length ? lista.length + ' foto(s) prontas para enviar' : fotosDica();
   fotosPintarPrevias(chave);
 }
 
 function fotosPintarPrevias(chave) {
   const alvo = el(chave + '-previas'); if (!alvo) return;
   alvo.innerHTML = (FOTOS_PENDENTES[chave] || []).map((f, i) => `
-    <span class="foto-previa">${f.previa ? `<img src="${f.previa}" alt="">` : `<span class="foto-sem-previa">${esc(f.nome)}</span>`}
+    <span class="foto-previa">${f.previa ? `<img src="${f.previa}" alt="">` : `<span class="foto-sem-previa">${f.heic ? 'HEIC · ' : ''}${esc(f.nome)}</span>`}
       <button type="button" title="Tirar esta foto" onclick="fotosTirar(${jsArg(chave)}, ${i})">&times;</button></span>`).join('');
 }
 function fotosTirar(chave, i) {
   (FOTOS_PENDENTES[chave] || []).splice(i, 1);
   fotosPintarPrevias(chave);
   const s = el(chave + '-fotos-situacao');
-  if (s) s.textContent = (FOTOS_PENDENTES[chave] || []).length ? FOTOS_PENDENTES[chave].length + ' foto(s) prontas para enviar' : 'até ' + fotosPorVez() + ' por vez';
+  if (s) s.textContent = (FOTOS_PENDENTES[chave] || []).length ? FOTOS_PENDENTES[chave].length + ' foto(s) prontas para enviar' : fotosDica();
 }
 
-/* Reduz para JPEG. Formato que o navegador não abre (HEIC no Chrome): vai como veio, se couber. */
-async function comprimirFoto(arquivo) {
+/*
+ * HEIC/HEIF (iPhone; alguns Android): pelo tipo, pela extensao ou pelos
+ * primeiros bytes ('ftyp' e a marca) — no Windows sem a extensao HEIF o
+ * tipo vem vazio, e o seletor de fotos do Android manda o nome sem extensao.
+ */
+const MARCAS_HEIC = ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1'];
+async function ehHeic(arquivo) {
+  if (/^image\/hei[cf]/i.test(arquivo.type || '') || /\.hei[cf]$/i.test(arquivo.name || '')) return true;
+  try {
+    const t = String.fromCharCode(...new Uint8Array(await arquivo.slice(0, 12).arrayBuffer()));
+    return t.slice(4, 8) === 'ftyp' && MARCAS_HEIC.includes(t.slice(8, 12));
+  } catch (e) { return false; }
+}
+
+/*
+ * HEIC que o navegador nao abre (Chrome): sobe sozinha, uma por chamada, e o
+ * servidor devolve a miniatura de 1600 px do Drive, que segue como qualquer
+ * outra foto (com previa). O Google sem a miniatura ainda: a foto vai como
+ * veio e o visor converte quando alguem abrir. Servidor de antes desta
+ * versao (sem converterFoto): vai como ia antes.
+ */
+async function converterHeicNoServidor(arquivo) {
+  if (arquivo.size > 10 * 1024 * 1024) throw new Error('A foto "' + arquivo.name + '" passa de 10 MB.');
+  const dados = await lerBase64(arquivo);
+  const comoVeio = { nome: arquivo.name, tipo: 'image/heic', dados: dados, previa: '', heic: true };
+  let r;
+  try { r = await executarAcaoSrv('converterFoto', { foto: { nome: arquivo.name, tipo: 'image/heic', dados: dados } }); }
+  catch (e) {
+    if (/desconhecida|que nao existe/i.test(String((e && e.message) || e))) return comoVeio;
+    throw e;
+  }
+  if (!r || !r.dados) {
+    avisar('A foto "' + arquivo.name + '" vai como está: o Google ainda não terminou de convertê-la. Ela aparece normalmente quando alguém abrir a ação.', true);
+    return comoVeio;
+  }
+  const bytes = Uint8Array.from(atob(r.dados), (c) => c.charCodeAt(0));
+  return comprimirFoto(new File([bytes], arquivo.name, { type: r.tipo || 'image/jpeg' }), false);    // sai IMG_0001.jpg
+}
+
+/* Reduz para JPEG (lado maior 1600 px). A HEIC que o navegador nao abre vai antes ao servidor. */
+async function comprimirFoto(arquivo, heic) {
   const url = URL.createObjectURL(arquivo);
   try {
     const img = await new Promise((ok, erro) => {
@@ -4793,9 +5386,8 @@ async function comprimirFoto(arquivo) {
     return { nome: String(arquivo.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg', tipo: 'image/jpeg',
              dados: dataUrl.split(',')[1], previa: dataUrl };
   } catch (e) {
-    if (arquivo.size > 10 * 1024 * 1024) throw new Error('A foto "' + arquivo.name + '" passa de 10 MB e o navegador não consegue reduzi-la.');
-    const dados = await lerBase64(arquivo);
-    return { nome: arquivo.name || 'foto', tipo: (arquivo.type || 'image/heic').toLowerCase(), dados: dados, previa: '' };
+    if (heic) return converterHeicNoServidor(arquivo);
+    throw new Error('"' + arquivo.name + '" não abre como foto neste navegador. Envie JPG, PNG ou HEIC.');
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -4871,7 +5463,8 @@ async function visorMostrar() {
     try {
       const r = await executarAcaoSrv(V.acaoFoto, { id: V.idAcao, arquivo: f.id });
       url = 'data:' + (r.tipo || 'image/jpeg') + ';base64,' + r.dados;
-      FOTO_CACHE.set(f.id, url);
+      // A HEIC que o Google ainda nao converteu fica fora do cache: a proxima abertura tenta de novo.
+      if (!ehUrlHeic(url)) FOTO_CACHE.set(f.id, url);
       if (FOTO_CACHE.size > 24) FOTO_CACHE.delete(FOTO_CACHE.keys().next().value);
     } catch (e) {
       if (VISOR === V && V.pedido === pedido) alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
@@ -4879,20 +5472,29 @@ async function visorMostrar() {
     }
   }
   if (VISOR !== V || V.pedido !== pedido) return;      // trocou de foto ou fechou no meio
-  alvo.innerHTML = /^data:image\/(heic|heif)/i.test(url)
-    ? '<div class="vazio">Este navegador não mostra fotos HEIC (iPhone). Use <b>Baixar</b> para abrir no computador.</div>'
+  alvo.innerHTML = ehUrlHeic(url)
+    ? '<div class="vazio">O Google ainda está preparando esta foto do iPhone (HEIC). Feche e abra de novo em alguns segundos — ou use <b>Baixar</b>.</div>'
     : `<img src="${url}" alt="${esc(f.nome || 'foto')}">`;
   V.url = url;          // o Baixar usa a foto que esta na tela (o cache pode ja ter soltado ela)
   const b = el('visor-baixar'); if (b) b.disabled = false;
 }
+const ehUrlHeic = (url) => /^data:image\/hei[cf]/i.test(url);
 
 function visorBaixar() {
   if (!VISOR) return;
   const f = VISOR.fotos[VISOR.i], url = VISOR.url || FOTO_CACHE.get(f.id);
   if (!url) return;
   const a = document.createElement('a');
-  a.href = url; a.download = f.nome || 'foto.jpg';
+  a.href = url; a.download = nomeParaBaixar(f.nome, url);
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* Com a extensao do que esta na tela: a HEIC antiga, convertida pelo servidor, sai .jpg (o Windows abre). */
+const EXTENSAO_DA_FOTO = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+function nomeParaBaixar(nome, url) {
+  const ext = EXTENSAO_DA_FOTO[(/^data:([^;,]+)/.exec(url) || [])[1]];
+  const base = String(nome || 'foto');
+  return ext ? base.replace(/\.(heic|heif|jpe?g|png|webp)$/i, '') + ext : base;
 }
 
 async function visorRemover() {

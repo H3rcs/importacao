@@ -13,6 +13,7 @@
 'use strict';
 const path = require('path');
 const { Mundo, chamarPeloNavegador } = require('./emulador/gas.js');
+const { HEIC_MINI } = require('./emulador/miniatura-drive.js');
 
 const PASTA = path.resolve(process.argv[2] || path.join(__dirname, '..', 'GSL'));
 const DONO = 'dono@bartofil.com.br', ATACANTE = 'estagiario@bartofil.com.br';
@@ -68,13 +69,28 @@ const bloqueadas = [
   // 10/10: sessao duravel, gravar pela reserva, cache — tudo interno
   ['acaoPelaPagina_', { t: 'x', acao: 'excluirAcao', ap: '{}' }], ['embutirTela_', {}, 'x', 'acoes', ''],
   ['encerrarSessao_', 'f'.repeat(64)], ['podarSessoes_', true], ['resumoDasSessoes_'], ['lerSessaoDaLoja_', 'f'.repeat(64)], ['publicarNumeros_', { GERACAO_DADOS: '999' }], ['publicarGeracoes_'], ['preLerCache_', 'x'],
-  ['cadastrosDeAcesso_'], ['lojaDeSessoes_'], ['chaveSessaoDuravel_', 'x']
+  ['cadastrosDeAcesso_'], ['lojaDeSessoes_'], ['chaveSessaoDuravel_', 'x'],
+  // 19/10: o menu relido depois de uma gravacao (so por dentro do executarAcaoETela)
+  ['menuDaSessao_', ctx],
+  // 19/10: foto HEIC — as pecas do conversor (o Drive e a API do Drive com o token do dono)
+  ['miniaturaDoDrive_', 'x', 25000], ['heicGravadaConvertida_', 'x'],
+  // 19/10: marcar pessoa no comentario — a lista de quem pode ser marcado (com quem ve tudo), o aviso e a porta direta
+  ['pessoasParaAcao', { id: 'CALENDARIO', modulo: 'calendario', cap: 'GERIR_ACOES' }],
+  ['acaoComentarAcao', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }], ['acaoComentarAcaoLimpeza', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }],
+  ['mencoesDoPedido_', { id: 'CALENDARIO', modulo: 'calendario', cap: 'GERIR_ACOES', nome: 'Plano de Ação' }, FALSO, { mencoes: [DONO] }],
+  ['avisarMencao_', { id: 'CALENDARIO', tela: 'acoes' }, { ID: 'x', ACAO: 'x' }, { email: ATACANTE, nome: 'x' }, 'x', DONO, true],
+  // 19/10: rotinas — gravar, desativar e remover mexem nas atividades ja geradas
+  ['acaoSalvarRotina', FALSO, { tipo: 'RON', atividade: 'x', frequencia: 'SEMANAL', dia: '3', ativo: true }],
+  ['acaoAlternarRotina', FALSO, { id: 'x', ativo: false }], ['acaoExcluirRotina', FALSO, { id: 'x' }],
+  ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
 ];
+const emailsAntesDosAtaques = m.emails.length;
 bloqueadas.forEach(([fn, ...a]) => {
   const r = run(ATACANTE, fn, ...a);
   ok(!r.ok && /Acesso negado|not found/i.test(r.erro.message), fn + '(' + a.map((x) => JSON.stringify(x)).join(', ').slice(0, 50) + ') bloqueada' +
     (r.ok ? ' — DEVOLVEU ' + JSON.stringify(r.valor).slice(0, 60) : ''));
 });
+ok(m.emails.length === emailsAntesDosAtaques, 'nenhum e-mail saiu pelas chamadas diretas (marcar pessoa pelo console nao avisa ninguem)');
 
 console.log('\nPortas novas sem sessao (10/10):');
 const ea = run(ATACANTE, 'executarAcaoETela', { t: 'f'.repeat(64), f: ctx.f }, 'excluirAcao', { id: 'x' }, 'acoes', {});
@@ -83,6 +99,16 @@ const ms = run(ATACANTE, 'manterSessao', { t: 'f'.repeat(64), f: ctx.f });
 ok(ms.ok && JSON.parse(ms.valor).ok === false && Object.keys(JSON.parse(ms.valor)).length === 1, 'manterSessao sem sessao so diz ok:false');
 const sc = run(ATACANTE, 'sondarCanal');
 ok(sc.ok && sc.valor === 'ok', 'sondarCanal so diz "ok"');
+
+console.log('\nFoto HEIC pelo console (19/10):');
+const noDrive = () => m.arquivos.size + m.pastas.size;
+const antesHeic = noDrive();
+const fotoHeic = { foto: { nome: 'a.heic', tipo: 'image/heic', dados: HEIC_MINI } };
+const cd = run(ATACANTE, 'acaoConverterFoto', FALSO, fotoHeic);
+ok(!cd.ok && /Acesso negado/.test(cd.erro.message) && noDrive() === antesHeic, 'acaoConverterFoto direto: recusado, nada criado no Drive' +
+  (cd.ok ? ' — DEVOLVEU ' + JSON.stringify(cd.valor).slice(0, 60) : ''));
+const cp = run(ATACANTE, 'executarAcao', { t: 'f'.repeat(64), f: ctx.f }, 'converterFoto', fotoHeic);
+ok(!cp.ok && /\[SESSAO\]/.test(cp.erro.message) && noDrive() === antesHeic, 'converterFoto pela porta sem sessao: recusado, nada criado no Drive');
 
 console.log('\nQuem deve continuar passando:');
 const g = run('', 'atualizarCompetenciaAberta');                        // gatilho: sem usuario do outro lado

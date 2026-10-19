@@ -154,6 +154,14 @@ function gerarCompetencia(competencia, quem, soSeNaoGerado) {
     // completar o mes). A comTrava derrubou a memoria: o marcador e o atual.
     if (soSeNaoGerado && mesGerado_(comp)) return { ok: true, competencia: comp, criadas: 0, jaGerado: true };
 
+    /*
+     * Mes que ja tinha sido gerado so e COMPLETADO de hoje em diante (19/10).
+     * "Gerar mes" no mes corrente criava tambem as datas que ja passaram, e
+     * elas nasciam Atrasadas. A primeira geracao do mes continua inteira.
+     */
+    const completar = mesGerado_(comp);
+    const hojeIso = hojeISO();
+
     // Dentro da trava o listar() relê a planilha: a comTrava derrubou a
     // memoria da execucao, entao o que outra execucao gravou agora aparece.
     const existentes = {}, antigosDoAno = {};
@@ -166,41 +174,14 @@ function gerarCompetencia(competencia, quem, soSeNaoGerado) {
     const equipe = coordenadoresPorTurno();
     const novas = [];
 
-    listar('ROTINAS').filter(function (r) { return marcado(r.ATIVO); }).forEach(function (rotina) {
-      const tipo = String(rotina.TIPO || '').trim();
-      if (!tipo) return;
-      const turnos = marcado(rotina.POR_TURNO) ? TURNOS : ['Todos'];
-      datasDaRotina(rotina, ano, mes).forEach(function (data, i) {
-        const semana = data ? semanaISO(data) : 'S00';
-        const indice = data ? 0 : i + 1;          // vaga sem data: 1, 2, 3...
-        turnos.forEach(function (turno) {
-          const sufixo = (turno === 'Todos') ? 'T' : turno;
-          const id = idDeRotina_(ano, mes, semana, tipo, sufixo, indice);
-          // A vaga 1 e a atividade com data tinham, no formato antigo, o
-          // mesmo ID sem ano: se ele existe neste ano, a atividade existe.
-          const antigo = (indice <= 1) ? idDeRotinaAntigo_(mes, semana, tipo, sufixo) : '';
-          if (existentes[id] || (antigo && antigosDoAno[antigo])) return;
-
-          const pessoa = (turno === 'Todos')
-            ? { nome: 'Gerencia + coordenadores', email: '' }
-            : (equipe[turno] || { nome: '', email: '' });
-
-          novas.push({
-            ID: id,
-            COMPETENCIA: comp,
-            SEMANA: semana,
-            PRAZO: data ? paraISO(data) : '',
-            ATIVIDADE: rotina.ATIVIDADE,
-            TIPO: tipo,
-            TURNO: turno,
-            COORDENADOR: pessoa.nome,
-            COORDENADOR_EMAIL: pessoa.email,
-            SETOR: '',
-            ANEXOS: '', ENTREGUE_EM: '', VALIDACAO: '', MOTIVO: '',
-            STATUS: data ? statusDe(data, '', '') : STATUS.NAO_AGENDADO
-          });
-          existentes[id] = true;
-        });
+    listar('ROTINAS').forEach(function (rotina) {
+      planoDaRotina_(rotina, ano, mes).forEach(function (p) {
+        if (completar && !p.vaga && p.iso < hojeIso) return;
+        // A vaga 1 e a atividade com data tinham, no formato antigo, o
+        // mesmo ID sem ano: se ele existe neste ano, a atividade existe.
+        if (existentes[p.id] || (p.antigo && antigosDoAno[p.antigo])) return;
+        novas.push(atividadeDaRotina_(rotina, p, comp, equipe));
+        existentes[p.id] = true;
       });
     });
 
@@ -213,15 +194,65 @@ function gerarCompetencia(competencia, quem, soSeNaoGerado) {
     if (novas.length) inserirVarios('ATIVIDADES', novas, quem || 'sistema');
     marcarMesGerado_(comp);
     registrarLog(quem || 'sistema', 'GERAR MES', 'ATIVIDADES', comp, novas.length + ' atividades');
-    return { ok: true, competencia: comp, criadas: novas.length };
+    return { ok: true, competencia: comp, criadas: novas.length, completou: completar };
   });
+}
+
+/* A sigla da rotina como entra no ID e no TIPO das atividades ('' sem rotina). */
+function siglaDaRotina_(rotina) {
+  return rotina ? String(rotina.TIPO || '').toUpperCase().trim() : '';
+}
+
+/*
+ * O que uma rotina ATIVA gera num mes: um item por data (ou vaga) e por
+ * turno, com o ID e o ID antigo (sem ano) que reconhecem a atividade. A
+ * mesma conta serve a geracao do mes e o acerto dos meses ja gerados quando
+ * a rotina muda (sincronizarRotina_).
+ */
+function planoDaRotina_(rotina, ano, mes) {
+  const tipo = siglaDaRotina_(rotina);
+  if (!tipo || !marcado(rotina.ATIVO)) return [];
+  const turnos = marcado(rotina.POR_TURNO) ? TURNOS : ['Todos'];
+  const plano = [];
+  datasDaRotina(rotina, ano, mes).forEach(function (data, i) {
+    const semana = data ? semanaISO(data) : 'S00';
+    const indice = data ? 0 : i + 1;          // vaga sem data: 1, 2, 3...
+    turnos.forEach(function (turno) {
+      const sufixo = (turno === 'Todos') ? 'T' : turno;
+      plano.push({
+        id: idDeRotina_(ano, mes, semana, tipo, sufixo, indice),
+        antigo: (indice <= 1) ? idDeRotinaAntigo_(mes, semana, tipo, sufixo) : '',
+        data: data, iso: data ? paraISO(data) : '', semana: semana, turno: turno, vaga: !data
+      });
+    });
+  });
+  return plano;
+}
+
+/* A linha de ATIVIDADES que nasce de um item do plano da rotina. */
+function atividadeDaRotina_(rotina, p, competencia, equipe) {
+  const pessoa = (p.turno === 'Todos')
+    ? { nome: 'Gerencia + coordenadores', email: '' }
+    : (equipe[p.turno] || { nome: '', email: '' });
+  return {
+    ID: p.id, COMPETENCIA: competencia, SEMANA: p.semana, PRAZO: p.iso,
+    ATIVIDADE: rotina.ATIVIDADE, TIPO: siglaDaRotina_(rotina), TURNO: p.turno,
+    COORDENADOR: pessoa.nome, COORDENADOR_EMAIL: pessoa.email,
+    SETOR: '', ANEXOS: '', ENTREGUE_EM: '', VALIDACAO: '', MOTIVO: '',
+    STATUS: p.vaga ? STATUS.NAO_AGENDADO : statusDe(p.iso, '', '')
+  };
 }
 
 /** Datas em que uma rotina cai dentro do mes. Avulsa devolve vagas sem data. */
 function datasDaRotina(rotina, ano, mes) {
   const freq = String(rotina.FREQUENCIA || '').toUpperCase().trim();
 
-  if (freq === 'SEMANAL') return diasDoMesEm(ano, mes, Number(rotina.DIA) || 3);
+  // Dia invalido nao gera nada (a Configuracao aponta o problema). Antes
+  // virava quarta-feira em silencio.
+  if (freq === 'SEMANAL') {
+    const dia = String(rotina.DIA == null ? '' : rotina.DIA).trim();
+    return /^[1-7]$/.test(dia) ? diasDoMesEm(ano, mes, Number(dia)) : [];
+  }
 
   if (freq === 'MENSAL') {
     const regra = String(rotina.DIA || '').toUpperCase().trim();
@@ -311,7 +342,8 @@ function acaoGerarMes(usuario, params) {
   return {
     ok: true, competencia: competencia, criadas: r.criadas, jaExistia: r.criadas === 0,
     recado: r.criadas
-      ? competencia + ': ' + r.criadas + ' atividade(s) criada(s) a partir das rotinas.'
+      ? competencia + ': ' + r.criadas + ' atividade(s) criada(s)' +
+        (r.completou ? ' — só de hoje em diante: o mês já estava gerado.' : ' a partir das rotinas.')
       : 'Nada a gerar: ' + competencia + ' já tinha todas as atividades das rotinas.'
   };
 }
@@ -355,6 +387,274 @@ function gerarMesDaFilial_() {
   const ultimo = gerados[gerados.length - 1] || {};
   return { ok: true, gerado: gerados.length > 0, competencia: ultimo.competencia || '',
            criadas: ultimo.criadas || 0, meses: gerados };
+}
+
+/* ------------------------------------------------------------------ */
+/* A ROTINA MUDOU — acerto dos meses ja gerados (19/10)                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Mudar o dia, desativar ou remover uma rotina so gravava a linha de
+ * ROTINAS: o mes atual e o seguinte, ja gerados, continuavam com as
+ * atividades no dia antigo. "Gerar mes" nao consertava — o ID nao tem o dia
+ * (mes + semana + sigla + turno) e a geracao pula ID que ja existe — e ainda
+ * criava as datas que ja tinham passado. Agora quem grava a rotina acerta,
+ * na mesma trava, as atividades de HOJE EM DIANTE dos meses ja gerados:
+ *   - a pendente cujo ID a regra nova tambem gera MUDA para o dia novo da
+ *     mesma semana (mesmo ID, com a nota "Remarcada de ... para ...");
+ *   - a que a regra nova nao gera (rotina parada ou removida, frequencia ou
+ *     turno que mudou, semana que atravessa o mes) e CANCELADA com a marca
+ *     "Cancelada pela rotina": fica no Arquivo de canceladas e VOLTA quando a
+ *     regra a quer de novo (reativar a rotina, recriar a sigla);
+ *   - o que a regra nova gera e nao existe NASCE, nunca no passado.
+ * Nao mexe: entregue, validada ou com anexo; cancelada ou remarcada a mao;
+ * vaga ja agendada; data que ja passou; mes encerrado.
+ */
+const MARCA_ROTINA = 'Cancelada pela rotina';
+const NOTA_ROTINA = ': a rotina mudou para ';
+const SIGLA_AVULSA = 'AV';             // atividade avulsa do calendario (acaoCriarAtividade), nunca de rotina
+const DIAS_DA_ROTINA = ['', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo'];
+
+/* ID de atividade de rotina: SET26-S36-VIS-A, SET26-S00-TRE-T-1 ou o antigo SET-S36-VIS-A. */
+const RE_ID_DE_ROTINA = /^([A-Z]{3})(\d{2})?-S\d{1,2}-([A-Z0-9]+)-(?:T|A|B|C)(?:-\d+)?$/;
+
+function ordemDoMes_(data) { return data.getFullYear() * 12 + data.getMonth(); }
+function competenciaDaOrdem_(ordem) { return SIGLAS[ordem % 12] + ' ' + Math.floor(ordem / 12); }
+
+/* O mes (ano * 12 + mes) a que uma atividade da sigla pertence, pelo ID; null se nao e da rotina. */
+function mesDaAtividadeDaRotina_(linha, sigla) {
+  if (!sigla || sigla === SIGLA_AVULSA || String(linha.TIPO || '').toUpperCase().trim() !== sigla) return null;
+  const m = RE_ID_DE_ROTINA.exec(String(linha.ID || '').trim());
+  const mes = (m && m[3] === sigla) ? SIGLAS.indexOf(m[1]) : -1;
+  if (mes === -1) return null;
+  if (m[2]) return (2000 + Number(m[2])) * 12 + mes;
+  const anos = anosDaLinha_(linha);              // ID antigo, sem ano
+  return anos.length ? Math.max.apply(null, anos) * 12 + mes : null;
+}
+
+/* Os meses ja gerados, do atual em diante, em ordem. Mes encerrado fica de fora. */
+function mesesGeradosDeHojeEmDiante_() {
+  const atual = ordemDoMes_(hoje());
+  return mesesGerados_().map(competenciaParaData)
+    .filter(function (d) { return d && ordemDoMes_(d) >= atual; })
+    .sort(function (a, b) { return a - b; }).map(competenciaDe);
+}
+
+/* O primeiro mes de hoje em diante ainda nao gerado: onde uma regra nova comeca a valer sozinha. */
+function primeiroMesAGerar_() {
+  const base = hoje();
+  for (let i = 0; i < 24; i++) {
+    const c = competenciaDe(new Date(base.getFullYear(), base.getMonth() + i, 1));
+    if (!mesGerado_(c)) return c;
+  }
+  return competenciaDe(base);
+}
+
+/* "toda quarta", "todo sábado", "1ª segunda do mês", "todo dia 15", "5 vagas sem data". */
+function descreverRegra_(rotina) {
+  const freq = String(rotina.FREQUENCIA || '').toUpperCase().trim();
+  const dia = String(rotina.DIA == null ? '' : rotina.DIA).toUpperCase().trim();
+  if (freq === 'SEMANAL') return (dia === '6' || dia === '7' ? 'todo ' : 'toda ') + (DIAS_DA_ROTINA[Number(dia)] || dia);
+  if (freq === 'MENSAL') {
+    return dia === 'PRIMEIRA_SEGUNDA' ? '1ª segunda do mês' : dia === 'ULTIMA_SEXTA' ? 'última sexta do mês' : 'todo dia ' + dia;
+  }
+  const vagas = Number(rotina.QUANTIDADE) || 1;
+  return vagas + (vagas === 1 ? ' vaga sem data' : ' vagas sem data');
+}
+
+function canceladaPelaRotina_(motivo) { return motivoDeValidacao_(motivo).indexOf(MARCA_ROTINA) === 0; }
+
+/* Remarcada pela tela ("Remarcada de ... para ...: motivo"); a nota do acerto da rotina nao conta. */
+function remarcadaAMao_(motivo) {
+  return partesDoMotivo_(motivo).some(function (s) {
+    return s.indexOf(PREFIXO_REMARCACAO) === 0 && s.indexOf(NOTA_ROTINA) === -1;
+  });
+}
+
+/*
+ * Em que pe esta uma atividade da rotina. So a 'pendente' (sem entrega, sem
+ * validacao, de hoje em diante) muda com a rotina; os outros nomes sao os
+ * contadores do que ficou como estava.
+ */
+function situacaoNaRotina_(linha, hojeIso) {
+  const validacao = String(linha.VALIDACAO || '').trim();
+  if (validacao === 'Cancelada') return canceladaPelaRotina_(linha.MOTIVO) ? 'canceladaPelaRotina' : 'canceladasAMao';
+  const prazo = paraData(linha.PRAZO);
+  if (prazo && paraISO(prazo) < hojeIso) return 'passadas';
+  if (validacao || String(linha.ENTREGUE_EM || '').trim() || idsDeAnexos(linha.ANEXOS).length) return 'entregues';
+  if (prazo && /-S00-/.test(String(linha.ID))) return 'agendadas';     // vaga que o gerente ja marcou
+  return 'pendente';
+}
+
+/*
+ * Para a tela da Configuracao, por sigla: as pendentes de hoje em diante
+ * (o mesmo criterio do acerto) e se a rotina ja gerou atividade (a sigla
+ * trava). A confirmacao da tela conta daqui, sem ir ao servidor: com o canal
+ * barrado so a gravacao pela pagina funciona.
+ */
+function calendarioDasRotinas_(rotinas) {
+  const hojeIso = hojeISO(), atual = ordemDoMes_(hoje());
+  const porSigla = {};
+  rotinas.forEach(function (r) { porSigla[siglaDaRotina_(r)] = { temAtividades: false, total: 0, porOrdem: {} }; });
+  listar('ATIVIDADES').forEach(function (l) {
+    const sigla = String(l.TIPO || '').toUpperCase().trim();
+    const x = porSigla[sigla];
+    if (!x) return;
+    x.temAtividades = true;
+    const ordem = mesDaAtividadeDaRotina_(l, sigla);
+    if (ordem === null || ordem < atual || situacaoNaRotina_(l, hojeIso) !== 'pendente') return;
+    x.total++;
+    x.porOrdem[ordem] = (x.porOrdem[ordem] || 0) + 1;
+  });
+  Object.keys(porSigla).forEach(function (s) {
+    const x = porSigla[s], porMes = {};
+    Object.keys(x.porOrdem).map(Number).sort(function (a, b) { return a - b; })
+      .forEach(function (o) { porMes[competenciaDaOrdem_(o)] = x.porOrdem[o]; });
+    porSigla[s] = { temAtividades: x.temAtividades, pendentes: { total: x.total, porMes: porMes } };
+  });
+  return porSigla;
+}
+
+/* A sigla ja esta em alguma atividade (e entao nao muda mais: ela esta no ID). */
+function siglaTemAtividades_(sigla) {
+  return listar('ATIVIDADES').some(function (l) { return String(l.TIPO || '').toUpperCase().trim() === sigla; });
+}
+
+/*
+ * O acerto. antes: a linha da rotina antes da mudanca (null = rotina nova);
+ * depois: os campos novos (null = removida; ATIVO 'NAO' = parada). Chamado
+ * DENTRO da trava de quem grava a rotina: uma leitura de ATIVIDADES, um
+ * atualizarVarios e um inserirVarios. Sem e-mail por atividade (seriam
+ * dezenas): o recado da tela diz o que mudou.
+ */
+function sincronizarRotina_(antes, depois, quem) {
+  const acerto = {
+    antes: antes, depois: depois, hojeIso: hojeISO(), ocupados: {}, mudancas: [], novas: [], equipe: null,
+    nota: { movidas: 0, canceladas: 0, criadas: 0, reativadas: 0, renomeadas: 0, porMes: {},
+            mantidas: { entregues: 0, remarcadas: 0, agendadas: 0, semanaPassou: 0, passadas: 0, canceladasAMao: 0 } }
+  };
+  const sigla = siglaDaRotina_(depois || antes);
+  if (!sigla || sigla === SIGLA_AVULSA) return acerto.nota;
+
+  // Os meses: os ja gerados de hoje em diante e qualquer mes de hoje em diante com atividade da rotina.
+  const atual = ordemDoMes_(hoje());
+  const meses = {};
+  mesesGeradosDeHojeEmDiante_().forEach(function (c) { meses[ordemDoMes_(competenciaParaData(c))] = []; });
+  listar('ATIVIDADES', true).forEach(function (l) {
+    const id = String(l.ID || '');
+    if (marcado(l.EXCLUIDO)) { acerto.ocupados[id] = acerto.ocupados[id] || l; return; }
+    acerto.ocupados[id] = l;                     // nada nasce em cima de um ID que existe (nem excluido)
+    const ordem = mesDaAtividadeDaRotina_(l, sigla);
+    if (ordem !== null && ordem >= atual) (meses[ordem] = meses[ordem] || []).push(l);
+  });
+
+  acerto.equipe = coordenadoresPorTurno();
+  Object.keys(meses).map(Number).sort(function (a, b) { return a - b; })
+    .forEach(function (ordem) { acertarMes_(acerto, ordem, meses[ordem]); });
+
+  if (acerto.mudancas.length) atualizarVarios('ATIVIDADES', acerto.mudancas, quem);
+  if (acerto.novas.length) inserirVarios('ATIVIDADES', acerto.novas, quem);
+  if (acerto.mudancas.length || acerto.novas.length) {
+    registrarLog(quem, 'ROTINA NO CALENDARIO', 'ATIVIDADES', sigla, JSON.stringify(acerto.nota));
+  }
+  return acerto.nota;
+}
+
+/* Um mes: cada atividade viva da rotina contra a regra nova; depois nasce o que falta. */
+function acertarMes_(acerto, ordem, linhas) {
+  const ano = Math.floor(ordem / 12), mes = ordem % 12;
+  const plano = planoDaRotina_(acerto.depois, ano, mes);
+  const novo = porIdDoPlano_(plano), velho = porIdDoPlano_(planoDaRotina_(acerto.antes, ano, mes));
+  const atendidos = {};
+  linhas.forEach(function (l) {
+    const alvo = novo[String(l.ID)];
+    if (alvo) atendidos[alvo.id] = true;
+    acertarLinha_(acerto, ordem, l, alvo, velho[String(l.ID)]);
+  });
+  plano.forEach(function (p) {
+    if (atendidos[p.id] || (!p.vaga && p.iso < acerto.hojeIso) || idOcupado_(acerto.ocupados, p, ano)) return;
+    acerto.novas.push(atividadeDaRotina_(acerto.depois, p, competenciaDaOrdem_(ordem), acerto.equipe));
+    acerto.ocupados[p.id] = true;
+    contarNoAcerto_(acerto, 'criadas', ordem);
+  });
+}
+
+/* O plano indexado pelo ID e pelo ID antigo (sem ano). */
+function porIdDoPlano_(plano) {
+  const porId = {};
+  plano.forEach(function (p) { porId[p.id] = p; if (p.antigo) porId[p.antigo] = p; });
+  return porId;
+}
+
+/* O ID (ou o ID antigo do mesmo ano) ja esta na tabela. */
+function idOcupado_(ocupados, p, ano) {
+  const antigo = p.antigo && ocupados[p.antigo];
+  return !!ocupados[p.id] || (!!antigo && anosDaLinha_(antigo).indexOf(ano) !== -1);
+}
+
+/* Uma atividade viva da rotina: volta, muda de dia, e cancelada, troca o nome — ou fica como esta. */
+function acertarLinha_(acerto, ordem, linha, alvo, velho) {
+  const situacao = situacaoNaRotina_(linha, acerto.hojeIso);
+  if (situacao === 'canceladaPelaRotina') {
+    if (alvo && (alvo.vaga || alvo.iso >= acerto.hojeIso)) mudarNoAcerto_(acerto, ordem, 'reativadas', linha, camposParaVoltar_(acerto, linha, alvo));
+    return;
+  }
+  if (situacao !== 'pendente') { acerto.nota.mantidas[situacao]++; return; }
+  if (!alvo) { mudarNoAcerto_(acerto, ordem, 'canceladas', linha, camposDeCancelar_(acerto, linha)); return; }
+
+  const campos = {};
+  if (String(linha.ATIVIDADE || '').trim() !== String(acerto.depois.ATIVIDADE || '').trim()) campos.ATIVIDADE = acerto.depois.ATIVIDADE;
+  const prazo = paraData(linha.PRAZO);
+  const prazoIso = prazo ? paraISO(prazo) : '';
+  if (!alvo.vaga && prazoIso !== alvo.iso) {
+    // Fora do dia da regra antiga E com nota de remarcacao da tela: quem pos ali foi uma pessoa.
+    if (!(velho && velho.iso === prazoIso) && remarcadaAMao_(linha.MOTIVO)) acerto.nota.mantidas.remarcadas++;
+    else if (alvo.iso < acerto.hojeIso) acerto.nota.mantidas.semanaPassou++;   // o dia novo desta semana ja passou
+    else Object.assign(campos, camposDeMudarDia_(acerto, linha, prazo, alvo));
+  }
+  if (Object.keys(campos).length) mudarNoAcerto_(acerto, ordem, campos.PRAZO ? 'movidas' : 'renomeadas', linha, campos);
+}
+
+function mudarNoAcerto_(acerto, ordem, chave, linha, campos) {
+  acerto.mudancas.push({ id: String(linha.ID), campos: campos });
+  contarNoAcerto_(acerto, chave, ordem);
+}
+
+function contarNoAcerto_(acerto, chave, ordem) {
+  const nota = acerto.nota, c = competenciaDaOrdem_(ordem);
+  nota[chave]++;
+  nota.porMes[c] = nota.porMes[c] || {};
+  nota.porMes[c][chave] = (nota.porMes[c][chave] || 0) + 1;
+}
+
+/* "Remarcada de 21/10/2026 para 23/10/2026: a rotina mudou para toda sexta." — o ID fica. */
+function camposDeMudarDia_(acerto, linha, prazo, alvo) {
+  return {
+    PRAZO: alvo.iso, SEMANA: alvo.semana, COMPETENCIA: competenciaDe(alvo.data), STATUS: statusDe(alvo.iso, '', ''),
+    MOTIVO: motivoComRemarcacao_(linha.MOTIVO, PREFIXO_REMARCACAO + formatarData(prazo) + ' para ' +
+      formatarData(alvo.data) + NOTA_ROTINA + descreverRegra_(acerto.depois) + '.')
+  };
+}
+
+/* Cancelada com a marca: e ela que diz, depois, o que volta quando a rotina quiser de novo. */
+function camposDeCancelar_(acerto, linha) {
+  const d = acerto.depois;
+  const porque = !d ? 'rotina removida' : !marcado(d.ATIVO) ? 'rotina desativada'
+    : 'rotina mudou para ' + descreverRegra_(d) + (marcado(d.POR_TURNO) ? ', uma por turno' : '');
+  return { VALIDACAO: 'Cancelada', STATUS: STATUS.CANCELADA,
+           MOTIVO: motivoComValidacao_(linha.MOTIVO, MARCA_ROTINA + ' (' + porque + ' em ' + formatarData(hoje()) + ').') };
+}
+
+/* A cancelada pela rotina volta: sem a marca, no dia da regra nova, com o nome novo. */
+function camposParaVoltar_(acerto, linha, alvo) {
+  const prazo = paraData(linha.PRAZO);
+  const campos = alvo.vaga ? { STATUS: STATUS.NAO_AGENDADO }
+    : (prazo && paraISO(prazo) !== alvo.iso) ? camposDeMudarDia_(acerto, linha, prazo, alvo)
+    : { PRAZO: alvo.iso, SEMANA: alvo.semana, COMPETENCIA: competenciaDe(alvo.data), STATUS: statusDe(alvo.iso, '', '') };
+  campos.VALIDACAO = '';
+  campos.MOTIVO = motivoComValidacao_(campos.MOTIVO || linha.MOTIVO, '');
+  campos.ATIVIDADE = acerto.depois.ATIVIDADE;
+  return campos;
 }
 
 /* ------------------------------------------------------------------ */
@@ -466,6 +766,9 @@ function dadosCalendario(usuario, params) {
     porTurno: TURNOS.map(function (t) { return resumoTurno(comPrazo, t); }),
     setores: listar('SETORES').filter(function (s) { return marcado(s.ATIVO); })
                               .map(function (s) { return s.SETOR; }),
+    // "Exige setor" das rotinas (19/10): a atividade destas siglas mostra o seletor de setor.
+    // Antes a marca so era gravada e o seletor era fixo na Vistoria (VIS).
+    tiposComSetor: listar('ROTINAS').filter(function (r) { return marcado(r.EXIGE_SETOR); }).map(siglaDaRotina_),
     equipe: pessoasDaFilial().filter(function (p) { return marcado(p.ATIVO) && String(p.TURNO || '').trim(); })
                              .map(function (p) { return { turno: String(p.TURNO).toUpperCase().trim(), nome: String(p.NOME || '').trim() }; }),
     validacoes: VALIDACOES,
@@ -1203,7 +1506,7 @@ function acaoCriarAtividade(usuario, params) {
   const turno = String(params.turno || 'Todos').trim();
   const semana = semanaISO(data);
   const sufixo = (turno === 'Todos') ? 'T' : turno;
-  const raiz = prefixoIdMes_(data.getFullYear(), data.getMonth()) + '-' + semana + '-AV-' + sufixo;
+  const raiz = prefixoIdMes_(data.getFullYear(), data.getMonth()) + '-' + semana + '-' + SIGLA_AVULSA + '-' + sufixo;
 
   /*
    * ID unico: se ja existe um com o mesmo prefixo, adiciona um contador.
@@ -1223,7 +1526,7 @@ function acaoCriarAtividade(usuario, params) {
 
     const registro = {
       ID: id, COMPETENCIA: competencia, SEMANA: semana, PRAZO: paraISO(data),
-      ATIVIDADE: atividade, TIPO: 'AV', TURNO: turno,
+      ATIVIDADE: atividade, TIPO: SIGLA_AVULSA, TURNO: turno,
       COORDENADOR: pessoa.nome, COORDENADOR_EMAIL: pessoa.email,
       SETOR: String(params.setor || '').trim(),
       ANEXOS: '', ENTREGUE_EM: '', VALIDACAO: '', MOTIVO: '', STATUS: statusDe(data, '', '')

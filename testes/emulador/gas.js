@@ -147,6 +147,8 @@ function textoExibido(v) {
 class Mundo {
   constructor(opcoes) {
     this.opcoes = Object.assign({ dono: 'dono@bartofil.com.br', urlApp: 'http://localhost:0/exec' }, opcoes || {});
+    // agora: '2026-10-19T10:00:00-03:00' — o relogio do script comeca ai e anda dali (ver instalarRelogio).
+    if (this.opcoes.agora) this.desvioRelogio = Date.parse(this.opcoes.agora) - Date.now();
     this.seq = 1000;
     this.planilhas = new Map();   // id -> Planilha
     this.arquivos = new Map();    // id -> {id,nome,mime,bytes,pais:Set,lixo,criado,descricao}
@@ -625,14 +627,21 @@ function servicos(m, execucao) {
   const MailApp = estrito('MailApp', { sendEmail: enviar, getRemainingDailyQuota: () => 100 });
   const GmailApp = estrito('GmailApp', { sendEmail: enviar, getAliases: () => [] });
 
+  /*
+   * m.opcoes.urlFetch(url, op) roteiriza a internet: devolve { codigo, texto } ou,
+   * para resposta binaria (uma imagem), { codigo, bytes: Buffer, tipo }; headers opcional.
+   * Lancar dentro dele e a rede (ou a cota) falhando.
+   */
   const UrlFetchApp = estrito('UrlFetchApp', {
     fetch(url, op) {
       m.logs.push('[UrlFetch] ' + url);
       const r = (m.opcoes.urlFetch && m.opcoes.urlFetch(url, op)) || { codigo: 404, texto: '' };
+      const corpo = r.bytes ? Buffer.from(r.bytes) : Buffer.from(r.texto || '');
       return estrito('HTTPResponse', {
-        getResponseCode: () => r.codigo, getContentText: () => r.texto || '',
-        getBlob: () => fazerBlob(Buffer.from(r.texto || ''), r.tipo || 'application/octet-stream', 'download'),
-        getHeaders: () => ({}), getContent: () => bytesAssinados(Buffer.from(r.texto || ''))
+        getResponseCode: () => r.codigo, getContentText: () => (r.bytes ? corpo.toString('utf8') : r.texto || ''),
+        getBlob: () => fazerBlob(Buffer.from(corpo), r.tipo || 'application/octet-stream', 'download'),
+        getHeaders: () => Object.assign({}, r.headers), getAllHeaders: () => Object.assign({}, r.headers),
+        getContent: () => bytesAssinados(corpo)
       });
     },
     fetchAll(reqs) { return reqs.map((q) => UrlFetchApp.fetch(q.url || q, q)); }
@@ -761,6 +770,30 @@ function arquivosGs(pasta, ordem) {
   return todos.sort();
 }
 
+/*
+ * RELOGIO DO TESTE (19/10). Com new Mundo({ agora: ... }), o Date do script comeca naquele
+ * instante e anda dali: o "hoje" do teste nao depende do dia em que ele roda. As datas com
+ * argumentos (new Date(2026, 9, 19)) e o instanceof Date continuam os de sempre.
+ */
+function instalarRelogio(ctx, mundo) {
+  if (mundo.desvioRelogio === undefined) return;
+  ctx.__desvioRelogio = mundo.desvioRelogio;
+  vm.runInContext(`(function () {
+    var Real = Date, desvio = __desvioRelogio;
+    function Relogio() {
+      if (!(this instanceof Relogio)) return new Real(Real.now() + desvio).toString();
+      if (!arguments.length) return new Real(Real.now() + desvio);
+      return new (Function.prototype.bind.apply(Real, [null].concat(Array.prototype.slice.call(arguments))))();
+    }
+    Relogio.prototype = Real.prototype;
+    Relogio.now = function () { return Real.now() + desvio; };
+    Relogio.UTC = Real.UTC;
+    Relogio.parse = Real.parse;
+    Date = Relogio;
+  })();`, ctx);
+  delete ctx.__desvioRelogio;
+}
+
 /**
  * Cria uma execucao nova (contexto limpo) e devolve o contexto.
  * execucao = { contaGoogle: 'quem@abriu' }
@@ -772,6 +805,7 @@ function novaExecucao(mundo, pasta, execucao, opcoes) {
     console: { log: (...a) => mundo.logs.push(a.map(String).join(' ')), warn: (...a) => mundo.logs.push('[warn] ' + a.join(' ')), error: (...a) => mundo.logs.push('[error] ' + a.join(' ')), info: (...a) => mundo.logs.push(a.join(' ')) },
     ...s
   });
+  instalarRelogio(ctx, mundo);
   mundo.DataDoScript = vm.runInContext('Date', ctx);
   ctx.HtmlService = htmlService(pasta, ctx, opcoes);
   ctx.ContentService = { createTextOutput: (t) => ({ getContent: () => t, setMimeType() { return this; } }), MimeType: { JSON: 'JSON', TEXT: 'TEXT' } };

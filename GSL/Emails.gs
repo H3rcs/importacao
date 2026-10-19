@@ -335,7 +335,8 @@ function avisarTreinamento(a) {
 /* MONTAGEM                                                            */
 /* ------------------------------------------------------------------ */
 
-function enviar(para, assunto, corpoHtml, ccExtra) {
+/* extras (19/10): { replyTo } — e-mail de pessoa para pessoa (mencao): o "Responder" vai para quem escreveu. */
+function enviar(para, assunto, corpoHtml, ccExtra, extras) {
   exigirPorta_();
   const destinatarios = (para || []).filter(Boolean);
   if (!destinatarios.length) return;
@@ -354,6 +355,7 @@ function enviar(para, assunto, corpoHtml, ccExtra) {
 
   const opcoes = { to: destinatarios.join(','), subject: assunto, htmlBody: html };
   if (copia.length) opcoes.cc = copia.join(',');
+  if (extras && extras.replyTo) opcoes.replyTo = extras.replyTo;
 
   try {
     MailApp.sendEmail(opcoes);
@@ -406,9 +408,10 @@ function linha(rotulo, valor) {
          '</td><td style="padding:3px 0"><b>' + htmlSeguro(valor) + '</b></td></tr>';
 }
 
+/* As quebras de linha do texto viram <br> (uma lista ou passos chegavam numa linha so). */
 function caixa(titulo, texto, corBarra, fundo) {
   return '<div style="border-left:4px solid ' + corBarra + ';background:' + fundo +
-    ';padding:10px 14px;margin:12px 0"><b>' + titulo + '</b><br>' + htmlSeguro(texto) + '</div>';
+    ';padding:10px 14px;margin:12px 0"><b>' + titulo + '</b><br>' + htmlSeguro(texto).replace(/\r?\n/g, '<br>') + '</div>';
 }
 
 /*
@@ -416,12 +419,14 @@ function caixa(titulo, texto, corBarra, fundo) {
  * assunto (calendario, acoes...): depois do e-mail e do PIN, o sistema abre
  * nela em vez da tela inicial. O e-mail de uma filial leva para a filial.
  * Com `acao` (19/10, o aviso de quem foi marcado num comentario), a tela do
- * plano abre ja com o historico daquela acao.
+ * plano abre ja com o historico daquela acao — e a filial vai sempre,
+ * tambem a principal: a acao so existe nela, e quem tem mais de uma filial
+ * cairia na escolha da filial (na outra, a acao nao esta).
  */
 function rodapeLink(tela, acao) {
   let url = urlDoApp_();       // respeita a propriedade URL_APP (ver Codigo.gs)
   const partes = [];
-  try { if (!ehFilialPrincipal()) partes.push('filial=' + encodeURIComponent(filialAtual().codigo)); } catch (e) {}
+  try { if ((tela && acao) || !ehFilialPrincipal()) partes.push('filial=' + encodeURIComponent(filialAtual().codigo)); } catch (e) {}
   if (tela) partes.push('tela=' + encodeURIComponent(tela));
   if (tela && acao) partes.push('acao=' + encodeURIComponent(acao));
   if (partes.length) url += '?' + partes.join('&');

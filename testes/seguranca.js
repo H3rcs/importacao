@@ -79,6 +79,8 @@ const bloqueadas = [
   ['acaoComentarAcao', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }], ['acaoComentarAcaoLimpeza', FALSO, { id: 'x', texto: 'x', mencoes: [DONO] }],
   ['mencoesDoPedido_', { id: 'CALENDARIO', modulo: 'calendario', cap: 'GERIR_ACOES', nome: 'Plano de Ação' }, FALSO, { mencoes: [DONO] }],
   ['avisarMencao_', { id: 'CALENDARIO', tela: 'acoes' }, { ID: 'x', ACAO: 'x' }, { email: ATACANTE, nome: 'x' }, 'x', DONO, true],
+  ['enviar', [DONO], 'x', '<p>x</p>', null, { replyTo: ATACANTE }], ['marcadosQueFicam_', [DONO], [], []],
+  ['acaoSalvarAcao', FALSO, { id: 'x', acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [ATACANTE], desmarcados: [DONO] }],
   // 19/10: rotinas — gravar, desativar e remover mexem nas atividades ja geradas
   ['acaoSalvarRotina', FALSO, { tipo: 'RON', atividade: 'x', frequencia: 'SEMANAL', dia: '3', ativo: true }],
   ['acaoAlternarRotina', FALSO, { id: 'x', ativo: false }], ['acaoExcluirRotina', FALSO, { id: 'x' }],

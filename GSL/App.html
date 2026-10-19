@@ -1047,14 +1047,16 @@ function destinoDoLink() {
 /*
  * usar: a tela do link esta sendo aberta agora. A acao do link fica para
  * abrirAcaoDoLink (o plano abre o historico dela) e sai do endereco — o F5
- * volta na posicao da aba, sem abrir o historico de novo.
+ * volta na posicao da aba, sem abrir o historico de novo. Ela leva a tela
+ * do link ({ id, tela }): so o plano dessa tela a abre, e pintar outra tela
+ * a descarta (o outro plano nao a procura nem avisa que ela sumiu).
  */
-let ACAO_DO_LINK = '';
+let ACAO_DO_LINK = null;
 function esquecerDestinoDoLink(usar) {
   const d = usar ? destinoDoLink() : null;
   try { sessionStorage.removeItem('gsl_destino'); } catch (e) {}
   if (!d || d.daAba || !d.acao) return;
-  ACAO_DO_LINK = String(d.acao);
+  ACAO_DO_LINK = { id: String(d.acao), tela: String(d.tela || '') };
   try { google.script.history.replace(null, Object.assign({ tela: d.tela, aba: '1' }, d.filial ? { filial: d.filial } : {}), ''); } catch (e) {}
 }
 /*
@@ -1716,6 +1718,7 @@ const TELAS_PINTA = {
 function pintar(idTela, r, silencioso) {
   DADOS = r.dados;
   paginaAtual = idTela;
+  if (ACAO_DO_LINK && ACAO_DO_LINK.tela !== idTela) ACAO_DO_LINK = null;     // a pessoa foi para outra tela antes de o plano do link abrir
   document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === idTela));
   el('titulo-pagina').textContent = r.titulo;
 
@@ -4778,15 +4781,21 @@ function pintarAcoes(r) {
 
 /*
  * LINK DO E-MAIL DE MENCAO (19/10): ?tela=acoes&acao=ID (ou tela=limpeza)
- * abre o historico daquela acao, uma vez, assim que o plano aparece. A que a
- * pessoa nao ve mais (excluida, de outra filial) vira so o aviso.
+ * abre o historico daquela acao, uma vez, assim que o plano DESSA tela
+ * aparece. A que a pessoa nao ve mais (excluida, de outra filial) vira so o
+ * aviso — que nomeia a filial para quem tem mais de uma.
  */
 function abrirAcaoDoLink() {
-  const id = ACAO_DO_LINK;
-  if (!id) return;
-  ACAO_DO_LINK = '';
+  const x = ACAO_DO_LINK;
+  if (!x || x.tela !== paginaAtual) return;
+  ACAO_DO_LINK = null;
+  const id = x.id;
   const a = planoAcaoPorId(id);
-  if (!a) return avisar('Esta ação não está mais disponível para você.', true);
+  if (!a) {
+    const filial = (SESSAO.filiais || []).length > 1 && SESSAO.filial ? SESSAO.filial.nome : '';
+    return avisar(filial ? 'Esta ação não está nesta filial (' + filial + ') ou não está mais disponível para você.'
+      : 'Esta ação não está mais disponível para você.', true);
+  }
   // Limpeza (o filtro e da tela): a acao concluida nao esta em "Em aberto" — a lista passa a mostrar todas.
   if (PLANO.local && !planoFiltrarLista([a], PLANO.local).length) PLANO.filtrar({ situacao: 'TODAS' });
   abrirComentarios(id, podeComentarAcao(a, planoD().permissoes));
@@ -4809,25 +4818,31 @@ const podeComentarAcao = (a, p) => a.situacao !== 'CANCELADA' && (cuidaDaAcao(a,
  * com IDs ({ idDaAcao: idDoUltimoRegistroVisto }) — nada que identifique a
  * pessoa. Guarda as ultimas 400 acoes abertas (sai a aberta ha mais tempo):
  * podar pela lista da tela apagaria as do outro plano e as concluidas que o
- * filtro "Em aberto" esconde. Sem localStorage, o "novo" vale ate abrir.
+ * filtro "Em aberto" esconde. Sem localStorage (cookie de terceiros
+ * bloqueado), o que foi aberto vale ate a pagina recarregar (VISTOS_NA_PAGINA,
+ * so na memoria e so com IDs).
  */
 const CHAVE_VISTOS = 'gsl_coment_vistos', VISTOS_MAX = 400;
 const COMENT_NOVO_MS = 72 * 3600 * 1000;           // cobre o fim de semana
+const VISTOS_NA_PAGINA = {};
 function comentVistos() {
-  try { return JSON.parse(lerLocal(CHAVE_VISTOS) || '{}') || {}; } catch (e) { return {}; }
+  let v = {};
+  try { v = JSON.parse(lerLocal(CHAVE_VISTOS) || '{}') || {}; } catch (e) { v = {}; }
+  Object.keys(VISTOS_NA_PAGINA).forEach((k) => { if (!(k in v)) v[k] = VISTOS_NA_PAGINA[k]; });
+  return v;
 }
 function marcarComentVisto(a) {
   const lista = a.comentarios || [];
   if (!lista.length) return;
   const vistos = comentVistos();
   delete vistos[a.id];                              // vai para o fim: a ultima aberta e a ultima a sair
-  vistos[a.id] = lista[lista.length - 1].id;
+  vistos[a.id] = VISTOS_NA_PAGINA[a.id] = lista[lista.length - 1].id;
   Object.keys(vistos).slice(0, -VISTOS_MAX).forEach((k) => { delete vistos[k]; });
   gravarLocal(CHAVE_VISTOS, JSON.stringify(vistos));
   document.querySelectorAll('.selo-coment.novo').forEach((b) => {
     if (b.dataset.acao !== a.id) return;
     b.classList.remove('novo');
-    const n = b.querySelector('.selo-novo'); if (n) n.remove();
+    b.querySelectorAll('.selo-novo, .selo-novo-leitor').forEach((n) => n.remove());
   });
 }
 /* 'dd/MM/yyyy HH:mm' (como o servidor grava) -> milissegundos. */
@@ -4835,10 +4850,14 @@ function msDoCarimbo(em) {
   const m = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/.exec(String(em || ''));
   return m ? new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime() : 0;
 }
-/* "novo": o ultimo comentario escrito por OUTRA pessoa, das ultimas 72 h, depois do que este aparelho abriu. */
+/*
+ * "novo": o ultimo comentario escrito por OUTRA pessoa, das ultimas 72 h, depois do que este aparelho abriu
+ * — e que eu ainda nao respondi (de outro aparelho, inclusive).
+ */
 function temComentarioNovo(a) {
-  const ultimo = comentariosEscritos(a).filter((c) => !ehMeu(c)).pop();
+  const escritos = comentariosEscritos(a), ultimo = escritos.filter((c) => !ehMeu(c)).pop();
   if (!ultimo || Date.now() - msDoCarimbo(ultimo.em) > COMENT_NOVO_MS) return false;
+  if (escritos.map(ehMeu).lastIndexOf(true) > escritos.indexOf(ultimo)) return false;
   const lista = a.comentarios || [], visto = comentVistos()[a.id];
   return lista.findIndex((c) => c.id === visto) < lista.findIndex((c) => c.id === ultimo.id);
 }
@@ -4854,12 +4873,13 @@ function mencaoParaMim(a) {
 
 /*
  * Os selos do topo do cartao: "@ voce" enquanto a pessoa marcada nao
- * responde e "N" comentarios (cheio, com "novo", quando ha um de outra
- * pessoa que este aparelho nao abriu). Sem comentario escrito, nada.
- * Clicar abre o historico.
+ * responde (e pode responder: na cancelada ninguem comenta) e "N"
+ * comentarios (cheio, com "novo", quando ha um de outra pessoa que este
+ * aparelho nao abriu; o leitor de tela ouve "2 comentarios, com comentario
+ * novo"). Sem comentario escrito, nada. Clicar abre o historico.
  */
 function seloComentarios(a, podeComentar) {
-  const escritos = comentariosEscritos(a), n = escritos.length, mencao = mencaoParaMim(a);
+  const escritos = comentariosEscritos(a), n = escritos.length, mencao = podeComentar ? mencaoParaMim(a) : null;
   const abre = `abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})`;
   const quando = (c) => String(c.em || '').slice(0, 16);
   let html = mencao ? `<button type="button" class="selo-mencao" onclick="${abre}" title="${esc(mencao.nome + ' marcou você em ' + quando(mencao))}">
@@ -4868,7 +4888,7 @@ function seloComentarios(a, podeComentar) {
   const novo = temComentarioNovo(a), ultimo = escritos[n - 1];
   const dica = n + (n === 1 ? ' comentário' : ' comentários') + ' — o último de ' + ultimo.nome + ' em ' + quando(ultimo);
   return html + `<button type="button" class="selo-coment${novo ? ' novo' : ''}" data-acao="${esc(a.id)}" onclick="${abre}" title="${esc(dica)}">
-    <span aria-hidden="true">&#128172;</span> ${n}<span class="so-leitor"> ${n === 1 ? 'comentário' : 'comentários'}</span>${novo ? ' <span class="selo-novo">novo</span>' : ''}</button>`;
+    <span aria-hidden="true">&#128172;</span> ${n}<span class="so-leitor"> ${n === 1 ? 'comentário' : 'comentários'}</span>${novo && n > 1 ? '<span class="so-leitor selo-novo-leitor">, com comentário</span>' : ''}${novo ? ' <span class="selo-novo">novo</span>' : ''}</button>`;
 }
 
 /* O texto do comentario com quem foi marcado em destaque — os nomes vem do servidor, nunca do texto. */
@@ -4888,12 +4908,15 @@ const linhaMarcou = (c) => ((c.mencoes || []).length ? `<div class="coment-menco
 /*
  * MARCAR PESSOA NO COMENTARIO (19/10). "@" no campo (no comeco ou depois de
  * um espaco) abre as sugestoes; o botao "@ Marcar pessoa" faz o mesmo. A
- * linha "Vai avisar por e-mail" e a verdade do que vai para o servidor: o
- * "@Nome" no texto e so texto (apagar ou editar nao engana ninguem).
- * Sugestoes: as pessoas do plano (as do campo Responsaveis), menos quem
- * escreve e quem ja foi escolhido, por nome, funcao ou turno, sem acento.
+ * linha "Vai avisar por e-mail" e a verdade do que vai para o servidor, e o
+ * texto nao a contradiz: apagar o "@Nome" tira a pessoa da linha, e o nome
+ * de alguem do plano escrito inteiro sem escolher na lista entra nela no
+ * Registrar, que pede para conferir antes de gravar.
+ * Sugestoes: as pessoas do plano (as do campo Responsaveis) que abrem o
+ * painel dele, menos quem escreve e quem ja foi escolhido, por nome, funcao
+ * ou turno, sem acento. tiradas: quem saiu pelo x (o texto nao a traz de volta).
  */
-const MENCAO = { acao: null, escolhidas: [], lista: [], ativo: 0, inicio: -1 };
+const MENCAO = { acao: null, escolhidas: [], tiradas: [], lista: [], ativo: 0, inicio: -1, fim: -1 };
 const MENCOES_MAX = 10, SUGESTOES_MAX = 8;
 const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const pessoaDoPlano = (email) => (planoD().pessoas || []).find((p) => p.email === email) || { email: email, nome: email };
@@ -4901,10 +4924,11 @@ const pessoaDoPlano = (email) => (planoD().pessoas || []).find((p) => p.email ==
 function mencaoCandidatos(filtro) {
   const a = MENCAO.acao || {}, eu = meuEmail(), f = semAcento(filtro);
   const jaVeem = (a.responsaveisEmails || []).concat(a.marcadosEmails || []);
-  return (planoD().pessoas || [])
-    .filter((p) => p.email !== eu && MENCAO.escolhidas.indexOf(p.email) === -1)
-    .filter((p) => !f || semAcento([p.nome, p.papel, p.turno ? 'turno ' + p.turno : ''].join(' ')).indexOf(f) !== -1)
-    .slice(0, SUGESTOES_MAX)
+  const todas = (planoD().pessoas || [])
+    .filter((p) => p.email !== eu && p.abre !== false && MENCAO.escolhidas.indexOf(p.email) === -1)
+    .filter((p) => !f || semAcento([p.nome, p.papel, p.turno ? 'turno ' + p.turno : ''].join(' ')).indexOf(f) !== -1);
+  // Sem filtro ("@" sozinho, o botao): todas, na lista que rola. Filtrando: as primeiras.
+  return (f ? todas.slice(0, SUGESTOES_MAX) : todas)
     .map((p) => Object.assign({}, p, { passaAVer: !p.veTodas && jaVeem.indexOf(p.email) === -1 }));
 }
 function mencaoPintarLista() {
@@ -4917,25 +4941,61 @@ function mencaoPintarLista() {
       ${p.passaAVer ? '<span class="mencao-acesso">passa a ver esta ação</span>' : ''}</div>`).join('')
     : '<div class="mencao-vazia">Ninguém com esse nome no plano.</div>';
   caixa.classList.remove('oculto');
+  // A ativa (setas) fica a vista dentro da lista que rola, sem rolar a pagina.
+  const ativa = el('cm-sug-' + MENCAO.ativo);
+  if (ativa && ativa.offsetTop < caixa.scrollTop) caixa.scrollTop = ativa.offsetTop;
+  else if (ativa && ativa.offsetTop + ativa.offsetHeight > caixa.scrollTop + caixa.clientHeight) caixa.scrollTop = ativa.offsetTop + ativa.offsetHeight - caixa.clientHeight;
   campo.setAttribute('aria-expanded', 'true');
   if (MENCAO.lista.length) campo.setAttribute('aria-activedescendant', 'cm-sug-' + MENCAO.ativo);
   else campo.removeAttribute('aria-activedescendant');
 }
 function mencaoFechar() {
-  MENCAO.inicio = -1; MENCAO.lista = [];
+  MENCAO.inicio = -1; MENCAO.fim = -1; MENCAO.lista = [];
   const caixa = el('cm-sugestoes'); if (caixa) { caixa.classList.add('oculto'); caixa.innerHTML = ''; }
   const campo = el('cm-texto'); if (campo) { campo.setAttribute('aria-expanded', 'false'); campo.removeAttribute('aria-activedescendant'); }
 }
-/* A cada tecla: "@" + ate duas palavras antes do cursor abre (ou filtra) as sugestoes. */
-function mencaoDigitando(campo) {
+/*
+ * O "@..." que esta sendo digitado: logo antes do cursor, com ate quatro
+ * palavras (nomes compostos). "@" sozinho abre a lista inteira; "@ " (o
+ * espaco logo depois) nao e marcacao.
+ */
+const RE_MENCAO_DIGITADA = /(^|\s)@((?:[^\s@]{1,30}(?: [^\s@]{0,30}){0,3})?)$/;
+/*
+ * { inicio (o "@"), fim (o cursor), filtro, pontuacao } do "@..." no cursor;
+ * null se o cursor nao esta num (ou ha texto selecionado). "@Pedro,": a
+ * pontuacao logo depois do nome fica fora do filtro e volta depois do nome.
+ */
+function mencaoNoCursor(campo) {
+  if (campo.selectionStart !== campo.selectionEnd) return null;
   const antes = campo.value.slice(0, campo.selectionStart);
-  const m = /(^|\s)@([^\s@]{0,30}(?: [^\s@]{0,30})?)$/.exec(antes);
-  if (!m) return mencaoFechar();
-  const lista = mencaoCandidatos(m[2]);
-  if (!lista.length && /\s/.test(m[2])) return mencaoFechar();      // a segunda palavra ja e o resto da frase
-  MENCAO.inicio = antes.length - m[2].length - 1;
+  const m = RE_MENCAO_DIGITADA.exec(antes);
+  if (!m) return null;
+  const p = /[^\s.,;:!?]([.,;:!?]+)$/.exec(m[2]);
+  return { inicio: antes.length - m[2].length - 1, fim: antes.length,
+           filtro: p ? m[2].slice(0, -p[1].length) : m[2], pontuacao: p ? p[1] : '' };
+}
+/* A cada tecla: o "@..." no cursor abre (ou filtra) as sugestoes; quem saiu do texto sai da linha "Vai avisar". */
+function mencaoDigitando(campo) {
+  mencaoPodar(campo.value);
+  const t = mencaoNoCursor(campo);
+  if (!t) return mencaoFechar();
+  const lista = mencaoCandidatos(t.filtro);
+  if (!lista.length && /\s/.test(t.filtro)) return mencaoFechar();      // a palavra seguinte ja e o resto da frase
+  MENCAO.inicio = t.inicio; MENCAO.fim = t.fim;
   MENCAO.lista = lista; MENCAO.ativo = 0;
   mencaoPintarLista();
+}
+/*
+ * O "@..." que abriu a lista, se o cursor continua nele. O cursor andou
+ * (clique ou toque no texto, setas, Home/End): a lista fecha e volta null —
+ * o Enter quebra a linha e o Tab sai do campo, sem marcar ninguem.
+ */
+function mencaoConferirCursor(campo) {
+  if (MENCAO.inicio < 0) return null;
+  const t = mencaoNoCursor(campo);
+  if (t && t.inicio === MENCAO.inicio && t.fim === MENCAO.fim) return t;
+  mencaoFechar();
+  return null;
 }
 function mencaoTeclas(ev) {
   if (MENCAO.inicio < 0) return;
@@ -4945,21 +5005,23 @@ function mencaoTeclas(ev) {
     ev.preventDefault();
     MENCAO.ativo = (MENCAO.ativo + (ev.key === 'ArrowDown' ? 1 : MENCAO.lista.length - 1)) % MENCAO.lista.length;
     mencaoPintarLista();
-  } else if (ev.key === 'Enter' || ev.key === 'Tab') {
+  } else if ((ev.key === 'Enter' || ev.key === 'Tab') && mencaoConferirCursor(ev.target)) {
     ev.preventDefault();
     mencaoEscolher(MENCAO.ativo);
   }
 }
-/* Troca o "@texto" digitado por "@Nome " e poe a pessoa na lista de quem vai ser avisado. */
+/* Troca exatamente o "@texto" que abriu a lista por "@Nome " e poe a pessoa na lista de quem vai ser avisado. */
 function mencaoEscolher(i) {
   const p = MENCAO.lista[i], campo = el('cm-texto');
   if (!p || !campo) return;
+  const t = mencaoConferirCursor(campo);
+  if (!t) return;
   if (MENCAO.escolhidas.length >= MENCOES_MAX) { mencaoFechar(); return avisar('Marque no máximo ' + MENCOES_MAX + ' pessoas por comentário.', true); }
-  const fim = campo.selectionStart, ini = MENCAO.inicio >= 0 ? MENCAO.inicio : fim;
-  const nome = '@' + p.nome + ' ';
-  campo.value = campo.value.slice(0, ini) + nome + campo.value.slice(fim);
-  campo.selectionStart = campo.selectionEnd = ini + nome.length;
+  const nome = '@' + p.nome + t.pontuacao + ' ';
+  campo.value = campo.value.slice(0, t.inicio) + nome + campo.value.slice(t.fim);
+  campo.selectionStart = campo.selectionEnd = t.inicio + nome.length;
   MENCAO.escolhidas.push(p.email);
+  MENCAO.tiradas = MENCAO.tiradas.filter((e) => e !== p.email);
   mencaoFechar(); mencaoPintarEscolhidas(); campo.focus();
 }
 /* O botao "@ Marcar pessoa": poe o "@" no cursor e abre a lista inteira. */
@@ -4973,7 +5035,70 @@ function mencaoBotao() {
 }
 /* Saiu do campo (clique fora, Tab): a lista fecha — menos quando o foco voltou para ele (o botao "@ Marcar pessoa"). */
 function mencaoAoSair() { setTimeout(() => { if (document.activeElement !== el('cm-texto')) mencaoFechar(); }, 150); }
-function mencaoTirar(email) { MENCAO.escolhidas = MENCAO.escolhidas.filter((e) => e !== email); mencaoPintarEscolhidas(); }
+function mencaoTirar(email) {
+  MENCAO.escolhidas = MENCAO.escolhidas.filter((e) => e !== email);
+  if (MENCAO.tiradas.indexOf(email) === -1) MENCAO.tiradas.push(email);
+  mencaoPintarEscolhidas();
+}
+/*
+ * Os nomes (sem acento) de pessoas do plano escritos com "@" no texto, do
+ * maior para o menor: cada um achado sai do texto, e "@Ana Paula Ribeiro"
+ * nao cita tambem a "Ana Paula". Depois do nome, pontuacao ou espaco.
+ */
+function nomesCitados(texto) {
+  let t = ' ' + semAcento(texto) + ' ';
+  const nomes = (planoD().pessoas || []).map((p) => semAcento(p.nome))
+    .filter((n, i, l) => n && l.indexOf(n) === i).sort((x, y) => y.length - x.length);
+  return nomes.filter((n) => {
+    const re = new RegExp('(\\s)@' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])', 'g');
+    if (!re.test(t)) return false;
+    t = t.replace(re, '$1');
+    return true;
+  });
+}
+/* Quem saiu do texto (o "@Nome" apagado ou editado) sai da linha "Vai avisar": so tira, nunca poe. */
+function mencaoPodar(texto) {
+  if (!MENCAO.escolhidas.length) return;
+  const citados = nomesCitados(texto);
+  const ficam = MENCAO.escolhidas.filter((e) => citados.indexOf(semAcento(pessoaDoPlano(e).nome)) !== -1);
+  if (ficam.length !== MENCAO.escolhidas.length) { MENCAO.escolhidas = ficam; mencaoPintarEscolhidas(); }
+}
+/*
+ * Pessoas do plano com o "@Nome" escrito sem escolher na lista, na ordem do
+ * texto. Nao entram quem escreve, quem nao abre o plano, as ja escolhidas,
+ * as tiradas no x e os homonimos (qual dos dois seria?).
+ */
+function mencoesSoEscritas(texto) {
+  const eu = meuEmail(), citados = nomesCitados(texto), pessoas = planoD().pessoas || [], t = semAcento(texto);
+  const nome = (p) => semAcento(p.nome), onde = (p) => t.indexOf('@' + nome(p));
+  return pessoas.filter((p) => citados.indexOf(nome(p)) !== -1 && pessoas.filter((x) => nome(x) === nome(p)).length === 1 &&
+    p.email !== eu && p.abre !== false && MENCAO.escolhidas.indexOf(p.email) === -1 && MENCAO.tiradas.indexOf(p.email) === -1)
+    .sort((x, y) => onde(x) - onde(y));
+}
+/*
+ * Registrar comentario. O "@Nome" escrito sem escolher na lista nao some
+ * calado: a pessoa entra na linha "Vai avisar", com a nota, e so o clique
+ * seguinte grava. Sem confirm(): ele gastaria o clique de que a gravacao
+ * pela pagina (canal barrado) precisa. acao: o nome da acao do plano em que
+ * a janela foi aberta.
+ */
+function registrarComentario(id, acao) {
+  if (!fotosProntas('cm')) return;
+  const texto = val('cm-texto');
+  mencaoPodar(texto);
+  const faltam = mencoesSoEscritas(texto).slice(0, Math.max(0, MENCOES_MAX - MENCAO.escolhidas.length));
+  if (faltam.length) {
+    faltam.forEach((p) => MENCAO.escolhidas.push(p.email));
+    mencaoPintarEscolhidas();
+    const nomes = faltam.map((p) => '@' + p.nome);
+    const quem = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
+    el('cm-marcados').insertAdjacentHTML('beforeend', '<div class="mencao-nota">' + esc('Você escreveu ' + quem + ' sem escolher na lista. ' +
+      (faltam.length > 1 ? 'As pessoas entraram' : 'A pessoa entrou') + ' em “Vai avisar por e-mail”: confira (o × tira) e clique de novo em Registrar comentário.') + '</div>');
+    return;
+  }
+  agir(acao, { id: id, texto: texto, situacao: val('cm-sit'), depende: val('cm-dep'), fotos: fotosParaEnviar('cm'),
+    mencoes: MENCAO.escolhidas.slice() }).catch(() => {});
+}
 function mencaoPintarEscolhidas() {
   const alvo = el('cm-marcados'); if (!alvo) return;
   alvo.innerHTML = MENCAO.escolhidas.length ? 'Vai avisar por e-mail: ' + MENCAO.escolhidas.map((e) => {
@@ -5180,7 +5305,7 @@ function abrirComentarios(id, podeComentar) {
   const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}
     ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>` : '';
   fotosLimpar('cm');
-  MENCAO.acao = a; MENCAO.escolhidas = []; mencaoFechar();
+  MENCAO.acao = a; MENCAO.escolhidas = []; MENCAO.tiradas = []; mencaoFechar();
   marcarComentVisto(a);
   abrirJanela('Comentários — ' + a.acao, `
     <div class="coment-historico">${criada}${hist || '<div class="vazio">Nenhum comentário ainda. O primeiro abre o histórico desta ação.</div>'}</div>
@@ -5189,7 +5314,8 @@ function abrirComentarios(id, podeComentar) {
       <div class="campo mencao-campo"><label for="cm-texto">O que avançou</label>
         <textarea id="cm-texto" rows="3" placeholder="Ex.: Lâmpadas compradas, troca agendada com a manutenção para quinta. Digite @ para marcar alguém."
           role="combobox" aria-autocomplete="list" aria-controls="cm-sugestoes" aria-expanded="false" aria-describedby="cm-dica-mencao"
-          oninput="mencaoDigitando(this)" onkeydown="mencaoTeclas(event)" onblur="mencaoAoSair()"></textarea>
+          oninput="mencaoDigitando(this)" onkeydown="mencaoTeclas(event)" onkeyup="mencaoConferirCursor(this)" onclick="mencaoConferirCursor(this)"
+          onblur="mencaoAoSair()"></textarea>
         <div id="cm-sugestoes" class="mencao-sugestoes oculto" role="listbox" aria-label="Pessoas para marcar"></div>
         <div class="mencao-barra"><button type="button" class="botao-texto" onclick="mencaoBotao()">@ Marcar pessoa</button>
           <span id="cm-dica-mencao" class="dica">Quem você marcar recebe um e-mail com esta ação e pode responder aqui.</span></div>
@@ -5202,7 +5328,7 @@ function abrirComentarios(id, podeComentar) {
       </div>` : `<p class="dica" style="margin:0 0 12px">Marcaram você nesta ação: o seu comentário entra no histórico, e a situação dela fica com os responsáveis.</p>`}
       ${fotosCampoHtml('cm', 'Foto (opcional) — do que foi feito, do antes e depois')}` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-    ${podeComentar ? `<button class="botao" onclick="fotosProntas('cm') && agir(${planoAcao('comentar')},{id:${jsArg(id)},texto:val('cm-texto'),situacao:val('cm-sit'),depende:val('cm-dep'),fotos:fotosParaEnviar('cm'),mencoes:MENCAO.escolhidas.slice()}).catch(()=>{})">Registrar comentário</button>` : ''}`);
+    ${podeComentar ? `<button class="botao" onclick="registrarComentario(${jsArg(id)}, ${planoAcao('comentar')})">Registrar comentário</button>` : ''}`);
   const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
@@ -5258,6 +5384,9 @@ function formAcao(id) {
             ${a && (a.responsaveisEmails || [a.responsavelEmail]).indexOf(pe.email) !== -1 ? 'checked' : ''}>
             ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}${pe.papel ? ' · ' + esc(pe.papel) : ''}</label>`).join('')}
       </div></div>
+    ${a && (a.marcados || []).length ? `<fieldset class="mencao-marcados"><legend>Marcados (veem e comentam esta ação)</legend>
+      ${a.marcados.map((m) => `<label class="marcador"><input type="checkbox" class="ac-marcado" value="${esc(m.email)}" checked> ${esc(m.nome)}</label>`).join('')}
+      <p class="dica">Desmarque quem foi marcado por engano: a pessoa deixa de ver esta ação.</p></fieldset>` : ''}
     <div class="campo-duplo">
       <div class="campo"><label>Entregar até</label>
         <input type="date" id="ac-prazo" value="${a ? esc(a.prazoISO) : ''}"></div>
@@ -5295,6 +5424,8 @@ function salvarAcao(id) {
     params.zona = val('ac-zona'); params.local = val('ac-local');
     params.criticidade = val('ac-crit'); params.abertaEm = val('ac-aberta');
   }
+  // Quem a gestao desmarcou (19/10): vai so quem saiu — o servidor so tira, e quem outra pessoa marcou com o formulario aberto fica.
+  if (document.querySelector('.ac-marcado')) params.desmarcados = [...document.querySelectorAll('.ac-marcado')].filter((c) => !c.checked).map((c) => c.value);
   if (id) params.id = id;
   const antigo = a && !(a.responsaveisEmails || []).length ? a.responsavel : '';
   if (!params.responsaveisEmails.length) {

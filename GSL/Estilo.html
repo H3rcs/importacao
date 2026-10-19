@@ -2308,6 +2308,22 @@ input.travado {
   background: var(--azul-tenue); color: var(--azul-vivo); font-weight: 700;
 }
 .mencao-tirar { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 6px; }
+/* A nota do "@Nome" escrito sem escolher na lista: o Registrar so grava no clique seguinte. */
+.mencao-nota { margin-top: 4px; color: var(--laranja-escuro); font-weight: 600; }
+/* Editar a acao: os marcados, para desmarcar quem foi marcado por engano. */
+.mencao-marcados { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.mencao-marcados legend {
+  padding: 0; margin-bottom: 7px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--tinta-media);
+}
+.mencao-marcados .marcador { margin: 4px 0; }
+/* No dedo: o x do chip e o "@ Marcar pessoa" tinham 15 px de altura, colados no vizinho. */
+@media (pointer: coarse) {
+  .mencao-tirar { min-width: 32px; min-height: 32px; padding: 0 9px; }
+  .mencao-barra { margin-top: 10px; }            /* a area de toque do botao nao invade o campo de texto */
+  .mencao-barra .botao-texto { padding: 9px 2px; margin: -9px 0; }
+  .mencao-chip { margin: 3px 6px 3px 0; }
+}
 @media (forced-colors: active) {
   .selo-coment, .selo-mencao, .coment-mencao, .mencao-chip { border: 1px solid CanvasText; }
   .mencao-opcao.ativa { outline: 2px solid Highlight; outline-offset: -2px; }

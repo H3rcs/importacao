@@ -136,14 +136,17 @@ function dadosDoEstoque_(cfg, usuario, params) {
   const itens = itensEstoque_(cfg);
   const movs = movimentosEstoque_(cfg);
   const saldo = saldosEstoque_(movs);
-  const ultimaSaida = {}, ultimaEntrada = {};
+  const ultimaSaida = {}, ultimaEntrada = {}, quantas = {};
   movs.forEach(function (m) {
     if (m.tipo === 'SAIDA' && (!ultimaSaida[m.item] || m.data > ultimaSaida[m.item])) ultimaSaida[m.item] = m.data;
     if (m.tipo === 'ENTRADA' && (!ultimaEntrada[m.item] || m.data > ultimaEntrada[m.item])) ultimaEntrada[m.item] = m.data;
+    quantas[m.item] = (quantas[m.item] || 0) + 1;
   });
 
   itens.forEach(function (i) {
     i.saldo = saldo[i.codigo] || 0;
+    // Todas as movimentacoes do item (a tela so leva ~90 dias): a confirmacao do Remover diz quantas apaga.
+    i.movimentacoes = quantas[i.codigo] || 0;
     // Quanto falta para chegar ao estoque ideal (0 = esta no ideal ou acima).
     i.faltaIdeal = i.ideal && i.saldo < i.ideal ? estArred_(i.ideal - Math.max(0, i.saldo)) : 0;
     i.ultimaSaida = ultimaSaida[i.codigo] || '';
@@ -284,15 +287,42 @@ function salvarItemEstoque_(cfg, usuario, params) {
 
 function acaoExcluirItemEstoque(usuario, params) { return excluirItemEstoque_(ESTOQUES.TI, usuario, params); }
 
+/*
+ * REMOVER UM ITEM (20/10). "Quando eu disser que e para excluir, ele tem que
+ * excluir": antes, item com movimentacao so era desativado, por mais que a
+ * pessoa quisesse apagar. Agora a tela pergunta (dizendo quantas
+ * movimentacoes vao junto) e manda o que a pessoa escolheu:
+ *   excluirMovimentos: true  apaga o item E as movimentacoes dele (EXCLUIDO=SIM,
+ *                            como o resto do sistema apaga). Saem do saldo, do
+ *                            historico e dos relatorios — e um item novo com o
+ *                            mesmo codigo comeca do zero, sem herdar saldo.
+ *   desativar: true          so tira de uso (ATIVO=NAO); o historico fica.
+ *   nenhum dos dois          tela de antes desta versao: o comportamento de
+ *                            sempre (com movimentacao desativa, sem apaga).
+ */
 function excluirItemEstoque_(cfg, usuario, params) {
   exigirCapacidade(usuario, cfg.capCadastrar);
   // Conferir e apagar na mesma trava: uma entrada no meio nao deixa movimento orfao.
   return comTrava(function () {
     const item = itensEstoque_(cfg).filter(function (i) { return i.id === params.id; })[0];
     if (!item) throw new Error('Item não encontrado.');
-    const temHistorico = movimentosEstoque_(cfg).some(function (m) { return m.item === item.codigo; });
-    if (temHistorico) {
-      // Com historico nao apaga: desativa. O historico continua consultavel.
+    if (params.desativar === true) {
+      atualizar(cfg.itens, params.id, { ATIVO: 'NAO' }, usuario.email);
+      return { ok: true, id: params.id, recado: 'Item ' + item.codigo + ' desativado. O histórico continua guardado.' };
+    }
+    // As linhas cruas do item (qualquer tipo): nao sobra nada para um item novo com o mesmo codigo herdar.
+    const movs = listar(cfg.movs).filter(function (m) { return String(m.ITEM || '').toUpperCase().trim() === item.codigo; });
+    if (params.excluirMovimentos === true) {
+      // Movimentacoes primeiro, numa escrita so; se o item falhar depois, ele fica sem movimentacao e o Remover de novo apaga.
+      if (movs.length) {
+        atualizarVarios(cfg.movs, movs.map(function (m) { return { id: m.ID, linha: m._linha, campos: { EXCLUIDO: 'SIM' } }; }), usuario.email);
+      }
+      excluir(cfg.itens, params.id, usuario.email);
+      return { ok: true, id: params.id, recado: 'Item ' + item.codigo + ' excluído' + (!movs.length ? '.'
+        : movs.length === 1 ? ', com a movimentação dele.' : ', com as ' + movs.length + ' movimentações dele.') };
+    }
+    if (movs.length) {
+      // Tela antiga (sem a confirmacao): com historico nao apaga, desativa. O historico continua consultavel.
       atualizar(cfg.itens, params.id, { ATIVO: 'NAO' }, usuario.email);
       return { ok: true, recado: 'O item tem movimentações, então foi desativado em vez de apagado.' };
     }

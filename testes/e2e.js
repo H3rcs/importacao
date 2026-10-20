@@ -1705,6 +1705,140 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  /*
+   * REMOVER (20/10) — "quando eu disser que e para excluir, ele tem que excluir". O Remover do item
+   * pergunta antes (sem ir ao servidor), diz quantas movimentacoes vao junto e deixa escolher.
+   */
+  const confirmacaoDoRemover = async (f, nome) => {
+    await f.click('#est-tabela-itens tr:has(strong:text-is("' + nome + '")) >> text=Editar');
+    await f.waitForSelector('#ei-nome');
+    await f.click('#janela-rodape >> text=Remover');
+    await f.waitForFunction(() => /^Excluir “/.test(document.getElementById('janela-titulo').textContent), null, { timeout: 5000 });
+    return f.evaluate(() => ({
+      titulo: document.getElementById('janela-titulo').textContent,
+      texto: document.getElementById('janela-corpo').textContent.replace(/\s+/g, ' ').trim(),
+      botoes: [...document.querySelectorAll('#janela-rodape button')].map((b) => b.textContent.trim() + (b.classList.contains('perigo') ? ' [vermelho]' : '')).join(' | ')
+    }));
+  };
+  const TEXTO_EXCLUIR = (quais, fim) => 'Excluir apaga o item e ' + quais + ' do saldo, do histórico e dos relatórios. ' + fim;
+  const PARA_DESATIVAR = 'Para só tirar o item de uso e manter o histórico, desative o item.';
+
+  await cenario('estoque: Remover pergunta antes — diz quantas movimentacoes vao junto (inclusive as de mais de 90 dias); Voltar, Desativar (manter o historico) e Excluir mesmo assim; sem movimentacao so Excluir; Limpeza igual', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(async () => {
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Mouse USB', saldoInicial: '10' });
+      await executarAcaoSrv('movimentarEstoque', { tipo: 'SAIDA', item: 'TI-0001', quantidade: '3', destino: 'Recebimento' });
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Teclado', saldoInicial: '5' });
+      await executarAcaoSrv('salvarItemEstoque', { nome: 'Cabo HDMI' });
+    });
+    // uma entrada de mais de 90 dias (a tela nao a leva, mas ela vai junto e entra na conta)
+    noServidor(s, (c) => c.inserir('EST_MOVIMENTOS', { DATA: '2025-01-10', TIPO: 'ENTRADA', ITEM: 'TI-0001', QUANTIDADE: 1 }, DONO));
+    await f.evaluate(() => { esquecerTelas(); abrir('estoque'); });
+    await f.waitForFunction(() => paginaAtual === 'estoque' && !!document.querySelector('#est-tabela-itens'), null, { timeout: 15000 });
+    const pedidas = acoesPedidas(aba);
+    let c = await confirmacaoDoRemover(f, 'Mouse USB');
+    afirmar(c.titulo === 'Excluir “Mouse USB”?', 'titulo: ' + c.titulo);
+    afirmar(c.texto === TEXTO_EXCLUIR('as 3 movimentações dele: saem', PARA_DESATIVAR), 'texto: ' + c.texto);
+    afirmar(c.botoes === 'Voltar | Desativar (manter o histórico) | Excluir mesmo assim [vermelho]', 'botoes: ' + c.botoes);
+    afirmar(!pedidas.length, 'a confirmacao abriu sem ir ao servidor: ' + pedidas.join());
+    // Voltar: de volta ao formulario do item
+    await f.click('#janela-rodape >> text=Voltar');
+    await f.waitForFunction(() => document.getElementById('ei-nome') && document.getElementById('ei-nome').value === 'Mouse USB', null, { timeout: 5000 });
+    await f.click('#janela-rodape >> text=Remover');
+    await f.waitForSelector('#janela-rodape >> text=Desativar (manter o histórico)');
+    let r = await recadoDe(f, () => f.click('#janela-rodape >> text=Desativar (manter o histórico)'));
+    afirmar(r === 'Item TI-0001 desativado. O histórico continua guardado.', 'desativar: ' + r);
+    await f.waitForFunction(() => { const i = DADOS.itens.find((x) => x.codigo === 'TI-0001'); return i && !i.ativo && i.saldo === 8 && i.movimentacoes === 3; }, null, { timeout: 15000 });
+    // inativo: sem o Desativar
+    await f.click('.lp-filtro >> text=Inativos');
+    c = await confirmacaoDoRemover(f, 'Mouse USB');
+    afirmar(c.texto === TEXTO_EXCLUIR('as 3 movimentações dele: saem', 'O item já está desativado: deixando assim, o histórico continua guardado.'), 'inativo: ' + c.texto);
+    afirmar(c.botoes === 'Voltar | Excluir mesmo assim [vermelho]', 'botoes do inativo: ' + c.botoes);
+    r = await recadoDe(f, () => f.click('#janela-rodape >> text=Excluir mesmo assim'));
+    afirmar(r === 'Item TI-0001 excluído, com as 3 movimentações dele.', 'excluir: ' + r);
+    await f.waitForFunction(() => paginaAtual === 'estoque' && !DADOS.itens.some((x) => x.codigo === 'TI-0001') && !DADOS.movimentos.some((x) => x.item === 'TI-0001'), null, { timeout: 15000 });
+    afirmar(pedidas.join() === 'excluirItemEstoque,excluirItemEstoque', 'acoes: ' + pedidas.join());
+    const noBanco = noServidor(s, (cx) => cx.listar('EST_MOVIMENTOS', true).filter((x) => x.ITEM === 'TI-0001').map((x) => x.EXCLUIDO).join());
+    afirmar(noBanco === 'SIM,SIM,SIM', 'movimentacoes no banco: ' + noBanco);
+    // uma movimentacao (singular) e nenhuma
+    await f.click('.lp-filtro >> nth=0');             // Ativos
+    c = await confirmacaoDoRemover(f, 'Teclado');
+    afirmar(c.texto === TEXTO_EXCLUIR('a única movimentação dele: ela sai', PARA_DESATIVAR), 'uma: ' + c.texto);
+    await f.click('#janela-rodape >> text=Voltar');
+    await f.click('#janela-rodape >> text=Cancelar');
+    c = await confirmacaoDoRemover(f, 'Cabo HDMI');
+    afirmar(c.texto === 'Cabo HDMI (TI-0003) não tem movimentações. Excluir apaga o item do cadastro.', 'nenhuma: ' + c.texto);
+    afirmar(c.botoes === 'Voltar | Excluir [vermelho]', 'botoes sem movimentacao: ' + c.botoes);
+    r = await recadoDe(f, () => f.click('#janela-rodape button:text-is("Excluir")'));
+    afirmar(r === 'Item TI-0003 excluído.', 'sem movimentacao: ' + r);
+    await f.waitForFunction(() => DADOS.itens.map((x) => x.codigo).join() === 'TI-0002', null, { timeout: 15000 });
+    // LIMPEZA — a mesma janela, pela porta da limpeza
+    await f.evaluate(async () => {
+      await executarAcaoSrv('salvarItemLimpeza', { nome: 'Detergente neutro 5L', unidade: 'galão', saldoInicial: '6' });
+      await executarAcaoSrv('movimentarLimpeza', { tipo: 'SAIDA', item: 'LP-0001', quantidade: '2', destino: 'Z7' });
+      await executarAcaoSrv('salvarItemLimpeza', { nome: 'Papel toalha', unidade: 'fardo' });
+      esquecerTelas(); ABA_LP = 'estoque'; abrir('limpeza');
+    });
+    await f.waitForFunction(() => paginaAtual === 'limpeza' && !!document.querySelector('#conteudo-lp #est-tabela-itens'), null, { timeout: 15000 });
+    c = await confirmacaoDoRemover(f, 'Detergente neutro 5L');
+    afirmar(c.titulo === 'Excluir “Detergente neutro 5L”?' && c.texto === TEXTO_EXCLUIR('as 2 movimentações dele: saem', PARA_DESATIVAR) &&
+      c.botoes === 'Voltar | Desativar (manter o histórico) | Excluir mesmo assim [vermelho]', 'limpeza: ' + JSON.stringify(c));
+    r = await recadoDe(f, () => f.click('#janela-rodape >> text=Excluir mesmo assim'));
+    afirmar(r === 'Item LP-0001 excluído, com as 2 movimentações dele.', 'limpeza: ' + r);
+    await f.waitForFunction(() => DADOS.estoque.itens.map((x) => x.codigo).join() === 'LP-0002' && !DADOS.estoque.movimentos.length, null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => ABA_LP) === 'estoque', 'continua na aba Estoque da limpeza');
+    afirmar(pedidas.slice(-1)[0] === 'excluirItemLimpeza', 'porta da limpeza: ' + pedidas.join());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('estoque com o Google barrando (HTTP 403): a confirmacao do Remover abre sem ir ao servidor; Desativar e Excluir mesmo assim gravam pela pagina (1 POST cada) e voltam no Estoque', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    noServidor(s, (c, adm) => c.acaoSalvarItemEstoque(adm, { nome: 'Mouse USB', saldoInicial: '10' }));
+    noServidor(s, (c, adm) => c.acaoMovimentarEstoque(adm, { tipo: 'SAIDA', item: 'TI-0001', quantidade: '3', destino: 'Recebimento' }));
+    noServidor(s, (c, adm) => c.acaoSalvarItemEstoque(adm, { nome: 'Teclado', saldoInicial: '5' }));
+    criarPin(s, DONO, DONO, '4321');
+    const aba = await abrirAba(s, DONO, { bloqueio403: true, contexto: await navegador.newContext({ viewport: { width: 1300, height: 1300 } }) });
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 30000) === 'aplicacao', 'entrou pela reserva');
+    let f = await paginaNova(aba, () => CANAL_BARRADO && paginaAtual === 'modulos');
+    const pelaPagina = async (gesto, pronta) => {
+      await f.evaluate(() => { window.__paginaVelha = true; });
+      await gesto();
+      f = await paginaNova(aba, pronta);
+    };
+    await pelaPagina(() => f.evaluate(() => { esquecerTelas(); abrir('estoque'); }), () => paginaAtual === 'estoque' && !!document.querySelector('#est-tabela-itens'));
+    marcar(aba);
+    let c = await confirmacaoDoRemover(f, 'Mouse USB');
+    let d = desdeMarca(aba);
+    afirmar(!d.posts && !d.gets && !d.runs.filter((x) => x !== 'sondarCanal').length, 'a confirmacao abriu sem ir ao servidor: ' + JSON.stringify(d));
+    afirmar(c.texto === TEXTO_EXCLUIR('as 2 movimentações dele: saem', PARA_DESATIVAR) && c.botoes === 'Voltar | Desativar (manter o histórico) | Excluir mesmo assim [vermelho]', 'confirmacao: ' + JSON.stringify(c));
+    marcar(aba);
+    await pelaPagina(() => f.click('#janela-rodape >> text=Desativar (manter o histórico)'),
+      () => paginaAtual === 'estoque' && DADOS.itens.some((i) => i.codigo === 'TI-0001' && !i.ativo));
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'desativou pela pagina: ' + JSON.stringify(d));
+    await f.waitForFunction(() => document.getElementById('recado').textContent === 'Item TI-0001 desativado. O histórico continua guardado.', null, { timeout: 5000 });
+    await f.click('.lp-filtro >> text=Inativos');
+    c = await confirmacaoDoRemover(f, 'Mouse USB');
+    afirmar(c.botoes === 'Voltar | Excluir mesmo assim [vermelho]', 'inativo: ' + c.botoes);
+    marcar(aba);
+    await pelaPagina(() => f.click('#janela-rodape >> text=Excluir mesmo assim'),
+      () => paginaAtual === 'estoque' && DADOS.itens.map((i) => i.codigo).join() === 'TI-0002');
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'excluiu pela pagina: ' + JSON.stringify(d));
+    await f.waitForFunction(() => document.getElementById('recado').textContent === 'Item TI-0001 excluído, com as 2 movimentações dele.', null, { timeout: 5000 });
+    afirmar(await f.evaluate(() => !DADOS.movimentos.some((x) => x.item === 'TI-0001') && DADOS.totalMovimentos === 1), 'as movimentacoes sairam da tela');
+    const noBanco = noServidor(s, (cx) => [cx.listar('EST_ITENS').map((x) => x.CODIGO).join(), cx.listar('EST_MOVIMENTOS', true).filter((x) => x.ITEM === 'TI-0001').map((x) => x.EXCLUIDO).join()]);
+    afirmar(noBanco[0] === 'TI-0002' && noBanco[1] === 'SIM,SIM', 'no banco: ' + JSON.stringify(noBanco));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('nobreaks: hora so com numeros, historico no formato da folha e exportar Excel/PDF', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, DONO);

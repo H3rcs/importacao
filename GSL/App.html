@@ -139,17 +139,42 @@ const chamar = (f, ...a) => new Promise((ok, erro) => {
  * caminho. Nas paginas da reserva, no maximo a cada 10 min, ve se o canal
  * voltou (ai os cliques seguintes voltam ao caminho rapido).
  */
-let SONDA = '';
+let SONDA = '', SONDA_INDO = null, SONDA_BARROU_EM = 0;
 function sondarCanal() {
-  if (SONDA === 'indo' || typeof google === 'undefined' || !google.script || !google.script.run) return;
+  if (SONDA_INDO) return SONDA_INDO;
+  if (typeof google === 'undefined' || !google.script || !google.script.run) return Promise.resolve(false);
   SONDA = 'indo';
   gravarSs(CHAVE_SONDA, String(Date.now()));
-  try {
-    google.script.run
-      .withSuccessHandler(function () { SONDA = 'ok'; if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado(); })
-      .withFailureHandler(function (e) { SONDA = canalBarradoDeVez(e) ? 'barrado' : 'erro'; if (SONDA === 'barrado') lembrarCanalBarrado(); })
-      .sondarCanal();
-  } catch (e) { SONDA = 'erro'; }
+  let prazo = 0;
+  const esta = new Promise((ok) => {
+    const fim = (passou) => { clearTimeout(prazo); if (SONDA_INDO === esta) SONDA_INDO = null; ok(passou); };
+    prazo = setTimeout(() => { if (SONDA === 'indo') SONDA = 'erro'; fim(false); }, 10000);
+    try {
+      google.script.run
+        .withSuccessHandler(function () { SONDA = 'ok'; if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado(); fim(true); })
+        .withFailureHandler(function (e) {
+          SONDA = canalBarradoDeVez(e) ? 'barrado' : 'erro';
+          if (SONDA === 'barrado') { lembrarCanalBarrado(); SONDA_BARROU_EM = Date.now(); }
+          fim(false);
+        })
+        .sondarCanal();
+    } catch (e) { SONDA = 'erro'; fim(false); }
+  });
+  SONDA_INDO = esta;
+  return esta;
+}
+/*
+ * 20/10 — CONFERIR ANTES DE RECUSAR. A pagina que veio pela reserva (e o
+ * navegador que lembra de uma falha de horas atras) comeca achando que o
+ * canal e barrado. Recusar foto e arquivo na hora, sem tentar, dava o erro
+ * na primeira foto do visor e passava na segunda (a sonda ja tinha voltado
+ * e apagado a marca). Agora a sonda confere antes: so a recusa de verdade
+ * (ou uma de menos de 2 min atras) segura o pedido.
+ */
+function canalLivre() {
+  if (!CANAL_BARRADO) return Promise.resolve(true);
+  if (SONDA === 'barrado' && Date.now() - SONDA_BARROU_EM < 2 * 60000) return Promise.resolve(false);
+  return sondarCanal();
 }
 function sondarDeVezEmQuando() {
   if (Date.now() - Number(lerSs(CHAVE_SONDA) || 0) > 10 * 60 * 1000) setTimeout(sondarCanal, 4000);
@@ -182,21 +207,15 @@ const carregarTelaSrv = (id, params) => {
   });
 };
 /*
- * Com o canal barrado, fotos e arquivos (e as acoes chamadas direto, fora do
- * agir) nao tem caminho: em vez de uma chamada condenada de varios segundos,
- * a explicacao na hora — e a sonda confere se o canal voltou.
+ * Com o canal barrado de verdade (a sonda conferiu), as acoes chamadas direto,
+ * fora do agir (abrir uma foto, anexar arquivo na entrega), nao tem caminho:
+ * a explicacao em vez de uma chamada condenada. As gravacoes do agir, com
+ * foto ou sem, vao pela pagina.
  */
-const SEM_CANAL_PARA_ARQUIVO = 'Este computador bloqueia a conversa direta com o Google. Fotos, arquivos e esta função ' +
-  'precisam dela: use um navegador só com a conta @bartofil.com.br (ou outro computador).';
-const temArquivo = (p) => !!p && Object.keys(p).some((k) => {
-  if (!/foto|arquivo|anexo|dados64|base64/i.test(k)) return false;
-  const v = p[k];
-  if (Array.isArray(v)) return v.length > 0;          // fotos: [] = nenhuma foto escolhida
-  if (typeof v === 'string') return v.length > 200;    // um id de arquivo passa; um base64 nao
-  return !!v && typeof v === 'object';
-});
-const executarAcaoSrv = (nome, params) => {
-  if (CANAL_BARRADO && !LEITURAS_PELA_PAGINA[nome]) { sondarCanal(); return Promise.reject(new Error(SEM_CANAL_PARA_ARQUIVO)); }
+const SEM_CANAL_PARA_ARQUIVO = 'Este computador bloqueia a conversa direta com o Google, e esta função precisa dela. ' +
+  'Use um navegador só com a conta @bartofil.com.br (ou outro computador).';
+const executarAcaoSrv = async (nome, params) => {
+  if (CANAL_BARRADO && !LEITURAS_PELA_PAGINA[nome] && !(await canalLivre())) throw new Error(SEM_CANAL_PARA_ARQUIVO);
   return chamarJSON('executarAcao', ctx(), nome, params || {});
 };
 /* Leituras que tem caminho proprio pela pagina com o canal barrado (ver fichaPelaPagina). */
@@ -1257,7 +1276,11 @@ function explicarErro(t) {
            'navegador. Use uma janela só com a conta @bartofil.com.br (ou uma janela anônima). ' +
            'Detalhe técnico: ' + m;
   }
-  if (/HTTP 403\b|NetworkError|Falha na conex/i.test(m)) {
+  if (falhaPassageira(m)) {
+    return 'A conexão com o Google caiu no meio do pedido (rede instável ou servidor ocupado). ' +
+           'Se era uma gravação, confira na tela se ela foi feita antes de repetir. Detalhe técnico: ' + m;
+  }
+  if (/HTTP 40[13]\b|NetworkError|Falha na conex/i.test(m)) {
     return 'Este computador abriu o sistema, mas o Google bloqueou (HTTP 403) a conversa '
          + 'com o servidor. Verifique: 1) a conta @bartofil.com.br é a PRIMEIRA conta logada no '
          + 'navegador (ou use uma janela só com ela); 2) cookies de terceiros liberados para '
@@ -1798,6 +1821,36 @@ function pintar(idTela, r, silencioso) {
  *   - o botao clicado mostra que esta trabalhando, entao a espera nao
  *     parece travamento.
  */
+/* A reserva sabe gravar (Codigo.gs desta versao) e ha sessao para mandar junto. */
+function podeGravarPelaPagina() { return !!(URL_APP && FILIAL && TOKEN); }
+/*
+ * Grava pela pagina (POST no /exec). Devolve uma promessa que nao se resolve
+ * (a pagina vai embora), ou null quando nao ha como navegar. Lanca o erro ja
+ * explicado na tela (Codigo.gs antigo, fotos grandes demais para um envio).
+ */
+const POST_MAXIMO = 30 * 1024 * 1024;
+function gravarPelaPagina(acao, params, recado) {
+  // Codigo.gs de antes de 10/10 (colado pela metade): ele trataria o POST como navegacao e nada seria gravado.
+  if (!(SESSAO && SESSAO.app && SESSAO.app.gravarPelaPagina)) {
+    const e = new Error('Atualização incompleta do GSL: gravar neste computador precisa do Codigo.gs desta versão. Avise o administrador do sistema.');
+    avisar(e.message, true);
+    throw e;
+  }
+  const corpo = JSON.stringify(params || {});
+  if (corpo.length > POST_MAXIMO) {
+    const e = new Error('As fotos passam do que dá para mandar de uma vez por este computador. Mande menos fotos (ou fotos menores) por vez.');
+    avisar(e.message, true);
+    throw e;
+  }
+  const tela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
+  const temP = tela && paramsAtual && Object.keys(paramsAtual).length;
+  if (navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: tela, p: temP ? JSON.stringify(paramsAtual) : '',
+      acao: acao, ap: corpo, idem: novoIdem(), recado: recado || '' })) {
+    return new Promise(() => {});      // a pagina vai embora; quem esperava o resultado nao roda
+  }
+  return null;
+}
+
 async function agir(acao, params, recado) {
   const botao = (typeof event !== 'undefined' && event && event.target)
     ? event.target.closest('button') : null;
@@ -1809,31 +1862,14 @@ async function agir(acao, params, recado) {
   /*
    * 10/10 — CANAL BARRADO: a gravacao vai pela pagina (POST no /exec), dentro
    * do clique, pela mesma porta do servidor; a pagina volta com a tela atual
-   * ja atualizada e o recado da acao. Fotos e arquivos ficam de fora (pesados
-   * demais para o formulario): a tela explica.
+   * ja atualizada e o recado da acao. 20/10: as fotos vao junto (antes a tela
+   * recusava: era a rota que funciona, e a foto ficava de fora).
    */
-  if (CANAL_BARRADO && URL_APP && FILIAL && TOKEN) {
-    // Codigo.gs de antes desta entrega (colado pela metade): ele trataria o POST como navegacao e nada seria gravado.
-    if (!(SESSAO && SESSAO.app && SESSAO.app.gravarPelaPagina)) {
-      if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
-      const e = new Error('Atualização incompleta do GSL: gravar neste computador precisa do Codigo.gs desta versão. Avise o administrador do sistema.');
-      avisar(e.message, true);
-      throw e;
-    }
-    const corpo = JSON.stringify(params || {});
-    if (temArquivo(params) || corpo.length > 200000) {
-      if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
-      sondarCanal();
-      const e = new Error(SEM_CANAL_PARA_ARQUIVO);
-      avisar(e.message, true);
-      throw e;
-    }
-    const tela = paginaAtual && paginaAtual !== 'modulos' ? paginaAtual : '';
-    const temP = tela && paramsAtual && Object.keys(paramsAtual).length;
-    if (navegarPelaPagina({ t: TOKEN, filial: FILIAL, tela: tela, p: temP ? JSON.stringify(paramsAtual) : '',
-        acao: acao, ap: corpo, idem: novoIdem(), recado: recado || '' })) {
-      return new Promise(() => {});      // a pagina vai embora; quem esperava o resultado nao roda
-    }
+  if (CANAL_BARRADO && podeGravarPelaPagina()) {
+    let indo = null;
+    try { indo = gravarPelaPagina(acao, params, recado); }
+    catch (e) { if (botao) { botao.disabled = false; botao.innerHTML = rotulo; } throw e; }
+    if (indo) return indo;
   }
 
   pedidosDoUsuario++;
@@ -1897,6 +1933,17 @@ async function agir(acao, params, recado) {
     return r;
   } catch (e) {
     if (idTela && await painelSaiu(e, idTela)) throw e;      // o painel saiu da filial: menu e aviso, sem a caixa de erro
+    /*
+     * 20/10 — O GOOGLE RECUSOU A CONVERSA (403, PERMISSION_DENIED): o pedido
+     * nem chegou ao servidor, entao nada foi gravado. Em vez do erro (e de a
+     * pessoa ter de clicar de novo), segue pela pagina na hora — a rota que
+     * funciona. Sem o clique valendo, o "Continuar" pede o clique.
+     */
+    if (canalBarradoDeVez(e) && podeGravarPelaPagina()) {
+      if (botao) { botao.disabled = false; botao.innerHTML = rotulo; }
+      const indo = gravarPelaPagina(acao, params, recado);
+      if (indo) return indo;
+    }
     let msg = e.message || String(e);
     // "Acao desconhecida" e implantacao pela metade (Codigo.gs antigo com telas novas).
     // O Codigo.gs antigo nao explica isso — entao a tela explica.
@@ -5650,7 +5697,8 @@ async function converterHeicNoServidor(arquivo, contexto) {
   try { r = await executarAcaoSrv('converterFoto', Object.assign({}, contexto, { foto: { nome: arquivo.name, tipo: 'image/heic', dados: dados } })); }
   catch (e) {
     if (/desconhecida|que nao existe/i.test(String((e && e.message) || e))) return comoVeio;
-    if (canalBarradoDeVez(e)) throw new Error(SEM_CANAL_PARA_ARQUIVO);
+    // Canal barrado: a foto vai crua pela pagina (o agir grava por POST) e o visor converte depois.
+    if (canalBarradoDeVez(e) || (e && e.message === SEM_CANAL_PARA_ARQUIVO)) return vaiComoEsta('este computador não deixa o Google convertê-la agora.');
     if (falhaPassageira(e)) return vaiComoEsta('a conexão com o Google falhou na conversão.');
     throw e;
   }
@@ -5763,7 +5811,10 @@ async function visorMostrar() {
       if (!ehUrlHeic(url) || HEIC_SEM_PREVIA[f.id] !== 'preparando') FOTO_CACHE.set(f.id, url);
       if (FOTO_CACHE.size > 24) FOTO_CACHE.delete(FOTO_CACHE.keys().next().value);
     } catch (e) {
-      if (VISOR === V && V.pedido === pedido) alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+      if (VISOR === V && V.pedido === pedido) {
+        alvo.innerHTML = `<div class="erro-caixa">${esc(canalBloqueado(e) ? explicarErro(e) : (e.message || e))}
+          <button class="botao-texto" onclick="visorMostrar()">Tentar de novo</button></div>`;
+      }
       return;
     }
   }

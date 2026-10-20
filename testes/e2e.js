@@ -1289,7 +1289,72 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
-  await cenario('foto HEIC: a conexao cai na conversao (HTTP 500) — a foto vai como esta, com o aviso em portugues; canal barrado (HTTP 403) — a explicacao de sempre e nenhuma foto', async () => {
+  /*
+   * 20/10 — A ROTA QUE FUNCIONA. Com o canal barrado, a foto ia ser recusada ("Este computador bloqueia...");
+   * agora a gravacao com foto vai pela pagina, o 403 do primeiro clique segue sozinho pela pagina, e a pagina
+   * que so ACHA que o canal e barrado confere com a sonda antes de recusar (a primeira foto do visor).
+   */
+  await cenario('canal barrado: criar acao com foto (JPEG e HEIC crua) grava pela pagina (1 POST) e as fotos ficam na acao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { atraso: 1 });
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await aba.contexto.addCookies([{ name: 'gas_403', value: '1', url: s.url }]);
+    await f.evaluate(() => formAcao(null));
+    await escolherFotos(f, 'ac', [{ name: 'doca.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(JPEG_MINI, 'base64') }]);
+    await escolherFotos(f, 'ac', fotosHeic(1));
+    afirmar(await f.evaluate(() => CANAL_BARRADO && FOTOS_PENDENTES.ac.map((x) => x.tipo).join(',') === 'image/jpeg,image/heic'), 'duas fotos prontas com o canal barrado');
+    await f.fill('#ac-acao', 'Doca 5 com goteira');
+    await f.check('.ac-resp[value="' + DONO + '"]');
+    await f.fill('#ac-prazo', '2026-12-01');
+    const posts = []; aba.page.on('request', (r) => { if (r.method() === 'POST' && /\/exec/.test(r.url())) posts.push(r.postData().length); });
+    await f.click('.janela .botao >> text=Criar ação');
+    const g = await paginaNova(aba, () => paginaAtual === 'acoes' && (planoD().lista || []).some((a) => a.acao === 'Doca 5 com goteira'));
+    const fotos = await g.evaluate(() => planoD().lista.find((a) => a.acao === 'Doca 5 com goteira').fotos.map((x) => x.nome).join(','));
+    afirmar(posts.length === 1 && fotos === 'doca.jpg,IMG_0001.HEIC', 'um POST com as fotos (' + posts.length + '): ' + fotos);
+    const recado = await g.evaluate(() => document.getElementById('recado').textContent);
+    afirmar(!/bloqueia/.test(recado), 'sem a recusa de antes: ' + recado);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('canal: o Google recusa o primeiro clique (HTTP 403) — o comentario segue pela pagina sozinho, sem erro na tela, e grava uma vez so', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const c = s.contexto(DONO); c._porta = true;
+    const id = c.acaoSalvarAcao({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') },
+      { acao: 'Portão 2 travando', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await f.evaluate((i) => abrirComentarios(i, true), id);
+    await f.fill('#cm-texto', 'Peça pedida ao fornecedor');
+    await aba.contexto.addCookies([{ name: 'gas_falha', value: 'executarAcaoETela:403:1', url: s.url }]);
+    await f.click('.janela .botao >> text=Registrar comentário');
+    const g = await paginaNova(aba, (i) => paginaAtual === 'acoes' && (planoD().lista || []).some((a) => a.id === i && a.comentarios.some((x) => x.texto === 'Peça pedida ao fornecedor')), id);
+    const coment = s.contexto(DONO).listar('COMENTARIOS').filter((x) => x.TEXTO === 'Peça pedida ao fornecedor');
+    const recado = await g.evaluate(() => (document.getElementById('recado').classList.contains('erro') ? '[ERRO] ' : '') + document.getElementById('recado').textContent);
+    afirmar(coment.length === 1 && !/ERRO|bloque/.test(recado), 'gravou uma vez pela pagina: ' + coment.length + ' / ' + recado);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('pagina que so acha que o canal e barrado (veio da reserva, o canal voltou): a primeira foto do visor abre — a sonda confere antes de recusar; queda de rede nao vira "o Google bloqueou"', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    miniaturaDrive(s.mundo, { atraso: 1 });
+    const c = s.contexto(DONO); c._porta = true;
+    const id = c.acaoSalvarAcao({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') }, { acao: 'Rampa 1 quebrada', prazo: '2026-12-01', turno: 'A',
+      responsaveisEmails: [DONO], fotos: [{ nome: 'IMG_0400.HEIC', tipo: 'image/heic', dados: HEIC_MINI }, { nome: 'rampa.jpg', tipo: 'image/jpeg', dados: JPEG_MINI }] }).id;
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await f.evaluate(() => lembrarCanalBarrado());              // como a pagina que veio pela reserva
+    const pedidas = acoesPedidas(aba);
+    await f.evaluate((i) => verFotosDaAcao(i), id);
+    await f.waitForFunction(visorComFoto, null, { timeout: 20000 });
+    afirmar(await f.evaluate(() => !CANAL_BARRADO && !document.querySelector('#visor-imagem .erro-caixa')), 'a primeira foto abriu e a marca de barrado saiu');
+    afirmar(pedidas.filter((n) => n === 'fotoAcao').length === 1, 'uma ida so pela foto: ' + pedidas.join(','));
+    const texto = await f.evaluate(() => explicarErro('NetworkError: Connection failure due to HTTP 500'));
+    afirmar(/^A conexão com o Google caiu/.test(texto) && !/bloqueou/.test(texto), 'queda de rede: ' + texto);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('foto HEIC: a conexao cai na conversao (HTTP 500) — a foto vai como esta, com o aviso em portugues; canal barrado (HTTP 403) — tambem vai crua (a gravacao vai pela pagina)', async () => {
     const s = await subir(); instalarComPessoas(s);
     miniaturaDrive(s.mundo, { atraso: 1 });
     const { aba, f } = await planoComHeic(s, DONO, '4321');
@@ -1302,8 +1367,8 @@ async function rodar() {
     await f.evaluate(() => formAcao(null));
     await aba.contexto.addCookies([{ name: 'gas_403', value: '1', url: s.url }]);
     recado = await recadoDe(f, () => escolherFotos(f, 'ac', fotosHeic(1)));
-    afirmar(recado === '[ERRO] ' + await f.evaluate(() => SEM_CANAL_PARA_ARQUIVO), 'HTTP 403: ' + recado);
-    afirmar(await f.evaluate(() => !FOTOS_PENDENTES.ac.length && CANAL_BARRADO), 'canal barrado: nenhuma foto');
+    afirmar(recado === '[ERRO] A foto "IMG_0001.HEIC" vai como está: este computador não deixa o Google convertê-la agora. Ela aparece normalmente quando alguém abrir a ação.', 'HTTP 403: ' + recado);
+    afirmar(await f.evaluate(() => FOTOS_PENDENTES.ac.length === 1 && FOTOS_PENDENTES.ac[0].tipo === 'image/heic' && CANAL_BARRADO), 'canal barrado: a HEIC vai crua');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

@@ -3440,11 +3440,32 @@ function estFormItem(id) {
     ${i ? '' : `<div class="campo"><label>Saldo inicial (opcional)</label><input id="ei-saldo" inputmode="decimal" placeholder="quanto tem hoje — vira uma entrada"></div>`}
     <div class="campo"><label>Observação</label><input id="ei-obs" value="${esc(i ? i.observacao : '')}"></div>
     ${i ? `<label class="marcador"><input type="checkbox" id="ei-ativo" ${i.ativo ? 'checked' : ''}> Item em uso (aparece nas listas)</label>` : ''}`, `
-    ${i ? `<button class="botao perigo" onclick="agir(${estAcao('excluir')},{id:${jsArg(i.id)}},'Removido').catch(()=>{})">Remover</button>` : ''}
+    ${i ? `<button class="botao perigo" onclick="estConfirmarRemover(${jsArg(i.id)})">Remover</button>` : ''}
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="agir(${estAcao('salvar')},{id:${jsArg(i ? i.id : '')},nome:val('ei-nome'),codigo:val('ei-codigo'),categoria:val('ei-cat'),
       unidade:val('ei-un'),marca:val('ei-marca'),modelo:val('ei-modelo'),minimo:val('ei-min'),ideal:val('ei-ideal'),local:val('ei-local'),
       saldoInicial:val('ei-saldo'),observacao:val('ei-obs'),ativo:${i ? "marcado('ei-ativo')" : 'true'}},'Salvo').catch(()=>{})">Salvar</button>`);
+}
+
+/*
+ * REMOVER (20/10) — "quando eu disser que e para excluir, ele tem que excluir". Antes o Remover ia
+ * direto ao servidor e o item com movimentacao so era desativado. Agora a janela diz quantas
+ * movimentacoes vao junto (a contagem vem do servidor: a tela so leva ~90 dias) e a pessoa escolhe:
+ * Excluir (o item e as movimentacoes dele) ou Desativar (tira de uso, o historico fica).
+ * Estoque.gs de antes (colado pela metade): sem a contagem, o texto fala das movimentacoes sem numero.
+ */
+function estConfirmarRemover(id) {
+  const i = (estD().itens || []).find((x) => x.id === id);
+  if (!i) return;
+  const n = typeof i.movimentacoes === 'number' ? i.movimentacoes : -1;
+  const quais = n < 0 ? 'as movimentações dele: saem' : (n === 1 ? 'a única movimentação dele: ela sai' : 'as ' + n + ' movimentações dele: saem');
+  abrirJanela('Excluir “' + i.nome + '”?', !n
+    ? `<p style="margin:0 0 12px;line-height:1.7"><b>${esc(i.nome)}</b> (${esc(i.codigo)}) não tem movimentações. Excluir apaga o item do cadastro.</p>`
+    : `<p style="margin:0 0 12px;line-height:1.7">Excluir apaga o item e ${quais} do saldo, do histórico e dos relatórios.
+        ${i.ativo ? 'Para só tirar o item de uso e manter o histórico, desative o item.' : 'O item já está desativado: deixando assim, o histórico continua guardado.'}</p>`, `
+    <button class="botao secundario" onclick="estFormItem(${jsArg(i.id)})">Voltar</button>
+    ${n && i.ativo ? `<button class="botao secundario" onclick="agir(${estAcao('excluir')},{id:${jsArg(i.id)},desativar:true},'Item desativado').catch(()=>{})">Desativar (manter o histórico)</button>` : ''}
+    <button class="botao perigo" onclick="agir(${estAcao('excluir')},{id:${jsArg(i.id)},excluirMovimentos:true},'Item excluído').catch(()=>{})">${n ? 'Excluir mesmo assim' : 'Excluir'}</button>`);
 }
 
 function estFormLote() {

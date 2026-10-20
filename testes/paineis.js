@@ -611,6 +611,136 @@ caso('estoque: historico com dois movimentos no mesmo segundo nao mostra saldo n
     'ordem ' + lista.movimentos.map((x) => x.tipo).join(',') + ' saldos ' + saldos.join(','));
 });
 
+/*
+ * REMOVER (20/10) — "quando eu disser que e para excluir, ele tem que excluir". Com a confirmacao da
+ * tela (excluirMovimentos) o item e as movimentacoes dele saem de verdade; sem ela (tela antiga), o de sempre.
+ */
+caso('estoque: Remover confirmado apaga o item e as movimentacoes dele (saldo, Movimentacoes, historico); item novo com o mesmo codigo comeca do zero; tela antiga so desativa; Desativar guarda o historico', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  acao(m, s, 'salvarItemEstoque', { nome: 'Mouse USB', saldoInicial: '10' });
+  acao(m, s, 'salvarItemEstoque', { nome: 'Teclado', saldoInicial: '5' });
+  acao(m, s, 'movimentarEstoque', { tipo: 'SAIDA', item: 'TI-0001', quantidade: '3', destino: 'Recebimento' });
+  acao(m, s, 'movimentarEstoque', { tipo: 'ENTRADA', item: 'TI-0001', quantidade: '2' });
+  // inserida direto na planilha com mais de 90 dias: a tela nao a leva, mas a contagem e o Remover contam
+  ctx(m).inserir('EST_MOVIMENTOS', { DATA: '2025-01-10', TIPO: 'ENTRADA', ITEM: 'TI-0001', QUANTIDADE: 1 }, DONO);
+  let d = tela(m, s, 'estoque');
+  const mouse = d.itens.find((i) => i.codigo === 'TI-0001'), teclado = d.itens.find((i) => i.codigo === 'TI-0002');
+  afirmar(mouse.movimentacoes === 4 && teclado.movimentacoes === 1 && mouse.saldo === 10, 'contagem: ' + JSON.stringify([mouse.movimentacoes, teclado.movimentacoes, mouse.saldo]));
+  afirmar(d.movimentos.filter((x) => x.item === 'TI-0001').length === 3, 'a tela so leva 90 dias');
+  // tela de antes desta versao (sem a confirmacao): com movimentacao, desativa
+  let r = acao(m, s, 'excluirItemEstoque', { id: mouse.id });
+  afirmar(r.recado === 'O item tem movimentações, então foi desativado em vez de apagado.', 'tela antiga: ' + r.recado);
+  d = tela(m, s, 'estoque');
+  let x = d.itens.find((i) => i.id === mouse.id);
+  afirmar(x && !x.ativo && x.situacao === 'INATIVO' && x.movimentacoes === 4 && x.saldo === 10, 'desativado, com o historico: ' + JSON.stringify(x));
+  // confirmado na tela: apaga o item e as 4 movimentacoes (uma escrita so nas movimentacoes)
+  const custo = (fn) => { const antes = m.chamadasPlanilha; fn(); return m.chamadasPlanilha - antes; };
+  const custo4 = custo(() => { r = acao(m, s, 'excluirItemEstoque', { id: mouse.id, excluirMovimentos: true }); });
+  afirmar(r.recado === 'Item TI-0001 excluído, com as 4 movimentações dele.', 'recado: ' + r.recado);
+  d = tela(m, s, 'estoque');
+  afirmar(!d.itens.some((i) => i.codigo === 'TI-0001') && !d.movimentos.some((i) => i.item === 'TI-0001') && d.totalMovimentos === 1,
+    'sumiu da tela: ' + JSON.stringify({ itens: d.itens.map((i) => i.codigo), movs: d.movimentos.map((i) => i.item), total: d.totalMovimentos }));
+  const h = acao(m, s, 'historicoItemEstoque', { codigo: 'TI-0001' });
+  afirmar(h.total === 0 && h.saldo === 0 && !h.movimentos.length, 'historico vazio: ' + JSON.stringify(h));
+  const c = ctx(m);
+  const movsMouse = c.listar('EST_MOVIMENTOS', true).filter((x) => x.ITEM === 'TI-0001');
+  afirmar(movsMouse.length === 4 && movsMouse.every((x) => x.EXCLUIDO === 'SIM'), 'no banco: ' + movsMouse.map((x) => x.EXCLUIDO).join());
+  afirmar(c.listar('EST_ITENS', true).find((i) => i.ID === mouse.id).EXCLUIDO === 'SIM', 'o item marcado EXCLUIDO');
+  // 30 movimentacoes custam quase o mesmo que 4 (o log desce de 10 em 10): uma escrita so, nao um excluir() por linha (~9 chamadas cada)
+  acao(m, s, 'salvarItemEstoque', { nome: 'Headset', codigo: 'TI-0009' });
+  c.inserirVarios('EST_MOVIMENTOS', Array.from({ length: 30 }, () => ({ DATA: '2026-09-29', TIPO: 'ENTRADA', ITEM: 'TI-0009', QUANTIDADE: 1 })), DONO);
+  const headset = tela(m, s, 'estoque').itens.find((i) => i.codigo === 'TI-0009');
+  const custo30 = custo(() => { r = acao(m, s, 'excluirItemEstoque', { id: headset.id, excluirMovimentos: true }); });
+  afirmar(r.recado === 'Item TI-0009 excluído, com as 30 movimentações dele.' && custo30 < custo4 + 10, 'em lote: ' + r.recado + ' — chamadas ' + custo4 + ' (4) x ' + custo30 + ' (30)');
+  // o teclado nao foi junto
+  const t = d.itens.find((i) => i.codigo === 'TI-0002');
+  afirmar(t.saldo === 5 && t.movimentacoes === 1, 'teclado intacto: ' + JSON.stringify(t));
+  // item novo com o mesmo codigo: saldo zero, sem herdar nada
+  acao(m, s, 'salvarItemEstoque', { nome: 'Mouse sem fio', codigo: 'TI-0001' });
+  x = tela(m, s, 'estoque').itens.find((i) => i.codigo === 'TI-0001');
+  afirmar(x.saldo === 0 && x.movimentacoes === 0 && x.situacao === 'ZERADO', 'codigo reaproveitado comeca do zero: ' + JSON.stringify(x));
+  afirmar(acao(m, s, 'historicoItemEstoque', { codigo: 'TI-0001' }).total === 0, 'historico do novo vazio');
+  // Desativar (manter o historico)
+  r = acao(m, s, 'excluirItemEstoque', { id: teclado.id, desativar: true });
+  afirmar(r.recado === 'Item TI-0002 desativado. O histórico continua guardado.', 'desativar: ' + r.recado);
+  x = tela(m, s, 'estoque').itens.find((i) => i.id === teclado.id);
+  afirmar(!x.ativo && x.saldo === 5 && x.movimentacoes === 1, 'desativado com o historico: ' + JSON.stringify(x));
+  // inativo com uma movimentacao: Excluir mesmo assim
+  r = acao(m, s, 'excluirItemEstoque', { id: teclado.id, excluirMovimentos: true });
+  afirmar(r.recado === 'Item TI-0002 excluído, com a movimentação dele.', 'singular: ' + r.recado);
+  // sem movimentacao, confirmado
+  const novo = tela(m, s, 'estoque').itens.find((i) => i.codigo === 'TI-0001');
+  r = acao(m, s, 'excluirItemEstoque', { id: novo.id, excluirMovimentos: true });
+  afirmar(r.recado === 'Item TI-0001 excluído.', 'sem movimentacao: ' + r.recado);
+  // sem movimentacao, tela antiga: apaga como sempre
+  acao(m, s, 'salvarItemEstoque', { nome: 'Cabo HDMI' });
+  const cabo = tela(m, s, 'estoque').itens.find((i) => i.nome === 'Cabo HDMI');
+  acao(m, s, 'excluirItemEstoque', { id: cabo.id });
+  d = tela(m, s, 'estoque');
+  afirmar(!d.itens.length && !d.movimentos.length && d.totalMovimentos === 0, 'catalogo vazio: ' + JSON.stringify(d.itens.map((i) => i.codigo)));
+  afirmar(/Item não encontrado/.test(erroDe(() => acao(m, s, 'excluirItemEstoque', { id: mouse.id, excluirMovimentos: true }))), 'excluir de novo: item nao encontrado');
+});
+
+caso('limpeza: Remover confirmado apaga o produto e as movimentacoes; o proximo codigo automatico (o mesmo LP-0002) nasce com saldo zero; o estoque de TI nao e tocado; tela antiga so desativa', () => {
+  const m = mundo(); const g = entrar(m, GERENTE, '5555'); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarItemEstoque', { nome: 'Mouse USB', saldoInicial: '4' });
+  acao(m, g, 'salvarItemLimpeza', { nome: 'Papel toalha', unidade: 'fardo', saldoInicial: '3' });
+  acao(m, g, 'salvarItemLimpeza', { nome: 'Detergente neutro 5L', unidade: 'galão', saldoInicial: '6' });
+  acao(m, g, 'movimentarLimpeza', { tipo: 'SAIDA', item: 'LP-0002', quantidade: '2', destino: 'Z7' });
+  let d = tela(m, g, 'limpeza').estoque;
+  const det = d.itens.find((i) => i.codigo === 'LP-0002');
+  afirmar(det.movimentacoes === 2 && det.saldo === 4, 'contagem: ' + JSON.stringify(det));
+  let r = acao(m, g, 'excluirItemLimpeza', { id: det.id });
+  afirmar(/foi desativado em vez de apagado/.test(r.recado) && !tela(m, g, 'limpeza').estoque.itens.find((i) => i.id === det.id).ativo, 'tela antiga: ' + r.recado);
+  r = acao(m, g, 'excluirItemLimpeza', { id: det.id, excluirMovimentos: true });
+  afirmar(r.recado === 'Item LP-0002 excluído, com as 2 movimentações dele.', 'recado: ' + r.recado);
+  d = tela(m, g, 'limpeza').estoque;
+  afirmar(d.itens.map((i) => i.codigo).join() === 'LP-0001' && d.movimentos.every((x) => x.item === 'LP-0001') && d.totalMovimentos === 1, 'so o papel: ' + JSON.stringify(d.itens.map((i) => i.codigo)));
+  afirmar(d.listas.destinos.indexOf('Z7') === -1, 'o destino da saida apagada saiu da lista: ' + d.listas.destinos.join());
+  // o codigo automatico volta a ser LP-0002: sem herdar o saldo do detergente apagado
+  const novo = acao(m, g, 'salvarItemLimpeza', { nome: 'Desinfetante 5L', unidade: 'galão' });
+  afirmar(novo.codigo === 'LP-0002', 'codigo: ' + novo.codigo);
+  const x = tela(m, g, 'limpeza').estoque.itens.find((i) => i.codigo === 'LP-0002');
+  afirmar(x.saldo === 0 && x.movimentacoes === 0 && x.nome === 'Desinfetante 5L' && x.situacao === 'ZERADO', 'LP-0002 novo do zero: ' + JSON.stringify(x));
+  afirmar(acao(m, g, 'historicoItemLimpeza', { codigo: 'LP-0002' }).total === 0, 'historico do novo vazio');
+  // Desativar (manter o historico) na limpeza
+  const papel = tela(m, g, 'limpeza').estoque.itens.find((i) => i.codigo === 'LP-0001');
+  r = acao(m, g, 'excluirItemLimpeza', { id: papel.id, desativar: true });
+  afirmar(r.recado === 'Item LP-0001 desativado. O histórico continua guardado.', 'desativar: ' + r.recado);
+  const p2 = tela(m, g, 'limpeza').estoque.itens.find((i) => i.codigo === 'LP-0001');
+  afirmar(!p2.ativo && p2.saldo === 3 && p2.movimentacoes === 1, 'papel desativado com o historico: ' + JSON.stringify(p2));
+  // o estoque de TI ficou como estava
+  const ti = tela(m, adm, 'estoque');
+  afirmar(ti.itens.length === 1 && ti.itens[0].codigo === 'TI-0001' && ti.itens[0].saldo === 4 && ti.totalMovimentos === 1, 'TI intacto: ' + JSON.stringify(ti.itens));
+});
+
+caso('estoque: so quem cadastra (GERIR_ESTOQUE / GERIR_LIMPEZA) remove — quem so movimenta, quem so ve e o modulo em "Ver" sao recusados e nada muda', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321');
+  acao(m, adm, 'salvarItemEstoque', { nome: 'Toner HP 85A', saldoInicial: '3' });
+  acao(m, adm, 'salvarItemLimpeza', { nome: 'Saco de lixo 100L', saldoInicial: '2' });
+  const toner = tela(m, adm, 'estoque').itens[0], saco = tela(m, adm, 'limpeza').estoque.itens[0];
+  // o gerente ve o Estoque de TI sem GERIR_ESTOQUE; com MOVIMENTAR_ESTOQUE ele movimenta, mas nao remove
+  const linha = ctx(m).listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
+  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'PODE_MOVIMENTAR_ESTOQUE', valor: true });
+  const g = entrar(m, GERENTE, '5555');
+  const dg = tela(m, g, 'estoque');
+  afirmar(dg.permissoes.movimentar && !dg.permissoes.cadastrar, 'gerente so movimenta: ' + JSON.stringify(dg.permissoes));
+  acao(m, g, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', destino: 'Loja 3' });
+  [{ id: toner.id, excluirMovimentos: true }, { id: toner.id, desativar: true }, { id: toner.id }].forEach((p) => {
+    afirmar(erroDe(() => acao(m, g, 'excluirItemEstoque', p)), 'gerente recusado: ' + JSON.stringify(p));
+  });
+  // a coordenadora com a Limpeza em "Ver"
+  const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'limpeza', modo: 'VER' });
+  const maria = entrar(m, COORD, '1234');
+  afirmar(erroDe(() => acao(m, maria, 'excluirItemLimpeza', { id: saco.id, excluirMovimentos: true })), 'coordenadora em Ver recusada');
+  afirmar(erroDe(() => acao(m, maria, 'excluirItemEstoque', { id: toner.id, excluirMovimentos: true })), 'coordenadora sem o Estoque de TI recusada');
+  // o gerente tem GERIR_LIMPEZA, mas a porta do TI nao apaga produto da limpeza (e vice-versa)
+  afirmar(/Item não encontrado/.test(erroDe(() => acao(m, g, 'excluirItemLimpeza', { id: toner.id, excluirMovimentos: true }))), 'id do TI pela porta da limpeza');
+  const t = tela(m, adm, 'estoque').itens[0], sc = tela(m, adm, 'limpeza').estoque.itens[0];
+  afirmar(t.ativo && t.saldo === 2 && t.movimentacoes === 2 && sc.ativo && sc.saldo === 2 && sc.movimentacoes === 1, 'nada mudou: ' + JSON.stringify([t, sc]));
+});
+
 /* ------------------------------------------------------------------ */
 /* FILIAIS                                                             */
 /* ------------------------------------------------------------------ */

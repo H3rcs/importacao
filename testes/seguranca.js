@@ -87,6 +87,8 @@ const bloqueadas = [
   ['acaoSalvarRotina', FALSO, { tipo: 'RON', atividade: 'x', frequencia: 'SEMANAL', dia: '3', ativo: true }],
   ['acaoAlternarRotina', FALSO, { id: 'x', ativo: false }], ['acaoExcluirRotina', FALSO, { id: 'x' }],
   ['acaoLimparSiglaOrfa', FALSO, { sigla: 'RON' }],
+  // 20/10: Remover do estoque apaga o item E as movimentacoes dele
+  ['acaoExcluirItemEstoque', FALSO, { id: 'x', excluirMovimentos: true }], ['acaoExcluirItemLimpeza', FALSO, { id: 'x', excluirMovimentos: true }],
   ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
 ];
 const emailsAntesDosAtaques = m.emails.length;

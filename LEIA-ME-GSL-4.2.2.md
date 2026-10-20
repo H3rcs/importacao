@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -35,6 +35,33 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Pedido de 20/10 (Google bloqueando a conexão, excluir item do estoque, primeira foto HEIC)
+
+**"O Google bloqueou a conversa": as fotos e as gravações vão pela rota que funciona**
+
+Em alguns computadores (várias contas Google no mesmo navegador, cookies barrados), o Google recusa a conversa direta com o sistema. O GSL já tinha a rota de reserva: grava recarregando a página. Mas essa rota deixava as fotos de fora, e era aí que o erro aparecia toda hora. Agora:
+- **Ação, comentário e conclusão com foto** vão pela rota de reserva junto com as fotos. A página recarrega e a ação aparece com as fotos. A foto HEIC vai como veio e o visor converte depois.
+- **O Google recusou o clique** (erro 403 ou "PERMISSION_DENIED"): nesse caso nada foi gravado, então o mesmo clique segue sozinho pela rota de reserva. Não aparece mais o erro pedindo para clicar de novo. Se o navegador exigir, aparece o botão **Continuar**.
+- **A página que veio pela reserva** começava achando que o Google estava bloqueado e recusava foto e arquivo sem tentar. Por isso a primeira foto do visor dava erro e, passando para a próxima e voltando, abria. Agora o sistema confere antes e só recusa se o bloqueio for real.
+- Uma **queda passageira da rede** (servidor ocupado, internet oscilando) não aparece mais como "o Google bloqueou". A mensagem diz que a conexão caiu e pede para conferir se a gravação foi feita. O visor de fotos ganhou o botão **Tentar de novo**.
+- Continua precisando da conversa direta (quando o bloqueio é real): abrir uma foto no visor e anexar arquivo na entrega de atividade. Nesses casos, o melhor é usar uma janela do Chrome só com a conta @bartofil.com.br.
+
+**Estoque (TI e Limpeza): Excluir exclui**
+- **Remover** no cadastro do item agora abre uma confirmação, que diz quantas movimentações o item tem.
+- **Excluir mesmo assim** apaga o item e todas as movimentações dele: saem do saldo, do histórico e dos relatórios. Um item novo com o mesmo código começa do zero. Na planilha, as linhas ficam marcadas como excluídas (EXCLUIDO = SIM), como em todo o GSL.
+- **Desativar (manter o histórico)** tira o item de uso e guarda o histórico, como antes.
+- Item sem movimentação: **Excluir** apaga direto.
+
+**Arquivos desta entrega** (carimbo `2026.10.20`; enviados no `GSL-20-10.zip`). São só os 4 que mudaram desde o pacote de 19/10:
+- `App.html`, `Paineis.html`, `Estoque.gs` e `Codigo.gs` (no `Codigo.gs` mudou só o carimbo).
+
+Como publicar: cole os 4 por cima, crie uma **Nova versão** da implantação e recarregue a página (F5). Se você ainda não colou o pacote de 19/10, cole primeiro os 15 dele (`GSL-19-10.zip`) e depois estes 4.
+
+**Para conferir:**
+1. Num computador em que o Google bloqueia a conversa, crie uma ação com foto. A página recarrega e a ação aparece com a foto.
+2. Abra uma ação com fotos HEIC: a primeira foto abre direto.
+3. No Estoque de TI, abra um item com movimentações, clique em **Remover** e depois em **Excluir mesmo assim**. O item some das listas.
 
 ## Pedido de 19/10 (rotinas do calendário, comentários e fotos HEIC nas ações, painel desativado)
 

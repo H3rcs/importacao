@@ -16,7 +16,7 @@
  *   AJUSTE     correcao de inventario (guarda a diferenca)     (+/-)
  */
 
-const BUILD_ESTOQUE = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_ESTOQUE = '2026.10.20';   // carimbo da entrega — ver APP.build no Codigo.gs
 const EST_TIPOS = ['ENTRADA', 'SAIDA', 'DEVOLUCAO', 'BAIXA', 'AJUSTE'];
 const EST_SINAL = { ENTRADA: 1, DEVOLUCAO: 1, SAIDA: -1, BAIXA: -1, AJUSTE: 1 };
 const EST_NOMES_TIPO = { ENTRADA: 'Entrada', SAIDA: 'Saída', DEVOLUCAO: 'Devolução', BAIXA: 'Baixa', AJUSTE: 'Ajuste de inventário' };

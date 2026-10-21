@@ -3635,7 +3635,8 @@ async function rodar() {
     afirmar(/3 desligados continuam ATIVOS na GERAL/.test(faixa) && /Sem eles, o CD teria 164 pessoas/.test(faixa) && faixa.includes(nomeDoCod(E.desligadoAtivo[0])) &&
       /\+ 8 pontos de atenção na planilha/.test(faixa), 'faixa: ' + faixa);
     const abasTela = await f.evaluate(() => Array.from(document.querySelectorAll('#qd-abas .aba')).map((b) => b.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(abasTela.join('|') === 'Visão geral|Quadro por turno|Movimentação|Férias ■ 6|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
+    // Ferias (21/10): o numero da aba conta quem esta no vermelho ou no laranja (sem programacao: 2 vermelhos e 1 laranja)
+    afirmar(abasTela.join('|') === 'Visão geral|Quadro por turno|Movimentação|Férias ■ 3|Conferência ■ 3', 'abas: ' + abasTela.join('|'));
     // cartoes: o CD e as quatro equipes, com o numero de cada uma
     const cartoes = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-cartao')).map((c) => c.innerText.replace(/\s+/g, ' ')));
     afirmar(cartoes.length === 5 && /167 pessoas no quadro/.test(cartoes[0]) && /inclui 3 desligados ainda ativos/.test(cartoes[0]) &&
@@ -3659,7 +3660,7 @@ async function rodar() {
     }, nomeDoCod('30001'));
     afirmar(casa[0] === '' && casa[1] === '' && casa[2] === '30001' && casa[3] === null && casa[4] === null && casa[5] === 1, 'casamento na tela: ' + JSON.stringify(casa));
     const resumo = await f.evaluate(() => qdResumoTexto());
-    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL\nFérias: 6 precisam sair de férias, 11 para avisar, 2 sem dados de férias$/.test(resumo),
+    afirmar(/^Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\n167 pessoas no quadro: 1° TURNO 60 · 2° TURNO 53 · 3° TURNO 39 · ADM 14 · sem turno 1\n158 disponíveis · 6 de férias · 3 afastados\nÚltimos 90 dias: 15 saídas e 11 entradas\nAtenção: 3 desligados ainda ATIVOS na GERAL\nFérias: \d+ para programar, 0 programadas, 3 pedem atenção agora, 3 sem dados de férias$/.test(resumo),
       'copiar resumo: ' + resumo);
     // mapa de calor: SEPARADOR x 1° TURNO = 18; tocar leva para a lista dessas 18 pessoas
     const celula = await f.evaluate(() => {
@@ -3708,241 +3709,23 @@ async function rodar() {
     const kpis = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-kpi')).map((k) => k.innerText.replace(/\s+/g, ' ')));
     afirmar(kpis.length === 3 && /SAÍDAS 24 sem histórico anterior para comparar 12 voluntárias · 12 involuntárias/.test(kpis[0]) && /ENTRADAS 12/.test(kpis[1]) &&
       /2,4% ao mês/.test(kpis[2]) && !(await f.$('#qd-conteudo .erro-caixa')), 'movimentacao: ' + kpis.join(' || '));
-    // FÉRIAS (14/10, refeita): um cartao so — a lista do que fazer (Precisam sair de ferias, Avisar, Programar fechado), o
-    // calendario a um toque e o rodape; a ficha, o texto copiado, o Excel e os parametros. Nenhuma palavra de multa em lugar nenhum.
+    // FÉRIAS (21/10): a aba abre com a busca e os grupos; cada pessoa conta num lugar so. Cada caso da situacao, a busca,
+    // a janela Programar, o calendario, o Excel e a gravacao pela pagina estao nos cenarios "ferias (21/10)" (relogio parado).
     const PROIBIDAS = /multa|dobro|risco|penalidade|infra[çc][ãa]o|puni[çc][ãa]o/i;
     await f.evaluate(() => { try { localStorage.removeItem('gsl_ferias_vista'); } catch (e) {} QD.feVista = ''; qdAba('ferias'); });
     await f.waitForSelector('.qd-fe .qd-fe-grupo', { timeout: 5000 });
     const fe = await f.evaluate(() => ({
       aba: document.querySelector('#qd-abas .aba[data-aba="ferias"]').innerText.replace(/\s+/g, ' ').trim(),
-      sub: document.querySelector('.qd-fe-sub').innerText.trim(),
+      tit: document.querySelector('#qd-fe-tit').innerText.trim(), busca: document.querySelector('#qd-fe-busca').placeholder,
       vista: document.querySelector('.qd-fe-vista .qd-pill[aria-pressed="true"]').innerText.trim(),
       grupos: Array.from(document.querySelectorAll('.qd-fe-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()),
-      itens: Array.from(document.querySelectorAll('.qd-fe-grupo')).map((g) => g.querySelectorAll('.qd-fe-item').length),
-      folhas: document.querySelectorAll('.qd-fe-grupo .qd-fe-folha').length,
-      prim: document.querySelector('.qd-fe-grupo.sair .qd-fe-item').getAttribute('aria-label'),
-      primQuando: document.querySelector('.qd-fe-grupo.sair .qd-fe-quando').innerText.replace(/\s+/g, ' ').trim(),
-      sairDias: Array.from(document.querySelectorAll('.qd-fe-grupo.sair .qd-fe-item')).map((b) => qdFeriasDados().porRef[Number(/qdFicha\((\d+)\)/.exec(b.getAttribute('onclick'))[1])].pior.dias),
-      avisar: document.querySelector('.qd-fe-grupo.avisar .qd-fe-quando').innerText.replace(/\s+/g, ' ').trim(),
-      rodape: document.querySelector('.qd-fe-rodape').innerText.replace(/\s+/g, ' ').trim(),
-      html: document.querySelector('.qd-fe').innerHTML }));
-    afirmar(fe.aba === 'Férias' && fe.sub === 'O aviso de férias é dado 30 dias antes da saída.' && fe.vista === 'Lista',
-      'cabecalho da aba Ferias (sem o contador com a aba aberta; Lista na primeira vez): ' + JSON.stringify([fe.aba, fe.sub, fe.vista]));
-    afirmar(fe.grupos.join('|') === 'Precisam sair de férias 6|Avisar 11|Programar 10' && fe.itens.join() === '6,11,0' && fe.folhas === 17,
-      'grupos (Programar fechado): ' + fe.grupos.join('|') + ' / ' + fe.itens.join() + ' / folhas ' + fe.folhas);
-    afirmar(/: prazo vencido em \d\d\/\d\d\/\d{4} \(há \d+ dias\)\. (.+ )?Abrir a ficha\.$/.test(fe.prim) && /^Prazo vencido há \d+ dias$/.test(fe.primQuando) &&
-      fe.sairDias.every((d, i) => !i || fe.sairDias[i - 1] <= d), 'o prazo vencido ha mais tempo primeiro: ' + fe.prim + ' / ' + fe.primQuando + ' / ' + fe.sairDias.join());
-    afirmar(/^Avisar até (hoje|amanhã|em \d+ dias) sair até \d\d\/\d\d [a-zá]{3}$/.test(fe.avisar), 'linha de Avisar: ' + fe.avisar);
-    afirmar(/^\d+ em dia 2 sem dados de férias · ver na Conferência Baixar Excel Parâmetros Marcou férias no sistema\? Cole a extração nova na aba FÉRIAS e use Atualizar dados\.$/.test(fe.rodape),
+      rodape: document.querySelector('.qd-fe-rodape').innerText.replace(/\s+/g, ' ').trim(), html: document.querySelector('.qd-fe').innerHTML,
+      soma: (() => { const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(); return [c.programar.length, c.programadas.length, c.emdia.length, d.n, qdRecorte(qdNaEmpresa()).length]; })() }));
+    afirmar(fe.aba === 'Férias' && fe.tit === 'Programação de férias' && fe.busca === 'Buscar pelo nome' && fe.vista === 'Lista' && /^Programar \d+$/.test(fe.grupos[0]) && fe.grupos.length === 1,
+      'aba Ferias (sem o contador com a aba aberta; Lista na primeira vez; sem programacao, so o Programar): ' + JSON.stringify([fe.aba, fe.tit, fe.vista, fe.grupos]));
+    afirmar(/^\d+ em dia 3 sem dados de férias · ver na Conferência Baixar Excel Parâmetros crítico urgente atenção no prazo resolvido nada a fazer Marcou férias no sistema\? Cole a extração nova na aba FÉRIAS e use Atualizar dados\.$/.test(fe.rodape),
       'rodape: ' + fe.rodape);
-    afirmar(!PROIBIDAS.test(fe.html), 'lista das ferias sem palavra de multa');
-    const naTela = fe.grupos.map((g) => Number(g.replace(/\D+/g, ''))).concat((/^(\d+) em dia (\d+) sem dados/.exec(fe.rodape) || []).slice(1).map(Number));
-    const doQuadro = await f.evaluate(() => qdRecorte(qdNaEmpresa()).length);
-    afirmar(naTela.length === 5 && naTela.reduce((a, b) => a + b, 0) === doQuadro, 'os numeros da tela somam o quadro (cada pessoa num lugar so): ' + naTela.join('+') + ' x ' + doQuadro);
-    // Programar abre com um toque; quem esta sem dados abre no rodape
-    await f.click('.qd-fe-grupo.prog .qd-fe-grupo-bt');
-    await f.waitForFunction(() => document.querySelectorAll('.qd-fe-grupo.prog .qd-fe-item').length === 10, null, { timeout: 5000 });
-    afirmar(await f.evaluate(() => { const b = document.querySelector('.qd-fe-grupo.prog .qd-fe-grupo-bt'); return b.getAttribute('aria-expanded') === 'true' && b.innerText.trim() === 'Esconder'; }), 'Programar aberto');
-    await f.click('.qd-fe-rodape button[aria-expanded]');
-    const semDados = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-semdados li')).map((l) => l.innerText.replace(/\s+/g, ' ').trim()));
-    afirmar(semDados.length === 2 && semDados.every((t) => / · sem linha na aba FÉRIAS$/.test(t)), 'quem esta sem dados: ' + semDados.join(' | '));
-    // o calendario: cada pessoa uma vez, no dia de agir; o prazo vencido numa faixa em cima; a escolha fica guardada
-    await f.click('.qd-fe-vista .qd-pill:has-text("Calendário")');
-    await f.waitForSelector('.qd-fe-mes', { timeout: 5000 });
-    const mesHoje = await f.evaluate(() => ({ guardada: localStorage.getItem('gsl_ferias_vista'), hoje: !!document.querySelector('.qd-fe-mes td[aria-current="date"]'),
-      botaoHoje: !!document.querySelector('.qd-fe-hoje-bt') }));
-    afirmar(mesHoje.guardada === 'calendario' && mesHoje.hoje && !mesHoje.botaoHoje, 'o calendario abre no mes de hoje, sem o botao Hoje: ' + JSON.stringify(mesHoje));
-    // nos ultimos dias do mes, as datas de agir podem estar todas no mes seguinte: anda ate um mes com gente
-    await f.evaluate(() => { for (let i = 0; i < 3 && !document.querySelector('.qd-fe-mes .qd-fe-pil'); i++) qdFeMesRel(1); });
-    const cal = await f.evaluate(() => ({ tit: document.querySelector('#qd-fe-mes-tit').innerText.trim(),
-      rot: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => { const t = b.getAttribute('title'); return t.slice(t.indexOf(' — ') + 3); }),
-      nomes: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).map((b) => [b.getAttribute('aria-label'), b.innerText.trim(), b.getAttribute('title')]),
-      dias: Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-dia-bt')).map((b) => b.getAttribute('data-dia')),
-      venc: (document.querySelector('.qd-fe-vencidos') || { innerText: '' }).innerText.replace(/\s+/g, ' ').trim(),
-      leg: document.querySelector('.qd-fe-legenda').innerText.replace(/\s+/g, ' ').trim(), html: document.querySelector('.qd-fe').innerHTML }));
-    afirmar(cal.rot.length > 0 && cal.rot.every((r) => /^(Sair|Avisar) até \d\d\/\d\d\/\d{4}: .+\.$/.test(r)) && new Set(cal.rot.map((r) => r.split(': ')[1])).size === cal.rot.length &&
-      cal.nomes.every(([rot, nome, dica]) => rot.indexOf(nome + ' — ') === 0 && rot === dica), 'calendario (uma pilula por pessoa; o nome que aparece comeca o nome acessivel, igual a dica): ' + JSON.stringify(cal).slice(0, 700));
-    afirmar(/^Prazo vencido /.test(cal.venc) && (cal.venc.match(/\(\d\d\/\d\d\)/g) || []).length === 2, 'faixa do prazo vencido: ' + cal.venc);
-    afirmar(cal.leg === 'sair até avisar até programar em dia · toque no nome para abrir a ficha' && !PROIBIDAS.test(cal.html), 'legenda: ' + cal.leg);
-    // o dia com gente abre a lista dele embaixo da grade (no celular e o toque no dia; no computador, o "+N no dia")
-    const doDia = await f.evaluate((iso) => {
-      const td = document.querySelector('.qd-fe-mes .qd-fe-dia-bt[data-dia="' + iso + '"]').closest('td');
-      const n = td.querySelectorAll('.qd-fe-pil').length + Number(((td.querySelector('.qd-fe-mais') || {}).innerText || '').replace(/\D+/g, '') || 0);
-      qdFeDia(iso);
-      const l = document.querySelector('#qd-fe-dia-lista');
-      return { n, tit: l.querySelector('h4').innerText.replace(/\s+/g, ' ').trim(), itens: l.querySelectorAll('.qd-fe-item').length, escolhido: td.isConnected ? '' : !!document.querySelector('.qd-fe-mes td.escolhido') };
-    }, cal.dias[0]);
-    afirmar(doDia.itens === doDia.n && doDia.n > 0 && doDia.escolhido === true && /^[A-ZÁÉÍÓÚ][a-zçáéíóúâêô-]+, \d\d\/\d\d( \(hoje\))? fechar$/.test(doDia.tit), 'lista do dia: ' + JSON.stringify(doDia));
-    await f.evaluate(() => qdFeFecharDia());
-    afirmar(await f.evaluate(() => !document.querySelector('#qd-fe-dia-lista')), 'fecha a lista do dia');
-    await f.click('.qd-fe-seta.prox');
-    await f.waitForSelector('.qd-fe-hoje-bt', { timeout: 5000 });
-    await f.click('.qd-fe-hoje-bt');
-    await f.waitForFunction(() => !document.querySelector('.qd-fe-hoje-bt') && QD.feMes === qdHoje().slice(0, 7), null, { timeout: 5000 });
-    afirmar(await f.evaluate(() => { QD.feVista = ''; qdDesenhar(); return QD.feVista === 'calendario' && !!document.querySelector('.qd-fe-mes'); }), 'a escolha Lista/Calendario fica neste navegador');
-    await f.click('.qd-fe-vista .qd-pill:has-text("Lista")');
-    await f.waitForSelector('.qd-fe-grupo', { timeout: 5000 });
-    // a ficha de quem esta com o prazo vencido
-    await f.evaluate(() => document.querySelector('.qd-fe-grupo.sair .qd-fe-item').click());
-    await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha', { timeout: 5000 });
-    const fichaFe = await f.evaluate(() => ({ txt: document.querySelector('.qd-ficha').textContent.replace(/\s+/g, ' '), html: document.querySelector('.qd-ficha').innerHTML }));
-    afirmar(/Férias · \d períodos? em aberto/.test(fichaFe.txt) && /Prazo vencido/.test(fichaFe.txt) && /Sair até \(data limite\)/.test(fichaFe.txt) && /venceu há \d+ dias/.test(fichaFe.txt) &&
-      !PROIBIDAS.test(fichaFe.html), 'ficha do prazo vencido: ' + fichaFe.txt.slice(0, 500));
-    await f.evaluate(() => fecharJanela());
-    // o texto copiado, o Excel e o cartao da Visao geral
-    const resumoFe = await f.evaluate(() => qdFeResumoTexto());
-    afirmar(/^Férias — Quadro do CD — CD Feira de Santana — \d\d\/\d\d\/\d{4}\nPRECISAM SAIR DE FÉRIAS \(6\)\n- .+ \(.+\) — prazo vencido em \d\d\/\d\d [a-zá]{3}\n/.test(resumoFe) &&
-      /\nAVISAR \(11\)\n- .+ — avisar até \d\d\/\d\d [a-zá]{3} \(sair até \d\d\/\d\d\)\n/.test(resumoFe) && /\nSEM DADOS DE FÉRIAS \(2\)\n/.test(resumoFe) && !PROIBIDAS.test(resumoFe),
-      'copiar resumo na aba Ferias: ' + resumoFe);
-    const xls = await f.evaluate(() => { const o = pnBaixarXlsx; let cap = null; pnBaixarXlsx = (nome, abas) => { cap = { nome, abas }; }; try { qdFeBaixar(); } finally { pnBaixarXlsx = o; } return cap; });
-    const xlsCab = xls.abas[0].linhas[0].join('|'), xlsSit = Array.from(new Set(xls.abas[0].linhas.slice(1).map((l) => l[0])));
-    afirmar(xlsCab === 'SITUAÇÃO|NOME|EQUIPE|FUNÇÃO|MATRÍCULA (FÉRIAS)|RH (GERAL)|INÍCIO DO PERÍODO|FIM DO PERÍODO|PODE TIRAR DESDE|AVISAR ATÉ|SAIR ATÉ (DATA LIMITE)|DIAS ATÉ A DATA LIMITE|STATUS NA GERAL' &&
-      xlsSit.slice(0, 4).join() === 'PRAZO VENCIDO,URGENTE,AVISAR,PROGRAMAR' && xlsSit.every((x) => /^(PRAZO VENCIDO|URGENTE|AVISAR|PROGRAMAR|EM DIA|SEM DATA LIMITE)$/.test(x)) &&
-      !PROIBIDAS.test(JSON.stringify(xls)), 'Excel das ferias: ' + xlsCab + ' / ' + xlsSit.join());
-    const cartaoFe = await f.evaluate(() => qdFeCartaoGeral().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-    afirmar(/^Férias Ver férias → Prazos pela aba FÉRIAS\. 6 precisam sair de férias 11 para avisar Próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} \(sair até \d\d\/\d\d\)\. 2 sem dados de férias \( ver na Conferência \)$/.test(cartaoFe) &&
-      !PROIBIDAS.test(cartaoFe), 'cartao da visao geral: ' + cartaoFe);
-    // parametros: sem o escalonar e sem multa; o aviso passa a 45 dias e o "Avisar" a 75 — os grupos recalculam; depois volta ao padrao
-    await f.click('.qd-fe-rod-acoes button:has-text("Parâmetros")');
-    await f.waitForSelector('#fp-aviso', { timeout: 5000 });
-    const modal = await f.evaluate(() => ({ txt: document.querySelector('#janela').textContent.replace(/\s+/g, ' '), campos: Array.from(document.querySelectorAll('#janela input')).map((i) => i.id).join() }));
-    afirmar(modal.campos === 'fp-cc,fp-digitos,fp-aviso,fp-avisar,fp-planejar' && /“Programar”: data limite em até quantos dias/.test(modal.txt) && /data limite para sair \(DTA_LIMITEMAX\)/.test(modal.txt) &&
-      !/scalonar/.test(modal.txt) && !PROIBIDAS.test(modal.txt), 'parametros: ' + JSON.stringify(modal));
-    await f.fill('#fp-aviso', '45'); await f.fill('#fp-avisar', '75');
-    await f.click('#janela-rodape button:has-text("Salvar")');
-    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 45 && document.querySelector('.qd-fe-sub'), null, { timeout: 15000 });
-    const fe45 = await f.evaluate(() => ({ sub: document.querySelector('.qd-fe-sub').innerText.trim(), grupos: Array.from(document.querySelectorAll('.qd-fe-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()) }));
-    afirmar(fe45.sub === 'O aviso de férias é dado 45 dias antes da saída.' && /^Precisam sair de férias \d+$/.test(fe45.grupos[0]) && Number(fe45.grupos[0].replace(/\D+/g, '')) > 6,
-      'parametros mudam os grupos: ' + JSON.stringify(fe45));
-    await f.click('.qd-fe-rod-acoes button:has-text("Parâmetros")');
-    await f.waitForSelector('#fp-aviso', { timeout: 5000 });
-    await f.click('#janela-rodape button:has-text("Voltar ao padrão")');
-    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 30, null, { timeout: 15000 });
-    // FÉRIAS sem dados (revisao de 14/10): aba vazia, sem a coluna da data limite, periodo sem data — nada disso vira "ninguem para avisar"
-    const semPrazo = await f.evaluate(() => {
-      const orig = DADOS, r = {};
-      const txt = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      const com = (ferias, leitura) => Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, ferias), leitura: Object.assign({}, orig.leitura, { ferias: Object.assign({}, orig.leitura.ferias, leitura) }) });
-      const tela = () => ({ aba: txt(qdFerias()), card: txt(qdFeCartaoGeral()), linha: qdFeResumoLinha(), resumo: qdFeResumoTexto() });
-      try {
-        DADOS = com({ linhas: [] }, { linhas: 0 }); r.vazia = tela();
-        r.vazia.conf = qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join(); r.vazia.selo = qdSeloAba();
-        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { limiteMax: '' })) }, { faltam: ['limiteMax'] }); r.semColuna = tela();
-        // sem a coluna pa_fim: a ficha usa o DTA_LIMITE (como a situacao); colada sem o cabecalho: um aviso so, sem efeitos que se contradizem
-        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { paFim: '' })) }, { faltam: ['paFim'] });
-        const refFicha = qdFeriasDados().lista.find((p) => p.pior.k === 'avisar').g.ref;
-        r.semPaFim = { ficha: txt(qdFeFichaSecao(refFicha)), conf: qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join(), aba: txt(qdFerias()) };
-        DADOS = com({ linhas: [] }, { linhas: 0, faltam: ['matricula', 'nome', 'paFim', 'limiteMax'] });
-        r.semCabecalho = qdMemo().inc.filter((x) => x.tipo === 'FERIAS_ABA').map((x) => x.detalhe).join();
-        // ninguem para avisar nem para sair: a linha diz o proximo aviso (e "entre quem tem prazo", porque ha gente sem dados)
-        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { limiteMax: qdSomarDias(qdHoje(), 80) })) }, {});
-        r.ninguem = { aba: txt(qdFerias()), card: txt(qdFeCartaoGeral()), resumo: qdFeResumoTexto() };
-        // quem tem prazo ganha um periodo antigo sem DTA_LIMITEMAX: fica no grupo do prazo, com a etiqueta, e nao conta em "sem dados"
-        DADOS = orig;
-        const p1 = qdFeriasDados().lista.find((p) => p.pior.k === 'planejar');
-        const extra = Object.assign({}, p1.periodos[0].f, { linha: 999, limiteMax: '', limite: '', paFim: qdSomarDias(qdHoje(), -500), paInicio: qdSomarDias(qdHoje(), -864) });
-        DADOS = com({ linhas: orig.ferias.linhas.concat([extra]) }, {});
-        const p2 = qdFeriasDados().porRef[p1.g.ref];
-        r.semData = { pior: p2.pior.k, ks: p2.periodos.map((x) => x.k).join(), item: txt(qdFeItem(p2)), linha: qdFeResumoLinha() };
-        // sem prazo perto, o periodo sem data passa na frente do "em dia": a pessoa conta em "sem dados"
-        DADOS = orig;
-        const p3 = qdFeriasDados().lista.find((p) => p.pior.k === 'liberada' || p.pior.k === 'aquisicao');
-        DADOS = com({ linhas: orig.ferias.linhas.concat([Object.assign({}, p3.periodos[0].f, { linha: 998, limiteMax: '', limite: '', paFim: qdSomarDias(qdHoje(), -500) })]) }, {});
-        r.semData.p3 = qdFeriasDados().porRef[p3.g.ref].pior.k;
-        r.semData.linha3 = qdFeResumoLinha();
-        QD.feSemDados = true;
-        r.semData.lista = Array.from(new DOMParser().parseFromString(qdFerias(), 'text/html').querySelectorAll('.qd-fe-semdados li')).map((l) => l.textContent.replace(/\s+/g, ' ').trim());
-      } finally { DADOS = orig; QD.feSemDados = false; }
-      // a linha sem PROD (RH 109002) entra no texto copiado com o COD e o RH, nao com o nome vazio
-      r.resumoSemNome = qdFeResumoTexto().split('\n').filter((l) => /RH 109002/.test(l) || /^-  \(/.test(l));
-      // as bordas: com a data limite a 30 dias o aviso ainda cabe (e hoje); a 29, nao. No dia do pa_fim, ainda em aquisicao
-      const h = qdHoje(), P = qdFeP(), sit = (lim, fim) => qdFeriasSituacao({ limiteMax: lim === null ? '' : qdSomarDias(h, lim), paFim: qdSomarDias(h, fim) }, h, P).k;
-      r.bordas = [sit(30, -200), sit(29, -200), sit(0, -200), sit(-1, -200), sit(60, -200), sit(61, -200), sit(400, 0), sit(400, -1), sit(null, 0), sit(null, -1)].join();
-      return r;
-    });
-    afirmar(/^O que fazer e até quando A aba FÉRIAS está vazia Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados\. Parâmetros das férias$/.test(semPrazo.vazia.aba) &&
-      /A aba FÉRIAS está vazia: o GSL não sabe o prazo de ninguém\./.test(semPrazo.vazia.card) && !/Ninguém para avisar/.test(semPrazo.vazia.card) &&
-      semPrazo.vazia.linha === 'Férias: a aba FÉRIAS está vazia (o GSL não sabe os prazos)' && /\nA aba FÉRIAS está vazia: o GSL não sabe o prazo de ninguém\.$/.test(semPrazo.vazia.resumo) &&
-      semPrazo.vazia.conf === 'A aba FÉRIAS está vazia: só tem o cabeçalho. Sem as linhas, o GSL não sabe o prazo de ninguém.' && !/planilha conferida/.test(semPrazo.vazia.selo),
-      'aba FÉRIAS vazia: ' + JSON.stringify(semPrazo.vazia));
-    afirmar(/Não achei a coluna DTA_LIMITEMAX na aba FÉRIAS Sem ela, o GSL não sabe o prazo de ninguém\./.test(semPrazo.semColuna.aba) &&
-      /sem a coluna DTA_LIMITEMAX: o GSL não sabe o prazo de ninguém\./.test(semPrazo.semColuna.card) &&
-      !/Ninguém para avisar/.test(semPrazo.semColuna.card + semPrazo.semColuna.resumo) && semPrazo.semColuna.linha === 'Férias: a aba FÉRIAS está sem a coluna DTA_LIMITEMAX (o GSL não sabe os prazos)',
-      'sem a coluna DTA_LIMITEMAX: ' + JSON.stringify(semPrazo.semColuna));
-    afirmar(/Pode tirar desde \d\d\/\d\d\/\d{4}/.test(semPrazo.semPaFim.ficha) && /Sair até \(data limite\)/.test(semPrazo.semPaFim.ficha) &&
-      /Não achei a coluna pa_fim na aba FÉRIAS: parte das férias pode ficar sem dados\. ver na Conferência/.test(semPrazo.semPaFim.aba) &&
-      /^Não achei a coluna pa_fim: "pode tirar desde" e "em aquisição" usam o DTA_LIMITE/.test(semPrazo.semPaFim.conf), 'sem pa_fim: ' + JSON.stringify(semPrazo.semPaFim));
-    afirmar(semPrazo.semCabecalho === 'Não achei as colunas Matricula, Nome, pa_fim, DTA_LIMITEMAX no cabeçalho da aba FÉRIAS, e nenhuma linha foi lida (sem Matricula e sem Nome, nenhuma linha serve): o GSL não sabe o prazo de ninguém.',
-      'colada sem o cabecalho: ' + semPrazo.semCabecalho);
-    afirmar(/Ninguém para avisar ou sair de férias agora entre quem tem prazo · próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} \(em \d+ dias\) Programar \d+/.test(semPrazo.ninguem.aba) &&
-      /0 precisam sair de férias 0 para avisar Ninguém para avisar ou sair de férias agora entre quem tem prazo\. Próximo aviso: /.test(semPrazo.ninguem.card) &&
-      /\nNinguém para avisar ou sair de férias agora entre quem tem prazo\. Próximo aviso: .+ até \d\d\/\d\d [a-zá]{3} \(em \d+ dias\)\.\n/.test(semPrazo.ninguem.resumo),
-      'ninguem para agir: ' + JSON.stringify(semPrazo.ninguem));
-    afirmar(semPrazo.semData.pior === 'planejar' && semPrazo.semData.p3 === 'semdata' && /semdata/.test(semPrazo.semData.ks) && /período sem data/.test(semPrazo.semData.item) &&
-      semPrazo.semData.linha === 'Férias: 6 precisam sair de férias, 11 para avisar, 2 sem dados de férias' && semPrazo.semData.linha3 === 'Férias: 6 precisam sair de férias, 11 para avisar, 3 sem dados de férias' &&
-      semPrazo.semData.lista.length === 3 && semPrazo.semData.lista.filter((t) => / · período sem data limite na aba FÉRIAS$/.test(t)).length === 1,
-      'periodo sem data (cada pessoa conta num lugar so): ' + JSON.stringify(semPrazo.semData));
-    afirmar(semPrazo.bordas === 'avisar,critica,critica,vencida,avisar,planejar,aquisicao,liberada,aquisicao,semdata', 'bordas das faixas: ' + semPrazo.bordas);
-    afirmar(semPrazo.resumoSemNome.length === 1 && /^- Sem nome, COD 39002, RH 109002 \(2° TURNO, [^)]+\) — sem linha na aba FÉRIAS$/.test(semPrazo.resumoSemNome[0]), 'sem nome no texto copiado: ' + semPrazo.resumoSemNome.join('|'));
-    afirmar(!PROIBIDAS.test(JSON.stringify(semPrazo)), 'nenhuma palavra de multa nos casos sem dados');
-    // cada pessoa conta num lugar so; quem consta como desligado tem a etiqueta; o "+N no dia"; o corte da faixa do prazo vencido;
-    // a aba sem Matricula e Nome; sem a aba; a ficha de um periodo com data limite e sem pa_fim
-    const maisFe = await f.evaluate(() => {
-      const orig = DADOS, r = {};
-      const txt = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      const dom = (h) => new DOMParser().parseFromString(h, 'text/html');
-      const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido();
-      r.soma = ['vencida', 'critica', 'avisar', 'planejar', 'liberada', 'aquisicao'].reduce((n, k) => n + c[k].length, 0) + d.n;
-      r.quadro = qdRecorte(qdNaEmpresa()).length;
-      QD.feProgramar = true; QD.feVista = 'lista';
-      const itens = Array.from(dom(qdFerias()).querySelectorAll('.qd-fe-item')).map((b) => ({ ref: Number(/qdFicha\((\d+)\)/.exec(b.getAttribute('onclick'))[1]),
-        tag: /consta como desligado/.test(b.textContent), rot: b.getAttribute('aria-label') }));
-      r.saiu = itens.filter((x) => qdFeSaiu({ ref: x.ref }));
-      r.etiquetaSobrando = itens.filter((x) => x.tag && !qdFeSaiu({ ref: x.ref })).length;
-      r.resumoSaiu = qdFeResumoTexto().split('\n').filter((l) => /consta como desligado/.test(l)).length;
-      r.saiuNoResumo = qdFePessoas().filter((p) => ['vencida', 'critica', 'avisar'].indexOf(p.pior.k) !== -1 && qdFeSaiu(p.g)).length;
-      try {
-        // cinco pessoas com o mesmo "avisar ate" (2 pilulas e "+N no dia"); seis a mais com o prazo vencido (a faixa mostra 6 e corta)
-        const hoje = qdHoje(), limite = qdSomarDias(hoje, 45);
-        const emDia = qdFePessoas().filter((p) => p.pior.k === 'liberada' || p.pior.k === 'aquisicao').map((p) => p.g.ref);
-        const mesmoDia = emDia.slice(0, 5), vencem = emDia.slice(5, 11);         // pessoas do quadro (todos os periodos delas)
-        const linhas = orig.ferias.linhas.map((x) => {
-          const y = Object.assign({}, x);
-          if (mesmoDia.indexOf(y.ref) !== -1) y.limiteMax = limite;
-          else if (vencem.indexOf(y.ref) !== -1) y.limiteMax = qdSomarDias(hoje, -20 - vencem.indexOf(y.ref));
-          return y;
-        });
-        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas }) });
-        const dia = qdSomarDias(limite, -qdFeP().aviso);
-        QD.feVista = 'calendario'; QD.feMes = dia.slice(0, 7); QD.feDia = '';
-        const cal = dom(qdFerias());
-        const td = cal.querySelector('.qd-fe-dia-bt[data-dia="' + dia + '"]').closest('td');
-        r.mais = { pil: td.querySelectorAll('.qd-fe-pil').length, mais: (td.querySelector('.qd-fe-mais') || {}).textContent || '', n: qdFePorDia(qdFePessoas(), dia.slice(0, 7))[dia].length };
-        const venc = cal.querySelector('.qd-fe-vencidos');
-        r.venc = { nomes: venc.querySelectorAll('span .qd-link').length, mais: (Array.from(venc.querySelectorAll('button')).pop() || {}).textContent || '',
-          total: qdFeContagem(qdFePessoas()).vencida.length };
-        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas: [] }),
-          leitura: Object.assign({}, orig.leitura, { ferias: Object.assign({}, orig.leitura.ferias, { linhas: 0, faltam: ['matricula', 'nome'] }) }) });
-        r.semMatNome = { aba: txt(qdFerias()), card: txt(qdFeCartaoGeral()), linha: qdFeResumoLinha() };
-        DADOS = Object.assign({}, orig, { ferias: null });
-        r.semAba = txt(qdFerias());
-        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { paFim: '', limite: '' })) }) });
-        r.fichaSemPaFim = txt(qdFeFichaSecao(qdFeriasDados().lista.find((x) => x.pior.k === 'avisar').g.ref));
-      } finally { DADOS = orig; QD.feVista = 'lista'; QD.feMes = ''; QD.feDia = ''; QD.feProgramar = false; }
-      return r;
-    });
-    afirmar(maisFe.soma === maisFe.quadro, 'cada pessoa conta num lugar so: ' + maisFe.soma + ' x ' + maisFe.quadro);
-    afirmar(maisFe.saiu.length >= 1 && maisFe.saiu.every((x) => x.tag && /Consta como desligado/.test(x.rot)) && !maisFe.etiquetaSobrando &&
-      maisFe.saiuNoResumo >= 1 && maisFe.resumoSaiu === maisFe.saiuNoResumo, 'quem consta como desligado: ' + JSON.stringify([maisFe.saiu, maisFe.resumoSaiu, maisFe.saiuNoResumo]));
-    afirmar(maisFe.mais.n >= 5 && maisFe.mais.pil === 2 && maisFe.mais.mais === '+' + (maisFe.mais.n - 2) + ' no dia', 'muita gente no mesmo dia (2 pilulas e "+N no dia"): ' + JSON.stringify(maisFe.mais));
-    afirmar(maisFe.venc.total === 8 && maisFe.venc.nomes === 6 && maisFe.venc.mais === 'e mais 2 na lista', 'faixa do prazo vencido cortada: ' + JSON.stringify(maisFe.venc));
-    afirmar(/^O que fazer e até quando Não achei as colunas Matricula e Nome na aba FÉRIAS Sem elas, nenhuma linha foi lida\./.test(maisFe.semMatNome.aba) &&
-      /A aba FÉRIAS está sem as colunas Matricula e Nome: o GSL não sabe o prazo de ninguém\./.test(maisFe.semMatNome.card) &&
-      maisFe.semMatNome.linha === 'Férias: a aba FÉRIAS está sem as colunas Matricula e Nome (o GSL não sabe os prazos)', 'sem Matricula e Nome: ' + JSON.stringify(maisFe.semMatNome));
-    afirmar(/^O que fazer e até quando Falta a aba FÉRIAS na planilha Extraia as férias do sistema \(com Matricula, Nome, pa_fim e DTA_LIMITEMAX\)/.test(maisFe.semAba), 'sem a aba FÉRIAS: ' + maisFe.semAba);
-    afirmar(/Avisar até \d\d\/\d\d\/\d{4} [a-zá]{3}/.test(maisFe.fichaSemPaFim) && /Sair até \(data limite\) \d\d\/\d\d\/\d{4} [a-zá]{3} · em \d+ dias/.test(maisFe.fichaSemPaFim) &&
-      !/Pode tirar desde/.test(maisFe.fichaSemPaFim), 'ficha sem pa_fim: ' + maisFe.fichaSemPaFim);
-    afirmar(!PROIBIDAS.test(JSON.stringify(maisFe)), 'nenhuma palavra de multa nos casos novos');
+    afirmar(fe.soma[0] + fe.soma[1] + fe.soma[2] + fe.soma[3] === fe.soma[4] && fe.soma[1] === 0 && !PROIBIDAS.test(fe.html), 'cada pessoa conta num lugar so: ' + fe.soma.join());
     // a barra lateral recolhe e volta; quem desenha pela largura da caixa (graficos do Aprendiz) recebe um "resize"
     await f.evaluate(() => { window.__redim = 0; window.addEventListener('resize', () => { window.__redim++; }); });
     await f.click('#lateral-alternar');
@@ -3978,10 +3761,470 @@ async function rodar() {
     afirmar(dela[0] === '1° TURNO' && dela[1] === 'geral' && /^1° TURNO/.test(dela[2]), 'coordenadora do turno A cai no 1° TURNO, na visao geral: ' + dela.join(' | '));
     afirmar(await c.evaluate(() => !document.querySelector('#acoes-topo').innerText.includes('Trocar planilha')), 'quem so ve nao troca a planilha');
     await c.evaluate(() => qdAba('ferias'));
-    afirmar(await c.evaluate(() => !!document.querySelector('.qd-fe .qd-fe-rodape') && !document.querySelector('.qd-fe-rodape').innerText.includes('Parâmetros')), 'quem so ve nao muda os parametros das ferias');
+    afirmar(await c.evaluate(() => !!document.querySelector('.qd-fe .qd-fe-rodape') && !document.querySelector('.qd-fe-rodape').innerText.includes('Parâmetros') &&
+      document.querySelectorAll('.qd-fe-item').length > 0 && !document.querySelector('.qd-fe-bt')), 'quem so ve nao muda os parametros nem programa ferias (sem botoes)');
     afirmar(!pc.erros.length, 'erros: ' + pc.erros.join(' | '));
     await pc.contexto.close();
     await s.fechar();
+  });
+
+
+  /*
+   * FÉRIAS (21/10, programacao). Servidor e navegador parados na quarta 21/10/2026; a planilha de teste do Quadro
+   * (dados-quadro.js: as 17 primeiras pessoas sao um caso cada) ligada pelo servidor e a programacao desses casos
+   * ja gravada no banco, como a tela gravaria.
+   */
+  const QUARTA_21_10 = '2026-10-21T10:00:00-03:00';
+  const PROIBIDAS_FE = /multa|dobro|risco|penalidade|infra[çc][ãa]o|puni[çc][ãa]o/i;
+  const quadroComFerias = async (opcoes) => {
+    const s = await subir({ agora: QUARTA_21_10 }); instalarComPessoas(s);
+    const { abas, esperado: E } = require('./dados-quadro.js')(s.mundo.DataDoScript, new Date(QUARTA_21_10));
+    const pl = s.mundo.novaPlanilha('BI Quadro CD Feira');
+    const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+    Object.keys(abas).forEach((nome, i) => {
+      const a = i === 0 ? pl.abas[0] : new Aba(pl, nome, 1000, 26);
+      if (i === 0) a.nome = nome; else pl.abas.push(a);
+      abas[nome].forEach((linha, l) => { if (linha) a.dados[l] = linha.slice(); });
+    });
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFonteQuadro', { link: 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit' });
+    const c = s.contexto(DONO); c._porta = true;
+    E.programacoes.forEach((p) => c.inserir('FERIAS_PROG', p, DONO));
+    const aba = await abrirAba(s, DONO, Object.assign({ relogio: QUARTA_21_10, contexto: await navegador.newContext({ viewport: (opcoes && opcoes.viewport) || { width: 1300, height: 1100 } }) }, opcoes || {}));
+    return { s, E, dono, aba };
+  };
+  /* Abre o Quadro na aba Ferias (pelo canal normal). */
+  const abrirFerias = async (aba) => {
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => abrir('quadro'));
+    await f.waitForSelector('.qd-cartao', { timeout: 20000 });
+    return f;
+  };
+  /* A linha de uma pessoa na aba (a primeira com esse nome), como a pessoa ve. */
+  const linhaFe = (f, nome) => f.evaluate((n) => {
+    const li = Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-item')).find((x) => x.querySelector('.qd-fe-nome').innerText.trim() === n);
+    if (!li) return null;
+    const t = (sel) => ((li.querySelector(sel) || {}).innerText || '').replace(/\s+/g, ' ').trim();
+    return { st: t('.qd-fe-st'), cor: (/qd-fe-(vermelho|laranja|amarelo|azul|verde|cinza|semdata)/.exec(li.className) || [])[1], folha: t('.qd-fe-folha'), det: t('.qd-fe-det'),
+      bts: Array.from(li.querySelectorAll('.qd-fe-bt')).map((b) => b.innerText.trim()), grupo: li.closest('.qd-fe-grupo') ? li.closest('.qd-fe-grupo').querySelector('h3').id : '',
+      rot: li.querySelector('.qd-fe-abre').getAttribute('aria-label') };
+  }, nome);
+  /* Clica num botao da linha de uma pessoa (Programar, Reprogramar, Confirmar saida). */
+  const botaoFe = (f, nome, texto) => f.evaluate(([n, t]) => {
+    const li = Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-item')).find((x) => x.querySelector('.qd-fe-nome').innerText.trim() === n);
+    Array.from(li.querySelectorAll('.qd-fe-bt')).find((b) => b.innerText.trim() === t).click();
+  }, [nome, texto]);
+  const recadoFe = (f, texto) => f.waitForFunction((t) => document.getElementById('recado').textContent === t && el('janela').classList.contains('oculto'), texto, { timeout: 15000 });
+  const ESPERA_FE = {
+    vencido: ['vermelho', 'Limite máximo para sair vencido em 11/10 (há 10 dias)'], ja: ['laranja', 'Programe já: limite máximo em 45 dias'],
+    hoje: ['vermelho', 'Programe hoje: limite máximo em 20 dias'], pode: ['amarelo', 'Já pode sair desde 23/06 — sem programação'],
+    programar: ['azul', 'Programar: pode sair a partir de 20/11'], deferias: ['verde', 'De férias desde 18/10'],
+    prog: ['azul', 'Programada para 20/12 · aviso até 20/11'], aviso: ['amarelo', 'Entregar o aviso até 24/10 (em 3 dias)'],
+    sai: ['azul', 'Sai em 10/11 (em 20 dias)'], breve: ['laranja', 'Sai em 5 dias (26/10)'], confirme: ['laranja', 'Saída prevista para 19/10 — confirme'],
+    confirmeja: ['vermelho', 'Saiu de férias em 11/10? Confirme'], depois: ['vermelho', 'Programada depois do limite máximo — reprogramar'],
+    cumprida: ['verde', 'Férias cumpridas'], fechado: ['cinza', 'Em dia — pode sair a partir de 29/01'], emdia: ['cinza', 'Em dia — pode sair a partir de 19/01'],
+    semdata: ['semdata', 'Sem limite máximo na aba FÉRIAS']
+  };
+  const dma = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+  /* FOTO_FERIAS=prefixo: as telas da aba Ferias em PNG, para conferir o desenho (sem as animacoes de entrada, paradas pelo relogio do teste). */
+  const fotoFe = async (aba, f, nome, rolar) => {
+    if (!process.env.FOTO_FERIAS) return;
+    await f.addStyleTag({ content: '*, *::before { animation: none !important; transition: none !important; }' });
+    if (rolar) await f.evaluate((sel) => { const e = document.querySelector(sel); if (e) window.scrollTo(0, e.getBoundingClientRect().top + window.scrollY - 12); }, rolar);
+    await aba.page.screenshot({ path: process.env.FOTO_FERIAS + '-' + nome + '.png' });
+  };
+
+  await cenario('ferias (21/10): relogio parado — a cor e o texto de cada caso, os grupos Programar e Programadas (folhinha, ordem, botoes), de ferias agora e cumpridas, o numero da aba, o calendario, o Excel, o resumo, a Visao geral e a ficha; nenhuma palavra de multa', async () => {
+    const { s, E, aba } = await quadroComFerias();
+    const f = await abrirFerias(aba);
+    afirmar(await f.evaluate(() => document.querySelector('#qd-abas .aba[data-aba="ferias"]').innerText.replace(/\s+/g, ' ').trim()) === 'Férias ■ 7',
+      'o numero da aba: 4 no vermelho e 3 no laranja (o CD inteiro)');
+    // a cor e o texto de cada caso (a pessoa vale pelo periodo mais urgente)
+    const sit = await f.evaluate((casos) => { const fd = qdFeriasDados(), r = {}; Object.keys(casos).forEach((k) => {
+      const g = qdGeral().find((x) => x.cod === casos[k].cod); const p = fd.porRef[g.ref]; r[k] = p ? [p.pior.cor, p.pior.txt] : null; }); return r; }, E.casos);
+    const errados = Object.keys(ESPERA_FE).filter((k) => JSON.stringify(sit[k]) !== JSON.stringify(ESPERA_FE[k]));
+    afirmar(!errados.length, 'situacao de cada caso: ' + errados.map((k) => k + ' ' + JSON.stringify(sit[k]) + ' (esperado ' + JSON.stringify(ESPERA_FE[k]) + ')').join(' | '));
+    // os grupos na tela
+    await f.evaluate(() => { QD.feVista = 'lista'; qdAba('ferias'); });
+    await f.waitForSelector('#qd-fe-corpo .qd-fe-grupo');
+    const g = await f.evaluate(() => ({ grupos: Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-grupo h3')).map((h) => h.innerText.replace(/\s+/g, ' ').trim()),
+      prog: Array.from(document.querySelectorAll('#qd-fe-g-programadas ~ .qd-fe-itens .qd-fe-nome, .qd-fe-grupo:nth-of-type(2) .qd-fe-nome')).map((x) => x.innerText.trim()),
+      ordem: Array.from(document.querySelectorAll('.qd-fe-grupo')).map((gr) => Array.from(gr.querySelectorAll('.qd-fe-nome')).map((x) => x.innerText.trim())),
+      agora: document.querySelector('.qd-fe-agora-bt').innerText.replace(/\s+/g, ' ').trim(), html: document.querySelector('.qd-fe').innerHTML }));
+    const n = (k) => E.casos[k].nome;
+    afirmar(/^Programar \d+$/.test(g.grupos[0]) && g.grupos[1] === 'Programadas 7', 'grupos: ' + g.grupos.join(' | '));
+    afirmar(g.ordem[0].slice(0, 3).join() === [n('vencido'), n('hoje'), n('ja')].join() && g.ordem[1].join() === ['confirmeja', 'depois', 'confirme', 'breve', 'aviso', 'sai', 'prog'].map(n).join(),
+      'do mais urgente para o menos: ' + JSON.stringify([g.ordem[0].slice(0, 4), g.ordem[1]]));
+    afirmar(['deferias', 'cumprida', 'fechado', 'emdia', 'semdata'].every((k) => !g.ordem.some((x) => x.indexOf(n(k)) !== -1)), 'em dia, verde e sem dados fora dos grupos');
+    // o grupo grande mostra 40 e o "Mostrar todos"
+    const todos = Number(g.grupos[0].replace(/\D+/g, ''));
+    afirmar(todos > 40 && g.ordem[0].length === 40 && await f.evaluate(() => document.querySelector('.qd-fe-grupo .qd-mais').innerText.trim()) === 'Mostrar todos (' + todos + ')', 'Programar com ' + todos);
+    await f.click('.qd-fe-grupo .qd-mais');
+    await f.waitForFunction((t) => document.querySelectorAll('.qd-fe-grupo')[0].querySelectorAll('.qd-fe-item').length === t, todos, { timeout: 5000 });
+    afirmar(g.agora === '6 de férias agora · 2 cumpridas nos últimos 60 dias', 'linha de ferias agora: ' + g.agora);
+    await fotoFe(aba, f, 'lista', '.qd-fe');
+    await fotoFe(aba, f, 'programadas', '#qd-fe-g-programadas');
+    const lv = await linhaFe(f, n('vencido')), lp = await linhaFe(f, n('pode')), la = await linhaFe(f, n('aviso')), lc = await linhaFe(f, n('confirme')), lb = await linhaFe(f, n('breve'));
+    afirmar(lv.cor === 'vermelho' && lv.folha === 'OUT 11 dom' && lv.st === ESPERA_FE.vencido[1] && lv.det === 'pode sair desde 25/11/2025' && lv.bts.join() === 'Programar',
+      'linha do vencido (folhinha no limite maximo; a outra data com o ano, a mais de 300 dias): ' + JSON.stringify(lv));
+    afirmar(lp.folha === 'JUN 23 ter' && lp.det === 'limite máximo para sair: ' + dma(E.casos.pode.limiteMax).slice(0, 5) && /Consta como desligado/.test(lp.rot) && lp.grupo === 'qd-fe-g-programar',
+      'linha do amarelo (folhinha no pode sair; consta como desligado): ' + JSON.stringify(lp));
+    afirmar(la.cor === 'amarelo' && la.folha === 'NOV 23 seg' && la.det === 'Sai em 23/11 (em 33 dias) · 30 dias' && la.bts.join() === 'Reprogramar' && la.grupo === 'qd-fe-g-programadas', 'linha do aviso: ' + JSON.stringify(la));
+    afirmar(lc.bts.join() === 'Confirmar saída,Reprogramar' && lc.det === 'Saída em 19/10 (há 2 dias) · 30 dias · volta em 18/11' && lb.bts.join() === 'Reprogramar' &&
+      lb.det === '30 dias · volta em 25/11' && (await linhaFe(f, n('depois'))).det === 'Sai em 19/01 (em 90 dias) · 30 dias · limite máximo para sair: 09/01',
+      'confirmar so do inicio em diante; a linha de baixo so com o que o texto colorido nao diz: ' + JSON.stringify([lc, lb]));
+    // de ferias agora e cumpridas: a linha abre a lista
+    await f.click('.qd-fe-agora-bt');
+    const agora = await f.evaluate(() => Array.from(document.querySelectorAll('.qd-fe-agora .qd-fe-item')).map((li) => li.querySelector('.qd-fe-nome').innerText.trim() + ': ' + li.querySelector('.qd-fe-st').innerText.trim() +
+      (li.querySelector('.qd-fe-det') ? ' ' + li.querySelector('.qd-fe-det').innerText.trim() : '')));
+    afirmar(agora.length === 8 && agora.some((x) => x.indexOf(n('deferias') + ': De férias desde 18/10 Saída em 18/10') === 0) && agora.indexOf(n('cumprida') + ': Férias cumpridas saiu em 01/10 · 30 dias') !== -1 &&
+      agora.indexOf(n('fechado') + ': Férias cumpridas saiu em 06/10 · 30 dias · período fechado na aba FÉRIAS') !== -1, 'quem esta de ferias e as cumpridas: ' + agora.join(' | '));
+    // rodape e legenda
+    const rod = await f.evaluate(() => [document.querySelector('.qd-fe-rodape').innerText.replace(/\s+/g, ' ').trim(),
+      (() => { const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(); return c.programar.length + c.programadas.length + c.emdia.length + d.n === qdRecorte(qdNaEmpresa()).length; })()]);
+    afirmar(/^\d+ em dia 3 sem dados de férias · ver na Conferência Baixar Excel Parâmetros crítico urgente atenção no prazo resolvido nada a fazer /.test(rod[0]) && rod[1], 'rodape: ' + rod[0]);
+    // calendario de outubro: as pilulas no dia que importa; o vermelho com a data ja passada na faixa de cima
+    await f.click('.qd-fe-vista .qd-pill:has-text("Calendário")');
+    await f.waitForSelector('.qd-fe-mes');
+    const cal = await f.evaluate((nomes) => {
+      const pil = (nome) => { const b = Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).find((x) => x.getAttribute('aria-label').indexOf(' — ' + nome + ' (') !== -1);
+        return b ? b.closest('td').querySelector('.qd-fe-dia-n').innerText + ' ' + (/qd-fe-(vermelho|laranja|amarelo|azul|verde|cinza)/.exec(b.className) || [])[1] : ''; };
+      return { tit: document.querySelector('#qd-fe-mes-tit').innerText, faixa: document.querySelector('.qd-fe-vencidos').innerText.replace(/\s+/g, ' ').trim(),
+        pils: nomes.map(pil), html: document.querySelector('.qd-fe').innerHTML };
+    }, [n('confirme'), n('breve'), n('deferias'), n('vencido'), n('confirmeja')]);
+    await fotoFe(aba, f, 'calendario', '.qd-fe');
+    afirmar(cal.tit === 'Outubro de 2026' && cal.pils.join() === '19 laranja,26 laranja,18 verde,,' && /^Data já passou .+ \(11\/10\) .+ \(11\/10\)$/.test(cal.faixa) && !PROIBIDAS_FE.test(cal.html),
+      'calendario: ' + JSON.stringify([cal.tit, cal.pils, cal.faixa]));
+    await f.click('.qd-fe-seta.prox');
+    afirmar(await f.evaluate((nome) => { const b = Array.from(document.querySelectorAll('.qd-fe-mes .qd-fe-pil')).find((x) => x.getAttribute('aria-label').indexOf(' — ' + nome + ' (') !== -1);
+      return b && b.closest('td').querySelector('.qd-fe-dia-n').innerText === '10' && /qd-fe-vermelho/.test(b.className) && /: Programe hoje: limite máximo em 20 dias\.$/.test(b.getAttribute('title')); }, n('hoje')),
+    'novembro: o "programe hoje" no dia do limite maximo');
+    // o dia com gente abre a lista dele embaixo da grade (com os botoes); "Hoje" volta ao mes de hoje; a escolha Lista | Calendario fica no navegador
+    const doDia = await f.evaluate(() => { qdFeDia('2026-11-10'); const l = document.querySelector('#qd-fe-dia-lista');
+      return { tit: l.querySelector('h4').innerText.replace(/\s+/g, ' ').trim(), itens: l.querySelectorAll('.qd-fe-item').length, bts: l.querySelectorAll('.qd-fe-bt').length,
+        n: qdFePorDia(qdFePessoas(), '2026-11')['2026-11-10'].length }; });
+    afirmar(doDia.tit === 'Terça-feira, 10/11 fechar' && doDia.itens === doDia.n && doDia.n >= 2 && doDia.bts >= doDia.n, 'lista do dia: ' + JSON.stringify(doDia));
+    await f.evaluate(() => qdFeFecharDia());
+    await f.click('.qd-fe-hoje-bt');
+    afirmar(await f.evaluate(() => !document.querySelector('.qd-fe-hoje-bt') && QD.feMes === '2026-10' && !document.querySelector('#qd-fe-dia-lista') &&
+      localStorage.getItem('gsl_ferias_vista') === 'calendario' && (QD.feVista = '', qdDesenhar(), QD.feVista === 'calendario')), 'Hoje e a escolha guardada');
+    // muita gente no mesmo dia: 2 pilulas e "+N no dia"; a faixa de cima mostra 6 nomes e corta (as datas mudadas so na pagina)
+    const muitos = await f.evaluate(() => {
+      const orig = DADOS, r = {};
+      try {
+        const hoje = qdHoje(), dia = qdSomarDias(hoje, 45);
+        const emDia = qdFePessoas().filter((p) => p.pior.k === 'emdia').map((p) => p.g.ref), mesmoDia = emDia.slice(0, 5), vencem = emDia.slice(5, 13);
+        DADOS = Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, { linhas: orig.ferias.linhas.map((x) => {
+          const y = Object.assign({}, x);
+          if (mesmoDia.indexOf(y.ref) !== -1) y.limite = dia;                   // azul: pode sair a partir do mesmo dia
+          else if (vencem.indexOf(y.ref) !== -1) y.limiteMax = qdSomarDias(hoje, -20 - vencem.indexOf(y.ref));
+          return y;
+        }) }) });
+        QD.feVista = 'calendario'; QD.feMes = dia.slice(0, 7); QD.feDia = '';
+        const cal = new DOMParser().parseFromString(qdFerias(), 'text/html');
+        const td = cal.querySelector('.qd-fe-dia-bt[data-dia="' + dia + '"]').closest('td'), faixa = cal.querySelector('.qd-fe-vencidos');
+        r.dia = { pil: td.querySelectorAll('.qd-fe-pil').length, mais: (td.querySelector('.qd-fe-mais') || {}).textContent || '', n: qdFePorDia(qdFePessoas(), dia.slice(0, 7))[dia].length };
+        r.faixa = { nomes: faixa.querySelectorAll('span .qd-link').length, mais: (Array.from(faixa.querySelectorAll('button')).pop() || {}).textContent || '' };
+      } finally { DADOS = orig; QD.feVista = 'calendario'; QD.feMes = ''; }
+      return r;
+    });
+    afirmar(muitos.dia.n >= 6 && muitos.dia.pil === 2 && muitos.dia.mais === '+' + (muitos.dia.n - 2) + ' no dia' && muitos.faixa.nomes === 6 && muitos.faixa.mais === 'e mais 4 na lista',
+      'muita gente no mesmo dia e a faixa cortada: ' + JSON.stringify(muitos));
+    await f.click('.qd-fe-vista .qd-pill:has-text("Lista")');
+    // Excel: as colunas do pedido; a linha da programada
+    const xls = await f.evaluate(() => { const o = pnBaixarXlsx; let cap = null; pnBaixarXlsx = (nome, abas) => { cap = { nome, abas }; }; try { qdFeBaixar(); } finally { pnBaixarXlsx = o; } return cap; });
+    const cab = xls.abas[0].linhas[0].join('|'), lprog = xls.abas[0].linhas.find((l) => l[0] === n('prog'));
+    const cp = E.casos.prog;
+    afirmar(cab === 'NOME|RH|EQUIPE|FUNÇÃO|PA INÍCIO|PA FIM|PODE SAIR A PARTIR DE|LIMITE MÁXIMO PARA SAIR|PROGRAMADA PARA|DIAS|VOLTA EM|SITUAÇÃO|DIAS ATÉ O LIMITE MÁXIMO' &&
+      xls.nome === 'ferias-quadro-cd-2026-10-21.xlsx' && xls.abas[0].linhas[1][0] === n('vencido') &&
+      JSON.stringify(lprog) === JSON.stringify([n('prog'), cp.rh, '1° TURNO', 'SEPARADOR', '01/09/2025', dma(cp.paFim), dma(cp.pode), dma(cp.limiteMax), '20/12/2026', 30, '19/01/2027',
+        'Programada para 20/12 · aviso até 20/11', 270]) && !PROIBIDAS_FE.test(JSON.stringify(xls)), 'Excel: ' + cab + ' / ' + JSON.stringify(lprog));
+    // copiar resumo, Visao geral e a linha do resumo das outras abas
+    const txt = await f.evaluate(() => ({ resumo: qdFeResumoTexto(), linha: qdFeResumoLinha(), card: qdFeCartaoGeral().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() }));
+    afirmar(/^Férias — Quadro do CD — CD Feira de Santana — 21\/10\/2026\nPROGRAMAR \(\d+\)\n- .+ \(1° TURNO, SEPARADOR\) — Limite máximo para sair vencido em 11\/10 \(há 10 dias\)\n/.test(txt.resumo) &&
+      txt.resumo.indexOf('\nPROGRAMADAS (7)\n- ' + n('confirmeja') + ' (1° TURNO, SEPARADOR) — Saiu de férias em 11/10? Confirme · Saída em 11/10 (há 10 dias) · 30 dias · volta em 10/11\n') !== -1 &&
+      /\nDE FÉRIAS AGORA \(6\)\n/.test(txt.resumo) && /\nSEM DADOS DE FÉRIAS \(3\)\n/.test(txt.resumo) && !PROIBIDAS_FE.test(txt.resumo), 'copiar resumo: ' + txt.resumo.slice(0, 900));
+    afirmar(/^Férias: \d+ para programar, 7 programadas, 7 pedem atenção agora, 3 sem dados de férias$/.test(txt.linha), 'linha do resumo: ' + txt.linha);
+    afirmar(new RegExp('^Férias Ver férias → Programação pela aba FÉRIAS\\. \\d+ para programar 7 programadas 7 pedem atenção agora \\(vermelho ou laranja\\) Próxima saída: ' + n('breve') +
+      ' 1° TURNO em 26/10 seg \\(em 5 dias\\)\\. 3 sem dados de férias \\( ver na Conferência \\)$').test(txt.card) && !PROIBIDAS_FE.test(txt.card), 'Visao geral: ' + txt.card);
+    // a ficha: um bloco por periodo, com a linha do tempo, as datas e a programacao
+    await f.evaluate((cod) => qdFicha(qdGeral().find((x) => x.cod === cod).ref), E.casos.ja.cod);
+    await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha');
+    const ficha = await f.evaluate(() => ({ blocos: Array.from(document.querySelectorAll('.qd-fe-ficha > li')).map((li) => li.innerText.replace(/\s+/g, ' ').trim()),
+      tempo: document.querySelectorAll('.qd-fe-ficha .qd-fe-tempo').length, html: document.querySelector('.qd-ficha').innerHTML }));
+    await fotoFe(aba, f, 'ficha');
+    afirmar(ficha.blocos.length === 2 && ficha.tempo === 2 && /^Programe já: limite máximo em 45 dias linha \d+ da aba FÉRIAS HOJE PA INÍCIO 19\/01\/2025 PA FIM 19\/01\/2026 PODE SAIR A PARTIR DE 19\/01\/2026 seg LIMITE MÁXIMO PARA SAIR 05\/12\/2026 · em 45 dias Programar$/.test(ficha.blocos[0]) &&
+      /^Em dia — pode sair a partir de 19\/01 /.test(ficha.blocos[1]) && !PROIBIDAS_FE.test(ficha.html), 'ficha (dois periodos, do mais antigo): ' + JSON.stringify(ficha.blocos));
+    await f.evaluate(() => fecharJanela());
+    // parametros: os novos campos; o aviso de 46 dias muda as cores (o limite maximo em 45 dias passa a "programe hoje"); depois volta ao padrao
+    await f.click('.qd-fe-rod-acoes button:has-text("Parâmetros")');
+    await f.waitForSelector('#fp-janela');
+    const modal = await f.evaluate(() => ({ txt: document.querySelector('#janela').textContent.replace(/\s+/g, ' '), campos: Array.from(document.querySelectorAll('#janela input')).map((i) => i.id + '=' + i.value).join() }));
+    afirmar(modal.campos === 'fp-cc=655,fp-digitos=3,fp-aviso=30,fp-janela=60,fp-urgente=60,fp-tolerancia=3' && /Entra em “Programar”: dias antes de poder sair/.test(modal.txt) && !PROIBIDAS_FE.test(modal.txt),
+      'parametros: ' + JSON.stringify(modal));
+    await f.fill('#fp-aviso', '46');
+    await f.click('#janela-rodape button:has-text("Salvar")');
+    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 46 && document.querySelector('.qd-fe-sub'), null, { timeout: 15000 });
+    afirmar((await linhaFe(f, n('ja'))).st === 'Programe hoje: limite máximo em 45 dias' && await f.evaluate(() => document.querySelector('.qd-fe-sub').innerText) === 'O aviso de férias é dado 46 dias antes da saída.',
+      'aviso de 46 dias: ' + JSON.stringify(await linhaFe(f, n('ja'))));
+    await f.click('.qd-fe-rod-acoes button:has-text("Parâmetros")');
+    await f.waitForSelector('#fp-aviso');
+    await f.click('#janela-rodape button:has-text("Voltar ao padrão")');
+    await f.waitForFunction(() => DADOS && DADOS.parametrosFerias && DADOS.parametrosFerias.aviso === 30, null, { timeout: 15000 });
+    // a aba que nao serve (vazia, sem DTA_LIMITEMAX, sem Matricula e Nome, sem a aba): nada vira "ninguem para programar"
+    const ruim = await f.evaluate(() => {
+      const orig = DADOS, r = {}, txt = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const com = (ferias, leitura) => Object.assign({}, orig, { ferias: Object.assign({}, orig.ferias, ferias), leitura: Object.assign({}, orig.leitura, { ferias: Object.assign({}, orig.leitura.ferias, leitura) }) });
+      try {
+        DADOS = com({ linhas: [] }, { linhas: 0 }); r.vazia = [txt(qdFerias()), txt(qdFeCartaoGeral()), qdFeResumoLinha()];
+        DADOS = com({ linhas: orig.ferias.linhas.map((x) => Object.assign({}, x, { limiteMax: '' })) }, { faltam: ['limiteMax'] }); r.semColuna = [txt(qdFerias()), qdFeResumoLinha()];
+        DADOS = com({ linhas: [] }, { linhas: 0, faltam: ['matricula', 'nome'] }); r.semMatNome = txt(qdFerias());
+        DADOS = Object.assign({}, orig, { ferias: null }); r.semAba = txt(qdFerias());
+      } finally { DADOS = orig; }
+      return r;
+    });
+    afirmar(/^Programação de férias A aba FÉRIAS está vazia Só tem o cabeçalho/.test(ruim.vazia[0]) && /A aba FÉRIAS está vazia: o GSL não sabe o prazo de ninguém\./.test(ruim.vazia[1]) &&
+      ruim.vazia[2] === 'Férias: a aba FÉRIAS está vazia (o GSL não sabe os prazos)' && /Não achei a coluna DTA_LIMITEMAX na aba FÉRIAS Sem ela/.test(ruim.semColuna[0]) &&
+      /Não achei as colunas Matricula e Nome na aba FÉRIAS/.test(ruim.semMatNome) && /^Programação de férias Falta a aba FÉRIAS na planilha Extraia as férias do sistema \(com Matricula, Nome, pa_fim, DTA_LIMITE e DTA_LIMITEMAX\)/.test(ruim.semAba) &&
+      !/Ninguém para programar/.test(JSON.stringify(ruim)) && !PROIBIDAS_FE.test(JSON.stringify(ruim)), 'aba que nao serve: ' + JSON.stringify(ruim));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('ferias (21/10): a busca pelo nome (sem acento) acha quem esta em dia e deixa programar; a janela Programar (limites, a volta e o aviso ao vivo, o aviso que ja nao cabe, as recusas sem ir ao servidor); Reprogramar; Confirmar saida; Desfazer e Cancelar pela ficha', async () => {
+    const { s, E, aba } = await quadroComFerias();
+    const f = await abrirFerias(aba);
+    const n = (k) => E.casos[k].nome;
+    // cada leitura num contexto novo (o listar guarda a tabela lida durante a execucao)
+    const banco = () => { const c = s.contexto(DONO); c._porta = true; return c.listar('FERIAS_PROG'); };
+    const prog = (k) => banco().find((x) => Number(x.MATRICULA) === Number(E.casos[k].matricula) && x.PA_FIM === E.casos[k].paFim);
+    /* Busca a pessoa pelo nome inteiro (a lista da busca mostra todo mundo que bate, em qualquer situacao). */
+    const buscar = async (nome) => {
+      await f.fill('#qd-fe-busca', nome);
+      await f.waitForFunction((x) => Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-nome')).some((y) => y.innerText.trim() === x), nome, { timeout: 5000 });
+    };
+    await f.evaluate(() => qdAba('ferias'));
+    await f.waitForSelector('#qd-fe-busca');
+    // a busca: sem acento, as palavras em qualquer ordem; o RH tambem; o cursor fica no campo
+    await f.fill('#qd-fe-busca', 'conceicao patricia');
+    await f.waitForFunction(() => document.querySelectorAll('#qd-fe-corpo .qd-fe-item').length === 1, null, { timeout: 5000 });
+    let l = await linhaFe(f, n('emdia'));
+    afirmar(l && l.st === 'Em dia — pode sair a partir de 19/01' && l.cor === 'cinza' && l.bts.join() === 'Programar' && l.grupo === 'qd-fe-g-busca' &&
+      await f.evaluate(() => document.activeElement.id === 'qd-fe-busca'), 'busca sem acento acha quem esta em dia: ' + JSON.stringify(l));
+    await f.fill('#qd-fe-busca', E.casos.emdia.rh);
+    await f.waitForFunction((nome) => document.querySelectorAll('#qd-fe-corpo .qd-fe-item').length === 1 && document.querySelector('#qd-fe-corpo .qd-fe-nome').innerText.trim() === nome, n('emdia'), { timeout: 5000 });
+    await f.fill('#qd-fe-busca', 'ninguem com esse nome');
+    await f.waitForFunction(() => /^Ninguém com «ninguem com esse nome» no quadro\.$/.test(document.querySelector('#qd-fe-corpo').innerText.trim()), null, { timeout: 5000 });
+    await f.fill('#qd-fe-busca', 'Patrícia Conceição');
+    await f.waitForFunction(() => document.querySelectorAll('#qd-fe-corpo .qd-fe-item').length === 1, null, { timeout: 5000 });
+    // a janela Programar: o periodo, as duas datas, os limites do campo e a volta e o aviso ao vivo
+    await botaoFe(f, n('emdia'), 'Programar');
+    await f.waitForSelector('#fe-inicio');
+    const jan = () => f.evaluate(() => ({ tit: el('janela-titulo').textContent, fatos: document.querySelector('.qd-fe-prog-fatos').innerText.replace(/\s+/g, ' ').trim(),
+      min: el('fe-inicio').min, max: el('fe-inicio').max, v: el('fe-inicio').value, dias: el('fe-dias').value, vivo: el('fe-vivo').textContent,
+      alerta: el('fe-alerta').hidden ? '' : el('fe-alerta').textContent, erro: el('fe-erro').hidden ? '' : el('fe-erro').textContent,
+      bts: Array.from(document.querySelectorAll('#janela-rodape button')).map((b) => b.innerText.trim()).join() }));
+    let j = await jan();
+    afirmar(j.tit === 'Programar férias — PATRÍCIA CONCEIÇÃO ARAÚJO' && j.fatos === 'Período aquisitivo: 19/01/2026 a 19/01/2027 Pode sair a partir de: 19/01/2027 Limite máximo para sair: 05/12/2027' &&
+      j.min === '2027-01-19' && j.max === '2027-12-05' && j.v === '2027-01-19' && j.dias === '30' && j.vivo === 'Volta em 18/02/2027 · entregar o aviso até 20/12/2026' && !j.alerta &&
+      j.bts === 'Voltar,Salvar programação', 'janela Programar: ' + JSON.stringify(j));
+    // as recusas aparecem na janela, sem ir ao servidor
+    marcar(aba);
+    const recusa = async (inicio, dias) => { await f.fill('#fe-inicio', inicio); await f.fill('#fe-dias', dias); await f.click('#janela-rodape >> text=Salvar programação'); return (await jan()).erro; };
+    afirmar(await recusa('2027-01-18', '30') === 'PATRÍCIA CONCEIÇÃO ARAÚJO só pode sair de férias a partir de 19/01/2027.', 'antes de poder sair');
+    afirmar(await recusa('2027-12-06', '30') === 'A data passa do limite máximo para sair (05/12/2027). Escolha uma data até lá.', 'depois do limite maximo');
+    afirmar(await recusa('2027-02-01', '4') === 'Dias de férias: use um número inteiro de 5 a 30.', 'dias');
+    const d = desdeMarca(aba);
+    afirmar(!d.posts && !d.runs.filter((x) => x !== 'sondarCanal').length, 'as recusas nao vao ao servidor: ' + JSON.stringify(d));
+    await f.fill('#fe-dias', '20');
+    await f.fill('#fe-obs', 'Combinado com a supervisão');
+    j = await jan();
+    afirmar(j.vivo === 'Volta em 21/02/2027 · entregar o aviso até 02/01/2027' && !j.alerta, 'ao vivo: ' + j.vivo);
+    await f.click('#janela-rodape >> text=Salvar programação');
+    await recadoFe(f, 'Férias de PATRÍCIA CONCEIÇÃO ARAÚJO programadas para 01/02/2027 (20 dias).');
+    await f.waitForFunction((nome) => { const li = document.querySelector('#qd-fe-corpo .qd-fe-item'); return li && /Programada/.test(li.innerText) && li.querySelector('.qd-fe-nome').innerText.trim() === nome; }, n('emdia'), { timeout: 15000 });
+    l = await linhaFe(f, n('emdia'));
+    afirmar(l.st === 'Programada para 01/02 · aviso até 02/01' && l.cor === 'azul' && l.bts.join() === 'Reprogramar' && await f.evaluate(() => el('qd-fe-busca').value) === 'Patrícia Conceição',
+      'a linha da busca ja programada (a busca fica): ' + JSON.stringify(l));
+    afirmar(prog('emdia') && prog('emdia').INICIO === '2027-02-01' && Number(prog('emdia').DIAS) === 20 && prog('emdia').OBSERVACAO === 'Combinado com a supervisão', 'gravou: ' + JSON.stringify(prog('emdia')));
+    // o aviso que ja nao cabe e so um alerta: grava
+    await buscar(n('pode'));
+    await botaoFe(f, n('pode'), 'Programar');
+    await f.waitForSelector('#fe-inicio');
+    await f.fill('#fe-inicio', '2026-11-01');
+    j = await jan();
+    await fotoFe(aba, f, 'programar');
+    afirmar(j.alerta === 'O aviso de 30 dias já não cabe antes desse início.' && j.vivo === 'Volta em 01/12/2026 · entregar o aviso até 02/10/2026', 'o aviso que nao cabe: ' + JSON.stringify(j));
+    await f.click('#janela-rodape >> text=Salvar programação');
+    await recadoFe(f, 'Férias de ' + n('pode') + ' programadas para 01/11/2026 (30 dias).');
+    // Reprogramar: a janela ja vem com a data e os dias
+    await buscar(n('prog'));
+    await botaoFe(f, n('prog'), 'Reprogramar');
+    await f.waitForSelector('#fe-inicio');
+    j = await jan();
+    afirmar(j.tit === 'Reprogramar férias — ' + n('prog') && j.v === '2026-12-20' && j.dias === '30', 'reprogramar: ' + JSON.stringify(j));
+    await f.fill('#fe-inicio', '2027-01-04');
+    await f.click('#janela-rodape >> text=Salvar programação');
+    await recadoFe(f, 'Férias de ' + n('prog') + ' reprogramadas para 04/01/2027 (30 dias).');
+    await f.waitForFunction((nome) => Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-item')).some((li) => li.querySelector('.qd-fe-nome').innerText.trim() === nome && /04\/01/.test(li.innerText)), n('prog'), { timeout: 15000 });
+    afirmar((await linhaFe(f, n('prog'))).st === 'Programada para 04/01 · aviso até 05/12' && banco().filter((x) => Number(x.MATRICULA) === Number(E.casos.prog.matricula)).length === 1,
+      'reprogramada na mesma linha');
+    // Confirmar saida: fica verde (cumprida) e conta nas cumpridas dos ultimos 60 dias
+    await buscar(n('confirme'));
+    await botaoFe(f, n('confirme'), 'Confirmar saída');
+    await recadoFe(f, 'Saída de férias de ' + n('confirme') + ' confirmada (19/10/2026).');
+    await f.waitForFunction((nome) => Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-item')).some((li) => li.querySelector('.qd-fe-nome').innerText.trim() === nome && /Férias cumpridas/.test(li.innerText)), n('confirme'), { timeout: 15000 });
+    l = await linhaFe(f, n('confirme'));
+    afirmar(l.cor === 'verde' && !l.bts.length && prog('confirme').SITUACAO === 'CUMPRIDA', 'confirmada: ' + JSON.stringify(l));
+    await f.fill('#qd-fe-busca', '');
+    await f.waitForFunction(() => /3 cumpridas nos últimos 60 dias/.test((document.querySelector('.qd-fe-agora-bt') || {}).innerText || ''), null, { timeout: 5000 });
+    afirmar(!(await f.evaluate((nome) => Array.from(document.querySelectorAll('.qd-fe-grupo .qd-fe-nome')).some((x) => x.innerText.trim() === nome), n('confirme'))), 'saiu das Programadas');
+    // ficha: Desfazer a confirmacao
+    const ficha = async (k) => { await f.evaluate((cod) => qdFicha(qdGeral().find((x) => x.cod === cod).ref), E.casos[k].cod); await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha'); };
+    await ficha('confirme');
+    const fc = await f.evaluate(() => document.querySelector('.qd-fe-ficha').innerText.replace(/\s+/g, ' '));
+    afirmar(/Saiu 19\/10\/2026 \(segunda-feira\) · 30 dias · volta em 18\/11\/2026 · saída confirmada em 21\/10\/2026/.test(fc) && /Desfazer confirmação$/.test(fc.trim()), 'ficha da cumprida: ' + fc);
+    await f.click('.qd-fe-ficha .qd-fe-bt:has-text("Desfazer confirmação")');
+    await recadoFe(f, 'Confirmação desfeita: as férias de ' + n('confirme') + ' voltam a programadas para 19/10/2026.');
+    await f.waitForFunction((nome) => Array.from(document.querySelectorAll('.qd-fe-grupo .qd-fe-nome')).some((x) => x.innerText.trim() === nome), n('confirme'), { timeout: 15000 });
+    afirmar((await linhaFe(f, n('confirme'))).st === 'Saída prevista para 19/10 — confirme', 'voltou para as Programadas');
+    // ficha: Cancelar programacao pergunta antes; Voltar volta para a ficha
+    await ficha('breve');
+    const fb = await f.evaluate(() => document.querySelector('.qd-fe-ficha').innerText.replace(/\s+/g, ' '));
+    afirmar(/Programada para 26\/10\/2026 \(segunda-feira\) · 30 dias · volta em 25\/11\/2026/.test(fb) && /Reprogramar Cancelar programação$/.test(fb.trim()), 'ficha da programada: ' + fb);
+    await f.click('.qd-fe-ficha .qd-fe-bt:has-text("Cancelar programação")');
+    await f.waitForSelector('.qd-fe-pergunta');
+    afirmar(await f.evaluate(() => el('janela-titulo').textContent + ' | ' + document.querySelector('.qd-fe-pergunta').innerText.replace(/\s+/g, ' ').trim()) ===
+      'Cancelar programação | Cancelar a programação das férias de ' + n('breve') + ' (início em 26/10/2026, 30 dias)? O período volta para “Programar”.', 'a pergunta');
+    await f.click('#janela-rodape >> text=Voltar');
+    await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha');
+    await f.click('.qd-fe-ficha .qd-fe-bt:has-text("Cancelar programação")');
+    await f.waitForSelector('.qd-fe-pergunta');
+    await f.click('#janela-rodape >> text=Cancelar programação');
+    await recadoFe(f, 'Programação das férias de ' + n('breve') + ' cancelada.');
+    await buscar(n('breve'));
+    l = await linhaFe(f, n('breve'));
+    afirmar(l.st === 'Já pode sair desde 02/08 — sem programação' && l.cor === 'amarelo' && l.bts.join() === 'Programar' && !prog('breve'), 'de volta a programar: ' + JSON.stringify(l));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('ferias (21/10): canal barrado (HTTP 403) — Programar e Confirmar saida gravam pela pagina (1 POST cada, os campos em JSON) e a pagina volta na aba Ferias, com a busca e o recado', async () => {
+    const { s, E, aba } = await quadroComFerias({ bloqueio403: true });
+    const n = (k) => E.casos[k].nome;
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 30000) === 'aplicacao', 'entrou pela reserva');
+    let f = await paginaNova(aba, () => CANAL_BARRADO && paginaAtual === 'modulos');
+    const pelaPagina = async (gesto, pronta) => { await f.evaluate(() => { window.__paginaVelha = true; }); await gesto(); f = await paginaNova(aba, pronta); };
+    await pelaPagina(() => f.evaluate(() => { esquecerTelas(); abrir('quadro'); }), () => paginaAtual === 'quadro' && !!document.querySelector('.qd-cartao'));
+    await f.evaluate(() => qdAba('ferias'));
+    await f.fill('#qd-fe-busca', 'patricia conceicao');
+    await f.waitForFunction(() => document.querySelectorAll('#qd-fe-corpo .qd-fe-item').length === 1, null, { timeout: 5000 });
+    await botaoFe(f, n('emdia'), 'Programar');
+    await f.waitForSelector('#fe-inicio');
+    await f.fill('#fe-inicio', '2027-03-01');
+    await f.fill('#fe-dias', '15');
+    marcar(aba);
+    const naAba = () => paginaAtual === 'quadro' && QD.aba === 'ferias' && !!document.querySelector('#qd-fe-corpo .qd-fe-item');
+    await pelaPagina(() => f.click('#janela-rodape >> text=Salvar programação'), naAba);
+    let d = desdeMarca(aba);
+    const post = aba.s.registro.slice(aba.marca).find((x) => x.tipo === 'doPost'), campos = new URLSearchParams(post.corpo);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length && campos.get('acao') === 'programarFerias' &&
+      JSON.stringify(JSON.parse(campos.get('ap'))) === JSON.stringify({ matricula: String(Number(E.casos.emdia.matricula)), nome: n('emdia'), paFim: E.casos.emdia.paFim, limiteMax: E.casos.emdia.limiteMax,
+        inicio: '2027-03-01', dias: 15, observacao: '' }), 'gravou pela pagina: ' + JSON.stringify([d, campos.get('acao'), campos.get('ap')]));
+    await f.waitForFunction(() => document.getElementById('recado').textContent === 'Férias de PATRÍCIA CONCEIÇÃO ARAÚJO programadas para 01/03/2027 (15 dias).', null, { timeout: 5000 });
+    const l = await linhaFe(f, n('emdia'));
+    afirmar(l && l.st === 'Programada para 01/03 · aviso até 30/01' && await f.evaluate(() => el('qd-fe-busca').value) === 'patricia conceicao', 'a pagina voltou na aba Ferias, com a busca: ' + JSON.stringify(l));
+    const c = s.contexto(DONO); c._porta = true;
+    afirmar(c.listar('FERIAS_PROG').some((x) => Number(x.MATRICULA) === Number(E.casos.emdia.matricula) && x.INICIO === '2027-03-01' && Number(x.DIAS) === 15), 'no servidor');
+    // Confirmar saida tambem vai pela pagina
+    await f.fill('#qd-fe-busca', n('confirmeja').split(' ')[0] + ' ' + n('confirmeja').split(' ').pop());
+    await f.waitForFunction((nome) => Array.from(document.querySelectorAll('#qd-fe-corpo .qd-fe-nome')).some((x) => x.innerText.trim() === nome), n('confirmeja'), { timeout: 5000 });
+    marcar(aba);
+    await pelaPagina(() => botaoFe(f, n('confirmeja'), 'Confirmar saída'), naAba);
+    d = desdeMarca(aba);
+    afirmar(d.posts === 1 && !d.runs.filter((x) => x !== 'sondarCanal').length, 'confirmou pela pagina: ' + JSON.stringify(d));
+    await f.waitForFunction((t) => document.getElementById('recado').textContent === t, 'Saída de férias de ' + n('confirmeja') + ' confirmada (11/10/2026).', { timeout: 5000 });
+    afirmar((await linhaFe(f, n('confirmeja'))).st === 'Férias cumpridas', 'cumprida na volta da pagina');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('ferias (21/10): celular 390 px — a busca, a lista com os botoes, o calendario, a ficha e a janela Programar sem vazar da tela (claro e escuro, com as cores legiveis); quem so ve o Quadro nao tem botao', async () => {
+    const { s, E, aba } = await quadroComFerias({ viewport: { width: 390, height: 844 } });
+    const f = await abrirFerias(aba);
+    const n = (k) => E.casos[k].nome;
+    await f.evaluate(() => { QD.feVista = 'lista'; qdAba('ferias'); });
+    await f.waitForSelector('#qd-fe-corpo .qd-fe-grupo');
+    await aba.page.waitForTimeout(300);
+    const medir = () => f.evaluate(() => {
+      const fora = [], larg = window.innerWidth;
+      document.querySelectorAll('.qd-fe *, #janela:not(.oculto) *').forEach((x) => {
+        const r = x.getBoundingClientRect();
+        if (r.width && (r.right > larg + 0.5 || r.left < -0.5) && !x.closest('.qd-fe-mes')) fora.push((x.className || x.tagName) + ' ' + Math.round(r.left) + '..' + Math.round(r.right));
+      });
+      return { fora: fora.slice(0, 6), rolagem: document.documentElement.scrollWidth - window.innerWidth };
+    });
+    let m = await medir();
+    const bt = await f.evaluate(() => { const b = document.querySelector('#qd-fe-corpo .qd-fe-bt'); const r = b.getBoundingClientRect(), a = b.closest('.qd-fe-item').querySelector('.qd-fe-abre').getBoundingClientRect(); return [Math.round(r.height), r.top >= a.bottom - 1]; });
+    afirmar(!m.fora.length && m.rolagem <= 0 && bt[0] >= 40 && bt[1], 'lista no celular (botoes embaixo, 40 px): ' + JSON.stringify([m, bt]));
+    await fotoFe(aba, f, 'celular-claro', '.qd-fe');
+    await f.fill('#qd-fe-busca', 'patricia conceicao');
+    await f.waitForFunction(() => document.querySelectorAll('#qd-fe-corpo .qd-fe-item').length === 1, null, { timeout: 5000 });
+    m = await medir();
+    afirmar(!m.fora.length && m.rolagem <= 0, 'busca no celular: ' + JSON.stringify(m));
+    await botaoFe(f, n('emdia'), 'Programar');
+    await f.waitForSelector('#fe-inicio');
+    await f.fill('#fe-inicio', '2026-11-01');
+    await f.evaluate(() => qdFeVivo());
+    m = await medir();
+    afirmar(!m.fora.length && m.rolagem <= 0, 'janela Programar no celular: ' + JSON.stringify(m));
+    await f.click('#janela-rodape >> text=Voltar');
+    await f.fill('#qd-fe-busca', '');
+    await f.evaluate((cod) => qdFicha(qdGeral().find((x) => x.cod === cod).ref), E.casos.ja.cod);
+    await f.waitForSelector('#janela:not(.oculto) .qd-fe-ficha');
+    m = await medir();
+    afirmar(!m.fora.length && m.rolagem <= 0, 'ficha no celular: ' + JSON.stringify(m));
+    await f.evaluate(() => fecharJanela());
+    await f.click('.qd-fe-vista .qd-pill:has-text("Calendário")');
+    await f.waitForSelector('.qd-fe-mes .qd-fe-dia-bt');
+    m = await medir();
+    const pontos = await f.evaluate(() => document.querySelectorAll('.qd-fe-mes .qd-fe-dia-bt .qd-fe-ponto').length);
+    afirmar(m.rolagem <= 0 && pontos > 0 && await f.evaluate(() => getComputedStyle(document.querySelector('.qd-fe-pilulas')).display === 'none'), 'calendario no celular (os quadradinhos no lugar das pilulas): ' + JSON.stringify([m, pontos]));
+    await f.click('.qd-fe-vista .qd-pill:has-text("Lista")');
+    // tema escuro: o texto colorido na cor clara (contraste), a folhinha com a tinta escura
+    const cores = () => f.evaluate(() => ['vermelho', 'laranja', 'amarelo', 'azul'].map((c) => { const x = document.querySelector('#qd-fe-corpo .qd-fe-st.qd-fe-' + c); return x ? getComputedStyle(x).color : ''; }).join(' '));
+    const claro = await cores();
+    await f.evaluate(() => alternarTema());
+    await aba.page.waitForTimeout(400);
+    const escuro = await cores();
+    m = await medir();
+    await fotoFe(aba, f, 'celular-escuro', '.qd-fe-grupo');
+    afirmar(claro === 'rgb(180, 35, 24) rgb(194, 65, 12) rgb(138, 90, 0) rgb(29, 78, 216)' && escuro === 'rgb(252, 165, 165) rgb(253, 186, 116) rgb(252, 211, 77) rgb(147, 197, 253)' &&
+      !m.fora.length && m.rolagem <= 0, 'cores do texto (claro | escuro): ' + claro + ' | ' + escuro + ' ' + JSON.stringify(m));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close();
+    // a coordenadora com o Quadro so para ver: a lista, sem nenhum botao de gravar
+    const cx = s.contexto(DONO); cx._porta = true;
+    const adminCx = { email: DONO, perfil: 'ADMIN', permissoes: cx.permissoesDe('ADMIN') };
+    cx.acaoDefinirModuloPessoa(adminCx, { id: cx.listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD).ID, modulo: 'quadro', modo: 'VER' });
+    criarPin(s, GERAL, COORD, '1357');
+    const pc = await abrirAba(s, GERAL, { relogio: QUARTA_21_10 });
+    await entrar(pc, COORD, '1357');
+    await esperarTela(pc, ['aplicacao']);
+    const g = await frame(pc);
+    await g.evaluate(() => abrir('quadro'));
+    await g.waitForSelector('.qd-cartao', { timeout: 20000 });
+    await g.evaluate(() => { QD.equipe = '*'; qdAba('ferias'); });
+    await g.waitForSelector('#qd-fe-corpo .qd-fe-item');
+    await g.evaluate((cod) => qdFicha(qdGeral().find((x) => x.cod === cod).ref), E.casos.confirme.cod);
+    await g.waitForSelector('#janela:not(.oculto) .qd-fe-ficha');
+    afirmar(await g.evaluate(() => !document.querySelector('.qd-fe-bt') && !/Parâmetros/.test(document.querySelector('.qd-fe-rodape').innerText) &&
+      /Saída prevista para 19\/10 — confirme/.test(document.querySelector('.qd-fe-ficha').innerText)), 'quem so ve: a situacao, sem botao');
+    afirmar(!pc.erros.length, 'erros: ' + pc.erros.join(' | '));
+    await pc.contexto.close(); await s.fechar();
   });
 
   await navegador.close();

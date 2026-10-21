@@ -89,6 +89,9 @@ const bloqueadas = [
   ['acaoLimparSiglaOrfa', FALSO, { sigla: 'RON' }],
   // 20/10: Remover do estoque apaga o item E as movimentacoes dele
   ['acaoExcluirItemEstoque', FALSO, { id: 'x', excluirMovimentos: true }], ['acaoExcluirItemLimpeza', FALSO, { id: 'x', excluirMovimentos: true }],
+  // 21/10: programacao das ferias do Quadro (grava no banco da filial)
+  ['acaoProgramarFerias', FALSO, { matricula: '123', nome: 'x', paFim: '2026-06-09', inicio: '2026-12-07', dias: 30 }],
+  ['acaoConfirmarFerias', FALSO, { id: 'x' }], ['acaoCancelarProgramacaoFerias', FALSO, { id: 'x' }],
   ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
 ];
 const emailsAntesDosAtaques = m.emails.length;

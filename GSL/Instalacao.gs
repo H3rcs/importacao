@@ -143,6 +143,17 @@ const ESQUEMA = {
                 'AUTOR_PAPEL', 'TIPO', 'ANEXOS', 'MENCOES'],
 
   /*
+   * PROGRAMACAO DAS FERIAS (8.11) — Quadro do CD. A aba FÉRIAS da planilha
+   * do Quadro e a extracao do RH (so leitura); a data programada fica aqui,
+   * uma linha viva por periodo aquisitivo: a MATRICULA e o PA_FIM da linha
+   * da FÉRIAS (sem o pa_fim, o LIMITE_MAX). NOME e o da FÉRIAS (liga a linha
+   * sem matricula). INICIO em aaaa-mm-dd. SITUACAO: PROGRAMADA · CUMPRIDA
+   * (a saida confirmada na tela). Cancelar exclui a linha (EXCLUIDO).
+   */
+  FERIAS_PROG: ['MATRICULA', 'NOME', 'PA_INICIO', 'PA_FIM', 'LIMITE_MAX', 'INICIO', 'DIAS', 'SITUACAO',
+                'OBSERVACAO', 'CONFIRMADA_EM', 'CONFIRMADA_POR'],
+
+  /*
    * CONVERSA — uma linha por mensagem.
    * CONTEXTO diz onde ela vive: 'ATIVIDADE' (a caixa dentro da atividade)
    * ou 'DIRETO' (conversa de duas pessoas). ALVO e o ID da atividade ou a
@@ -295,7 +306,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.10';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) (a proxima e 8.11: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.11';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) (a proxima e 8.12: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a

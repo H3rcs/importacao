@@ -1169,9 +1169,10 @@ const qdEstadoInicial = (de) => ({ de: de || '', aba: 'geral', equipe: '*', func
   busca: '', mostrar: 'empresa', organizar: 'funcao', ordK: 'nome', ordA: 1, limite: 100,
   periodo: 180, motivo: '', mes: '', sentido: 'tudo', limiteMov: 30, recolhidas: {},
   admAberto: false, desfalquesTodos: false, verTabela: false, leituraAberta: false,
-  // aba Ferias (14/10): Lista ou Calendario ('' = a ultima escolha deste navegador), Programar aberto, a lista de quem
-  // esta sem dados aberta, o mes do calendario e o dia aberto
-  feVista: '', feProgramar: false, feSemDados: false, feMes: '', feDia: '' });
+  // aba Ferias (21/10): Lista ou Calendario ('' = a ultima escolha deste navegador), a busca pelo nome, a linha de quem
+  // esta de ferias agora aberta, os grupos com todos, a lista de quem esta sem dados aberta, o mes do calendario, o dia
+  // aberto e o periodo da janela Programar
+  feVista: '', feBusca: '', feAgora: false, feTodos: {}, feSemDados: false, feMes: '', feDia: '', feAlvo: null });
 let QD = qdEstadoInicial();
 const QD_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
 const QD_TURNOS = ['1° TURNO', '2° TURNO', '3° TURNO'];
@@ -1263,7 +1264,7 @@ function qdMemo() {
   const efeito = { limiteMax: 'sem ela, o GSL não sabe o prazo de ninguém',
     matricula: 'só as linhas do centro de custo do CD se ligam à GERAL, pelo nome exato; as dos outros centros de custo ficam de fora',
     nome: 'a matrícula liga as linhas do CD sem conferir o nome; o final de RH que é de mais de uma pessoa ativa fica sem dono, e as linhas dos outros centros de custo ficam de fora',
-    paFim: '"pode tirar desde" e "em aquisição" usam o DTA_LIMITE (sem ele, ficam sem base)' };
+    paFim: '"pode sair a partir de" usa só o DTA_LIMITE (sem ele, fica sem data), e a programação liga o período pelo DTA_LIMITEMAX' };
   const feAba = lf && (lfFaltam.length || lf.linhas === 0) ? [{ tipo: 'FERIAS_ABA', nome: 'Aba ' + (lf.aba || 'FÉRIAS'), gravidade: 'atencao',
     linha: 1, aba: lf.aba, gid: (DADOS.ferias || {}).gid,
     detalhe: lfFaltam.length && lf.linhas === 0
@@ -1383,6 +1384,7 @@ function pintarQuadro(r) {
     const t = String((SESSAO && SESSAO.usuario && SESSAO.usuario.turno) || '').toUpperCase().trim();
     const meu = { A: '1° TURNO', B: '2° TURNO', C: '3° TURNO' }[t];
     if (meu && qdNaEmpresa().some((g) => g.equipe === meu)) QD.equipe = meu;
+    qdFeRetomar(quem);                     // a gravacao das ferias pela pagina volta na aba Ferias
   }
   if ((QD.equipe !== '*' && QD.equipe !== '' && QD_EQUIPES.indexOf(QD.equipe) === -1) ||
       (QD.equipe === '' && !qdNaEmpresa().some((g) => !g.equipe))) QD.equipe = '*';
@@ -1703,7 +1705,7 @@ const QD_TIPOS = {
   // FÉRIAS (14/10): a extracao do sistema cruzada com a GERAL pela matricula (os ultimos numeros do RH)
   FERIAS_ABA: { titulo: 'Férias: a aba FÉRIAS está vazia ou incompleta', curto: 'aba FÉRIAS',
     oque: 'Faltam as linhas ou uma coluna que o GSL usa para ligar as férias à GERAL e calcular os prazos. O detalhe diz o que deixa de funcionar.',
-    corrigir: 'Extraia as férias do sistema de novo e cole na aba com o cabeçalho como sai do sistema (Matricula, Nome, pa_fim, DTA_LIMITEMAX…); depois use Atualizar dados.' },
+    corrigir: 'Extraia as férias do sistema de novo e cole na aba com o cabeçalho como sai do sistema (Matricula, Nome, pa_fim, DTA_LIMITE, DTA_LIMITEMAX…); depois use Atualizar dados.' },
   FERIAS_NOME: { titulo: 'Férias: matrícula de outra pessoa', curto: 'férias: matrícula de outro nome',
     oque: 'A matrícula da aba FÉRIAS (os últimos números do RH) bate com alguém da GERAL de outro nome: as férias seriam de outra pessoa, e o GSL não as liga a ela.',
     corrigir: 'Confira o RH na GERAL: os últimos números precisam ser a matrícula do sistema.' },
@@ -2255,30 +2257,23 @@ function qdListaMov(adm, des, j) {
 }
 
 /* ------------------------------------------------------------------ */
-/* FERIAS (14/10) — dados                                              */
+/* FERIAS (21/10, programacao) — dados                                 */
 /* ------------------------------------------------------------------ */
 /*
- * A aba FÉRIAS (extracao do sistema de RH) chega casada com a GERAL
- * (f.ref, pela matricula = os ultimos numeros do RH). A situacao de cada
- * periodo aquisitivo e calculada aqui, com a data de hoje, pelos dias ate
- * o DTA_LIMITEMAX (a data limite para sair de ferias): VENCIDA (prazo
- * vencido), CRITICA (data limite mais perto que o aviso de ferias: ja nao da
- * para avisar com a antecedencia toda, a pessoa precisa sair), AVISAR (o aviso
- * sai ate a data limite - aviso), PLANEJAR ("programar"), LIBERADA (ja
- * completou o periodo aquisitivo) ou EM AQUISICAO (as duas: "em dia"). As
- * faixas vem dos parametros (padrao: 30, 60 e 90 dias). A da pessoa e a do
- * periodo mais urgente. Os codigos ficam so no codigo: a tela usa palavras
- * neutras (prazo, data limite, sair ate, avisar ate, programar, em dia),
- * porque quem ve a tela pode ser o proprio colaborador.
+ * A aba FÉRIAS (extracao do sistema de RH) chega casada com a GERAL (f.ref, pela matricula = os ultimos numeros
+ * do RH) e com a programacao de cada periodo (f.prog = o ID em DADOS.programacoes, gravada no banco da filial).
+ * Cada periodo tem duas datas da extracao: L, a partir de quando a pessoa pode sair (o DTA_LIMITE; sem ele, o dia
+ * seguinte ao pa_fim) e M, o limite maximo para sair (o DTA_LIMITEMAX: o ultimo dia para COMECAR as ferias). A
+ * situacao de cada periodo e calculada aqui, com a data de hoje, numa cor de urgencia:
+ *   azul = no prazo · amarelo = atencao · laranja = urgente · vermelho = critico · verde = resolvido · cinza = nada a fazer
+ * Sem programacao: cinza (ainda longe de poder sair), vermelho (o limite maximo passou, ou o aviso ja nao cabe antes
+ * dele), laranja (limite maximo em ate "urgente" dias), amarelo (ja pode sair) e azul (pode sair em breve).
+ * Programada: azul, amarelo na semana do aviso, azul, laranja na semana da saida e do inicio ate a tolerancia
+ * ("confirme"), vermelho depois; verde se a GERAL ja diz que esta de ferias. Confirmada: verde. A pessoa vale pelo
+ * periodo mais urgente. Palavras neutras (prazo, pode sair, limite maximo, programar, aviso, confirmar): quem ve a
+ * tela pode ser o proprio colaborador.
  */
-/* periodo completo sem DTA_LIMITEMAX vem antes de "liberada"/"em aquisicao": o prazo dele pode ate ter vencido */
-const QD_FERIAS_ORDEM = ['vencida', 'critica', 'avisar', 'planejar', 'semdata', 'liberada', 'aquisicao'];
-/*
- * Os parametros das ferias (botao Parametros da aba Ferias; o servidor manda os da filial). aviso = antecedencia
- * do aviso de ferias (o "avisar ate" e a data limite menos isso; data limite mais perto que isso: "precisam sair de
- * ferias"); avisar e planejar = ate quantos dias da data limite vao os grupos "Avisar" e "Programar".
- */
-const QD_FE_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, avisar: 60, planejar: 90 };
+const QD_FE_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, janela: 60, urgente: 60, tolerancia: 3 };
 const qdFeP = () => Object.assign({}, QD_FE_PADRAO, (DADOS && DADOS.parametrosFerias) || {});
 /* Dias de uma data ISO (aaaa-mm-dd) a outra, sem fuso. */
 function qdDias(de, ate) {
@@ -2289,90 +2284,111 @@ function qdSomarDias(iso, n) {
   const x = String(iso).split('-');
   return new Date(Date.UTC(Number(x[0]), Number(x[1]) - 1, Number(x[2]) + n)).toISOString().slice(0, 10);
 }
-function qdFeriasSituacao(f, hoje, P) {
+/* "aaaa-mm-dd" de uma data que existe (31/02 nao). */
+function qdIsoValido(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return !!m && qdSomarDias(iso, 0) === iso;
+}
+/* A ordem de urgencia. O periodo ja cumprido vem por ultimo: o proximo periodo da pessoa vale mais que ele. */
+const QD_FE_CORES = ['vermelho', 'laranja', 'amarelo', 'azul', 'semdata', 'verde', 'cinza'];
+const qdFeRank = (st) => st.feita ? QD_FE_CORES.length : QD_FE_CORES.indexOf(st.cor);
+const qdFePorUrgencia = (a, b) => qdFeRank(a) - qdFeRank(b) || String(a.data || '9999').localeCompare(String(b.data || '9999'));
+/*
+ * A situacao de um periodo: { cor, k, txt (o texto colorido), data (a que importa: a folhinha e a pilula do
+ * calendario), L, M, prog, programada, feita }.
+ */
+function qdFeSituacao(f, prog, g, hoje, P) {
   P = P || qdFeP();
-  const libera = f.paFim || f.limite;                            // o DTA_LIMITE repete o pa_fim
-  if (!f.limiteMax) return { k: libera && libera >= hoje ? 'aquisicao' : 'semdata', dias: null };
-  const dias = qdDias(hoje, f.limiteMax);
-  if (dias < 0) return { k: 'vencida', dias };
-  if (dias < P.aviso) return { k: 'critica', dias };                // o aviso inteiro ja nao cabe antes da data limite
-  if (dias <= P.avisar) return { k: 'avisar', dias };               // com dias = aviso, o aviso e hoje
-  if (dias <= P.planejar) return { k: 'planejar', dias };
-  return { k: libera && libera >= hoje ? 'aquisicao' : 'liberada', dias };   // pode tirar desde o dia seguinte ao pa_fim
+  const L = f.limite || (f.paFim ? qdSomarDias(f.paFim, 1) : ''), M = f.limiteMax || '';
+  const st = { f, prog: prog || null, L, M, programada: !!(prog && prog.situacao === 'PROGRAMADA'), feita: !!(prog && prog.situacao === 'CUMPRIDA') };
+  const dm = qdFeDM, em = qdFeEm;
+  const ret = (cor, k, txt, data) => Object.assign(st, { cor, k, txt, data: data || '' });
+  if (st.feita) return ret('verde', 'cumprida', 'Férias cumpridas', prog.inicio);
+  if (st.programada) {
+    const I = prog.inicio, A = qdSomarDias(I, -P.aviso);
+    if (M && I > M && hoje < I) {
+      return ret('vermelho', 'depois', M >= hoje ? 'Programada depois do limite máximo — reprogramar' : 'Limite máximo vencido em ' + dm(M) + ' — sai em ' + dm(I), I);
+    }
+    if (hoje < qdSomarDias(A, -7)) return ret('azul', 'prog', 'Programada para ' + dm(I) + ' · aviso até ' + dm(A), I);
+    if (hoje <= A) return ret('amarelo', 'aviso', 'Entregar o aviso até ' + dm(A) + ' (' + em(A) + ')', I);
+    if (hoje < qdSomarDias(I, -7)) return ret('azul', 'sai', 'Sai em ' + dm(I) + ' (' + em(I) + ')', I);
+    if (hoje < I) return ret('laranja', 'breve', 'Sai ' + em(I) + ' (' + dm(I) + ')', I);
+    if (g && g.situacao === 'FERIAS') return ret('verde', 'deferias', 'De férias desde ' + dm(I), I);
+    if (hoje <= qdSomarDias(I, P.tolerancia)) return ret('laranja', 'confirme', 'Saída prevista para ' + dm(I) + ' — confirme', I);
+    return ret('vermelho', 'confirmeja', 'Saiu de férias em ' + dm(I) + '? Confirme', I);
+  }
+  if (M && hoje > M) return ret('vermelho', 'vencido', 'Limite máximo para sair vencido em ' + dm(M) + ' (' + em(M) + ')', M);
+  if (L && hoje < qdSomarDias(L, -P.janela)) return ret('cinza', 'emdia', 'Em dia — pode sair a partir de ' + dm(L), L);
+  if (!M) return ret('semdata', 'semdata', 'Sem limite máximo na aba FÉRIAS', L);
+  const dias = qdDias(hoje, M);
+  if (dias < P.aviso) return ret('vermelho', 'hoje', 'Programe hoje: limite máximo ' + em(M), M);
+  if (dias <= P.urgente) return ret('laranja', 'ja', 'Programe já: limite máximo ' + em(M), M);
+  if (!L) return ret('amarelo', 'pode', 'Sem programação — limite máximo em ' + dm(M), M);
+  if (hoje >= L) return ret('amarelo', 'pode', 'Já pode sair desde ' + dm(L) + ' — sem programação', L);
+  return ret('azul', 'programar', 'Programar: pode sair a partir de ' + dm(L), L);
 }
 /*
- * Uma entrada por pessoa ATIVA da GERAL com ferias: { g, periodos: [{ f, k, dias, avisar }], pior }.
- * Linhas do CD sem par na GERAL ficam em foraGeral (a Conferencia aponta). Guardado por dia.
+ * Uma entrada por pessoa ATIVA da GERAL com ferias: { g, periodos: [situacao], pior }. Linhas do CD sem par na GERAL
+ * ficam em foraGeral (a Conferencia aponta); cumpridas = as programacoes cumpridas (confirmadas, ou com o periodo
+ * ja fechado pelo RH) que comecaram nos ultimos 60 dias. Guardado por dia.
  */
 function qdFeriasDados() {
   const memo = qdMemo(), hoje = qdHoje(), P = qdFeP();
   if (memo.ferias && memo.ferias.hoje === hoje) return memo.ferias;
-  const porRef = {};
+  const porRef = {}, progs = {};
   qdGeral().forEach((g) => { porRef[g.ref] = g; });
+  (DADOS.programacoes || []).forEach((x) => { progs[x.id] = x; });
   const pessoas = {}, foraGeral = [];
   ((DADOS.ferias || {}).linhas || []).forEach((f) => {
     const g = f.ref ? porRef[f.ref] : null;
     if (!g) { foraGeral.push(f); return; }
     if (!g.ativo) return;                                     // ja saiu da empresa
-    const sit = qdFeriasSituacao(f, hoje, P);
     const p = pessoas[g.ref] = pessoas[g.ref] || { g, periodos: [] };
-    p.periodos.push({ f, k: sit.k, dias: sit.dias, avisar: f.limiteMax ? qdSomarDias(f.limiteMax, -P.aviso) : '' });
+    p.periodos.push(qdFeSituacao(f, f.prog ? progs[f.prog] : null, g, hoje, P));
   });
-  const rank = (x) => QD_FERIAS_ORDEM.indexOf(x.k);
   const lista = Object.keys(pessoas).map((r) => {
     const p = pessoas[r];
-    p.periodos.sort((a, b) => rank(a) - rank(b) || (a.dias === null ? 1e9 : a.dias) - (b.dias === null ? 1e9 : b.dias));
+    p.periodos.sort(qdFePorUrgencia);
     p.pior = p.periodos[0];
     return p;
   });
-  memo.ferias = { hoje, lista, porRef: pessoas, foraGeral, tem: !!DADOS.ferias };
+  const desde = qdSomarDias(hoje, -60);
+  const cumpridas = (DADOS.programacoes || []).filter((x) => x.situacao === 'CUMPRIDA' && x.inicio && x.inicio >= desde && porRef[x.ref] && porRef[x.ref].ativo)
+    .map((x) => ({ x, g: porRef[x.ref] })).sort((a, b) => b.x.inicio.localeCompare(a.x.inicio));
+  memo.ferias = { hoje, lista, porRef: pessoas, foraGeral, cumpridas, tem: !!DADOS.ferias };
   return memo.ferias;
 }
+/* Quem grava a programacao: quem pode trocar a planilha do Quadro, com o servidor desta versao (a tabela no banco). */
+const qdFePodeProgramar = () => !!(DADOS.podeConfigurar && Array.isArray(DADOS.programacoes) && !DADOS.semProgramacao);
 
 /* ------------------------------------------------------------------ */
 /* FERIAS — a aba                                                      */
 /* ------------------------------------------------------------------ */
 /*
- * Um cartao so, "O que fazer e ate quando", que responde a pergunta do
- * gerente: quem avisar ou mandar de ferias, e ate quando. Cada pessoa aparece
- * uma vez (pelo periodo mais urgente), com um verbo e uma data: a de agir,
- * numa folhinha. Tres grupos, na ordem de agir: Precisam sair de ferias
- * (prazo vencido ou data limite mais perto que o aviso), Avisar e Programar
- * (fechado). O calendario do mes fica no mesmo cartao, a um toque (Lista |
- * Calendario), com a mesma regra: uma pilula por pessoa, no dia de agir. O
- * resto cabe no rodape. A linha de filtros (Equipe, Funcao) vale para tudo; o
- * contador da aba conta o CD inteiro e some com a aba aberta (o numero ja esta
- * na lista). Cada pessoa conta num lugar so: os grupos, "em dia" e "sem dados"
- * somam o quadro do recorte.
+ * Um cartao so, "Programacao de ferias". Em cima, a busca pelo nome (com texto, a lista de todo mundo que bate,
+ * em qualquer situacao, com os botoes: da para programar quem esta em dia). Embaixo, dois grupos: Programar (sem
+ * data escolhida e ja na janela, ou atrasado) e Programadas (acompanhar o aviso e confirmar a saida), cada pessoa
+ * uma vez, com a folhinha da data que importa e o texto colorido. Uma linha recolhida diz quem esta de ferias
+ * agora e quantas foram cumpridas nos ultimos 60 dias. O calendario do mes fica a um toque (Lista | Calendario).
+ * No rodape: em dia, sem dados, Excel, Parametros e a legenda das cores. Cada pessoa conta num lugar so:
+ * Programar + Programadas + em dia + sem dados = o quadro do recorte (Equipe, Funcao).
  */
-const QD_FE_GRUPO = { vencida: 'sair', critica: 'sair', avisar: 'avisar', planejar: 'prog', liberada: 'emdia', aquisicao: 'emdia', semdata: 'sem' };
-/* A situacao de um periodo por extenso (a ficha) e no Excel. */
-const QD_FE_ROTULO = { vencida: 'Prazo vencido', critica: 'Urgente: sair até a data', avisar: 'Avisar', planejar: 'Programar',
-  liberada: 'Em dia', aquisicao: 'Em dia', semdata: 'Sem data limite na aba FÉRIAS' };
-const QD_FE_EXCEL = { vencida: 'PRAZO VENCIDO', critica: 'URGENTE', avisar: 'AVISAR', planejar: 'PROGRAMAR', liberada: 'EM DIA', aquisicao: 'EM DIA',
-  semdata: 'SEM DATA LIMITE' };
 const QD_FE_MES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 const QD_FE_MES_LONGO = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const QD_FE_SEMANA = [['DOM', 'D'], ['SEG', 'S'], ['TER', 'T'], ['QUA', 'Q'], ['QUI', 'Q'], ['SEX', 'S'], ['SÁB', 'S']];
 const QD_FE_SEMANA_LONGA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const QD_FE_LEGENDA = [['vermelho', 'crítico'], ['laranja', 'urgente'], ['amarelo', 'atenção'], ['azul', 'no prazo'], ['verde', 'resolvido'], ['cinza', 'nada a fazer']];
 /* Lista ou Calendario: a ultima escolha de quem olha fica neste navegador. */
 const QD_FE_CHAVE_VISTA = 'gsl_ferias_vista';
-/*
- * Icones: uma forma por grupo, nunca so a cor. Quadrado vermelho = precisam sair e triangulo ambar = avisar (os do
- * QD_ICONES); relogio = programar; circulo = em dia; circulo tracejado = sem dados. Dentro da pilula cheia, a mesma
- * forma em branco ou escuro. O sol = de ferias agora.
- */
+/* Quantas pessoas cada grupo mostra antes do "Mostrar todos". */
+const QD_FE_LIMITE = 40;
 const QD_FE_ICO = {
-  prog: '<svg class="qd-fe-ico prog" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 3.9V7l2.1 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  emdia: '<svg class="qd-fe-ico emdia" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
-  sem: '<svg class="qd-fe-ico emdia" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.3 1.8"/></svg>',
+  emdia: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+  sem: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.3 1.8"/></svg>',
   sol: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="2.7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 .9v1.6M7 11.5v1.6M.9 7h1.6M11.5 7h1.6M2.7 2.7l1.1 1.1M10.2 10.2l1.1 1.1M2.7 11.3l1.1-1.1M10.2 3.8l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-  pilSair: '<svg class="qd-fe-ico" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true" focusable="false"><rect x=".6" y=".6" width="10.8" height="10.8" rx="2.4" fill="#fff"/><path d="M6 3.1v3.5M6 8.7v.1" stroke="#d03b3b" stroke-width="1.8" stroke-linecap="round"/></svg>',
-  pilAvisar: '<svg class="qd-fe-ico" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true" focusable="false"><path d="M6 .7 11.5 11H.5z" fill="#14152b"/><path d="M6 4.4v3M6 9.1v.1" stroke="#fab219" stroke-width="1.5" stroke-linecap="round"/></svg>',
   lista: '<svg class="qd-fe-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.2" fill="currentColor"/><circle cx="2.6" cy="8" r="1.2" fill="currentColor"/><circle cx="2.6" cy="12" r="1.2" fill="currentColor"/></svg>',
   cal: '<svg class="qd-fe-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="1.6" y="2.6" width="12.8" height="11.8" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 6.4h12.4M5 1.2v2.8M11 1.2v2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 };
-const qdFeIco = (gr) => gr === 'sair' ? QD_ICONES.grave : gr === 'avisar' ? QD_ICONES.atencao : (QD_FE_ICO[gr] || QD_FE_ICO.emdia);
 /* "17/10"; com o ano quando a data esta a mais de 300 dias de hoje (para frente ou para tras), para o ano nunca ser lido errado. */
 const qdFeDM = (iso) => iso ? (Math.abs(qdDias(qdHoje(), iso)) > 300 ? pnDataLonga(iso) : iso.slice(8, 10) + '/' + iso.slice(5, 7)) : '—';
 const qdFeSemana = (iso) => QD_FE_SEMANA_LONGA[new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)))).getUTCDay()];
@@ -2402,13 +2418,10 @@ function qdFeEm(iso) {
   if (d === -1) return 'ontem';
   return d > 0 ? 'em ' + qdPlural(d, 'dia', 'dias') : 'há ' + qdPlural(-d, 'dia', 'dias');
 }
-/* A data de agir: a data limite (quem precisa sair) ou o ultimo dia do aviso (os outros). */
-const qdFeDataAgir = (per) => QD_FE_GRUPO[per.k] === 'sair' ? per.f.limiteMax : per.avisar;
 /* Quem a CDESLIGADOS diz que saiu e continua ATIVO na GERAL (a faixa vermelha do painel ja diz o nome): a linha avisa. */
 const qdFeSaiu = (g) => (qdMemo().pend[g.ref] || []).some((x) => x.tipo === 'DESLIGADO_ATIVO');
-/* Do mais urgente para o menos: pelos dias ate a data limite (o prazo vencido ha mais tempo primeiro); empate, pelo nome. */
-const qdFePorPrazo = (a, b) => (a.pior.dias === null ? 1e9 : a.pior.dias) - (b.pior.dias === null ? 1e9 : b.pior.dias) ||
-  qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g));
+const qdFePorPessoa = (a, b) => qdFePorUrgencia(a.pior, b.pior) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g));
+const qdFeUrgente = (p) => p.pior.cor === 'vermelho' || p.pior.cor === 'laranja';
 
 /* Quem entra: as pessoas ATIVAS da GERAL com ferias, no recorte da linha de filtros (Equipe, Funcao). */
 function qdFePessoas() {
@@ -2416,23 +2429,29 @@ function qdFePessoas() {
   qdRecorte(qdNaEmpresa()).forEach((g) => { refs[g.ref] = true; });
   return qdFeriasDados().lista.filter((p) => refs[p.g.ref]);
 }
-/* Cada pessoa num grupo so: o do periodo mais urgente. */
+/* Cada pessoa num lugar so, pelo periodo mais urgente: Programar, Programadas, em dia (cinza ou verde) ou sem dados. */
 function qdFeContagem(pessoas) {
-  const c = { vencida: [], critica: [], avisar: [], planejar: [], liberada: [], aquisicao: [], semdata: [] };
-  pessoas.forEach((p) => { c[p.pior.k].push(p); });
+  const c = { programar: [], programadas: [], emdia: [], semdata: [] };
+  pessoas.forEach((p) => {
+    const st = p.pior;
+    if (st.cor === 'semdata') c.semdata.push(p);
+    else if (st.cor === 'verde' || st.cor === 'cinza') c.emdia.push(p);
+    else (st.programada ? c.programadas : c.programar).push(p);
+  });
+  c.programar.sort(qdFePorPessoa);
+  c.programadas.sort(qdFePorPessoa);
   return c;
 }
 /*
  * O que o GSL NAO sabe das ferias do recorte: a aba FÉRIAS sem a coluna da data limite (ou sem nenhuma linha),
  * quem do quadro nao tem linha ligada e quem tem como periodo mais urgente um sem DTA_LIMITEMAX ("sem dados").
- * Quem tem prazo num periodo e outro periodo sem data fica no grupo do prazo, com a etiqueta "periodo sem data":
- * cada pessoa conta num lugar so. Nada disso pode virar "ninguem para avisar".
+ * Nada disso pode virar "ninguem para programar".
  */
 function qdFeDesconhecido() {
   const pessoas = qdFePessoas(), comLinha = {};
   pessoas.forEach((p) => { comLinha[p.g.ref] = true; });
   const semLinha = qdRecorte(qdNaEmpresa()).filter((g) => !comLinha[g.ref]);
-  const semData = pessoas.filter((p) => p.pior.k === 'semdata');
+  const semData = pessoas.filter((p) => p.pior.cor === 'semdata');
   const ruim = qdFeAbaRuim();
   return { aba: ruim ? ruim.curto : '', semLinha, semData, n: semLinha.length + semData.length };
 }
@@ -2443,7 +2462,7 @@ function qdFeDesconhecido() {
  */
 function qdFeAbaRuim() {
   const lf = (DADOS.leitura && DADOS.leitura.ferias) || {}, aba = lf.aba || 'FÉRIAS', faltam = lf.faltam || [];
-  const cab = 'O cabeçalho precisa ter Matricula, Nome, pa_fim e DTA_LIMITEMAX, como sai do sistema.';
+  const cab = 'O cabeçalho precisa ter Matricula, Nome, pa_fim, DTA_LIMITE e DTA_LIMITEMAX, como sai do sistema.';
   if (faltam.indexOf('limiteMax') !== -1) {
     return { curto: 'sem a coluna DTA_LIMITEMAX', t: 'Não achei a coluna DTA_LIMITEMAX na aba ' + aba, frase: 'Sem ela, o GSL não sabe o prazo de ninguém. ' + cab };
   }
@@ -2453,40 +2472,52 @@ function qdFeAbaRuim() {
   if (lf.linhas === 0) return { curto: 'vazia', t: 'A aba ' + aba + ' está vazia', frase: 'Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados.' };
   return null;
 }
-/* O proximo aviso entre quem nao precisa sair: a primeira data de "avisar ate" (de hoje em diante). */
-function qdFeProximoAviso(pessoas) {
-  const hoje = qdHoje();
-  return pessoas.filter((p) => QD_FE_GRUPO[p.pior.k] !== 'sair' && p.pior.avisar && p.pior.avisar >= hoje)
-    .sort((a, b) => a.pior.avisar.localeCompare(b.pior.avisar) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g)))[0] || null;
+/* A proxima pessoa a entrar em "Programar" (a de "pode sair a partir de" mais perto), entre quem esta em dia. */
+function qdFeProxima(pessoas) {
+  return pessoas.filter((p) => p.pior.k === 'emdia').sort((a, b) => a.pior.L.localeCompare(b.pior.L) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g)))[0] || null;
 }
 
 function qdFerias() {
   if (QD.feVista !== 'lista' && QD.feVista !== 'calendario') QD.feVista = lerLocal(QD_FE_CHAVE_VISTA) === 'calendario' ? 'calendario' : 'lista';
-  const estado = qdFeEstado();
+  const estado = qdFeAbaEstado();
   if (estado) return estado;
   const ninguem = !qdRecorte(qdNaEmpresa()).length;
-  const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido();
   return `<section class="bq-card qd-fe" aria-labelledby="qd-fe-tit">
     ${qdFeCab(true)}
     ${qdFeFaltam()}
     ${ninguem ? `<p class="qd-fe-vazio">Ninguém neste filtro. <button class="qd-link" onclick="qdLimpar()">Limpar filtros</button></p>`
-      : QD.feVista === 'calendario' ? qdFeCalendario(pessoas, c) : qdFeLista(pessoas, c, d)}
-    ${ninguem ? '' : qdFeRodape(c, d)}
+      : `<div id="qd-fe-corpo">${qdFeCorpo()}</div>${qdFeRodape()}`}
   </section>`;
+}
+/* O que muda com a busca e com Lista | Calendario (a busca redesenha so isto: o cursor fica no campo). */
+function qdFeCorpo() {
+  if (String(QD.feBusca || '').trim()) return qdFeBuscaLista();
+  const pessoas = qdFePessoas();
+  return QD.feVista === 'calendario' ? qdFeCalendario(pessoas) : qdFeLista(qdFeContagem(pessoas), pessoas);
+}
+function qdFeRedesenharCorpo() {
+  const alvo = el('qd-fe-corpo'); if (!alvo) return;
+  const foco = qdGuardarFoco();
+  alvo.innerHTML = qdFeCorpo();
+  qdDevolverFoco(foco);
 }
 function qdFeCab(completo) {
   const P = qdFeP();
   const vista = (k, ico, rot) => `<button class="qd-pill" aria-pressed="${QD.feVista === k}" onclick="qdFeVista(${jsArg(k)})">${ico}${rot}</button>`;
   return `<header class="qd-fe-cab">
-    <div class="qd-fe-cab-tit"><h2 id="qd-fe-tit">O que fazer e até quando</h2>
+    <div class="qd-fe-cab-tit"><h2 id="qd-fe-tit">Programação de férias</h2>
       ${completo && P.aviso ? `<p class="qd-fe-sub">O aviso de férias é dado ${qdPlural(P.aviso, 'dia', 'dias')} antes da saída.</p>` : ''}</div>
     ${completo ? `<div class="qd-seg pequeno qd-fe-vista" role="group" aria-label="Ver como">${vista('lista', QD_FE_ICO.lista, 'Lista')}${vista('calendario', QD_FE_ICO.cal, 'Calendário')}</div>` : ''}
-  </header>`;
+  </header>
+  ${completo ? `<label class="qd-fe-busca"><span class="qd-fe-so-leitor">Buscar pelo nome</span>
+    <input type="search" id="qd-fe-busca" value="${esc(QD.feBusca || '')}" placeholder="Buscar pelo nome" autocomplete="off" spellcheck="false"
+      oninput="QD.feBusca=this.value;clearTimeout(QD.tFeBusca);QD.tFeBusca=setTimeout(qdFeRedesenharCorpo,150)"
+      onkeydown="if(event.key==='Enter')qdFeBuscaEnter()"></label>` : ''}`;
 }
 /* Sem a aba, ou com a aba que nao serve (vazia, sem a data limite, sem Matricula e Nome): o cartao curto, com o que fazer. */
-function qdFeEstado() {
+function qdFeAbaEstado() {
   const ruim = DADOS.ferias ? qdFeAbaRuim() : { t: 'Falta a aba FÉRIAS na planilha',
-    frase: 'Extraia as férias do sistema (com Matricula, Nome, pa_fim e DTA_LIMITEMAX), cole numa aba chamada FÉRIAS desta planilha e use Atualizar dados.' };
+    frase: 'Extraia as férias do sistema (com Matricula, Nome, pa_fim, DTA_LIMITE e DTA_LIMITEMAX), cole numa aba chamada FÉRIAS desta planilha e use Atualizar dados.' };
   if (!ruim) return '';
   return `<section class="bq-card qd-fe" aria-labelledby="qd-fe-tit">${qdFeCab(false)}
     <div class="qd-fe-estado">${QD_ICONES.grave}<b>${esc(ruim.t)}</b><p>${esc(ruim.frase)}</p>
@@ -2503,80 +2534,166 @@ function qdFeFaltam() {
     ${esc(lf.aba || 'FÉRIAS')}: parte das férias pode ficar sem dados. <button class="qd-link" onclick="qdIrConferencia('FERIAS_ABA')">ver na Conferência</button></span></p>`;
 }
 
-/* LISTA: Precisam sair de ferias e Avisar (abertos) e Programar (fechado). Grupo vazio some. */
-function qdFeLista(pessoas, c, d) {
-  const sair = c.vencida.concat(c.critica).sort(qdFePorPrazo);
-  const avisar = c.avisar.slice().sort(qdFePorPrazo), prog = c.planejar.slice().sort(qdFePorPrazo);
-  return (sair.length ? qdFeGrupo('sair', 'Precisam sair de férias', 'combine a data com a pessoa e o RH', sair) : '') +
-    (avisar.length ? qdFeGrupo('avisar', 'Avisar', 'entregue o aviso de férias até a data', avisar) : '') +
-    (sair.length || avisar.length ? '' : qdFeNinguem(pessoas, d)) +
-    (prog.length ? qdFeGrupo('prog', 'Programar', 'ainda há tempo: escolha o mês', prog, true) : '');
+/* LISTA: Programar e Programadas (grupo vazio some) e a linha de quem esta de ferias agora. */
+function qdFeLista(c, pessoas) {
+  return (c.programar.length ? qdFeGrupo('programar', 'Programar', 'escolha a data de saída', c.programar) : qdFeNinguem(pessoas)) +
+    (c.programadas.length ? qdFeGrupo('programadas', 'Programadas', 'entregue o aviso e confirme a saída', c.programadas) : '') +
+    qdFeAgoraLinha();
 }
-function qdFeGrupo(gr, titulo, frase, lista, recolhe) {
-  const aberto = !recolhe || !!QD.feProgramar;
-  return `<section class="qd-fe-grupo ${gr}" aria-labelledby="qd-fe-g-${gr}">
-    <div class="qd-fe-grupo-cab"><h3 id="qd-fe-g-${gr}">${qdFeIco(gr)}${titulo} <span class="qd-fe-n bq-num">${qdN(lista.length)}</span></h3>
-      <span class="qd-fe-grupo-frase">${frase}</span>
-      ${recolhe ? `<button class="qd-link qd-fe-grupo-bt" aria-expanded="${aberto}" onclick="QD.feProgramar=!QD.feProgramar;qdDesenhar()">${aberto ? 'Esconder' : 'Mostrar'}</button>` : ''}</div>
-    ${aberto ? `<ul class="qd-fe-itens">${lista.map((p) => qdFeItem(p)).join('')}</ul>` : ''}
+function qdFeGrupo(gr, titulo, frase, lista) {
+  const mostra = (QD.feTodos || {})[gr] ? lista : lista.slice(0, QD_FE_LIMITE);
+  return `<section class="qd-fe-grupo" aria-labelledby="qd-fe-g-${gr}">
+    <div class="qd-fe-grupo-cab"><h3 id="qd-fe-g-${gr}">${titulo} <span class="qd-fe-n bq-num">${qdN(lista.length)}</span></h3>
+      <span class="qd-fe-grupo-frase">${frase}</span></div>
+    <ul class="qd-fe-itens">${mostra.map((p) => qdFeItem(p)).join('')}</ul>
+    ${lista.length > mostra.length ? `<button class="qd-mais" onclick="qdFeMostrarTodos(${jsArg(gr)})">Mostrar todos (${qdN(lista.length)})</button>` : ''}
   </section>`;
 }
-/* Ninguem para avisar nem para sair: a linha diz o proximo passo (e, se ha gente sem dados, que e "entre quem tem prazo"). */
-function qdFeNinguem(pessoas, d) {
-  const prox = qdFeProximoAviso(pessoas);
-  return `<p class="qd-fe-ninguem">${d.n ? '' : QD_ICONES.ok}<span><b>Ninguém para avisar ou sair de férias agora${d.n ? ' entre quem tem prazo' : ''}</b>${prox
-    ? ` · próximo aviso: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> até ${qdFeDMS(prox.pior.avisar)} (${qdFeEm(prox.pior.avisar)})` : ''}</span></p>`;
+/* Ninguem para programar: a linha diz quem e o proximo (e, se ha gente sem dados, que e "entre quem tem as datas"). */
+function qdFeNinguem(pessoas) {
+  const d = qdFeDesconhecido(), prox = qdFeProxima(pessoas);
+  return `<p class="qd-fe-ninguem">${d.n ? '' : QD_ICONES.ok}<span><b>Ninguém para programar agora${d.n ? ' entre quem tem as datas' : ''}</b>${prox
+    ? ` · próximo: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button>, que pode sair a partir de ${qdFeDMS(prox.pior.L)}` : ''}</span></p>`;
 }
-/* A folhinha: a data de agir (mes na faixa de cima, o dia grande, o dia da semana embaixo). */
+/* A folhinha: a data que importa (mes na faixa de cima, na cor da situacao; o dia grande; o dia da semana embaixo). */
 function qdFeFolha(iso) {
   return `<span class="qd-fe-folha" aria-hidden="true"><span class="qd-fe-folha-mes">${QD_FE_MES[Number(iso.slice(5, 7)) - 1]}</span><span class="qd-fe-folha-dia">${Number(iso.slice(8, 10))}</span><span class="qd-fe-folha-sem">${qdFeSemana(iso).slice(0, 3)}</span></span>`;
 }
+/* O texto colorido da situacao: um quadradinho na cor e o texto numa tinta da mesma cor (com contraste). */
+const qdFeSt = (st) => `<span class="qd-fe-st qd-fe-${st.cor}"><i aria-hidden="true"></i>${esc(st.txt)}</span>`;
 /*
- * Uma pessoa: a folhinha (a data de agir), o nome, o turno e a funcao, e embaixo o verbo, quanto falta e (para
- * avisar e programar) a data limite. Etiquetas so quando valem. A linha inteira abre a ficha (os outros periodos estao la).
+ * A linha de baixo, so com o que o texto colorido nao diz: sem programacao, a outra data; programada, a saida, os
+ * dias e a volta (ou o aviso, ou o limite maximo que ela passou).
  */
-function qdFeItem(p, semFolha) {
-  const per = p.pior, g = p.g, gr = QD_FE_GRUPO[per.k], hoje = qdHoje();
-  const data = qdFeDataAgir(per), falta = qdDias(hoje, data);
-  const verbo = per.k === 'vencida' ? 'Prazo vencido' : gr === 'sair' ? 'Sair até' : 'Avisar até';
-  const comSair = gr !== 'sair';
-  const completos = p.periodos.filter((x) => (x.f.paFim || x.f.limite) && (x.f.paFim || x.f.limite) < hoje).length;
-  const tags = [], txt = [];
-  const tag = (html, dica, t) => { tags.push(`<span class="qd-fe-tag"${dica ? ` title="${esc(dica)}"` : ''}>${html}</span>`); txt.push(t); };
-  if (g.situacao === 'FERIAS') tag(QD_FE_ICO.sol + 'de férias agora', 'Pelo STATUS da GERAL. Se as férias forem deste período, está resolvido.',
-    'De férias agora pelo STATUS da GERAL: se forem deste período, está resolvido.');
+function qdFeDetalhe(st) {
+  const pr = st.prog, hoje = qdHoje(), dm = qdFeDM;
+  if (st.feita) return 'Saiu em ' + dm(pr.inicio) + ' · ' + qdPlural(pr.dias, 'dia', 'dias');
+  if (st.programada) {
+    const I = pr.inicio, d = qdPlural(pr.dias, 'dia', 'dias'), volta = 'volta em ' + dm(qdSomarDias(I, pr.dias));
+    if (I <= hoje) return 'Saída em ' + dm(I) + ' (' + qdFeEm(I) + ') · ' + d + ' · ' + volta;
+    if (st.k === 'sai' || st.k === 'breve') return d + ' · ' + volta;
+    return 'Sai em ' + dm(I) + ' (' + qdFeEm(I) + ') · ' + d + (st.k === 'depois' && st.M ? ' · limite máximo para sair: ' + dm(st.M) : '');
+  }
+  if (st.k === 'vencido' || st.k === 'hoje' || st.k === 'ja') return st.L ? (st.L <= hoje ? 'pode sair desde ' : 'pode sair a partir de ') + dm(st.L) : '';
+  return st.M ? 'limite máximo para sair: ' + dm(st.M) : '';
+}
+/* Etiquetas da pessoa, so quando valem. */
+function qdFeEtiquetas(p) {
+  const g = p.g, st = p.pior, html = [], txt = [];
+  const tag = (h, dica, t) => { html.push(`<span class="qd-fe-tag"${dica ? ` title="${esc(dica)}"` : ''}>${h}</span>`); txt.push(t); };
+  if (g.situacao === 'FERIAS' && st.k !== 'deferias') tag(QD_FE_ICO.sol + 'de férias agora', 'Pelo STATUS da GERAL.', 'De férias agora pelo STATUS da GERAL.');
   if (g.situacao === 'AFASTADO') tag('afastado', 'As férias ficam para depois da volta.', 'Afastado: as férias ficam para depois da volta.');
   if (qdFeSaiu(g)) tag('consta como desligado', 'Está na CDESLIGADOS e ainda ativo na GERAL: confira na Conferência.',
     'Consta como desligado: está na CDESLIGADOS e ainda ativo na GERAL.');
-  if (completos > 1) tag(completos + ' períodos completos', '', completos + ' períodos completos.');
-  if (per.k !== 'semdata' && p.periodos.some((x) => x.k === 'semdata')) tag('período sem data', 'Outro período desta pessoa está sem DTA_LIMITEMAX na aba FÉRIAS: veja a ficha.',
+  const outros = p.periodos.filter((x) => x !== st && !x.feita && x.cor !== 'semdata').length;
+  if (outros) tag('+' + qdPlural(outros, 'período', 'períodos'), 'Veja a ficha.', 'Mais ' + qdPlural(outros, 'período', 'períodos') + ' na ficha.');
+  if (st.cor !== 'semdata' && p.periodos.some((x) => x.cor === 'semdata')) tag('período sem data', 'Outro período desta pessoa está sem DTA_LIMITEMAX na aba FÉRIAS: veja a ficha.',
     'Outro período sem data limite na aba FÉRIAS.');
+  return { html: html.join(''), txt: txt.length ? txt.join(' ') + ' ' : '' };
+}
+/*
+ * Os botoes de uma situacao (so para quem programa): Programar; ou Confirmar saida (do dia do inicio em diante) e
+ * Reprogramar. Cheio so o que resolve agora (Confirmar saida; na ficha, Programar): a lista nao vira uma parede de botoes.
+ */
+function qdFeBotoes(st, ref, naFicha) {
+  if (!qdFePodeProgramar() || st.feita) return '';
+  const f = st.f, b = [], args = Number(ref) + ',' + Number(f.linha) + (naFicha ? ',true' : '');
+  if (st.programada) {
+    if (st.prog.inicio <= qdHoje()) b.push(`<button class="qd-fe-bt forte" onclick="qdFeConfirmar(${jsArg(st.prog.id)})">Confirmar saída</button>`);
+    b.push(`<button class="qd-fe-bt" onclick="qdFeProgramar(${args})">Reprogramar</button>`);
+    if (naFicha) b.push(`<button class="qd-fe-bt" onclick="qdFeCancelar(${args})">Cancelar programação</button>`);
+  } else b.push(`<button class="qd-fe-bt${naFicha ? ' forte' : ''}" onclick="qdFeProgramar(${args})">Programar</button>`);
+  return `<span class="qd-fe-acoes">${b.join('')}</span>`;
+}
+/*
+ * Uma pessoa: a folhinha (a data que importa), o nome, o turno e a funcao, e embaixo o texto colorido e a outra
+ * data. A linha abre a ficha (os outros periodos estao la); os botoes ficam do lado (embaixo, no celular).
+ */
+function qdFeItem(p) {
+  const st = p.pior, g = p.g, nome = qdNomeTxt(g) || 'Sem nome';
+  const tags = qdFeEtiquetas(p), det = qdFeDetalhe(st);
+  const rot = nome + ', ' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ': ' + st.txt + (det ? '; ' + det : '') + '. ' + tags.txt + 'Abrir a ficha.';
+  return `<li class="qd-fe-item qd-fe-${st.cor}">
+    <button class="qd-fe-abre${st.data ? '' : ' sem-folha'}" onclick="qdFicha(${Number(g.ref)})" aria-label="${esc(rot)}">
+      ${st.data ? qdFeFolha(st.data) : ''}
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(nome)}</span>${qdEq(g.equipe, g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(g))}</span>${tags.html}</span>
+      <span class="qd-fe-quando">${qdFeSt(st)}${det ? `<span class="qd-fe-det">${esc(det)}</span>` : ''}</span>
+    </button>${qdFeBotoes(st, g.ref)}
+  </li>`;
+}
+/* Quem nao tem linha na aba FÉRIAS (a busca e a lista de quem esta de ferias agora): sem folhinha e sem botao. */
+function qdFeItemSemLinha(g, txt) {
   const nome = qdNomeTxt(g) || 'Sem nome';
-  const rot = nome + ', ' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ': ' + (per.k === 'vencida'
-    ? 'prazo vencido em ' + pnDataLonga(data) + ' (' + qdFeEm(data) + ')'
-    : verbo.toLowerCase() + ' ' + qdFeSemana(data) + ', ' + pnDataLonga(data) + ' (' + qdFeEm(data) + ')' + (comSair ? '; sair até ' + pnDataLonga(per.f.limiteMax) : '')) +
-    '. ' + (txt.length ? txt.join(' ') + ' ' : '') + 'Abrir a ficha.';
-  return `<li><button class="qd-fe-item ${gr}${per.k === 'vencida' ? ' vencido' : ''}${semFolha ? ' sem-folha' : ''}" onclick="qdFicha(${Number(g.ref)})" aria-label="${esc(rot)}">
-    ${semFolha ? '' : qdFeFolha(data)}
-    <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(nome)}</span>${qdEq(g.equipe, g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(g))}</span>${tags.join('')}</span>
-    <span class="qd-fe-quando"><span class="qd-fe-verbo">${verbo}${semFolha ? ' ' + qdFeDMS(data) : ''}</span><span class="qd-fe-falta${per.k !== 'vencida' && falta <= 7 ? ' perto' : ''}">${qdFeEm(data)}</span>${comSair
-      ? `<span class="qd-fe-sair-ate">sair até ${qdFeDMS(per.f.limiteMax)}</span>` : ''}</span>
-    <span class="qd-fe-abrir" aria-hidden="true">›</span>
-  </button></li>`;
+  return `<li class="qd-fe-item qd-fe-semdata">
+    <button class="qd-fe-abre sem-folha" onclick="qdFicha(${Number(g.ref)})" aria-label="${esc(nome + ', ' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ': ' + txt + '. Abrir a ficha.')}">
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(nome)}</span>${qdEq(g.equipe, g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(g))}</span></span>
+      <span class="qd-fe-quando"><span class="qd-fe-st qd-fe-semdata"><i aria-hidden="true"></i>${esc(txt)}</span></span>
+    </button>
+  </li>`;
+}
+
+/* BUSCA pelo nome (sem acento nem maiuscula, cada palavra em qualquer ordem) ou pelo RH, no recorte dos filtros. */
+function qdFeBuscar(q) {
+  const palavras = qdChaveNome(q).split(' ').filter(Boolean), num = String(q).replace(/\D+/g, '');
+  const soNumero = /^\s*\d+\s*$/.test(q);
+  return qdRecorte(qdNaEmpresa()).filter((g) => {
+    const n = qdChaveNome(g.nome);
+    return (palavras.length && palavras.every((w) => n.indexOf(w) !== -1)) || (soNumero && num.length >= 3 && qdChaveCod(g.rh).indexOf(num) !== -1);
+  }).sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+}
+function qdFeBuscaLista() {
+  const q = String(QD.feBusca || '').trim(), achados = qdFeBuscar(q), porRef = qdFeriasDados().porRef;
+  const filtro = QD.equipe !== '*' || QD.funcao;
+  if (!achados.length) {
+    return `<p class="qd-fe-vazio">Ninguém com «${esc(q)}» ${filtro ? 'neste filtro' : 'no quadro'}.${filtro ? ' <button class="qd-link" onclick="qdLimpar()">Limpar filtros</button>' : ''}</p>`;
+  }
+  const mostra = achados.slice(0, 60);
+  return `<section class="qd-fe-grupo" aria-labelledby="qd-fe-g-busca">
+    <div class="qd-fe-grupo-cab"><h3 id="qd-fe-g-busca">Busca <span class="qd-fe-n bq-num">${qdN(achados.length)}</span></h3>
+      <span class="qd-fe-grupo-frase">todos com «${esc(q)}», em qualquer situação</span></div>
+    <ul class="qd-fe-itens">${mostra.map((g) => porRef[g.ref] ? qdFeItem(porRef[g.ref]) : qdFeItemSemLinha(g, 'Sem linha na aba FÉRIAS')).join('')}</ul>
+    ${achados.length > mostra.length ? `<p class="qd-fe-vazio">e mais ${qdN(achados.length - mostra.length)}: escreva mais do nome.</p>` : ''}
+  </section>`;
+}
+/* Enter com um resultado so abre a ficha. */
+function qdFeBuscaEnter() {
+  clearTimeout(QD.tFeBusca);
+  const l = String(QD.feBusca || '').trim() ? qdFeBuscar(String(QD.feBusca).trim()) : [];
+  if (l.length === 1) qdFicha(l[0].ref); else qdFeRedesenharCorpo();
+}
+
+/* De ferias agora (pelo STATUS da GERAL) e cumpridas nos ultimos 60 dias: uma linha recolhida, que abre a lista. */
+function qdFeAgoraLinha() {
+  const refs = {};
+  qdRecorte(qdNaEmpresa()).forEach((g) => { refs[g.ref] = true; });
+  const deFerias = qdRecorte(qdNaEmpresa()).filter((g) => g.situacao === 'FERIAS').sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+  const cumpridas = qdFeriasDados().cumpridas.filter((c) => refs[c.g.ref]);
+  if (!deFerias.length && !cumpridas.length) return '';
+  const aberto = !!QD.feAgora, porRef = qdFeriasDados().porRef;
+  const cumprida = (c) => `<li class="qd-fe-item qd-fe-verde">
+    <button class="qd-fe-abre" onclick="qdFicha(${Number(c.g.ref)})" aria-label="${esc((qdNomeTxt(c.g) || 'Sem nome') + ': férias cumpridas, saiu em ' + pnDataLonga(c.x.inicio) + '. Abrir a ficha.')}">
+      ${qdFeFolha(c.x.inicio)}
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(qdNomeTxt(c.g) || 'Sem nome')}</span>${qdEq(c.g.equipe, c.g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(c.g))}</span></span>
+      <span class="qd-fe-quando"><span class="qd-fe-st qd-fe-verde"><i aria-hidden="true"></i>Férias cumpridas</span><span class="qd-fe-det">saiu em ${qdFeDM(c.x.inicio)} · ${qdPlural(c.x.dias, 'dia', 'dias')}${c.x.pelaAba ? ' · período fechado na aba FÉRIAS' : ''}</span></span>
+    </button></li>`;
+  return `<div class="qd-fe-agora">
+    <button class="qd-link qd-fe-agora-bt" aria-expanded="${aberto}" onclick="QD.feAgora=!QD.feAgora;qdFeRedesenharCorpo()">${QD_FE_ICO.sol}<span><b class="bq-num">${qdN(deFerias.length)}</b> de férias agora · <b class="bq-num">${qdN(cumpridas.length)}</b> ${cumpridas.length === 1 ? 'cumprida' : 'cumpridas'} nos últimos 60 dias</span></button>
+    ${aberto ? `<ul class="qd-fe-itens">${deFerias.map((g) => porRef[g.ref] ? qdFeItem(porRef[g.ref]) : qdFeItemSemLinha(g, 'De férias agora pelo STATUS da GERAL')).join('')}${cumpridas.map(cumprida).join('')}</ul>` : ''}
+  </div>`;
 }
 
 /*
- * RODAPE: quantos estao em dia, quem esta sem dados (a lista abre aqui; o detalhe esta na Conferencia), o Excel e os
- * Parametros (so quem pode). Embaixo, a frase de quem ja marcou as ferias e ainda ve a pessoa na lista.
+ * RODAPE: quantos estao em dia, quem esta sem dados (a lista abre aqui; o detalhe esta na Conferencia), o Excel, os
+ * Parametros (so quem pode) e a legenda das cores. Embaixo, a frase de quem ja marcou as ferias no sistema.
  */
-function qdFeRodape(c, d) {
-  const emDia = c.liberada.length + c.aquisicao.length;
+function qdFeRodape() {
+  const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido();
   const inc = qdMemo().inc.filter((x) => /^FERIAS_/.test(x.tipo) && x.tipo !== 'FERIAS_ABA');
   const linhas = inc.filter((x) => x.tipo !== 'FERIAS_SEM_DADOS');
   // quem esta sem linha tem o item dele na Conferencia; quem tem um periodo sem data, nao (esta na lista que abre aqui)
   const semLinhaConf = d.semLinha.length && inc.length > linhas.length;
   const conf = (tipo) => `<span aria-hidden="true">·</span><button class="qd-link" onclick="qdIrConferencia(${jsArg(tipo)})">ver na Conferência</button>`;
-  const partes = [`<span class="qd-fe-rod-item">${QD_FE_ICO.emdia}<span><b class="bq-num">${qdN(emDia)}</b> em dia</span></span>`];
+  const partes = [`<span class="qd-fe-rod-item">${QD_FE_ICO.emdia}<span><b class="bq-num">${qdN(c.emdia.length)}</b> em dia</span></span>`];
   if (d.n) {
     partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<button class="qd-link" aria-expanded="${!!QD.feSemDados}" onclick="QD.feSemDados=!QD.feSemDados;qdDesenhar()"><b class="bq-num">${qdN(d.n)}</b> sem dados de férias</button>${semLinhaConf ? conf('FERIAS_SEM_DADOS') : ''}</span>`);
   }
@@ -2587,6 +2704,7 @@ function qdFeRodape(c, d) {
     <div class="qd-fe-rod-linha">${partes.join('')}
       <span class="qd-fe-rod-acoes"><button class="qd-link" onclick="qdFeBaixar()">Baixar Excel</button>${DADOS.podeConfigurar ? '<button class="qd-link" onclick="qdFeParametros()">Parâmetros</button>' : ''}</span></div>
     ${QD.feSemDados && d.n ? qdFeSemDados(d) : ''}
+    <p class="qd-fe-legenda">${QD_FE_LEGENDA.map(([cor, t]) => `<span class="qd-fe-${cor}"><i aria-hidden="true"></i>${t}</span>`).join('')}</p>
     <p class="qd-fe-rod-dica">Marcou férias no sistema? Cole a extração nova na aba FÉRIAS e use Atualizar dados.</p>
   </footer>`;
 }
@@ -2601,22 +2719,22 @@ function qdFeSemDados(d) {
 }
 
 /*
- * CALENDARIO: a grade do mes, no desenho da tela Calendario. Cada pessoa uma vez, no ultimo dia para agir (sair ate
- * ou avisar ate); o prazo vencido nao cai num dia que ja passou: fica numa faixa acima da grade, em qualquer mes.
+ * CALENDARIO: a grade do mes, no desenho da tela Calendario. Cada pessoa uma vez, no dia que importa (a data
+ * programada; sem programacao, o "pode sair a partir de" ou, quando aperta, o limite maximo), na cor da situacao.
+ * O vermelho com a data ja passada nao cai num dia que ja foi: fica numa faixa acima da grade, em qualquer mes.
  */
+const qdFePassou = (p) => p.pior.cor === 'vermelho' && p.pior.data && p.pior.data < qdHoje();
 function qdFePorDia(pessoas, ym) {
-  const porDia = {}, peso = ['sair', 'avisar', 'prog', 'emdia'];
+  const porDia = {};
   pessoas.forEach((p) => {
-    const per = p.pior, gr = QD_FE_GRUPO[per.k];
-    if (per.k === 'vencida' || peso.indexOf(gr) === -1 || !per.f.limiteMax) return;
-    const d = qdFeDataAgir(per);
-    if (d && d.slice(0, 7) === ym) (porDia[d] = porDia[d] || []).push(p);
+    const st = p.pior;
+    if (!st.data || st.feita || st.cor === 'semdata' || qdFePassou(p)) return;
+    if (st.data.slice(0, 7) === ym) (porDia[st.data] = porDia[st.data] || []).push(p);
   });
-  Object.keys(porDia).forEach((d) => porDia[d].sort((a, b) => peso.indexOf(QD_FE_GRUPO[a.pior.k]) - peso.indexOf(QD_FE_GRUPO[b.pior.k]) ||
-    qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g))));
+  Object.keys(porDia).forEach((d) => porDia[d].sort((a, b) => qdFeRank(a.pior) - qdFeRank(b.pior) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g))));
   return porDia;
 }
-function qdFeCalendario(pessoas, c) {
+function qdFeCalendario(pessoas) {
   const hoje = qdHoje(), mesHoje = hoje.slice(0, 7);
   if (!QD.feMes) QD.feMes = mesHoje;
   const ym = QD.feMes, ano = Number(ym.slice(0, 4)), mes = Number(ym.slice(5, 7)) - 1;
@@ -2628,46 +2746,42 @@ function qdFeCalendario(pessoas, c) {
     for (let i = 0; i < 7; i++) {
       const iso = new Date(Date.UTC(ano, mes, s * 7 + i - ini + 1)).toISOString().slice(0, 10), n = Number(iso.slice(8, 10));
       if (iso.slice(0, 7) !== ym) { cel.push(`<td class="qd-fe-dia fora"><div class="qd-fe-dia-cab" aria-hidden="true"><span class="qd-fe-dia-n">${n}</span></div></td>`); continue; }
-      const evs = porDia[iso] || [], grs = evs.map((p) => QD_FE_GRUPO[p.pior.k]);
-      const cor = ['sair', 'avisar', 'prog', 'emdia'].filter((x) => grs.indexOf(x) !== -1)[0] || '';
+      const evs = porDia[iso] || [], cor = evs.length ? evs[0].pior.cor : '';
       const cabe = evs.length > 3 ? 2 : 3, ehHoje = iso === hoje;
       const dica = qdFeSemana(iso) + ', ' + qdFeDM(iso) + (ehHoje ? ' (hoje)' : '') + ': ' + qdPlural(evs.length, 'pessoa', 'pessoas') + ' — ver quem';
-      cel.push(`<td class="qd-fe-dia${iso < hoje ? ' passado' : ''}${ehHoje ? ' hoje' : ''}${cor ? ' c-' + cor : ''}${QD.feDia === iso ? ' escolhido' : ''}"${ehHoje ? ' aria-current="date"' : ''}>
+      cel.push(`<td class="qd-fe-dia${iso < hoje ? ' passado' : ''}${ehHoje ? ' hoje' : ''}${cor ? ' tem-cor qd-fe-' + cor : ''}${QD.feDia === iso ? ' escolhido' : ''}"${ehHoje ? ' aria-current="date"' : ''}>
         <div class="qd-fe-dia-cab"><span class="qd-fe-dia-n">${n}</span>${ehHoje ? '<span class="qd-fe-hoje">hoje</span>' : ''}</div>
         ${evs.length ? `<ul class="qd-fe-pilulas">${evs.slice(0, cabe).map((p) => `<li>${qdFePilula(p)}</li>`).join('')}</ul>` : ''}
         ${evs.length > cabe ? `<button class="qd-fe-mais" data-dia="${iso}" onclick="qdFeDia(${jsArg(iso)})">+${evs.length - cabe} no dia</button>` : ''}
-        ${evs.length ? `<button class="qd-fe-dia-bt" data-dia="${iso}" onclick="qdFeDia(${jsArg(iso)})" aria-label="${esc(dica)}">${evs.slice(0, 3).map((p) => qdFeIco(QD_FE_GRUPO[p.pior.k])).join('')}${evs.length > 3 ? '<b>+' + (evs.length - 3) + '</b>' : ''}</button>` : ''}
+        ${evs.length ? `<button class="qd-fe-dia-bt" data-dia="${iso}" onclick="qdFeDia(${jsArg(iso)})" aria-label="${esc(dica)}">${evs.slice(0, 3).map((p) => `<i class="qd-fe-ponto qd-fe-${p.pior.cor}"></i>`).join('')}${evs.length > 3 ? '<b>+' + (evs.length - 3) + '</b>' : ''}</button>` : ''}
       </td>`);
     }
     semanas.push('<tr>' + cel.join('') + '</tr>');
   }
-  const venc = c.vencida.slice().sort(qdFePorPrazo), mostraV = venc.slice(0, 6);
+  const passou = pessoas.filter(qdFePassou).sort(qdFePorPessoa), mostraP = passou.slice(0, 6);
   return `<div class="qd-fe-cal-cab">
-      <div class="qd-fe-cal-tit"><h3 id="qd-fe-mes-tit">${qdFeMesLongo(ym)}</h3><span>cada pessoa no último dia para agir<span class="qd-fe-so-estreito"> · toque no dia para ver quem</span></span></div>
+      <div class="qd-fe-cal-tit"><h3 id="qd-fe-mes-tit">${qdFeMesLongo(ym)}</h3><span>cada pessoa no dia que importa<span class="qd-fe-so-estreito"> · toque no dia para ver quem</span></span></div>
       <div class="qd-fe-setas">
         ${ym === mesHoje ? '' : `<button class="qd-fe-hoje-bt" onclick="QD.focoDepois='.qd-fe-seta.ant';qdFeIrMes(${jsArg(mesHoje)})">Hoje</button>`}
         <button class="qd-fe-seta ant" onclick="qdFeMesRel(-1)" aria-label="Mês anterior">‹</button>
         <button class="qd-fe-seta prox" onclick="qdFeMesRel(1)" aria-label="Próximo mês">›</button>
       </div>
     </div>
-    ${venc.length ? `<p class="qd-fe-vencidos">${QD_ICONES.grave}<b>Prazo vencido</b>${mostraV.map((p) => `<span><button class="qd-link" onclick="qdFicha(${Number(p.g.ref)})"
-        title="${esc((qdNomeTxt(p.g) || 'Sem nome') + ': prazo vencido em ' + pnDataLonga(p.pior.f.limiteMax) + (qdFeSaiu(p.g) ? '. Consta como desligado.' : ''))}">${esc(qdFeNomeCurto(p.g.nome))}</button> (${qdFeDM(p.pior.f.limiteMax)})</span>`).join('')}${venc.length > mostraV.length
-        ? `<button class="qd-link" onclick="QD.focoDepois='#qd-fe-g-sair';qdFeVista('lista')">e mais ${venc.length - mostraV.length} na lista</button>` : ''}</p>` : ''}
+    ${passou.length ? `<p class="qd-fe-vencidos">${QD_ICONES.grave}<b>Data já passou</b>${mostraP.map((p) => `<span><button class="qd-link" onclick="qdFicha(${Number(p.g.ref)})"
+        title="${esc((qdNomeTxt(p.g) || 'Sem nome') + ': ' + p.pior.txt + (qdFeSaiu(p.g) ? '. Consta como desligado.' : ''))}">${esc(qdFeNomeCurto(p.g.nome))}</button> (${qdFeDM(p.pior.data)})</span>`).join('')}${passou.length > mostraP.length
+        ? `<button class="qd-link" onclick="QD.focoDepois='#qd-fe-g-programar';qdFeVista('lista')">e mais ${passou.length - mostraP.length} na lista</button>` : ''}</p>` : ''}
     <table class="qd-fe-mes" aria-labelledby="qd-fe-mes-tit">
       <thead><tr>${QD_FE_SEMANA.map(([l, k], i) => `<th scope="col" abbr="${QD_FE_SEMANA_LONGA[i]}"><span class="qd-fe-longo">${l}</span><span class="qd-fe-curto" aria-hidden="true">${k}</span></th>`).join('')}</tr></thead>
       <tbody>${semanas.join('')}</tbody>
     </table>
-    <p class="qd-fe-legenda"><span>${QD_ICONES.grave}sair até</span><span>${QD_ICONES.atencao}avisar até</span><span>${QD_FE_ICO.prog}programar</span><span>${QD_FE_ICO.emdia}em dia</span><span class="qd-fe-so-largo">· toque no nome para abrir a ficha</span></p>
+    <p class="qd-fe-cal-dica">A data programada; sem programação, a partir de quando pode sair ou, se apertar, o limite máximo.<span class="qd-fe-so-largo"> Toque no nome para abrir a ficha.</span></p>
     ${qdFeDiaLista(porDia, hoje)}`;
 }
-/* Pilula = forma + nome curto (o nome inteiro, o turno e as datas vao na dica e no leitor de tela). Clique: a ficha. */
+/* Pilula = nome curto na cor da situacao (o nome inteiro, o turno e o texto vao na dica e no leitor de tela). Clique: a ficha. */
 function qdFePilula(p) {
-  const per = p.pior, g = p.g, gr = QD_FE_GRUPO[per.k], d = qdFeDataAgir(per);
-  const quem = (qdNomeTxt(g) || 'Sem nome') + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ')';
-  const rot = (gr === 'sair' ? 'Sair até ' : 'Avisar até ') + pnDataLonga(d) + ': ' + quem + (gr === 'prog' ? ' — programar' : gr === 'emdia' ? ' — em dia' : '') +
-    (gr === 'sair' ? '' : '; sair até ' + pnDataLonga(per.f.limiteMax)) + '.' + (qdFeSaiu(g) ? ' Consta como desligado.' : '');
-  const ico = gr === 'sair' ? QD_FE_ICO.pilSair : gr === 'avisar' ? QD_FE_ICO.pilAvisar : qdFeIco(gr), nome = qdFeNomePilula(g.nome);
-  return `<button class="qd-fe-pil ${gr}" title="${esc(nome + ' — ' + rot)}" aria-label="${esc(nome + ' — ' + rot)}" onclick="qdFicha(${Number(g.ref)})">${ico}<span class="qd-fe-pil-nome">${esc(nome)}</span></button>`;
+  const st = p.pior, g = p.g, nome = qdFeNomePilula(g.nome);
+  const rot = nome + ' — ' + (qdNomeTxt(g) || 'Sem nome') + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + '): ' + st.txt + '.' + (qdFeSaiu(g) ? ' Consta como desligado.' : '');
+  return `<button class="qd-fe-pil qd-fe-${st.cor}" title="${esc(rot)}" aria-label="${esc(rot)}" onclick="qdFicha(${Number(g.ref)})"><span class="qd-fe-pil-nome">${esc(nome)}</span></button>`;
 }
 /* A lista de um dia (o "+N no dia"; no estreito, o toque no dia), embaixo da grade. */
 function qdFeDiaLista(porDia, hoje) {
@@ -2676,14 +2790,15 @@ function qdFeDiaLista(porDia, hoje) {
   const evs = porDia[iso] || [], sem = qdFeSemana(iso);
   return `<div class="qd-fe-dia-lista" id="qd-fe-dia-lista">
     <h4>${sem[0].toUpperCase() + sem.slice(1)}, ${qdFeDM(iso)}${iso === hoje ? ' (hoje)' : ''} <button class="qd-link" onclick="qdFeFecharDia()">fechar</button></h4>
-    ${evs.length ? `<ul class="qd-fe-itens">${evs.map((p) => qdFeItem(p, true)).join('')}</ul>` : '<p class="qd-fe-vazio">Ninguém neste dia.</p>'}
+    ${evs.length ? `<ul class="qd-fe-itens">${evs.map((p) => qdFeItem(p)).join('')}</ul>` : '<p class="qd-fe-vazio">Ninguém neste dia.</p>'}
   </div>`;
 }
 
-/* --- acoes --- */
+/* --- acoes da tela --- */
 function qdFeVista(v) { QD.feVista = v; QD.feDia = ''; gravarLocal(QD_FE_CHAVE_VISTA, v); qdDesenhar(); }
 function qdFeIrMes(m) { QD.feMes = m; QD.feDia = ''; qdDesenhar(); }
 function qdFeMesRel(n) { qdFeIrMes(qdFeSomarMes(QD.feMes || qdHoje().slice(0, 7), n)); }
+function qdFeMostrarTodos(gr) { QD.feTodos = Object.assign({}, QD.feTodos, { [gr]: true }); qdFeRedesenharCorpo(); }
 function qdFeDia(iso) {
   QD.feDia = QD.feDia === iso ? '' : iso;
   if (QD.feDia) QD.focoDepois = '#qd-fe-dia-lista h4';
@@ -2699,33 +2814,130 @@ function qdFeFecharDia() {
   QD.focoDepois = vis ? '.qd-fe-mes .' + vis.className.split(' ')[0] + '[data-dia="' + iso + '"]' : '#qd-fe-mes-tit';
   qdDesenhar();
 }
-/* Contador da aba (o CD inteiro): vermelho = precisam sair de ferias; so avisos = ambar; nada = sem contador. Some com a aba aberta. */
+/* Contador da aba (o CD inteiro): quem esta no vermelho ou no laranja (■ com algum vermelho; so laranja, ▲). Some com a aba aberta. */
 function qdFeSeloAba() {
   if (!DADOS.ferias || QD.aba === 'ferias') return '';
-  const l = qdFeriasDados().lista;
-  const s = l.filter((p) => QD_FE_GRUPO[p.pior.k] === 'sair').length, a = l.filter((p) => p.pior.k === 'avisar').length;
-  const selo = (cls, sinal, n, rot) => `<span class="qd-contador ${cls}" role="img" aria-label="${rot}" title="${rot}">${sinal} ${n}</span>`;
-  if (s) return selo('grave', '■', s, s === 1 ? '1 pessoa do CD precisa sair de férias' : qdN(s) + ' pessoas do CD precisam sair de férias');
-  if (a) return selo('atencao', '▲', a, qdPlural(a, 'aviso de férias para dar', 'avisos de férias para dar') + ' no CD');
-  return '';
+  const l = qdFeriasDados().lista, v = l.filter((p) => p.pior.cor === 'vermelho').length, n = l.filter(qdFeUrgente).length;
+  if (!n) return '';
+  const rot = (n === 1 ? '1 pessoa do CD pede' : qdN(n) + ' pessoas do CD pedem') + ' atenção agora nas férias (vermelho ou laranja)';
+  return `<span class="qd-contador ${v ? 'grave' : 'atencao'}" role="img" aria-label="${rot}" title="${rot}">${v ? '■' : '▲'} ${n}</span>`;
 }
 
-/* Excel: todos os periodos em aberto do recorte, do mais urgente para o menos. */
+/*
+ * PROGRAMAR (so quem pode trocar a planilha do Quadro; o servidor confere tudo de novo). A janela diz o periodo e as
+ * duas datas; o inicio vai de "pode sair a partir de" ate o limite maximo (o ultimo dia para comecar: a volta pode
+ * passar dele). O limite que ja passou nao barra: e o quanto antes. Embaixo, a volta e o ultimo dia do aviso, ao
+ * vivo; o aviso que ja nao cabe e so um alerta. Da ficha, Voltar volta para a ficha.
+ */
+function qdFeSituacaoDe(ref, linha) {
+  const p = qdFeriasDados().porRef[ref];
+  return p ? { p, st: p.periodos.find((x) => x.f.linha === linha) } : {};
+}
+function qdFeProgramar(ref, linha, daFicha) {
+  const { p, st } = qdFeSituacaoDe(ref, linha);
+  if (!st) return;
+  QD.feAlvo = { ref, linha, daFicha: !!daFicha };
+  const f = st.f, pr = st.programada ? st.prog : null, P = qdFeP(), hoje = qdHoje(), nome = qdNomeTxt(p.g) || 'Sem nome';
+  const passou = !!st.M && st.M < hoje;
+  // sem programacao: o primeiro dia com o aviso inteiro (e de quando pode sair em diante); se passar do limite, o primeiro possivel
+  let sug = pr ? pr.inicio : [st.L, qdSomarDias(hoje, P.aviso)].filter(Boolean).sort().pop();
+  if (!pr && st.M && !passou && sug > st.M) sug = [st.L, hoje].filter(Boolean).sort().pop();
+  if (!pr && st.M && !passou && sug > st.M) sug = st.M;
+  abrirJanela((pr ? 'Reprogramar' : 'Programar') + ' férias — ' + nome, `<div class="qd-fe-prog">
+    <p class="qd-fe-prog-fatos"><span>Período aquisitivo: ${pnDataLonga(f.paInicio)} a ${pnDataLonga(f.paFim)}</span>
+      <span>Pode sair a partir de: <b>${st.L ? pnDataLonga(st.L) : '—'}</b></span>
+      <span>Limite máximo para sair: <b>${st.M ? pnDataLonga(st.M) : 'sem data na aba FÉRIAS'}</b></span></p>
+    ${passou ? `<p class="qd-fe-prog-alerta">O limite máximo para sair já passou (${pnDataLonga(st.M)}): programe o quanto antes.</p>` : ''}
+    <div class="qd-fe-prog-campos">
+      <div class="campo"><label for="fe-inicio">Início das férias</label>
+        <input id="fe-inicio" type="date"${st.L ? ` min="${st.L}"` : ''}${st.M && !passou ? ` max="${st.M}"` : ''} value="${esc(sug || '')}" oninput="qdFeVivo()" onchange="qdFeVivo()"></div>
+      <div class="campo"><label for="fe-dias">Dias</label>
+        <input id="fe-dias" type="number" inputmode="numeric" min="5" max="30" step="1" value="${pr ? Number(pr.dias) : 30}" oninput="qdFeVivo()"></div>
+    </div>
+    <div class="campo"><label for="fe-obs">Observação <span class="qd-fe-opc">(opcional)</span></label>
+      <input id="fe-obs" maxlength="300" value="${esc(pr ? pr.observacao : '')}"></div>
+    <p class="qd-fe-prog-vivo" id="fe-vivo" aria-live="polite"></p>
+    <p class="qd-fe-prog-alerta" id="fe-alerta" hidden></p>
+    <p class="qd-fe-erro" id="fe-erro" role="alert" hidden></p>
+  </div>`, `<button class="botao secundario" onclick="qdFeVoltar()">Voltar</button>
+    <button class="botao" onclick="qdFeSalvarProgramacao()">Salvar programação</button>`);
+  qdFeVivo();
+}
+/* A volta (inicio + dias) e o ultimo dia do aviso, enquanto a pessoa escolhe. */
+function qdFeVivo() {
+  const vivo = el('fe-vivo'), alerta = el('fe-alerta');
+  if (!vivo) return;
+  const P = qdFeP(), i = val('fe-inicio'), d = Number(val('fe-dias')), ok = qdIsoValido(i), dias = Number.isInteger(d) && d >= 5 && d <= 30 ? d : 0;
+  vivo.textContent = !ok ? 'Escolha o início para ver a volta e o aviso.'
+    : [dias ? 'Volta em ' + pnDataLonga(qdSomarDias(i, dias)) : '', P.aviso ? 'entregar o aviso até ' + pnDataLonga(qdSomarDias(i, -P.aviso)) : ''].filter(Boolean).join(' · ');
+  const naoCabe = ok && P.aviso > 0 && qdSomarDias(i, -P.aviso) < qdHoje();
+  alerta.hidden = !naoCabe;
+  alerta.textContent = naoCabe ? 'O aviso de ' + qdPlural(P.aviso, 'dia', 'dias') + ' já não cabe antes desse início.' : '';
+}
+function qdFeVoltar() {
+  const a = QD.feAlvo;
+  if (a && a.daFicha) qdFicha(a.ref); else fecharJanela();
+}
+/* As mesmas conferencias do servidor, com as mesmas frases, antes de ir a ele. */
+function qdFeSalvarProgramacao() {
+  const a = QD.feAlvo || {}, { p, st } = qdFeSituacaoDe(a.ref, a.linha);
+  if (!st) { fecharJanela(); return; }
+  const inicio = val('fe-inicio'), t = String(val('fe-dias')).trim(), dias = t === '' ? 30 : Number(t), nome = qdNomeTxt(p.g) || 'Essa pessoa';
+  let erro = '';
+  if (!qdIsoValido(inicio)) erro = 'Escolha a data de início das férias.';
+  else if (!Number.isInteger(dias) || dias < 5 || dias > 30) erro = 'Dias de férias: use um número inteiro de 5 a 30.';
+  else if (st.L && inicio < st.L) erro = nome + ' só pode sair de férias a partir de ' + pnDataLonga(st.L) + '.';
+  else if (st.M && inicio > st.M && st.M >= qdHoje()) erro = 'A data passa do limite máximo para sair (' + pnDataLonga(st.M) + '). Escolha uma data até lá.';
+  const caixa = el('fe-erro');
+  caixa.textContent = erro; caixa.hidden = !erro;
+  if (erro) return;
+  const f = st.f;
+  qdFeGravar('programarFerias', { matricula: f.matricula || '', nome: f.nome || '', paFim: f.paFim || '', limiteMax: f.limiteMax || '',
+    inicio, dias, observacao: val('fe-obs') });
+}
+function qdFeConfirmar(id) { qdFeGravar('confirmarFerias', { id }); }
+/* Cancelar a programacao (a confirmada volta a programada: o servidor decide pela situacao gravada). */
+function qdFeDesfazer(id) { qdFeGravar('cancelarProgramacaoFerias', { id }); }
+/* Cancelar (da ficha): a janela pergunta antes. */
+function qdFeCancelar(ref, linha) {
+  const { p, st } = qdFeSituacaoDe(ref, linha);
+  if (!st || !st.programada) return;
+  QD.feAlvo = { ref, linha, daFicha: true };
+  abrirJanela('Cancelar programação', `<p class="qd-fe-pergunta">Cancelar a programação das férias de <b>${esc(qdNomeTxt(p.g) || 'Sem nome')}</b>
+    (início em ${pnDataLonga(st.prog.inicio)}, ${qdPlural(st.prog.dias, 'dia', 'dias')})? O período volta para “Programar”.</p>`,
+    `<button class="botao secundario" onclick="qdFeVoltar()">Voltar</button>
+    <button class="botao perigo" onclick="qdFeDesfazer(${jsArg(st.prog.id)})">Cancelar programação</button>`);
+}
+/*
+ * Grava pela porta de sempre (agir). No computador que barra a conversa com o Google, a gravacao vai pela pagina e
+ * ela recarrega: a marca na aba do navegador (2 min, so de quem gravou) faz o Quadro voltar na aba Ferias, com a busca.
+ */
+const QD_FE_CHAVE_VOLTA = 'gsl_ferias_volta';
+function qdFeGravar(acao, params) {
+  try { sessionStorage.setItem(QD_FE_CHAVE_VOLTA, JSON.stringify({ de: QD.de, ate: Date.now() + 120000, busca: QD.feBusca || '' })); } catch (e) {}
+  const limpa = () => { try { sessionStorage.removeItem(QD_FE_CHAVE_VOLTA); } catch (e) {} };
+  return agir(acao, params).then(limpa, limpa);
+}
+function qdFeRetomar(quem) {
+  let v = null;
+  try { v = JSON.parse(sessionStorage.getItem(QD_FE_CHAVE_VOLTA) || 'null'); sessionStorage.removeItem(QD_FE_CHAVE_VOLTA); } catch (e) { v = null; }
+  if (v && v.de === quem && v.ate > Date.now()) { QD.aba = 'ferias'; QD.feBusca = String(v.busca || ''); }
+}
+
+/* Excel: todos os periodos do recorte, do mais urgente para o menos. */
 function qdFeBaixar() {
-  const linhas = [['SITUAÇÃO', 'NOME', 'EQUIPE', 'FUNÇÃO', 'MATRÍCULA (FÉRIAS)', 'RH (GERAL)', 'INÍCIO DO PERÍODO', 'FIM DO PERÍODO', 'PODE TIRAR DESDE',
-    'AVISAR ATÉ', 'SAIR ATÉ (DATA LIMITE)', 'DIAS ATÉ A DATA LIMITE', 'STATUS NA GERAL']];
-  const rank = (x) => QD_FERIAS_ORDEM.indexOf(x.k);
-  const todos = [];
-  qdFePessoas().forEach((p) => p.periodos.forEach((per) => todos.push({ p, per })));
-  todos.sort((a, b) => rank(a.per) - rank(b.per) || (a.per.dias === null ? 1e9 : a.per.dias) - (b.per.dias === null ? 1e9 : b.per.dias));
-  const dt = (iso) => iso ? pnDataLonga(iso) : '';
-  todos.forEach(({ p, per }) => {
-    const f = per.f, g = p.g, paFim = f.paFim || f.limite;      // sem o pa_fim, o DTA_LIMITE (que repete a data), como na situacao
-    linhas.push([QD_FE_EXCEL[per.k] || per.k, qdFeNomeOuId(g), g.equipe || g.equipeBruta || '', qdFuncaoTela(g), f.matricula || '', g.rh || '',
-      dt(f.paInicio), dt(paFim), dt(paFim ? qdSomarDias(paFim, 1) : ''), dt(per.avisar), dt(f.limiteMax), per.dias === null ? '' : per.dias, g.status || '']);
+  const linhas = [['NOME', 'RH', 'EQUIPE', 'FUNÇÃO', 'PA INÍCIO', 'PA FIM', 'PODE SAIR A PARTIR DE', 'LIMITE MÁXIMO PARA SAIR', 'PROGRAMADA PARA', 'DIAS',
+    'VOLTA EM', 'SITUAÇÃO', 'DIAS ATÉ O LIMITE MÁXIMO']];
+  const todos = [], hoje = qdHoje(), dt = (iso) => iso ? pnDataLonga(iso) : '';
+  qdFePessoas().forEach((p) => p.periodos.forEach((st) => todos.push({ p, st })));
+  todos.sort((a, b) => qdFePorUrgencia(a.st, b.st) || qdNomeTxt(a.p.g).localeCompare(qdNomeTxt(b.p.g)));
+  todos.forEach(({ p, st }) => {
+    const g = p.g, f = st.f, pr = st.prog;
+    linhas.push([qdFeNomeOuId(g), g.rh || '', g.equipe || g.equipeBruta || '', qdFuncaoTela(g), dt(f.paInicio), dt(f.paFim), dt(st.L), dt(st.M),
+      pr ? dt(pr.inicio) : '', pr ? Number(pr.dias) : '', pr ? dt(qdSomarDias(pr.inicio, Number(pr.dias))) : '', st.txt, st.M ? qdDias(hoje, st.M) : '']);
   });
   const sufixo = qdChaveFuncao(qdRotuloRecorte()).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  pnBaixarXlsx('ferias-quadro-cd-' + qdHoje() + (sufixo ? '-' + sufixo : '') + '.xlsx', [{ nome: 'Férias', linhas }]);
+  pnBaixarXlsx('ferias-quadro-cd-' + hoje + (sufixo ? '-' + sufixo : '') + '.xlsx', [{ nome: 'Férias', linhas }]);
 }
 
 /* PARAMETROS DAS FERIAS: so quem pode trocar a planilha do Quadro. Valem para esta filial; o servidor confere. */
@@ -2734,82 +2946,96 @@ function qdFeParametros() {
   const campo = (id, rot, v, min, max, dica) => `<div class="campo"><label for="${id}">${rot}</label>
     <input id="${id}" type="number" inputmode="numeric" min="${min}" max="${max}" step="1" value="${esc(v)}">${dica ? `<p class="dica">${dica}</p>` : ''}</div>`;
   abrirJanela('Parâmetros das férias', `<div class="qd-fe-param">
-    <p class="dica">Valem para esta filial e para todo mundo que vê o Quadro. Os prazos contam os dias até a data limite para sair (DTA_LIMITEMAX).</p>
+    <p class="dica">Valem para esta filial e para todo mundo que vê o Quadro. O GSL usa duas datas da aba FÉRIAS: a partir de quando a pessoa pode sair (DTA_LIMITE) e o limite máximo para sair (DTA_LIMITEMAX, o último dia para começar).</p>
     <h4>Aba FÉRIAS</h4>
     <div class="campo"><label for="fp-cc">Centro(s) de custo do CD</label><input id="fp-cc" value="${esc(P.cc.join(', '))}">
       <p class="dica">Separe com vírgula. Linha da FÉRIAS com esse centro e sem par na GERAL vai para a Conferência; as dos outros centros são de outros setores.</p></div>
     ${campo('fp-digitos', 'Quantos números do fim do RH formam a matrícula', P.digitos, 1, 8, 'Com 3, o RH 100123 da GERAL é a matrícula 123 da FÉRIAS.')}
-    <h4>Prazos</h4>
-    ${campo('fp-aviso', 'Aviso de férias: dias antes da saída', P.aviso, 0, 120, '“Avisar até” = data limite menos este número. Data limite mais perto que isso: “precisam sair de férias”.')}
-    ${campo('fp-avisar', '“Avisar”: data limite em até quantos dias', P.avisar, 1, 400, '')}
-    ${campo('fp-planejar', '“Programar”: data limite em até quantos dias', P.planejar, 2, 400, 'Depois disso, “em dia”.')}
-    <p class="dica">Padrão: centro de custo ${esc(D.cc.join(', '))} · ${D.digitos} números · aviso de ${D.aviso} dias · “Avisar” ${D.avisar} dias · “Programar” ${D.planejar} dias.</p></div>`, `
+    <h4>Programação</h4>
+    ${campo('fp-aviso', 'Aviso de férias: dias antes da saída', P.aviso, 0, 120, '“Entregar o aviso até” = início menos este número. Sem programação e com o limite máximo mais perto que isso: vermelho.')}
+    ${campo('fp-janela', 'Entra em “Programar”: dias antes de poder sair', P.janela, 0, 400, 'Antes disso, a pessoa está em dia (cinza).')}
+    ${campo('fp-urgente', 'Urgente (laranja): limite máximo em até quantos dias', P.urgente, 0, 400, 'Para quem ainda não tem data programada. Pelo menos o aviso de férias.')}
+    ${campo('fp-tolerancia', 'Confirmar a saída: dias de tolerância depois do início', P.tolerancia, 0, 60, 'Depois disso sem confirmar, a linha fica vermelha.')}
+    <p class="dica">Padrão: centro de custo ${esc(D.cc.join(', '))} · ${D.digitos} números · aviso de ${D.aviso} dias · “Programar” ${D.janela} dias antes · urgente com ${D.urgente} dias · ${D.tolerancia} dias para confirmar.</p></div>`, `
     <button class="botao secundario" onclick="qdFeSalvarParametros(true)">Voltar ao padrão</button>
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="qdFeSalvarParametros(false)">Salvar</button>`);
 }
 function qdFeSalvarParametros(padrao) {
-  const p = padrao ? { padrao: true } : { cc: val('fp-cc'), digitos: val('fp-digitos'), aviso: val('fp-aviso'), avisar: val('fp-avisar'), planejar: val('fp-planejar') };
+  const p = padrao ? { padrao: true } : { cc: val('fp-cc'), digitos: val('fp-digitos'), aviso: val('fp-aviso'), janela: val('fp-janela'),
+    urgente: val('fp-urgente'), tolerancia: val('fp-tolerancia') };
   agir('salvarParametrosFerias', p).catch(() => {});
 }
 
-/* FICHA: a secao Ferias, um bloco por periodo em aberto, com a linha do tempo (aquisicao -> pode tirar -> aviso -> data limite). */
+/*
+ * FICHA: a secao Ferias, um bloco por periodo em aberto (do mais antigo para o mais novo), com a linha do tempo
+ * (periodo aquisitivo -> pode sair -> limite maximo, a programacao e hoje), as datas, a situacao e os botoes.
+ */
 function qdFeFichaSecao(ref) {
   if (!DADOS.ferias) return '';
   const g = qdGeral().find((x) => x.ref === ref);
   if (!g || !g.ativo) return '';
-  const p = qdFeriasDados().porRef[ref];
-  if (!p) return `<h4>Férias</h4><p class="qd-fe-vazio">Sem linha na aba FÉRIAS — o GSL não sabe o prazo das férias desta pessoa (veja a Conferência).</p>`;
-  const hoje = qdHoje();
-  return `<h4>Férias · ${qdPlural(p.periodos.length, 'período em aberto', 'períodos em aberto')}</h4>
-    ${g.situacao === 'FERIAS' ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}De férias agora pelo STATUS da GERAL: se forem as do período mais antigo, o prazo está sendo cumprido (a linha sai da extração quando o sistema fechar o período).</p>` : ''}
-    <ul class="qd-fe-ficha">${p.periodos.map((per) => {
-      const f = per.f, gr = QD_FE_GRUPO[per.k], paFim = f.paFim || f.limite;   // sem o pa_fim, o DTA_LIMITE
-      const fim = f.limiteMax;
-      const sairAte = fim ? `<div><dt>Sair até (data limite)</dt><dd><b>${qdFeDMAS(fim)}</b> · ${per.dias < 0 ? 'venceu ' + qdFeEm(fim) : qdFeEm(fim)}</dd></div>` : '';
-      if (!fim || !paFim) {
-        // sem a data limite, so a situacao; sem o fim do periodo, as datas que se sabe (o aviso e a data limite)
-        return `<li class="${gr}"><div class="qd-fe-ficha-cab">${qdFeIco(gr)}<b>${QD_FE_ROTULO[per.k]}</b>
-          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${paFim ? pnDataLonga(paFim) : '—'} · linha ${f.linha} da aba ${esc((DADOS.ferias || {}).aba || 'FÉRIAS')}</span></div>
-          ${fim ? `<dl class="qd-fe-ficha-datas"><div><dt>Avisar até</dt><dd>${qdFeDMAS(per.avisar)}</dd></div>${sairAte}</dl>` : ''}</li>`;
-      }
-      const ini = f.paInicio || qdSomarDias(paFim, -364);
-      const total = Math.max(1, qdDias(ini, fim));
-      const pos = (d) => Math.max(0, Math.min(100, qdDias(ini, d) / total * 100));
-      const hojePos = qdDias(ini, hoje) / total * 100;
-      return `<li class="${gr}">
-        <div class="qd-fe-ficha-cab">${qdFeIco(gr)}<b>${QD_FE_ROTULO[per.k]}</b>
-          <span>período ${f.paInicio ? pnDataLonga(f.paInicio) : '—'} a ${pnDataLonga(paFim)}</span></div>
-        <div class="qd-fe-tempo" role="img" aria-label="${esc('Período aquisitivo até ' + pnDataLonga(paFim) + '; pode tirar desde ' + pnDataLonga(qdSomarDias(paFim, 1)) + '; avisar até ' + pnDataLonga(per.avisar) + '; sair até ' + pnDataLonga(fim) + '.')}">
-          <i class="aq" style="left:0;width:${pos(paFim)}%"></i>
-          <i class="livre" style="left:${pos(paFim)}%;width:${Math.max(0, pos(per.avisar) - pos(paFim))}%"></i>
-          <i class="aviso ${gr}" style="left:${pos(per.avisar)}%;width:${100 - pos(per.avisar)}%"></i>
-          ${hojePos >= 0 && hojePos <= 100 ? `<b class="qd-fe-tempo-hoje" style="left:${hojePos}%"><span>hoje</span></b>` : ''}
-        </div>
-        <dl class="qd-fe-ficha-datas">
-          <div><dt>Pode tirar desde</dt><dd>${qdFeDMAS(qdSomarDias(paFim, 1))}</dd></div>
-          <div><dt>Avisar até</dt><dd>${qdFeDMAS(per.avisar)}</dd></div>
-          ${sairAte}
-        </dl></li>`;
-    }).join('')}</ul>`;
+  const fd = qdFeriasDados(), p = fd.porRef[ref];
+  const fechadas = fd.cumpridas.filter((c) => c.g.ref === ref && c.x.pelaAba);
+  const nota = (fechadas.length ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}${fechadas.map((c) => 'Férias cumpridas: saiu em ' + pnDataLonga(c.x.inicio) +
+    ' (o período já saiu da aba FÉRIAS).').join(' ')}</p>` : '') + (g.situacao === 'FERIAS' ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}De férias agora pelo STATUS da GERAL.</p>` : '');
+  if (!p) return `<h4>Férias</h4>${nota}<p class="qd-fe-vazio">Sem linha na aba FÉRIAS: o GSL não sabe as datas das férias desta pessoa (veja a Conferência).</p>`;
+  const periodos = p.periodos.slice().sort((a, b) => String(a.f.paFim || a.M || '').localeCompare(String(b.f.paFim || b.M || '')));
+  return `<h4>Férias · ${qdPlural(periodos.length, 'período em aberto', 'períodos em aberto')}</h4>${nota}
+    <ul class="qd-fe-ficha">${periodos.map((st) => qdFeFichaPeriodo(st, ref)).join('')}</ul>`;
+}
+function qdFeFichaPeriodo(st, ref) {
+  const f = st.f, pr = st.prog, hoje = qdHoje(), aba = esc((DADOS.ferias || {}).aba || 'FÉRIAS');
+  const ini = f.paInicio || (f.paFim ? qdSomarDias(f.paFim, -364) : (st.L ? qdSomarDias(st.L, -365) : ''));
+  const fimProg = pr ? qdSomarDias(pr.inicio, Number(pr.dias)) : '';
+  const fim = [st.M, fimProg, st.L, f.paFim].filter(Boolean).sort().pop() || '';
+  let tempo = '';
+  if (ini && fim && fim > ini) {
+    const total = qdDias(ini, fim), pos = (d) => Math.max(0, Math.min(100, qdDias(ini, d) / total * 100));
+    const seg = (cls, de, ate) => de && ate && ate > de ? `<i class="${cls}" style="left:${pos(de)}%;width:${Math.max(0.8, pos(ate) - pos(de))}%"></i>` : '';
+    const hojePos = qdDias(ini, hoje) / total * 100;
+    const rot = 'Período aquisitivo ' + pnDataLonga(f.paInicio || ini) + ' a ' + pnDataLonga(f.paFim) + '; pode sair a partir de ' + pnDataLonga(st.L) +
+      '; limite máximo para sair ' + pnDataLonga(st.M) + (pr ? '; programada para ' + pnDataLonga(pr.inicio) + ', ' + qdPlural(Number(pr.dias), 'dia', 'dias') : '') + '.';
+    tempo = `<div class="qd-fe-tempo" role="img" aria-label="${esc(rot)}">
+      ${seg('aq', ini, f.paFim || st.L)}${seg('livre', st.L, st.M)}${pr ? seg('prog', pr.inicio, fimProg) : ''}
+      ${hojePos >= 0 && hojePos <= 100 ? `<b class="qd-fe-tempo-hoje" style="left:${hojePos}%"><span>hoje</span></b>` : ''}
+    </div>`;
+  }
+  const quando = st.M ? (st.M < hoje ? 'venceu ' + qdFeEm(st.M) : qdFeEm(st.M)) : '';
+  return `<li class="qd-fe-${st.cor}">
+    <div class="qd-fe-ficha-cab">${qdFeSt(st)}<span>linha ${f.linha} da aba ${aba}</span></div>
+    ${tempo}
+    <dl class="qd-fe-ficha-datas">
+      <div><dt>PA início</dt><dd>${pnDataLonga(f.paInicio)}</dd></div>
+      <div><dt>PA fim</dt><dd>${pnDataLonga(f.paFim)}</dd></div>
+      <div><dt>Pode sair a partir de</dt><dd>${qdFeDMAS(st.L)}</dd></div>
+      <div><dt>Limite máximo para sair</dt><dd>${st.M ? `<b>${pnDataLonga(st.M)}</b> · ${quando}` : 'sem data na aba FÉRIAS'}</dd></div>
+    </dl>
+    ${pr ? `<p class="qd-fe-ficha-prog">${st.feita ? 'Saiu' : 'Programada para'} <b>${pnDataLonga(pr.inicio)}</b> (${qdFeSemana(pr.inicio)}) · ${qdPlural(Number(pr.dias), 'dia', 'dias')} · volta em ${pnDataLonga(fimProg)}${
+      st.feita && pr.confirmadaEm ? ' · saída confirmada em ' + pnDataLonga(pr.confirmadaEm) : ''}${pr.observacao ? `<span class="qd-fe-obs">${esc(pr.observacao)}</span>` : ''}</p>` : ''}
+    ${qdFeBotoes(st, ref, true)}${st.feita && qdFePodeProgramar() ? `<span class="qd-fe-acoes"><button class="qd-fe-bt" onclick="qdFeDesfazer(${jsArg(pr.id)})">Desfazer confirmação</button></span>` : ''}
+  </li>`;
 }
 
 /* VISAO GERAL: um cartao curto na coluna do lado, so com o que pede acao (segue os filtros). */
 function qdFeCartaoGeral() {
   if (!DADOS.ferias) return '';
-  const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido();
-  const sair = c.vencida.length + c.critica.length, prox = qdFeProximoAviso(pessoas);
-  const bt = (n, ico, rot) => `<button onclick="qdAba('ferias')"><b class="bq-num">${qdN(n)}</b><span>${ico}${rot}</span></button>`;
+  const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido(), hoje = qdHoje();
+  const urg = c.programar.concat(c.programadas).filter(qdFeUrgente), v = urg.filter((p) => p.pior.cor === 'vermelho').length;
+  const prox = pessoas.filter((p) => p.pior.programada && p.pior.prog.inicio >= hoje)
+    .sort((a, b) => a.pior.prog.inicio.localeCompare(b.pior.prog.inicio) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g)))[0];
+  const bt = (n, rot) => `<button onclick="qdAba('ferias')"><b class="bq-num">${qdN(n)}</b><span>${rot}</span></button>`;
   return `<div class="bq-card qd-fe-geral">
     <div class="qd-fe-card-cab"><h2>Férias</h2><button class="qd-link" onclick="qdAba('ferias')">Ver férias →</button></div>
-    <p class="bq-sub">Prazos pela aba FÉRIAS.</p>
+    <p class="bq-sub">Programação pela aba FÉRIAS.</p>
     ${d.aba ? `<p class="qd-fe-geral-prox">${QD_ICONES.grave} A aba FÉRIAS está ${d.aba}: o GSL não sabe o prazo de ninguém.</p>` : `<div class="qd-fe-geral-n">
-      ${bt(sair, QD_ICONES.grave, sair === 1 ? 'precisa sair de férias' : 'precisam sair de férias')}
-      ${bt(c.avisar.length, QD_ICONES.atencao, 'para avisar')}
+      ${bt(c.programar.length, 'para programar')}
+      ${bt(c.programadas.length, c.programadas.length === 1 ? 'programada' : 'programadas')}
     </div>
-    ${sair + c.avisar.length ? '' : `<p class="qd-fe-geral-prox">${d.n ? '' : QD_ICONES.ok + ' '}Ninguém para avisar ou sair de férias agora${d.n ? ' entre quem tem prazo' : ''}.</p>`}
-    ${prox ? `<p class="qd-fe-geral-prox">Próximo aviso: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> ${qdEq(prox.g.equipe, prox.g.equipeBruta)}
-      até <b>${qdFeDMS(prox.pior.avisar)}</b> (sair até ${qdFeDM(prox.pior.f.limiteMax)}).</p>` : ''}
+    ${urg.length ? `<p class="qd-fe-geral-prox"><span class="qd-fe-st qd-fe-${v ? 'vermelho' : 'laranja'}"><i aria-hidden="true"></i>${qdPlural(urg.length, 'pede', 'pedem')} atenção agora</span> (vermelho ou laranja)</p>` : ''}
+    ${c.programar.length + c.programadas.length ? '' : `<p class="qd-fe-geral-prox">${d.n ? '' : QD_ICONES.ok + ' '}Ninguém para programar agora${d.n ? ' entre quem tem as datas' : ''}.</p>`}
+    ${prox ? `<p class="qd-fe-geral-prox">Próxima saída: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> ${qdEq(prox.g.equipe, prox.g.equipeBruta)}
+      em <b>${qdFeDMS(prox.pior.prog.inicio)}</b> (${qdFeEm(prox.pior.prog.inicio)}).</p>` : ''}
     ${d.n ? `<p class="qd-fe-geral-prox">${QD_FE_ICO.sem} <b>${qdN(d.n)} sem dados de férias</b>${d.semLinha.length
       ? ` (<button class="qd-link" onclick="qdIrConferencia('FERIAS_SEM_DADOS')">ver na Conferência</button>)` : ''}</p>` : ''}`}
   </div>`;
@@ -2818,29 +3044,28 @@ function qdFeCartaoGeral() {
 /* Linha das ferias no Copiar resumo (fora da aba Ferias). */
 function qdFeResumoLinha() {
   if (!DADOS.ferias) return '';
-  const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(), sair = c.vencida.length + c.critica.length;
+  const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(), urg = c.programar.concat(c.programadas).filter(qdFeUrgente).length;
   if (d.aba) return 'Férias: a aba FÉRIAS está ' + d.aba + ' (o GSL não sabe os prazos)';
-  return 'Férias: ' + qdN(sair) + (sair === 1 ? ' precisa' : ' precisam') + ' sair de férias, ' + qdN(c.avisar.length) + ' para avisar' +
-    (d.n ? ', ' + qdN(d.n) + ' sem dados de férias' : '');
+  return 'Férias: ' + qdN(c.programar.length) + ' para programar, ' + qdPlural(c.programadas.length, 'programada', 'programadas') +
+    (urg ? ', ' + qdPlural(urg, 'pede', 'pedem') + ' atenção agora' : '') + (d.n ? ', ' + qdN(d.n) + ' sem dados de férias' : '');
 }
-/* Copiar resumo na aba Ferias: a lista do que fazer, para mandar no WhatsApp. */
+/* Copiar resumo na aba Ferias: as listas por situacao, para mandar no WhatsApp. */
 function qdFeResumoTexto() {
   const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
   const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido();
+  const saiu = (g) => qdFeSaiu(g) ? ' (consta como desligado)' : '';
   const quem = (g) => '- ' + qdFeNomeOuId(g) + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ')';
-  const bloco = (titulo, lista, txt) => lista.length ? [titulo + ' (' + lista.length + ')']
-    .concat(lista.map((p) => quem(p.g) + ' — ' + txt(p) + (qdFeSaiu(p.g) ? ' (consta como desligado)' : ''))) : [];
+  const bloco = (titulo, linhas) => linhas.length ? [titulo + ' (' + linhas.length + ')'].concat(linhas.slice(0, 40), linhas.length > 40 ? ['- e mais ' + (linhas.length - 40)] : []) : [];
   const titulo = 'Férias — Quadro do CD' + (filial ? ' — ' + filial : '') + ' — ' + pnDataLonga(qdHoje()) + (qdRotuloRecorte() ? ' — ' + qdRotuloRecorte() : '');
   if (d.aba) return [titulo, 'A aba FÉRIAS está ' + d.aba + ': o GSL não sabe o prazo de ninguém.'].join('\n');
-  const sair = c.vencida.concat(c.critica).sort(qdFePorPrazo), avisar = c.avisar.slice().sort(qdFePorPrazo);
-  const prox = sair.length + avisar.length ? null : qdFeProximoAviso(pessoas);
-  const saiu = (g) => qdFeSaiu(g) ? ' (consta como desligado)' : '';
+  const deFerias = qdRecorte(qdNaEmpresa()).filter((g) => g.situacao === 'FERIAS').sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+  const porRef = qdFeriasDados().porRef;
   const desc = d.semLinha.map((g) => quem(g) + ' — sem linha na aba FÉRIAS' + saiu(g)).concat(d.semData.map((p) => quem(p.g) + ' — período sem data limite na aba FÉRIAS' + saiu(p.g)));
   return [titulo]
-    .concat(bloco('PRECISAM SAIR DE FÉRIAS', sair, (p) => p.pior.k === 'vencida' ? 'prazo vencido em ' + qdFeDMS(p.pior.f.limiteMax) : 'sair até ' + qdFeDMS(p.pior.f.limiteMax)))
-    .concat(bloco('AVISAR', avisar, (p) => 'avisar até ' + qdFeDMS(p.pior.avisar) + ' (sair até ' + qdFeDM(p.pior.f.limiteMax) + ')'))
-    .concat(sair.length + avisar.length ? [] : ['Ninguém para avisar ou sair de férias agora' + (d.n ? ' entre quem tem prazo' : '') + '.' +
-      (prox ? ' Próximo aviso: ' + qdFeNomeOuId(prox.g) + ' até ' + qdFeDMS(prox.pior.avisar) + ' (' + qdFeEm(prox.pior.avisar) + ').' : '')])
+    .concat(bloco('PROGRAMAR', c.programar.map((p) => quem(p.g) + ' — ' + p.pior.txt + saiu(p.g))))
+    .concat(bloco('PROGRAMADAS', c.programadas.map((p) => quem(p.g) + ' — ' + p.pior.txt + ' · ' + qdFeDetalhe(p.pior) + saiu(p.g))))
+    .concat(c.programar.length + c.programadas.length ? [] : ['Ninguém para programar agora' + (d.n ? ' entre quem tem as datas' : '') + '.'])
+    .concat(bloco('DE FÉRIAS AGORA', deFerias.map((g) => quem(g) + (porRef[g.ref] && porRef[g.ref].pior.k === 'deferias' ? ' — ' + porRef[g.ref].pior.txt : ''))))
     .concat(d.n ? ['SEM DADOS DE FÉRIAS (' + d.n + ')'].concat(desc.slice(0, 10), desc.length > 10 ? ['- e mais ' + (desc.length - 10)] : []) : []).join('\n');
 }
 

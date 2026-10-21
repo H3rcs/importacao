@@ -1447,21 +1447,24 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
   afirmar(d.inconsistencias.filter((x) => /^FERIAS_/.test(x.tipo)).every((x) => x.gravidade === 'atencao'), 'conferencias das ferias sao de atencao');
   // PARAMETROS (editaveis na aba Ferias): o padrao vem na tela; o servidor confere o que chega
   const P0 = d.parametrosFerias;
-  afirmar(P0 && Object.keys(P0).sort().join() === 'avisar,aviso,cc,digitos,planejar' && P0.cc.join() === '655' && P0.digitos === 3 && P0.aviso === 30 && P0.avisar === 60 && P0.planejar === 90,
-    'parametros padrao (sem os do escalonar): ' + JSON.stringify(P0));
-  const ok = { cc: '700', digitos: '4', aviso: '45', avisar: '75', planejar: '120' };
+  // 21/10: os da programacao (janela, urgente, tolerancia); "Avisar" e "Programar" da aba de 14/10 nao existem mais
+  afirmar(P0 && Object.keys(P0).sort().join() === 'aviso,cc,digitos,janela,tolerancia,urgente' && P0.cc.join() === '655' && P0.digitos === 3 && P0.aviso === 30 &&
+    P0.janela === 60 && P0.urgente === 60 && P0.tolerancia === 3, 'parametros padrao (sem os do escalonar nem os de 14/10): ' + JSON.stringify(P0));
+  const ok = { cc: '700', digitos: '4', aviso: '45', janela: '90', urgente: '75', tolerancia: '5' };
   afirmar(/pelo menos um centro de custo/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { cc: 'abc' })))), 'centro de custo sem numero');
-  afirmar(/: "Avisar" precisa ser maior que o aviso de férias \(45 dias\)\.$/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { avisar: '40' })))), 'avisar menor que o aviso');
-  afirmar(/: "Programar" precisa ser maior que "Avisar" \(75 dias\)\.$/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { planejar: '75' })))), 'programar menor que o avisar');
+  afirmar(/: "Urgente" precisa ser pelo menos o aviso de férias \(45 dias\)\.$/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { urgente: '40' })))), 'urgente menor que o aviso');
   afirmar(/Números da matrícula: use um número inteiro de 1 a 8/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { digitos: '0' })))), 'digitos fora da faixa');
+  afirmar(/Confirmar a saída: use um número inteiro de 0 a 60/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { tolerancia: '61' })))), 'tolerancia fora da faixa');
+  afirmar(/Entra em "Programar": use um número inteiro de 0 a 400/.test(erroDe(() => acao(m, s, 'salvarParametrosFerias', Object.assign({}, ok, { janela: '' })))), 'janela vazia');
   const coord = entrar(m, COORD, '1234');
   afirmar(erroDe(() => acao(m, coord, 'salvarParametrosFerias', ok)) !== '', 'coordenador nao muda os parametros');
   acao(m, s, 'salvarParametrosFerias', ok);
   const d3 = tela(m, s, 'quadro');
   const P1 = d3.parametrosFerias;
-  afirmar(P1.cc.join() === '700' && P1.digitos === 4 && P1.aviso === 45 && P1.avisar === 75 && P1.planejar === 120 && P1.janela === undefined,
+  afirmar(P1.cc.join() === '700' && P1.digitos === 4 && P1.aviso === 45 && P1.janela === 90 && P1.urgente === 75 && P1.tolerancia === 5 && P1.avisar === undefined,
     'parametros salvos: ' + JSON.stringify(P1));
-  afirmar(!ctx(m).listar('PARAMETROS').some((x) => /^FERIAS_ESCALONAR/.test(x.CHAVE)), 'o escalonar nao grava mais parametro');
+  afirmar(!ctx(m).listar('PARAMETROS').some((x) => /^FERIAS_(ESCALONAR|AVISAR|PLANEJAR)/.test(x.CHAVE)), 'o escalonar e os de 14/10 nao gravam mais parametro');
+  afirmar(['FERIAS_JANELA_DIAS', 'FERIAS_URGENTE_DIAS', 'FERIAS_TOLERANCIA_DIAS'].every((k) => ctx(m).listar('PARAMETROS').some((x) => x.CHAVE === k)), 'as chaves novas gravadas');
   const conf3 = (tipo) => d3.inconsistencias.filter((x) => x.tipo === tipo);
   // CC 700: a linha da IRIS (700) e do CD e esta fora da GERAL; as do 655 passam a ser de outro setor: so entram pela matricula com o nome certo
   // (CARLOS, sem RH, nao e mais achado pelo nome; HELIO, JOAO, EVA e a do CARLOS ficam de fora, sem conferencia)
@@ -1474,7 +1477,7 @@ caso('quadro do CD: aba FÉRIAS cruzada com a GERAL pelos ultimos numeros do RH;
     'numeros da matricula do parametro: ' + JSON.stringify(conf3('FERIAS_SEM_DADOS')));
   acao(m, s, 'salvarParametrosFerias', { padrao: true });
   const P2 = tela(m, s, 'quadro').parametrosFerias;
-  afirmar(P2.cc.join() === '655' && P2.digitos === 3 && P2.aviso === 30 && P2.avisar === 60 && P2.planejar === 90, 'de volta ao padrao: ' + JSON.stringify(P2));
+  afirmar(P2.cc.join() === '655' && P2.digitos === 3 && P2.aviso === 30 && P2.janela === 60 && P2.urgente === 60 && P2.tolerancia === 3, 'de volta ao padrao: ' + JSON.stringify(P2));
   // extracao nova colada na aba: a copia guardada (5 min) segue ate o "Atualizar dados" — o da barra lateral tambem rele
   const idQ = /\/d\/([\w-]+)/.exec(link)[1];
   const abaF = m.planilhas.get(idQ).abas.find((a) => a.nome === 'Férias');
@@ -1666,6 +1669,203 @@ caso('quadro do CD: ferias — ativo antes de quem saiu; nome sem contradicao an
   afirmar(/^A aba FÉRIAS tem a matrícula 654, de JOSE CARLOS SILVA \(linha 8, centro de custo 700\): o nome bate só em parte, .* inclua o centro de custo 700 nos parâmetros da aba Férias\./.test(sem['60009']), 'J CARLOS: ' + sem['60009']);
   afirmar(/^A aba FÉRIAS tem a matrícula 777, mas de PEDRO ROCHA \(linha 10\), outro nome: veja "Férias: matrícula de outra pessoa"\./.test(sem['60010']) && sem['60010'] === sem['60011'],
     'os dois JOSE (o motivo da linha do CD primeiro): ' + sem['60010']);
+});
+
+/*
+ * PROGRAMACAO DAS FERIAS (21/10). O relogio parado na quarta 21/10/2026. Cada pessoa da aba FÉRIAS e um caso:
+ * ANA (pode sair desde 10/06/2026, limite maximo 10/05/2027), BRUNO (so pode sair a partir de 01/12/2026), CARLA (ja
+ * saiu da empresa), DIEGO (dois periodos; o primeiro sem o DTA_LIMITE, limite maximo 15/11/2026) e EVA (o limite
+ * maximo ja passou, 01/10/2026).
+ */
+const QUARTA_21_10 = '2026-10-21T10:00:00-03:00';
+const FERIAS_PROG_COLUNAS = 'ID,MATRICULA,NOME,PA_INICIO,PA_FIM,LIMITE_MAX,INICIO,DIAS,SITUACAO,OBSERVACAO,CONFIRMADA_EM,CONFIRMADA_POR,CRIADO_EM,CRIADO_POR,ATUALIZADO_EM,ATUALIZADO_POR,EXCLUIDO';
+const abasDaProgramacao = () => ({
+  'GERAL': [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS'],
+    ['1° TURNO', '30001', 'ANA LIMA', 'SEPARADOR', '100123', 'ATIVO'],
+    ['1° TURNO', '30002', 'BRUNO DIAS', 'SEPARADOR', '100456', 'ATIVO'],
+    ['2° TURNO', '30003', 'CARLA REIS', 'CONFERENTE', '100789', 'DESLIGADO'],
+    ['2° TURNO', '30004', 'DIEGO MOTA', 'CONFERENTE', '100321', 'ATIVO'],
+    ['ADM', '30005', 'EVA PRADO', 'ANALISTA', '100654', 'ATIVO']],
+  'CADMITIDOS': [['PRODUTIVA', 'COLABORADOR']], 'CDESLIGADOS': [['COD', 'COLABORADOR']],
+  'FÉRIAS': [['Empresa', 'Filial', 'Matricula', 'Descrição', 'Nome', 'cc', 'turno', 'admissão', 'pa_inicio', 'pa_fim', 'DTA_LIMITE', 'DTA_LIMITEMAX', 'dias vencidos', 'codfuc', 'tipfuncao'],
+    ['Bartofil', 21, 123, 'SEPARADOR', 'Ana Lima', 655, 'A', '10/06/2020', '10/06/2025', '09/06/2026', '10/06/2026', '10/05/2027', 0, 101, 'OPERACIONAL'],
+    ['Bartofil', 21, 456, 'SEPARADOR', 'BRUNO DIAS', 655, 'A', '01/12/2021', '01/12/2025', '30/11/2026', '01/12/2026', '31/10/2027', 0, 101, 'OPERACIONAL'],
+    ['Bartofil', 21, 789, 'CONFERENTE', 'CARLA REIS', 655, 'B', '01/01/2020', '01/01/2025', '31/12/2025', '01/01/2026', '30/11/2026', 0, 102, 'OPERACIONAL'],
+    ['Bartofil', 21, 321, 'CONFERENTE', 'DIEGO MOTA', 655, 'B', '01/02/2019', '01/02/2025', '31/01/2026', '', '15/11/2026', 0, 102, 'OPERACIONAL'],
+    ['Bartofil', 21, 321, 'CONFERENTE', 'DIEGO MOTA', 655, 'B', '01/02/2019', '01/02/2026', '31/01/2027', '01/02/2027', '31/12/2027', 0, 102, 'OPERACIONAL'],
+    ['Bartofil', 21, 654, 'ANALISTA', 'EVA PRADO', 655, 'ADM', '01/11/2018', '01/11/2024', '31/10/2025', '01/11/2025', '01/10/2026', 0, 103, 'ADMINISTRATIVO']]
+});
+const PER_ANA = { matricula: '123', nome: 'Ana Lima', paFim: '2026-06-09', limiteMax: '2027-05-10' };
+const PER_BRUNO = { matricula: '456', nome: 'BRUNO DIAS', paFim: '2026-11-30', limiteMax: '2027-10-31' };
+const PER_DIEGO1 = { matricula: '321', nome: 'DIEGO MOTA', paFim: '2026-01-31', limiteMax: '2026-11-15' };
+const PER_DIEGO2 = { matricula: '321', nome: 'DIEGO MOTA', paFim: '2027-01-31', limiteMax: '2027-12-31' };
+const PER_EVA = { matricula: '654', nome: 'EVA PRADO', paFim: '2025-10-31', limiteMax: '2026-10-01' };
+function mundoFerias() {
+  const m = new Mundo({ dono: DONO, agora: QUARTA_21_10 });
+  ctx(m).instalar(DONO);
+  const c = ctx(m);
+  const admin = { email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') };
+  c.acaoSalvarUsuario(admin, { email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+  ctx(m).acaoSalvarUsuario(admin, { email: COORD, nome: 'Maria Souza', perfil: 'COORDENADOR', turno: 'A', filiais: '*', papel: 'Coordenadora' });
+  ctx(m).acaoSalvarUsuario(admin, { email: 'carla.dias@bartofil.com.br', nome: 'Carla Dias', perfil: 'CONSULTA', turno: '', filiais: '*', papel: 'Consulta' });
+  const s = entrar(m, DONO, '4321');
+  const link = planilhaAntiga(m, 'BI Quadro Feira', abasDaProgramacao());
+  acao(m, s, 'salvarFonteQuadro', { link });
+  return { m, s, link, abaFerias: m.planilhas.get(/\/d\/([\w-]+)/.exec(link)[1]).abas.find((a) => a.nome === 'FÉRIAS') };
+}
+/* As linhas de LOG das ferias: as que ja desceram para a aba LOG e as do balde do cache. */
+function logDasFerias(m) {
+  const balde = JSON.parse((m.cache.get('log_pendente') || { v: '[]' }).v);
+  return ctx(m).listar('LOG').map((r) => [r.ACAO, r.DETALHE]).concat(balde.map((x) => [x[2], x[5]]))
+    .filter((x) => /FERIAS/.test(x[0])).map((x) => x[0] + ': ' + x[1]);
+}
+
+caso('ferias (21/10): programar e reprogramar pela porta — o inicio vai do "pode sair a partir de" ao limite maximo (o ultimo dia para comecar; o que ja passou nao barra), de 5 a 30 dias; uma programacao viva por periodo, ligada a linha da aba FÉRIAS; LOG de cada mudanca', () => {
+  const { m, s } = mundoFerias();
+  let d = tela(m, s, 'quadro');
+  afirmar(Array.isArray(d.programacoes) && !d.programacoes.length && !d.semProgramacao && d.podeConfigurar, 'sem programacao ainda: ' + JSON.stringify([d.programacoes, d.semProgramacao]));
+  const ref = (cod) => d.geral.find((g) => g.cod === cod).ref;
+  const linhaDe = (dd, cod, paFim) => dd.ferias.linhas.find((f) => f.ref === ref(cod) && f.paFim === paFim);
+  const r1 = acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-12-07', dias: '30' }, PER_ANA));
+  afirmar(r1.recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).' && !r1.invalidarTudo, 'recado: ' + JSON.stringify(r1));
+  d = tela(m, s, 'quadro');
+  const p1 = d.programacoes[0], la = linhaDe(d, '30001', '2026-06-09');
+  afirmar(d.programacoes.length === 1 && p1.situacao === 'PROGRAMADA' && p1.inicio === '2026-12-07' && p1.dias === 30 && p1.ref === ref('30001') &&
+    p1.linha === la.linha && la.prog === p1.id && p1.matricula === '123' && p1.paFim === '2026-06-09' && p1.limiteMax === '2027-05-10' && !p1.pelaAba,
+    'ligada a linha da ANA (a tela da filial ja volta com ela): ' + JSON.stringify(p1));
+  // reprogramar: a mesma linha do banco, com os dias e a observacao
+  const r2 = acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-12-14', dias: 20, observacao: '  Combinado   com a supervisão ' }, PER_ANA));
+  afirmar(r2.recado === 'Férias de ANA LIMA reprogramadas para 14/12/2026 (20 dias).', 'reprogramar: ' + r2.recado);
+  let banco = ctx(m).listar('FERIAS_PROG');
+  afirmar(banco.length === 1 && banco[0].INICIO === '2026-12-14' && Number(banco[0].DIAS) === 20 && banco[0].OBSERVACAO === 'Combinado com a supervisão' &&
+    banco[0].SITUACAO === 'PROGRAMADA' && banco[0].NOME === 'ANA LIMA' && banco[0].MATRICULA === '123' && banco[0].LIMITE_MAX === '2027-05-10' && banco[0].CRIADO_POR === DONO,
+    'uma viva por periodo: ' + JSON.stringify(banco));
+  // as recusas, com as frases que a tela tambem usa
+  const e = (p) => erroDe(() => acao(m, s, 'programarFerias', p)).replace(/^programarFerias: /, '');
+  const recusas = [
+    [Object.assign({ inicio: '2026-11-30' }, PER_BRUNO), 'BRUNO DIAS só pode sair de férias a partir de 01/12/2026.'],
+    [Object.assign({ inicio: '2027-05-11' }, PER_ANA), 'A data passa do limite máximo para sair (10/05/2027). Escolha uma data até lá.'],
+    [Object.assign({ inicio: '2026-11-16' }, PER_DIEGO1), 'A data passa do limite máximo para sair (15/11/2026). Escolha uma data até lá.'],
+    [Object.assign({ inicio: '2026-01-31' }, PER_DIEGO1), 'DIEGO MOTA só pode sair de férias a partir de 01/02/2026.'],
+    [Object.assign({ inicio: '2026-12-07', observacao: 'x'.repeat(301) }, PER_ANA), 'Observação: no máximo 300 letras.']
+  ].concat(['4', '31', 'abc', '12.5', 0].map((dias) => [Object.assign({ inicio: '2026-12-07', dias }, PER_ANA), 'Dias de férias: use um número inteiro de 5 a 30.']))
+    .concat(['', '2026-02-31', '07/12/2026', null].map((inicio) => [Object.assign({}, PER_ANA, { inicio }), 'Escolha a data de início das férias.']));
+  recusas.forEach(([p, frase]) => afirmar(e(p) === frase, 'recusa ' + JSON.stringify(p).slice(0, 90) + ': ' + e(p)));
+  afirmar(/^Não achei esse período na aba FÉRIAS \(de quem está ativo no quadro\)\./.test(e(Object.assign({ inicio: '2026-12-07' }, PER_ANA, { paFim: '2020-01-01', limiteMax: '2020-12-01' }))), 'periodo que nao existe');
+  afirmar(/^Não achei esse período na aba FÉRIAS/.test(e({ matricula: '789', nome: 'CARLA REIS', paFim: '2025-12-31', inicio: '2026-11-02' })), 'quem ja saiu da empresa');
+  // o limite maximo e o ultimo dia para COMECAR: no dia vale (a volta passa dele); sem os dias, 30
+  afirmar(acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-11-15' }, PER_DIEGO1)).recado === 'Férias de DIEGO MOTA programadas para 15/11/2026 (30 dias).', 'no ultimo dia');
+  // o outro periodo do DIEGO e outra programacao; o limite que ja passou (EVA) nao barra: e o quanto antes
+  acao(m, s, 'programarFerias', Object.assign({ inicio: '2027-02-08', dias: 10 }, PER_DIEGO2));
+  afirmar(acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-10-26', dias: 15 }, PER_EVA)).recado === 'Férias de EVA PRADO programadas para 26/10/2026 (15 dias).', 'limite que ja passou');
+  d = tela(m, s, 'quadro');
+  const progDe = (cod, paFim) => d.programacoes.find((x) => x.id === linhaDe(d, cod, paFim).prog);
+  afirmar(d.programacoes.length === 4 && progDe('30004', '2026-01-31').inicio === '2026-11-15' && progDe('30004', '2027-01-31').inicio === '2027-02-08' &&
+    progDe('30004', '2026-01-31').id !== progDe('30004', '2027-01-31').id && progDe('30005', '2025-10-31').dias === 15, 'cada periodo com a sua: ' + JSON.stringify(d.programacoes));
+  banco = ctx(m).listar('FERIAS_PROG');
+  afirmar(banco.length === 4 && banco.every((x) => x.SITUACAO === 'PROGRAMADA'), 'quatro vivas: ' + banco.length);
+  const log = logDasFerias(m);
+  afirmar(log.join('\n') === ['PROGRAMAR FERIAS: ANA LIMA · 07/12/2026 · 30 dias', 'REPROGRAMAR FERIAS: ANA LIMA · 14/12/2026 · 20 dias (era 07/12/2026)',
+    'PROGRAMAR FERIAS: DIEGO MOTA · 15/11/2026 · 30 dias', 'PROGRAMAR FERIAS: DIEGO MOTA · 08/02/2027 · 10 dias', 'PROGRAMAR FERIAS: EVA PRADO · 26/10/2026 · 15 dias'].join('\n'),
+    'LOG: ' + log.join(' | '));
+});
+
+caso('ferias (21/10): confirmar a saida (do dia do inicio em diante), desfazer a confirmacao e cancelar; quem nao programa e recusado; o periodo que saiu da aba FÉRIAS volta como cumprido — com a aba vazia, nada e dado como cumprido', () => {
+  const { m, s, abaFerias } = mundoFerias();
+  acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA));
+  acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-10-15', dias: 20 }, PER_EVA));
+  let d = tela(m, s, 'quadro');
+  const idDe = (nome) => d.programacoes.find((x) => x.nome === nome).id;
+  const idAna = idDe('ANA LIMA'), idEva = idDe('EVA PRADO');
+  const e = (nome, p) => erroDe(() => acao(m, s, nome, p)).replace(nome + ': ', '');
+  afirmar(e('confirmarFerias', { id: idAna }) === 'As férias de ANA LIMA começam em 07/12/2026: confirme a saída a partir desse dia.', 'antes do inicio: ' + e('confirmarFerias', { id: idAna }));
+  // quem nao programa (coordenador, consulta) nao confirma, nao programa e nao cancela
+  const coord = entrar(m, COORD, '1234'), consulta = entrar(m, 'carla.dias@bartofil.com.br', '2468');
+  [coord, consulta].forEach((q) => {
+    [['programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)], ['confirmarFerias', { id: idEva }], ['cancelarProgramacaoFerias', { id: idAna }]].forEach(([nome, p]) => {
+      const msg = erroDe(() => acao(m, q, nome, p));
+      afirmar(/nao pode executar esta acao/.test(msg), q.email + ' em ' + nome + ': ' + msg);
+    });
+  });
+  afirmar(ctx(m).listar('FERIAS_PROG').every((x) => x.SITUACAO === 'PROGRAMADA') && ctx(m).listar('FERIAS_PROG').length === 2, 'nada mudou com as recusas');
+  // EVA: a saida foi em 15/10 — confirma (quem e quando ficam na linha); confirmar de novo e reprogramar o mesmo periodo sao recusados
+  afirmar(acao(m, s, 'confirmarFerias', { id: idEva }).recado === 'Saída de férias de EVA PRADO confirmada (15/10/2026).', 'confirmou');
+  afirmar(e('confirmarFerias', { id: idEva }) === 'A saída de férias de EVA PRADO já foi confirmada.', 'de novo');
+  afirmar(e('programarFerias', Object.assign({ inicio: '2026-10-28' }, PER_EVA)) === 'A saída de férias de EVA PRADO neste período já foi confirmada.', 'reprogramar a confirmada');
+  const eva = () => ctx(m).listar('FERIAS_PROG').find((x) => x.ID === idEva);
+  afirmar(eva().SITUACAO === 'CUMPRIDA' && /^21\/10\/2026 /.test(eva().CONFIRMADA_EM) && eva().CONFIRMADA_POR === DONO, 'quem e quando: ' + JSON.stringify(eva()));
+  d = tela(m, s, 'quadro');
+  const pe = d.programacoes.find((x) => x.id === idEva);
+  afirmar(pe.situacao === 'CUMPRIDA' && pe.confirmadaEm === '2026-10-21' && pe.linha && !pe.pelaAba, 'cumprida na tela: ' + JSON.stringify(pe));
+  // desfazer a confirmacao (feita por engano): volta a programada, com a mesma data
+  afirmar(acao(m, s, 'cancelarProgramacaoFerias', { id: idEva }).recado === 'Confirmação desfeita: as férias de EVA PRADO voltam a programadas para 15/10/2026.', 'desfazer');
+  afirmar(eva().SITUACAO === 'PROGRAMADA' && eva().CONFIRMADA_EM === '' && eva().CONFIRMADA_POR === '' && eva().INICIO === '2026-10-15', 'voltou: ' + JSON.stringify(eva()));
+  // cancelar a programada: a linha sai (exclusao logica) e o periodo fica sem programacao
+  afirmar(acao(m, s, 'cancelarProgramacaoFerias', { id: idAna }).recado === 'Programação das férias de ANA LIMA cancelada.', 'cancelar');
+  d = tela(m, s, 'quadro');
+  afirmar(!d.programacoes.some((x) => x.id === idAna) && !d.ferias.linhas.some((f) => f.prog === idAna) && ctx(m).listar('FERIAS_PROG', true).find((x) => x.ID === idAna).EXCLUIDO === 'SIM',
+    'cancelada: ' + JSON.stringify(d.programacoes));
+  ['cancelarProgramacaoFerias', 'confirmarFerias'].forEach((nome) => afirmar(e(nome, { id: idAna }) === 'Essa programação de férias não existe mais. Atualize a tela.' &&
+    e(nome, { id: 'FER-INVENTADO' }) === 'Essa programação de férias não existe mais. Atualize a tela.' && e(nome, {}) === 'Essa programação de férias não existe mais. Atualize a tela.', nome + ' sem programacao viva'));
+  // o RH fechou o primeiro periodo do DIEGO (a linha saiu da extracao nova): a programacao volta como cumprida, na pessoa (pela outra linha da matricula)
+  acao(m, s, 'programarFerias', Object.assign({ inicio: '2026-11-02' }, PER_DIEGO1));
+  abaFerias.dados.splice(4, 1);
+  acao(m, s, 'atualizarDados', {});
+  d = tela(m, s, 'quadro');
+  const diego = d.geral.find((g) => g.cod === '30004').ref;
+  const pd = d.programacoes.find((x) => x.paFim === '2026-01-31');
+  afirmar(pd && pd.situacao === 'CUMPRIDA' && pd.pelaAba && pd.ref === diego && !pd.linha && ctx(m).listar('FERIAS_PROG').find((x) => x.ID === pd.id).SITUACAO === 'PROGRAMADA',
+    'periodo fechado pelo RH (nada gravado no banco): ' + JSON.stringify(pd));
+  afirmar(!d.ferias.linhas.some((f) => f.ref === diego && f.prog), 'o periodo seguinte do DIEGO segue sem programacao');
+  // aba FÉRIAS colada vazia (so o cabecalho): nenhuma programacao e dada como cumprida
+  abaFerias.dados.splice(1);
+  acao(m, s, 'atualizarDados', {});
+  d = tela(m, s, 'quadro');
+  afirmar(d.leitura.ferias.linhas === 0 && !d.programacoes.length, 'aba vazia: ' + JSON.stringify(d.programacoes));
+  afirmar(logDasFerias(m).filter((x) => /^(CONFIRMAR|DESFAZER|CANCELAR)/.test(x)).join(' | ') ===
+    'CONFIRMAR FERIAS: EVA PRADO · saiu em 15/10/2026 | DESFAZER CONFIRMACAO FERIAS: EVA PRADO · 15/10/2026 | CANCELAR FERIAS: ANA LIMA · era 07/12/2026', 'LOG: ' + logDasFerias(m).join(' | '));
+});
+
+caso('atualizacao 8.11: banco da 8.10 (sem a FERIAS_PROG) ganha a tabela na entrada e a programacao grava; com o Instalacao.gs de antes, a aba Ferias fica so de leitura e programar e recusado antes de gravar', () => {
+  const { m, s } = mundoFerias();
+  const c = ctx(m), banco = m.planilhas.get(c.prop('ID_BANCO'));
+  const i = banco.abas.findIndex((x) => x.nome === 'FERIAS_PROG');
+  afirmar(i !== -1 && banco.abas[i].dados[0].join() === FERIAS_PROG_COLUNAS, 'criada na instalacao: ' + (i !== -1 && banco.abas[i].dados[0].join()));
+  banco.abas.splice(i, 1);
+  c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.10');
+  m.cache.clear();
+  const adm = entrar(m, DONO, '4321');                        // a entrada roda a migracao
+  const aba = banco.abas.find((x) => x.nome === 'FERIAS_PROG');
+  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.11', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(acao(m, adm, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)).recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).', 'grava depois da migracao');
+  afirmar(tela(m, adm, 'quadro').programacoes.length === 1 && s, 'a tela le');
+  // Instalacao.gs de antes (colado pela metade): sem a FERIAS_PROG no esquema
+  const fs = require('fs'), os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-ferias-velho-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    const inst = fs.readFileSync(path.join(PASTA, 'Instalacao.gs'), 'utf8');
+    const velho = inst.replace(/\n  FERIAS_PROG: \[[^\]]*\],\n/, '\n').replace(/VERSAO_ESQUEMA = '8\.11'/, "VERSAO_ESQUEMA = '8.10'");
+    afirmar(velho !== inst && !/FERIAS_PROG: \[/.test(velho), 'o Instalacao.gs de antes, sem a tabela');
+    fs.writeFileSync(path.join(tmp, 'Instalacao.gs'), velho);
+    const m2 = new Mundo({ dono: DONO, agora: QUARTA_21_10 });
+    const run = (fn, ...a) => chamarPeloNavegador(m2, tmp, { contaGoogle: DONO }, fn, a, OP);
+    afirmar(run('instalar', DONO).ok, 'instalou com o Instalacao.gs de antes');
+    const en = JSON.parse(run('entrar', DONO, '4321', '4321', '', '').valor);
+    const cx = { t: en.token, f: en.filial.codigo };
+    const ag = (nome, p) => { const r = run('executarAcao', cx, nome, p); return r.ok ? JSON.parse(r.valor) : { ok: false, erro: r.erro.message }; };
+    ag('salvarFonteQuadro', { link: planilhaAntiga(m2, 'BI Quadro Feira', abasDaProgramacao()) });
+    const t = JSON.parse(run('carregarTela', cx, 'quadro', {}).valor).dados;
+    afirmar(t && !t.erro && t.semProgramacao === true && Array.isArray(t.programacoes) && !t.programacoes.length && t.ferias.linhas.length === 6, 'tela so de leitura: ' + JSON.stringify([t.erro, t.semProgramacao]));
+    const incompleta = 'Atualização incompleta do GSL: para programar férias, o Instalacao.gs desta versão precisa estar no Apps Script. Avise o administrador do sistema.';
+    [['programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)], ['confirmarFerias', { id: 'x' }], ['cancelarProgramacaoFerias', { id: 'x' }]].forEach(([nome, p]) => {
+      const r = ag(nome, p);
+      afirmar(r.ok === false && r.erro === incompleta, nome + ': ' + JSON.stringify(r));
+    });
+    const cv = novaExecucao(m2, tmp, { contaGoogle: DONO }, OP); cv._porta = true;
+    const bancoVelho = m2.planilhas.get(cv.prop('ID_BANCO'));
+    afirmar(!bancoVelho.abas.some((x) => x.nome === 'FERIAS_PROG'), 'nada criado no banco');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 caso('quadro do CD (layout APOIO): a mesma linha em abas diferentes nao se confunde; o repetido diz a aba de cada linha', () => {
@@ -2155,7 +2355,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.10', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.11', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);

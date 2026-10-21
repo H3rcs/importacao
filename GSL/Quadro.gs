@@ -14,8 +14,13 @@
  * 14/10 — FÉRIAS. A aba FÉRIAS da mesma planilha (a extracao do sistema de
  * RH: matricula, nome, centro de custo, periodo aquisitivo e as datas
  * limite) e cruzada com a GERAL pela matricula — os ultimos numeros do RH.
- * A tela mostra quem precisa sair de ferias, quem avisar e ate quando (pela
- * data limite para sair, o DTA_LIMITEMAX), com palavras neutras.
+ *
+ * 21/10 — PROGRAMACAO DAS FERIAS. Cada periodo tem duas datas da extracao:
+ * o DTA_LIMITE (a partir de quando a pessoa pode sair) e o DTA_LIMITEMAX (o
+ * ultimo dia para comecar as ferias). A data programada fica no banco da
+ * filial (FERIAS_PROG, lida a cada montagem da tela) e a tela acompanha o
+ * periodo ate a saida ser confirmada (ou o RH fechar o periodo), sempre com
+ * palavras neutras.
  *
  * INCONSISTENCIAS: desligado (CDESLIGADOS) que continua ATIVO na GERAL — o
  * pedido da gerencia, a unica "grave" (a faixa vermelha da tela) — e, como
@@ -31,24 +36,27 @@ const QUADRO_ABA_ADMITIDOS = 'CADMITIDOS';
 const QUADRO_ABA_DESLIGADOS = 'CDESLIGADOS';
 const QUADRO_ABA_FERIAS = 'FÉRIAS';
 /*
- * PARAMETROS DAS FERIAS (14/10): editaveis na propria aba Ferias (botao
+ * PARAMETROS DAS FERIAS (21/10): editaveis na propria aba Ferias (botao
  * Parametros, para quem pode trocar a planilha); cada filial tem os seus.
- *   cc       centro(s) de custo do CD: linha da FÉRIAS dele sem par na GERAL
- *            vira conferencia (as dos outros centros sao de outros setores)
- *   digitos  quantos numeros do fim do RH formam a matricula da FÉRIAS
- *   aviso    antecedencia do aviso de ferias (dias): o "avisar ate" e a
- *            data limite menos isso; data limite mais perto que isso:
- *            "precisam sair de ferias"
- *   avisar   data limite em ate N dias: grupo "Avisar"
- *   planejar data limite em ate N dias: grupo "Programar"
+ *   cc         centro(s) de custo do CD: linha da FÉRIAS dele sem par na GERAL
+ *              vira conferencia (as dos outros centros sao de outros setores)
+ *   digitos    quantos numeros do fim do RH formam a matricula da FÉRIAS
+ *   aviso      antecedencia do aviso de ferias (dias): "entregar o aviso ate"
+ *              = inicio programado menos isso; sem programacao e com o limite
+ *              maximo mais perto que isso: vermelho ("programe hoje")
+ *   janela     quantos dias antes de poder sair (DTA_LIMITE) a pessoa entra
+ *              em "Programar"
+ *   urgente    sem programacao e com o limite maximo em ate N dias: laranja
+ *   tolerancia dias depois do inicio programado para confirmar a saida
+ *              (depois disso, sem confirmar: vermelho)
  * Valor vazio (ou invalido, editado a mao na Configuracao) = o padrao. As
- * chaves FERIAS_ESCALONAR_DIAS e FERIAS_ESCALONAR_MESES (da primeira versao
- * da aba) nao sao mais lidas: se existirem, podem ser apagadas.
+ * chaves FERIAS_AVISAR_DIAS e FERIAS_PLANEJAR_DIAS (da aba de 14/10) e as
+ * FERIAS_ESCALONAR_* (da primeira versao) nao sao mais lidas: podem ser apagadas.
  */
-const FERIAS_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, avisar: 60, planejar: 90 };
-const FERIAS_CHAVES = { cc: 'FERIAS_CC', digitos: 'FERIAS_DIGITOS_RH', aviso: 'FERIAS_AVISO_DIAS', avisar: 'FERIAS_AVISAR_DIAS',
-  planejar: 'FERIAS_PLANEJAR_DIAS' };
-const FERIAS_LIMITES = { digitos: [1, 8], aviso: [0, 120], avisar: [1, 400], planejar: [2, 400] };
+const FERIAS_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, janela: 60, urgente: 60, tolerancia: 3 };
+const FERIAS_CHAVES = { cc: 'FERIAS_CC', digitos: 'FERIAS_DIGITOS_RH', aviso: 'FERIAS_AVISO_DIAS', janela: 'FERIAS_JANELA_DIAS',
+  urgente: 'FERIAS_URGENTE_DIAS', tolerancia: 'FERIAS_TOLERANCIA_DIAS' };
+const FERIAS_LIMITES = { digitos: [1, 8], aviso: [0, 120], janela: [0, 400], urgente: [0, 400], tolerancia: [0, 60] };
 function parametrosFeriasQ_() {
   const ler = function (k) { const v = parametro(FERIAS_CHAVES[k], ''); return v == null ? '' : String(v).trim(); };
   const n = function (k) {
@@ -57,9 +65,10 @@ function parametrosFeriasQ_() {
   };
   const cc = ler('cc').split(/[^0-9]+/)
     .map(function (x) { return x.replace(/^0+(?=\d)/, ''); }).filter(function (x) { return /[1-9]/.test(x); });
-  const p = { cc: cc.length ? cc : FERIAS_PADRAO.cc.slice(), digitos: n('digitos'), aviso: n('aviso'), avisar: n('avisar'), planejar: n('planejar') };
-  // as faixas em ordem: aviso < avisar < planejar (editado fora de ordem a mao: volta ao padrao)
-  if (p.avisar <= p.aviso || p.planejar <= p.avisar) { p.aviso = FERIAS_PADRAO.aviso; p.avisar = FERIAS_PADRAO.avisar; p.planejar = FERIAS_PADRAO.planejar; }
+  const p = { cc: cc.length ? cc : FERIAS_PADRAO.cc.slice(), digitos: n('digitos'), aviso: n('aviso'), janela: n('janela'),
+    urgente: n('urgente'), tolerancia: n('tolerancia') };
+  // o laranja vem antes do vermelho: urgente >= aviso (editado fora de ordem a mao: os dois voltam ao padrao)
+  if (p.urgente < p.aviso) { p.aviso = FERIAS_PADRAO.aviso; p.urgente = FERIAS_PADRAO.urgente; }
   return p;
 }
 const QUADRO_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
@@ -115,25 +124,31 @@ function dadosQuadro(usuario) {
     parametrosFerias: pf
   };
   if (!id) return base;
-
-  const chave = chaveQuadroQ_(id);
-  const guardado = lerTextoCache(chave);
-  if (guardado) {
-    try {
-      const g = JSON.parse(guardado);
-      if (g && g.formato === QUADRO_FORMATO && g.assinaturaFerias === assinaturaFeriasQ_(pf)) return Object.assign(base, g);
-    } catch (e) { /* le de novo */ }
-  }
   try {
-    const dados = lerPlanilhaQuadro_(id, pf);
-    dados.assinaturaFerias = assinaturaFeriasQ_(pf);
-    gravarTextoCache(chave, JSON.stringify(dados), QUADRO_CACHE_SEGUNDOS);
-    return Object.assign(base, dados);
+    Object.assign(base, quadroLidoQ_(id, pf));
   } catch (e) {
     base.erro = e && e.semAba ? e.message : 'Não consegui ler a planilha do Quadro: ' + (e.message || e) +
       '. Confira se o link está certo e se a conta dona do GSL tem acesso a ela.';
     return base;
   }
+  // a programacao das ferias vem do banco a cada montagem (a copia da planilha guardada nao a leva)
+  return anexarProgramacoesQ_(base);
+}
+
+/* A leitura da planilha do Quadro: a copia guardada (5 min, com os mesmos parametros das ferias) ou a planilha. */
+function quadroLidoQ_(id, pf) {
+  const chave = chaveQuadroQ_(id);
+  const guardado = lerTextoCache(chave);
+  if (guardado) {
+    try {
+      const g = JSON.parse(guardado);
+      if (g && g.formato === QUADRO_FORMATO && g.assinaturaFerias === assinaturaFeriasQ_(pf)) return g;
+    } catch (e) { /* le de novo */ }
+  }
+  const dados = lerPlanilhaQuadro_(id, pf);
+  dados.assinaturaFerias = assinaturaFeriasQ_(pf);
+  gravarTextoCache(chave, JSON.stringify(dados), QUADRO_CACHE_SEGUNDOS);
+  return dados;
 }
 
 /* ------------------------------------------------------------------ */
@@ -790,6 +805,97 @@ function casarFeriasQ_(geral, ferias, pf) {
 }
 
 /* ------------------------------------------------------------------ */
+/* PROGRAMACAO DAS FERIAS (21/10)                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A aba FÉRIAS e so leitura (a extracao do RH); a data programada fica no
+ * banco da filial (FERIAS_PROG). Uma programacao e de um periodo: a mesma
+ * pessoa (a matricula da linha; na linha sem matricula, o nome) e o mesmo
+ * pa_fim (sem o pa_fim, o mesmo DTA_LIMITEMAX). Uma viva por periodo.
+ */
+const FERIAS_PROG_INCOMPLETA = 'Atualização incompleta do GSL: para programar férias, o Instalacao.gs desta versão precisa estar no Apps Script. Avise o administrador do sistema.';
+function mesmaPessoaFeriasQ_(f, p) {
+  const m = digitosQ_(p.MATRICULA);
+  // a mesma matricula com outro nome e outra pessoa (como no casamento): o nome nao pode contradizer
+  if (m) return digitosQ_(f.matricula) === m && nivelNomeQ_(f.nome, p.NOME) !== 0;
+  const n = nomeGrafiaQ_(p.NOME);
+  return !f.matricula && !!n && nomeGrafiaQ_(f.nome) === n;
+}
+function mesmoPeriodoQ_(f, p) {
+  if (!mesmaPessoaFeriasQ_(f, p)) return false;
+  const fim = dataQ_(p.PA_FIM), lim = dataQ_(p.LIMITE_MAX);
+  if (fim && f.paFim) return fim === f.paFim;
+  return !!lim && lim === f.limiteMax;
+}
+/* A partir de quando a pessoa pode sair: o DTA_LIMITE; sem ele, o dia seguinte ao pa_fim. */
+function podeSairQ_(f) { return f.limite || (f.paFim ? somarDiasQ_(f.paFim, 1) : ''); }
+function somarDiasQ_(iso, n) {
+  const p = String(iso).split('-');
+  return new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + n)).toISOString().slice(0, 10);
+}
+/* "aaaa-mm-dd" de uma data que existe (31/02 nao); senao ''. */
+function isoValidoQ_(v) {
+  const m = String(v == null ? '' : v).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]) ? m[0] : '';
+}
+/* Sem a tabela (Instalacao.gs de antes, colado pela metade): erro. */
+function lerProgramacoesFeriasQ_() {
+  if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
+  return listar('FERIAS_PROG');
+}
+/* Uma linha da FERIAS_PROG como a tela usa. */
+function programacaoTelaQ_(r) {
+  const dias = Number(r.DIAS);
+  return { id: String(r.ID), matricula: digitosQ_(r.MATRICULA), nome: txtQ_(r.NOME), paInicio: dataQ_(r.PA_INICIO), paFim: dataQ_(r.PA_FIM),
+    limiteMax: dataQ_(r.LIMITE_MAX), inicio: dataQ_(r.INICIO), dias: isFinite(dias) && dias > 0 ? dias : 30,
+    situacao: String(r.SITUACAO || '').toUpperCase().trim() === 'CUMPRIDA' ? 'CUMPRIDA' : 'PROGRAMADA',
+    observacao: txtQ_(r.OBSERVACAO), confirmadaEm: dataQ_(r.CONFIRMADA_EM), linha: 0, ref: 0 };
+}
+/*
+ * Liga cada programacao viva ao periodo dela na aba FÉRIAS: a linha ganha
+ * f.prog (o ID); a programacao, a linha e a pessoa (ref). A programacao cujo
+ * periodo saiu da extracao (o RH ja fechou o periodo) volta como CUMPRIDA
+ * (pelaAba) — so as que comecaram nos ultimos 60 dias (a conta da tela),
+ * com a pessoa achada pelas outras linhas da mesma matricula ou pelo nome.
+ * Com a aba FÉRIAS vazia ou sem as colunas, nada e dado como cumprido.
+ */
+function anexarProgramacoesQ_(d) {
+  d.programacoes = [];
+  let vivas;
+  try { vivas = lerProgramacoesFeriasQ_(); }
+  catch (e) { d.semProgramacao = true; return d; }      // sem a tabela: a aba Ferias fica so de leitura
+  const linhas = (d.ferias && d.ferias.linhas) || [];
+  const lf = (d.leitura && d.leitura.ferias) || null, faltam = (lf && lf.faltam) || [];
+  const abaServe = !!(lf && lf.linhas && faltam.indexOf('limiteMax') === -1 && !(faltam.indexOf('matricula') !== -1 && faltam.indexOf('nome') !== -1));
+  const corte = somarDiasQ_(hojeISO(), -60);
+  const ativos = (d.geral || []).filter(function (g) { return g.ativo; });
+  const usada = {};
+  // a ultima gravada primeiro: se duas apontarem o mesmo periodo (a trava so deixa uma viva), vale ela
+  vivas.slice().reverse().forEach(function (r) {
+    const p = programacaoTelaQ_(r);
+    const doPeriodo = linhas.filter(function (x) { return x.ref && mesmoPeriodoQ_(x, r); });
+    const f = doPeriodo.filter(function (x) { return !usada[x.linha]; })[0];
+    if (f) {
+      usada[f.linha] = true; f.prog = p.id; p.linha = f.linha; p.ref = f.ref;
+      d.programacoes.push(p);
+      return;
+    }
+    if (doPeriodo.length || !abaServe || !p.inicio || p.inicio < corte) return;
+    const outra = linhas.filter(function (x) { return x.ref && mesmaPessoaFeriasQ_(x, r); })[0];
+    const n = nomeGrafiaQ_(p.nome);
+    const mesmoNome = ativos.filter(function (g) { return n && nomeGrafiaQ_(g.nome) === n; });
+    p.ref = outra ? outra.ref : (mesmoNome.length === 1 ? mesmoNome[0].ref : 0);
+    if (!p.ref) return;
+    p.situacao = 'CUMPRIDA'; p.pelaAba = true;
+    d.programacoes.push(p);
+  });
+  return d;
+}
+
+/* ------------------------------------------------------------------ */
 /* INCONSISTENCIAS                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -1086,7 +1192,8 @@ function acaoSalvarParametrosFerias(usuario, params) {
     if (!cc.length) throw new Error('Informe pelo menos um centro de custo do CD (só números, ex.: 655).');
     if (cc.some(function (x) { return x.length > 10; })) throw new Error('Centro de custo com número grande demais.');
     valores.cc = cc.filter(function (x, i) { return cc.indexOf(x) === i; }).join(', ');
-    const rot = { digitos: 'Números da matrícula', aviso: 'Aviso de férias', avisar: 'Avisar', planejar: 'Programar' };
+    const rot = { digitos: 'Números da matrícula', aviso: 'Aviso de férias', janela: 'Entra em "Programar"', urgente: 'Urgente (laranja)',
+      tolerancia: 'Confirmar a saída' };
     Object.keys(FERIAS_LIMITES).forEach(function (k) {
       const t = String(params[k] == null ? '' : params[k]).trim(), v = Number(t), lim = FERIAS_LIMITES[k];
       if (t === '' || !isFinite(v) || Math.round(v) !== v || v < lim[0] || v > lim[1]) {
@@ -1094,12 +1201,12 @@ function acaoSalvarParametrosFerias(usuario, params) {
       }
       valores[k] = v;
     });
-    if (valores.avisar <= valores.aviso) throw new Error('"Avisar" precisa ser maior que o aviso de férias (' + valores.aviso + ' dias).');
-    if (valores.planejar <= valores.avisar) throw new Error('"Programar" precisa ser maior que "Avisar" (' + valores.avisar + ' dias).');
+    if (valores.urgente < valores.aviso) throw new Error('"Urgente" precisa ser pelo menos o aviso de férias (' + valores.aviso + ' dias).');
   }
   const desc = { cc: 'Férias (Quadro do CD): centro(s) de custo do CD', digitos: 'Férias (Quadro do CD): números do fim do RH que formam a matrícula',
-    aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', avisar: 'Férias (Quadro do CD): avisar — data limite em até N dias',
-    planejar: 'Férias (Quadro do CD): programar — data limite em até N dias' };
+    aviso: 'Férias (Quadro do CD): dias de antecedência do aviso', janela: 'Férias (Quadro do CD): entra em "Programar" N dias antes de poder sair',
+    urgente: 'Férias (Quadro do CD): sem programação e com o limite máximo em até N dias, laranja',
+    tolerancia: 'Férias (Quadro do CD): dias depois do início para confirmar a saída' };
   const id = idPlanilhaQuadro_();
   Object.keys(FERIAS_CHAVES).forEach(function (k) {
     acaoSalvarParametro(usuario, { chave: FERIAS_CHAVES[k], valor: params.padrao ? '' : String(valores[k]), descricao: desc[k] });
@@ -1107,6 +1214,107 @@ function acaoSalvarParametrosFerias(usuario, params) {
   // a leitura guardada com o casamento antigo (centro de custo, matricula) nao serve mais
   if (id) { try { CacheService.getScriptCache().remove(chaveQuadroQ_(id)); } catch (e) {} }
   return { ok: true, invalidarTudo: true, recado: params.padrao ? 'Parâmetros das férias de volta ao padrão.' : 'Parâmetros das férias salvos.' };
+}
+
+/*
+ * PROGRAMAR FERIAS (21/10): cria ou reprograma (a mesma linha) a programacao
+ * de um periodo da aba FÉRIAS de quem esta ativo no quadro. O inicio vai do
+ * "pode sair a partir de" ate o limite maximo para sair (o DTA_LIMITEMAX e o
+ * ultimo dia para comecar; o limite que ja passou nao barra: e o quanto antes).
+ */
+function acaoProgramarFerias(usuario, params) {
+  exigirPorta_();
+  exigirCapacidade(usuario, 'PROGRAMAR');
+  if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
+  params = params || {};
+  const inicio = isoValidoQ_(params.inicio);
+  if (!inicio) throw new Error('Escolha a data de início das férias.');
+  const td = String(params.dias == null ? '' : params.dias).trim(), dias = td === '' ? 30 : Number(td);
+  if (!isFinite(dias) || Math.round(dias) !== dias || dias < 5 || dias > 30) throw new Error('Dias de férias: use um número inteiro de 5 a 30.');
+  const obs = txtQ_(params.observacao).replace(/\s+/g, ' ');
+  if (obs.length > 300) throw new Error('Observação: no máximo 300 letras.');
+  const per = periodoDaTelaQ_(params), f = per.f, nome = nomeDaProgramacaoQ_(per.g.nome || f.nome);
+  const L = podeSairQ_(f), M = f.limiteMax;
+  if (L && inicio < L) throw new Error(nome + ' só pode sair de férias a partir de ' + dataCurtaQ_(L) + '.');
+  if (M && inicio > M && M >= hojeISO()) throw new Error('A data passa do limite máximo para sair (' + dataCurtaQ_(M) + '). Escolha uma data até lá.');
+  return comTrava(function () {
+    const ja = listar('FERIAS_PROG').filter(function (r) { return mesmoPeriodoQ_(f, r); }).pop();
+    if (ja && programacaoTelaQ_(ja).situacao === 'CUMPRIDA') throw new Error('A saída de férias de ' + nome + ' neste período já foi confirmada.');
+    // NOME: o da GERAL (a linha sem matricula so liga pelo nome igual, entao e o mesmo da FÉRIAS)
+    const campos = { MATRICULA: f.matricula, NOME: per.g.nome || f.nome || '', PA_INICIO: f.paInicio, PA_FIM: f.paFim, LIMITE_MAX: M,
+      INICIO: inicio, DIAS: dias, SITUACAO: 'PROGRAMADA', OBSERVACAO: obs };
+    let id;
+    if (ja) { id = String(ja.ID); atualizar('FERIAS_PROG', id, campos, usuario.email); }
+    else id = inserir('FERIAS_PROG', campos, usuario.email);
+    registrarLog(usuario.email, ja ? 'REPROGRAMAR FERIAS' : 'PROGRAMAR FERIAS', 'FERIAS_PROG', id, nome + ' · ' + dataCurtaQ_(inicio) + ' · ' + dias + ' dias' +
+      (ja ? ' (era ' + dataCurtaQ_(dataQ_(ja.INICIO)) + ')' : ''));
+    return { ok: true, id: id, recado: 'Férias de ' + nome + (ja ? ' reprogramadas' : ' programadas') + ' para ' + dataCurtaQ_(inicio) + ' (' + dias + ' dias).' };
+  });
+}
+
+/* Confirmar saida: a programacao vira CUMPRIDA (quem e quando ficam na linha). So a partir do dia do inicio. */
+function acaoConfirmarFerias(usuario, params) {
+  exigirPorta_();
+  exigirCapacidade(usuario, 'PROGRAMAR');
+  if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
+  const id = String((params || {}).id || '').trim();
+  return comTrava(function () {
+    const p = programacaoPeloIdQ_(id), nome = nomeDaProgramacaoQ_(p.nome);
+    if (p.situacao === 'CUMPRIDA') throw new Error('A saída de férias de ' + nome + ' já foi confirmada.');
+    if (p.inicio > hojeISO()) throw new Error('As férias de ' + nome + ' começam em ' + dataCurtaQ_(p.inicio) + ': confirme a saída a partir desse dia.');
+    atualizar('FERIAS_PROG', id, { SITUACAO: 'CUMPRIDA', CONFIRMADA_EM: agoraTexto(), CONFIRMADA_POR: usuario.email }, usuario.email);
+    registrarLog(usuario.email, 'CONFIRMAR FERIAS', 'FERIAS_PROG', id, nome + ' · saiu em ' + dataCurtaQ_(p.inicio));
+    return { ok: true, recado: 'Saída de férias de ' + nome + ' confirmada (' + dataCurtaQ_(p.inicio) + ').' };
+  });
+}
+
+/*
+ * Cancelar: a programacao sai (exclusao logica) e o periodo volta a "Programar".
+ * Na ja confirmada, desfaz so a confirmacao (feita por engano): volta a programada, com a mesma data.
+ */
+function acaoCancelarProgramacaoFerias(usuario, params) {
+  exigirPorta_();
+  exigirCapacidade(usuario, 'PROGRAMAR');
+  if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
+  const id = String((params || {}).id || '').trim();
+  return comTrava(function () {
+    const p = programacaoPeloIdQ_(id), nome = nomeDaProgramacaoQ_(p.nome);
+    if (p.situacao === 'CUMPRIDA') {
+      atualizar('FERIAS_PROG', id, { SITUACAO: 'PROGRAMADA', CONFIRMADA_EM: '', CONFIRMADA_POR: '' }, usuario.email);
+      registrarLog(usuario.email, 'DESFAZER CONFIRMACAO FERIAS', 'FERIAS_PROG', id, nome + ' · ' + dataCurtaQ_(p.inicio));
+      return { ok: true, recado: 'Confirmação desfeita: as férias de ' + nome + ' voltam a programadas para ' + dataCurtaQ_(p.inicio) + '.' };
+    }
+    excluir('FERIAS_PROG', id, usuario.email);
+    registrarLog(usuario.email, 'CANCELAR FERIAS', 'FERIAS_PROG', id, nome + ' · era ' + dataCurtaQ_(p.inicio));
+    return { ok: true, recado: 'Programação das férias de ' + nome + ' cancelada.' };
+  });
+}
+
+/* O nome nos recados: em maiusculas, como a GERAL. */
+function nomeDaProgramacaoQ_(nome) { return String(nome || '').trim().toUpperCase() || 'Essa pessoa'; }
+/* A programacao viva, lida dentro da trava (a FERIAS_PROG nao fica em cache). */
+function programacaoPeloIdQ_(id) {
+  const r = id ? listar('FERIAS_PROG').filter(function (x) { return String(x.ID) === id; })[0] : null;
+  if (!r) throw new Error('Essa programação de férias não existe mais. Atualize a tela.');
+  return programacaoTelaQ_(r);
+}
+/*
+ * O periodo que a tela mandou programar: a linha da aba FÉRIAS (de quem esta
+ * ativo no quadro) com a mesma matricula (na linha sem matricula, o nome) e o
+ * mesmo pa_fim (ou DTA_LIMITEMAX). Lido da copia guardada da planilha.
+ */
+function periodoDaTelaQ_(params) {
+  const id = idPlanilhaQuadro_();
+  if (!id) throw new Error('O Quadro ainda não está ligado a uma planilha.');
+  let d;
+  try { d = quadroLidoQ_(id, parametrosFeriasQ_()); }
+  catch (e) { throw new Error('Não consegui ler a planilha do Quadro agora. Tente de novo em instantes.'); }
+  const alvo = { MATRICULA: digitosQ_(params.matricula), NOME: txtQ_(params.nome), PA_FIM: dataQ_(params.paFim), LIMITE_MAX: dataQ_(params.limiteMax) };
+  const ativo = {};
+  (d.geral || []).forEach(function (g) { if (g.ativo) ativo[g.ref] = g; });
+  const f = (((d.ferias || {}).linhas) || []).filter(function (x) { return x.ref && ativo[x.ref] && mesmoPeriodoQ_(x, alvo); })[0];
+  if (!f) throw new Error('Não achei esse período na aba FÉRIAS (de quem está ativo no quadro). Use Atualizar dados e tente de novo.');
+  return { f: f, g: ativo[f.ref] };
 }
 
 function acaoAtualizarQuadro(usuario) {

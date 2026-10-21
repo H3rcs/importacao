@@ -685,6 +685,10 @@ const ACOES = {
   // quadro do CD
   salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },
   salvarParametrosFerias: { capacidade: 'PROGRAMAR',   funcao: 'acaoSalvarParametrosFerias', modulo: ['quadro', 'config'] },
+  // Programacao das ferias (21/10): a data escolhida para cada periodo fica no banco da filial (FERIAS_PROG).
+  programarFerias:     { capacidade: 'PROGRAMAR',      funcao: 'acaoProgramarFerias', modulo: ['quadro', 'config'] },
+  confirmarFerias:     { capacidade: 'PROGRAMAR',      funcao: 'acaoConfirmarFerias', modulo: ['quadro', 'config'] },
+  cancelarProgramacaoFerias: { capacidade: 'PROGRAMAR', funcao: 'acaoCancelarProgramacaoFerias', modulo: ['quadro', 'config'] },
   atualizarQuadro:     { capacidade: null,             funcao: 'acaoAtualizarQuadro', modulo: 'quadro' },
 
   // entrada (4.2)

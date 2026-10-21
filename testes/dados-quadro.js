@@ -36,6 +36,32 @@ const QUADRO = {
     ['COORDENADOR DE LOGÍSTICA', 1], ['GERENTE DE CD', 1], ['TÉCNICO DE SEGURANÇA', 1], ['JOVEM APRENDIZ', 1]]
 };
 
+/*
+ * FÉRIAS: um caso por pessoa (o indice em `pessoas`), em dias a partir de hoje. pode = o "pode sair a partir de" (o
+ * DTA_LIMITE, que repete o pa_fim); limiteMax = o DTA_LIMITEMAX (null: vazio). inicio = a data programada (com o
+ * padrao de 30 dias de aviso, 60 de janela, 60 de urgente e 3 de tolerancia). A pessoa 5 esta de FÉRIAS na GERAL;
+ * a 3 consta como desligada (CDESLIGADOS); a 1 tem um segundo periodo.
+ */
+const CASOS_FERIAS = {
+  0: { caso: 'vencido', pode: -330, limiteMax: -10 },                 // vermelho: limite maximo para sair vencido
+  1: { caso: 'ja', pode: -275, limiteMax: 45 },                       // laranja: programe ja (e o 2o periodo: azul)
+  2: { caso: 'hoje', pode: -300, limiteMax: 20 },                     // vermelho: programe hoje (o aviso ja nao cabe)
+  3: { caso: 'pode', pode: -120, limiteMax: 200 },                    // amarelo: ja pode sair, sem programacao
+  4: { caso: 'programar', pode: 30, limiteMax: 350 },                 // azul: programar, pode sair a partir de
+  5: { caso: 'deferias', pode: -100, limiteMax: 220, inicio: -3 },    // verde: de ferias desde (STATUS FÉRIAS na GERAL)
+  6: { caso: 'prog', pode: -50, limiteMax: 270, inicio: 60 },         // azul: programada para · aviso ate
+  7: { caso: 'aviso', pode: -60, limiteMax: 260, inicio: 33 },        // amarelo: entregar o aviso ate (em 3 dias)
+  8: { caso: 'sai', pode: -70, limiteMax: 250, inicio: 20 },          // azul: sai em (em 20 dias)
+  9: { caso: 'breve', pode: -80, limiteMax: 240, inicio: 5 },         // laranja: sai em 5 dias
+  10: { caso: 'confirme', pode: -90, limiteMax: 230, inicio: -2 },    // laranja: saida prevista — confirme
+  11: { caso: 'confirmeja', pode: -100, limiteMax: 220, inicio: -10 }, // vermelho: saiu de ferias em ...? confirme
+  12: { caso: 'depois', pode: -240, limiteMax: 80, inicio: 90 },      // vermelho: programada depois do limite maximo (a aba mudou)
+  13: { caso: 'cumprida', pode: -130, limiteMax: 190, inicio: -20, situacao: 'CUMPRIDA' },   // verde: ferias cumpridas
+  14: { caso: 'fechado', pode: 100, limiteMax: 420, inicio: -15, fechado: true },            // cinza; e o periodo anterior, fechado pelo RH: cumprida
+  15: { caso: 'emdia', pode: 90, limiteMax: 410 },                    // cinza: em dia
+  16: { caso: 'semdata', pode: -40, limiteMax: null }                 // sem dados: sem DTA_LIMITEMAX
+};
+
 function nomeDe(i) {
   return PRIMEIROS[i % PRIMEIROS.length] + ' ' + SOBRENOMES[(i * 7) % SOBRENOMES.length] + ' ' + SOBRENOMES[(i * 13 + 3) % SOBRENOMES.length];
 }
@@ -56,6 +82,7 @@ module.exports = function planilhaQuadro(Data, hoje, opcoes) {
       }
     });
   });
+  pessoas[15].nome = 'PATRÍCIA CONCEIÇÃO ARAÚJO';                 // com acento: a busca da aba Ferias acha sem acento
   const base = pessoas.length;                                   // 164
   // fora da empresa, mas ainda na lista (nao contam)
   const fora = [
@@ -113,26 +140,39 @@ module.exports = function planilhaQuadro(Data, hoje, opcoes) {
   abas['CDESLIGADOS'] = [['COD', 'COLABORADOR', 'EQUIPE', 'FUNÇÃO', 'DATA DESLIGAMENTO', 'TIPO', 'MOTIVO']]
     .concat(desligados.map((d) => [d.cod, d.nome, d.equipe, d.funcao, d.data, d.tipo, d.motivo]));
 
-  // FÉRIAS (14/10): a extracao do sistema de RH. Matricula = os 3 ultimos numeros do RH da GERAL. Um periodo
-  // aquisitivo em aberto por pessoa (alguns com dois), com o limite antes da multa espalhado de -40 a +400 dias.
+  // FÉRIAS: a extracao do sistema de RH. Matricula = os 3 ultimos numeros do RH da GERAL. Um periodo aquisitivo em
+  // aberto por pessoa (alguns com dois). O DTA_LIMITE repete o pa_fim (como na extracao de verdade): e o "pode sair a
+  // partir de"; o DTA_LIMITEMAX e o limite maximo para sair. As 17 primeiras pessoas sao um caso cada (CASOS_FERIAS, em
+  // dias a partir de hoje); a programacao delas (o que a tela gravaria) vai em esperado.programacoes.
+  const casos = {};
+  const programacoes = [];
   if (!opcoes.antigo && !opcoes.semFerias) {
     const fmt = (dt) => ('0' + dt.getDate()).slice(-2) + '/' + ('0' + (dt.getMonth() + 1)).slice(-2) + '/' + dt.getFullYear();
-    const linhaFerias = (p, k, limiteMax, comoTexto) => {
-      const lm = dia(limiteMax), paFim = dia(limiteMax - 320), paIni = dia(limiteMax - 685), adm = dia(limiteMax - 685 - 365 * (k % 4));
+    const iso = (desloc) => { const dt = dia(desloc); return dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2) + '-' + ('0' + dt.getDate()).slice(-2); };
+    const linhaFerias = (p, k, pode, limiteMax, comoTexto) => {
+      const paFim = dia(pode), paIni = dia(pode - 365), adm = dia(pode - 365 - 365 * (k % 4));
       const d = (x) => comoTexto ? fmt(x) : x;
       return ['Bartofil', 21, p.rh.slice(-3), p.funcao, p.nome, 655, p.equipe.replace('1º', '1°').slice(0, 1) === 'A' ? 'ADM' : p.equipe.slice(0, 1),
-        d(adm), d(paIni), d(paFim), d(paFim), d(lm), limiteMax < 0 ? 30 : 0, 100 + (k % 7), 'OPERACIONAL'];
+        d(adm), d(paIni), d(paFim), d(paFim), limiteMax === null ? '' : d(dia(limiteMax)), limiteMax !== null && limiteMax < 0 ? 30 : 0, 100 + (k % 7), 'OPERACIONAL'];
     };
     const ferias = [];
     pessoas.forEach((p, k) => {
       if (k === 77) return;                                                 // uma pessoa da GERAL sem linha (conferencia)
-      // limite: 2 vencidos, 5 em ate 30 dias, ~10 em 31-60, ~10 em 61-90, o resto liberado ou em aquisicao
-      const lm = k < 2 ? -10 - k * 25 : (k < 7 ? 3 + k * 5 : (k < 17 ? 32 + (k - 7) * 3 : (k < 27 ? 62 + (k - 17) * 3 : 95 + ((k * 37) % 300))));
-      ferias.push(linhaFerias(p, k, lm, k % 3 === 0));
-      if (k % 40 === 1) ferias.push(linhaFerias(p, k, lm + 365, false));    // segundo periodo em aberto
+      const c = CASOS_FERIAS[k];
+      const lm = c ? c.limiteMax : 95 + ((k * 37) % 330), pode = c ? c.pode : lm - 320;
+      ferias.push(linhaFerias(p, k, pode, lm, k % 3 === 0));
+      if (k % 40 === 1) ferias.push(linhaFerias(p, k, pode + 365, lm + 365, false));    // segundo periodo em aberto
+      if (!c) return;
+      casos[c.caso] = { k, cod: p.cod, nome: p.nome, rh: p.rh, status: p.status, matricula: p.rh.slice(-3), paFim: iso(pode), pode: iso(pode),
+        limiteMax: lm === null ? '' : iso(lm), inicio: c.inicio === undefined ? '' : iso(c.inicio), situacao: c.situacao || '' };
+      if (c.inicio === undefined) return;
+      // a programacao: do periodo da linha; a do periodo que o RH ja fechou (saiu da extracao), de um pa_fim que nao esta na aba
+      const paFimProg = c.fechado ? iso(pode - 365) : iso(pode);
+      programacoes.push({ MATRICULA: p.rh.slice(-3), NOME: p.nome, PA_INICIO: c.fechado ? iso(pode - 730) : iso(pode - 365), PA_FIM: paFimProg,
+        LIMITE_MAX: c.fechado ? iso(lm - 365) : iso(lm), INICIO: iso(c.inicio), DIAS: 30, SITUACAO: c.situacao || 'PROGRAMADA', OBSERVACAO: '' });
     });
     // os especiais com nome tambem estao na extracao (o final do RH deles repete o de outras pessoas: o nome desempata)
-    especiais.filter((p) => p.nome).forEach((p, k) => ferias.push(linhaFerias(p, k, 150 + k * 20, false)));
+    especiais.filter((p) => p.nome).forEach((p, k) => ferias.push(linhaFerias(p, k, 150 + k * 20 - 320, 150 + k * 20, false)));
     ferias.push(['Bartofil', 21, '901', 'SEPARADOR', 'NATALIA COSTA FREIRE', 655, '1', dia(-500), dia(-500), dia(-135), dia(-135), dia(180), 0, 101, 'OPERACIONAL']);   // CC 655, fora da GERAL
     ferias.push(['Bartofil', 21, '902', 'VENDEDOR', 'OSCAR LIMA PRADO', 700, 'ADM', dia(-500), dia(-500), dia(-135), dia(-135), dia(180), 0, 104, 'COMERCIAL']);     // outro setor
     abas['FÉRIAS'] = [['Empresa', 'Filial', 'Matricula', 'Descrição', 'Nome', 'cc', 'turno', 'admissão', 'pa_inicio', 'pa_fim', 'DTA_LIMITE', 'DTA_LIMITEMAX',
@@ -159,7 +199,8 @@ module.exports = function planilhaQuadro(Data, hoje, opcoes) {
       codRepetido: [pessoas[10].cod],
       admitidoFora: ['39100', '39101'],
       feriasSemLinha: opcoes.antigo || opcoes.semFerias ? null : pessoas[77].cod,
-      feriasVencidas: opcoes.antigo || opcoes.semFerias ? 0 : 2
+      // FÉRIAS (21/10): cada caso da situacao (a pessoa, as datas em aaaa-mm-dd) e as programacoes gravadas para eles
+      casos, programacoes
     }
   };
 };

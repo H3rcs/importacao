@@ -687,36 +687,61 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
   .qd-esp-mes { padding-bottom: 7px; }       /* o tracejado (6px para dentro) passa abaixo do rotulo do mes */
 }
 /* =========================================================
-   FÉRIAS (14/10, refeita) — a aba do Quadro do CD (prefixo qd-fe-).
-   Um cartão só: a lista do que fazer (cada pessoa uma vez, um verbo e
-   uma data numa folhinha) e, no mesmo cartão, o calendário do mês a um
-   toque (Lista | Calendário). Estado sempre com forma + palavra:
-   quadrado vermelho = precisam sair de férias, triângulo âmbar = avisar,
-   relógio azul = programar, círculo cinza = em dia, círculo tracejado =
-   sem dados. O calendário copia o desenho da tela Calendário em classes
-   próprias (as de lá usam color-mix e o hover 3D). Sem color-mix, :has
-   nem CSS aninhado (Chrome 109). Nada de opacidade em texto.
+   FERIAS (21/10, programacao) — a aba do Quadro do CD (prefixo qd-fe-).
+   Um cartao so: a busca pelo nome, os grupos Programar e Programadas
+   (cada pessoa uma vez, com a folhinha da data que importa e o texto
+   na cor da situacao) e, no mesmo cartao, o calendario do mes a um
+   toque (Lista | Calendario). Cor = urgencia: azul no prazo, amarelo
+   atencao, laranja urgente, vermelho critico, verde resolvido, cinza
+   nada a fazer — sempre com a palavra ao lado. O texto colorido usa uma
+   tinta da mesma cor com contraste (no escuro, a cor clara). Sem
+   color-mix, :has nem CSS aninhado (Chrome 109). Nada de opacidade em texto.
    ========================================================= */
-.qd-fe, .qd-ficha, .qd-fe-geral {
-  --st-sair: #d03b3b; --st-sair-tinta: #ffffff; --st-avisar: #fab219; --st-avisar-tinta: #14152b; --st-avisar-borda: #b07400;
-  --st-prog: #2563eb; --st-prog-tinta: #ffffff; --st-prog-fundo: rgba(37, 99, 235, .10); --st-dia: #64748b; }
-[data-tema="escuro"] .qd-fe, [data-tema="escuro"] .qd-ficha, [data-tema="escuro"] .qd-fe-geral {
-  --st-avisar-borda: #fab219; --st-prog: #6ea8ff; --st-prog-tinta: #0b1220; --st-prog-fundo: rgba(110, 168, 255, .16); --st-dia: #94a3b8; }
+.qd-fe, .qd-ficha, .qd-fe-geral, .qd-fe-prog {
+  --fe-vm: #d03b3b; --fe-vm-tinta: #ffffff; --fe-vm-texto: #b42318;
+  --fe-lj: #f97316; --fe-lj-tinta: #1c0a00; --fe-lj-texto: #c2410c;
+  --fe-am: #fab219; --fe-am-tinta: #14152b; --fe-am-texto: #8a5a00;
+  --fe-az: #2563eb; --fe-az-tinta: #ffffff; --fe-az-texto: #1d4ed8;
+  --fe-vd: #15803d; --fe-vd-tinta: #ffffff; --fe-vd-texto: #15803d;
+  --fe-cz: #64748b; --fe-cz-tinta: #ffffff; --fe-cz-texto: #475569;
+  --fe-fundo: var(--bq-surface-2, rgba(99, 102, 241, .07)); --fe-linha: var(--bq-linha, var(--linha-forte)); }
+[data-tema="escuro"] .qd-fe, [data-tema="escuro"] .qd-ficha, [data-tema="escuro"] .qd-fe-geral, [data-tema="escuro"] .qd-fe-prog {
+  --fe-vm: #f87171; --fe-vm-tinta: #1f0707; --fe-vm-texto: #fca5a5;
+  --fe-lj: #fb923c; --fe-lj-tinta: #1c0a00; --fe-lj-texto: #fdba74;
+  --fe-am: #fbbf24; --fe-am-tinta: #14152b; --fe-am-texto: #fcd34d;
+  --fe-az: #6ea8ff; --fe-az-tinta: #0b1220; --fe-az-texto: #93c5fd;
+  --fe-vd: #4ade80; --fe-vd-tinta: #052e16; --fe-vd-texto: #86efac;
+  --fe-cz: #94a3b8; --fe-cz-tinta: #0f172a; --fe-cz-texto: #cbd5e1;
+  --fe-fundo: var(--bq-surface-2, rgba(255, 255, 255, .06)); }
+/* a cor de cada situacao: a cheia (folhinha, pilula, quadradinho), a tinta sobre ela e o texto sobre a pagina */
+.qd-fe-vermelho { --fe-cor: var(--fe-vm); --fe-cor-tinta: var(--fe-vm-tinta); --fe-texto: var(--fe-vm-texto); }
+.qd-fe-laranja { --fe-cor: var(--fe-lj); --fe-cor-tinta: var(--fe-lj-tinta); --fe-texto: var(--fe-lj-texto); }
+.qd-fe-amarelo { --fe-cor: var(--fe-am); --fe-cor-tinta: var(--fe-am-tinta); --fe-texto: var(--fe-am-texto); }
+.qd-fe-azul { --fe-cor: var(--fe-az); --fe-cor-tinta: var(--fe-az-tinta); --fe-texto: var(--fe-az-texto); }
+.qd-fe-verde { --fe-cor: var(--fe-vd); --fe-cor-tinta: var(--fe-vd-tinta); --fe-texto: var(--fe-vd-texto); }
+.qd-fe-cinza, .qd-fe-semdata { --fe-cor: var(--fe-cz); --fe-cor-tinta: var(--fe-cz-tinta); --fe-texto: var(--fe-cz-texto); }
 .qd-fe-ico { flex: none; display: inline-block; vertical-align: -2px; }
-.qd-fe-ico.prog { color: var(--st-prog); }
-.qd-fe-ico.emdia { color: var(--tinta-media); }
 .qd-fe-curto, .qd-fe-so-estreito { display: none; }
+.qd-fe-so-leitor { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .qd-fe-vazio { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 2px 4px; font-size: 13px; color: var(--tinta-media); }
 .qd-fe-card-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 
-/* o cabeçalho do cartão: o título, a regra do aviso e o Lista | Calendário */
-.qd-fe-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-bottom: 12px;
-  border-bottom: 1px solid var(--bq-linha); }
+/* o texto da situacao: o quadradinho na cor cheia e o texto na tinta da cor */
+.qd-fe-st { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; font-weight: 600; color: var(--fe-texto, var(--tinta)); }
+.qd-fe-st > i { flex: none; align-self: center; width: 9px; height: 9px; border-radius: 2px; background: var(--fe-cor); }
+.qd-fe-st.qd-fe-semdata > i { background: transparent; border: 1.5px dashed var(--fe-cz); }
+
+/* o cabecalho do cartao: o titulo, a regra do aviso, o Lista | Calendario e a busca */
+.qd-fe-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-bottom: 12px; }
 .bi-quadro .qd-fe h2 { font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
 .qd-fe-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--tinta-media); }
 .qd-fe-vista .qd-pill { gap: 6px; }
+.qd-fe-busca { display: block; padding-bottom: 12px; border-bottom: 1px solid var(--bq-linha); }
+.qd-fe-busca input { width: 100%; max-width: 420px; min-height: 40px; padding: 0 12px; border-radius: 10px; border: 1.5px solid var(--bq-linha);
+  background: var(--bq-surface); color: var(--tinta); font: inherit; font-size: 14px; }
+.qd-fe-busca input:focus-visible { outline: 2px solid var(--tinta); outline-offset: 1px; }
 
-/* os grupos: Precisam sair de férias, Avisar, Programar */
+/* os grupos: Programar, Programadas (e a busca) */
 .qd-fe-grupo { padding-top: 12px; }
 .qd-fe-grupo + .qd-fe-grupo, .qd-fe-ninguem + .qd-fe-grupo { margin-top: 8px; border-top: 1px solid var(--bq-linha); }
 .qd-fe-grupo-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 4px; min-height: 30px; }
@@ -724,42 +749,39 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-n { font-family: 'Archivo', sans-serif; font-weight: 800; font-size: 12.5px; line-height: 1.6; padding: 0 8px; border-radius: 99px;
   background: var(--bq-surface-2); border: 1px solid var(--bq-linha); }
 .qd-fe-grupo-frase { font-size: 12.5px; color: var(--tinta-media); }
-.qd-fe-grupo-bt { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--tinta); }
 .qd-fe-itens { list-style: none; margin: 0; padding: 0; }
 .qd-fe-itens > li + li { border-top: 1px solid var(--linha); }
 
-/* uma pessoa: a folhinha, o nome (turno, função, etiquetas) e embaixo o verbo e quanto falta. A linha inteira abre a ficha. */
-.qd-fe-item { width: 100%; display: grid; grid-template-columns: 40px minmax(0, 1fr) 14px; grid-template-areas: 'folha quem abrir' 'folha quando abrir';
+/* uma pessoa: a folhinha, o nome (turno, funcao, etiquetas), o texto colorido e a outra data; os botoes do lado */
+.qd-fe-item { display: flex; align-items: center; gap: 6px 12px; padding: 0 2px 0 0; }
+.qd-fe-abre { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-areas: 'folha quem' 'folha quando';
   column-gap: 12px; row-gap: 3px; align-items: center; padding: 7px 8px 7px 6px; min-height: 52px; border: 0; border-radius: 10px;
   background: transparent; cursor: pointer; text-align: left; color: var(--tinta); font: inherit; }
-.qd-fe-item:hover { background: var(--bq-surface-2); }
-.qd-fe-item.sem-folha { grid-template-columns: minmax(0, 1fr) 14px; grid-template-areas: 'quem abrir' 'quando abrir'; min-height: 44px; }
-.qd-fe-item.sair { --fe-cor: var(--st-sair); --fe-cor-tinta: var(--st-sair-tinta); --fe-borda: var(--st-sair); }
-.qd-fe-item.avisar { --fe-cor: var(--st-avisar); --fe-cor-tinta: var(--st-avisar-tinta); --fe-borda: var(--st-avisar-borda); }
-.qd-fe-item.prog { --fe-cor: var(--st-prog); --fe-cor-tinta: var(--st-prog-tinta); --fe-borda: var(--st-prog); }
-.qd-fe-item.emdia { --fe-cor: var(--st-dia); --fe-cor-tinta: #ffffff; --fe-borda: var(--st-dia); }
+.qd-fe-abre:hover { background: var(--bq-surface-2); }
+.qd-fe-abre.sem-folha { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'quem' 'quando'; min-height: 44px; }
 .qd-fe-folha { grid-area: folha; display: flex; flex-direction: column; align-items: center; width: 40px; border-radius: 8px; overflow: hidden;
-  border: 1.5px solid var(--fe-borda); background: var(--bq-surface); line-height: 1; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); }
-.qd-fe-folha-mes { width: 100%; text-align: center; background: var(--fe-cor); color: var(--fe-cor-tinta); font-family: 'Archivo', sans-serif;
+  border: 1.5px solid var(--fe-cor, var(--fe-cz)); background: var(--bq-surface); line-height: 1; box-shadow: 0 1px 3px rgba(15, 23, 42, .08); }
+.qd-fe-folha-mes { width: 100%; text-align: center; background: var(--fe-cor, var(--fe-cz)); color: var(--fe-cor-tinta, #ffffff); font-family: 'Archivo', sans-serif;
   font-size: 9px; font-weight: 800; letter-spacing: .1em; padding: 2px 0 1px; }
 .qd-fe-folha-dia { font-family: 'Archivo', sans-serif; font-size: 16px; font-weight: 800; padding-top: 3px; font-variant-numeric: tabular-nums; color: var(--tinta); }
 .qd-fe-folha-sem { font-size: 9.5px; font-weight: 600; color: var(--tinta-media); padding: 1px 0 3px; }
-.qd-fe-item.vencido .qd-fe-folha { border-style: dashed; }
 .qd-fe-quem { grid-area: quem; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; }
 .qd-fe-nome { font-size: 13.5px; font-weight: 600; }
 .qd-fe-funcao { font-size: 12px; color: var(--tinta-media); }
 .qd-fe-quem .qd-eq, .qd-fe-semdados .qd-eq, .qd-fe-geral-prox .qd-eq { white-space: normal; overflow-wrap: anywhere; }
 .qd-fe-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap;
   background: var(--bq-surface-2); border: 1px solid var(--bq-linha); color: var(--tinta-media); }
-.qd-fe-quando { grid-area: quando; display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; font-size: 12.5px; color: var(--tinta-media); }
-.qd-fe-quando > span + span::before { content: '·'; margin: 0 6px; color: var(--tinta-fraca); font-weight: 400; }
-.qd-fe-verbo { color: var(--tinta); }
-.qd-fe-item.sair .qd-fe-verbo { font-weight: 700; }
-.qd-fe-falta.perto { color: var(--tinta); font-weight: 700; }
-.qd-fe-abrir { grid-area: abrir; color: var(--tinta-fraca); font-size: 18px; line-height: 1; }
-.qd-fe-item:hover .qd-fe-abrir { color: var(--tinta); }
+.qd-fe-quando { grid-area: quando; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; min-width: 0; font-size: 12.5px; color: var(--tinta-media); }
+.qd-fe-quando > .qd-fe-st { font-size: 12.5px; }
+.qd-fe-det::before { content: '·'; margin: 0 6px; color: var(--tinta-fraca); font-weight: 400; }
+.qd-fe-acoes { flex: none; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.qd-fe-bt { min-height: 34px; padding: 0 12px; border-radius: 9px; border: 1.5px solid var(--fe-linha); background: transparent; color: var(--tinta);
+  font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; }
+.qd-fe-bt:hover { border-color: var(--tinta-fraca); background: var(--fe-fundo); }
+.qd-fe-bt.forte { background: var(--tinta); border-color: var(--tinta); color: var(--vidro-alto); }
+.qd-fe-bt:disabled { cursor: wait; }
 
-/* ninguém para agir, a coluna que falta e os estados sem lista (sem a aba, aba vazia, sem a data limite) */
+/* ninguem para programar, a coluna que falta e os estados sem lista (sem a aba, aba vazia, sem a data limite) */
 .qd-fe-ninguem { display: flex; align-items: flex-start; gap: 8px; margin: 16px 2px 8px; font-size: 13.5px; line-height: 1.5; color: var(--tinta-media); }
 .qd-fe-ninguem b { color: var(--tinta); font-weight: 600; }
 .qd-fe-ninguem > .qd-ico { flex: none; margin-top: 3px; }
@@ -771,7 +793,13 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-estado b { font-family: 'Archivo', sans-serif; font-size: 15px; }
 .qd-fe-estado p { grid-column: 2; margin: 2px 0 0; font-size: 13px; line-height: 1.55; color: var(--tinta-media); max-width: 760px; }
 
-/* o rodapé: em dia, sem dados (abre a lista aqui), Baixar Excel, Parâmetros; e a frase de quem já marcou as férias */
+/* de ferias agora e cumpridas: uma linha recolhida, que abre a lista */
+.qd-fe-agora { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--bq-linha); }
+.qd-fe-agora-bt { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--tinta); }
+.qd-fe-agora-bt b { font-family: 'Archivo', sans-serif; }
+.qd-fe-agora .qd-fe-itens { margin-top: 6px; }
+
+/* o rodape: em dia, sem dados (abre a lista aqui), Baixar Excel, Parametros, a legenda das cores e a frase de quem ja marcou as ferias */
 .qd-fe-rodape { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--bq-linha); font-size: 12.5px; color: var(--tinta-media); }
 .qd-fe-rod-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
 .qd-fe-rod-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
@@ -780,13 +808,16 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-rod-acoes { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 6px 18px; }
 .qd-fe-rod-acoes .qd-link { color: var(--tinta); font-weight: 600; }
 .qd-fe-rod-dica { margin: 8px 0 0; font-size: 12px; color: var(--tinta-media); }
+.qd-fe-legenda { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 10px 0 0; font-size: 12px; color: var(--tinta); }
+.qd-fe-legenda > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.qd-fe-legenda i { width: 10px; height: 10px; border-radius: 2px; background: var(--fe-cor); }
 .qd-fe-semdados { list-style: none; margin: 10px 0 0; padding: 8px 12px; border-radius: 10px; display: grid; gap: 5px;
   background: var(--bq-surface-2); border: 1px solid var(--bq-linha); }
 .qd-fe-semdados li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 12.5px; }
 .qd-fe-semdados li > span { color: var(--tinta-media); }
 .qd-fe-semdados .qd-link { color: var(--tinta); font-weight: 600; }
 
-/* o calendário: no desenho da tela Calendário; cada pessoa uma vez, no dia de agir */
+/* o calendario: no desenho da tela Calendario; cada pessoa uma vez, no dia que importa */
 .qd-fe-cal-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 14px 0 10px; }
 .qd-fe-cal-tit { flex: 1 1 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
 .bi-quadro .qd-fe-cal-tit h3 { margin: 0; font-family: 'Archivo', sans-serif; font-size: 17px; font-weight: 700; }
@@ -807,14 +838,10 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .bi-quadro .qd-fe-mes td { position: relative; overflow: hidden; vertical-align: top; white-space: normal; height: 88px; padding: 6px 5px 5px;
   border: 1.5px solid var(--linha-forte); border-radius: 12px; background: var(--vidro-alto); box-shadow: var(--sombra); }
 .bi-quadro .qd-fe-mes tbody tr:hover { background: transparent; }
-.bi-quadro .qd-fe-mes td::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: var(--fe-faixa, transparent); }
+.bi-quadro .qd-fe-mes td.tem-cor::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: var(--fe-cor); }
 .bi-quadro .qd-fe-mes td.passado, .bi-quadro .qd-fe-mes td.fora { background: transparent; box-shadow: none; }
 .bi-quadro .qd-fe-mes td.fora { border-style: dashed; }
 .bi-quadro .qd-fe-mes td.fora .qd-fe-dia-n { color: var(--tinta-fraca); }
-.bi-quadro .qd-fe-mes td.c-sair { --fe-faixa: var(--st-sair); border-color: rgba(208, 59, 59, .6); }
-.bi-quadro .qd-fe-mes td.c-avisar { --fe-faixa: var(--st-avisar); border-color: rgba(250, 178, 25, .8); }
-.bi-quadro .qd-fe-mes td.c-prog { --fe-faixa: var(--st-prog); }
-.bi-quadro .qd-fe-mes td.c-emdia { --fe-faixa: var(--st-dia); }
 .bi-quadro .qd-fe-mes td.hoje { border: 2px solid var(--tinta); }
 .bi-quadro .qd-fe-mes td.escolhido { outline: 2px solid var(--tinta); outline-offset: 1px; }
 .qd-fe-dia-cab { display: flex; align-items: center; gap: 6px; min-height: 20px; margin-bottom: 4px; }
@@ -824,63 +851,72 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 .qd-fe-hoje { font-family: 'Archivo', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta); }
 .qd-fe-pilulas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .qd-fe-pilulas > li { min-width: 0; }
-.qd-fe-pil { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 22px; padding: 2px 5px 2px 4px; border-radius: 6px;
-  border: 1.5px solid transparent; font-family: 'Archivo', sans-serif; font-size: 10.5px; font-weight: 700; line-height: 1.2; text-align: left;
-  cursor: pointer; box-shadow: 0 1px 3px -1px rgba(15, 23, 42, .25); }
+.qd-fe-pil { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 22px; padding: 2px 5px; border-radius: 6px;
+  border: 1.5px solid var(--fe-cor); background: var(--fe-cor); color: var(--fe-cor-tinta); font-family: 'Archivo', sans-serif; font-size: 10.5px;
+  font-weight: 700; line-height: 1.2; text-align: left; cursor: pointer; box-shadow: 0 1px 3px -1px rgba(15, 23, 42, .25); }
+.qd-fe-pil.qd-fe-azul, .qd-fe-pil.qd-fe-verde, .qd-fe-pil.qd-fe-cinza { background: var(--bq-surface-2); color: var(--tinta); box-shadow: none; }
+.qd-fe-pil.qd-fe-cinza { color: var(--tinta-media); border-color: var(--linha-forte); }
 .qd-fe-pil-nome { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qd-fe-pil:hover { filter: brightness(1.06); box-shadow: 0 3px 10px -4px rgba(15, 23, 42, .45); }
-.qd-fe-pil.sair { background: var(--st-sair); color: #ffffff; }
-.qd-fe-pil.avisar { background: var(--st-avisar); color: #14152b; }
-.qd-fe-pil.prog { background: var(--st-prog-fundo); border-color: var(--st-prog); color: var(--tinta); box-shadow: none; }
-.qd-fe-pil.emdia { background: var(--bq-surface-2); border-color: var(--linha-forte); color: var(--tinta-media); box-shadow: none; }
+.qd-fe-pil:hover { filter: brightness(1.06); }
 .qd-fe-mais { display: block; margin: 4px 0 0 2px; border: none; background: none; padding: 0; font-size: 11px; font-weight: 700;
   color: var(--tinta-media); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .qd-fe-dia-bt { display: none; }
-.qd-fe-legenda { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 12px 2px 0; font-size: 12px; color: var(--tinta); }
-.qd-fe-legenda > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.qd-fe-legenda > .qd-fe-so-largo { color: var(--tinta-media); }
+.qd-fe-ponto { display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--fe-cor); }
+.qd-fe-cal-dica { margin: 10px 2px 0; font-size: 12px; color: var(--tinta-media); }
 .qd-fe-dia-lista { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--bq-linha); }
 .bi-quadro .qd-fe-dia-lista h4 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 4px; font-family: 'Archivo', sans-serif;
   font-size: 14px; font-weight: 700; }
 .qd-fe-dia-lista h4 .qd-link { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500; }
 .qd-fe-dia-lista h4:focus-visible { outline: 2px solid var(--tinta); outline-offset: 3px; border-radius: 2px; }
-.qd-fe-item:focus-visible, .qd-fe-pil:focus-visible, .qd-fe-dia-bt:focus-visible, .qd-fe-mais:focus-visible, .qd-fe-seta:focus-visible,
+.qd-fe-abre:focus-visible, .qd-fe-bt:focus-visible, .qd-fe-pil:focus-visible, .qd-fe-dia-bt:focus-visible, .qd-fe-mais:focus-visible, .qd-fe-seta:focus-visible,
 .qd-fe-hoje-bt:focus-visible, .qd-fe-geral-n button:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
 
-/* ficha: a seção Férias, com a linha do tempo de cada período */
+/* ficha: a secao Ferias, com a linha do tempo de cada periodo */
 .qd-fe-ficha { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
-.qd-fe-ficha > li { padding: 10px 12px 12px; border-radius: 10px; border: 1px solid var(--bq-linha); background: var(--bq-surface-2); }
-.qd-fe-ficha-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
-.qd-fe-ficha-cab span { color: var(--tinta-media); font-size: 12px; }
+.qd-fe-ficha > li { padding: 10px 12px 12px; border-radius: 10px; border: 1px solid var(--fe-linha); border-left: 4px solid var(--fe-cor); background: var(--fe-fundo); }
+.qd-fe-ficha-cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.qd-fe-ficha-cab > span:last-child { color: var(--tinta-media); font-size: 12px; }
 .qd-fe-ficha-nota { display: flex; gap: 6px; align-items: flex-start; margin: 0 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--tinta-media); }
 .qd-fe-ficha-nota .qd-fe-ico { margin-top: 2px; }
 .qd-fe-tempo { position: relative; height: 8px; margin: 24px 2px 10px; border-radius: 99px; background: var(--linha); }
-.qd-fe-tempo i { position: absolute; top: 0; bottom: 0; }
-.qd-fe-tempo i.aq { background: var(--linha-forte); border-radius: 99px 0 0 99px; }
-.qd-fe-tempo i.livre { background: var(--tinta-fraca); }
-.qd-fe-tempo i.aviso { border-radius: 0 99px 99px 0; background: var(--st-dia); }
-.qd-fe-tempo i.aviso.sair { background: var(--st-sair); }
-.qd-fe-tempo i.aviso.avisar { background: var(--st-avisar); }
-.qd-fe-tempo i.aviso.prog { background: var(--st-prog); }
+.qd-fe-tempo i { position: absolute; top: 0; bottom: 0; border-radius: 99px; }
+.qd-fe-tempo i.aq { background: var(--linha-forte); }
+.qd-fe-tempo i.livre { background: var(--fe-cor); opacity: .35; }
+.qd-fe-tempo i.prog { top: -3px; bottom: -3px; background: var(--fe-cor); }
 .qd-fe-tempo-hoje { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--tinta); border-radius: 2px; }
 .qd-fe-tempo-hoje span { position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); font-family: 'Archivo', sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-.qd-fe-ficha-datas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
+.qd-fe-ficha-datas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
 .qd-fe-ficha-datas dt { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tinta-media); }
 .qd-fe-ficha-datas dd { margin: 2px 0 0; font-size: 12.5px; }
+.qd-fe-ficha-prog { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; }
+.qd-fe-obs { display: block; margin-top: 2px; color: var(--tinta-media); font-style: italic; }
+.qd-fe-ficha .qd-fe-acoes { display: flex; justify-content: flex-start; margin-top: 10px; }
 
-/* visão geral: o cartão curto */
+/* a janela Programar: o periodo e as duas datas, os campos, a volta e o aviso ao vivo */
+.qd-fe-prog-fatos { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5;
+  background: var(--fe-fundo); border: 1px solid var(--fe-linha); }
+.qd-fe-prog-campos { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 0 12px; }
+.qd-fe-prog .campo input { width: 100%; }
+.qd-fe-opc { font-weight: 400; color: var(--tinta-media); }
+.qd-fe-prog-vivo { margin: 4px 0 0; font-size: 13px; font-weight: 600; }
+.qd-fe-prog-alerta { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5;
+  background: var(--qd-atencao-fundo, rgba(250, 178, 25, .14)); border: 1px solid rgba(250, 178, 25, .55); }
+.qd-fe-erro { margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--fe-vm-texto); }
+.qd-fe-prog-alerta[hidden], .qd-fe-erro[hidden] { display: none; }
+.qd-fe-pergunta { margin: 0; line-height: 1.6; }
+
+/* visao geral: o cartao curto */
 .qd-fe-geral-n { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 2px 0 10px; }
 .qd-fe-geral-n button { display: flex; flex-direction: column; gap: 3px; min-width: 0; text-align: left; border: 1px solid var(--bq-linha);
   background: var(--bq-surface-2); border-radius: 9px; padding: 8px 10px; cursor: pointer; color: var(--tinta); }
 .qd-fe-geral-n button:hover { border-color: var(--tinta-fraca); }
 .qd-fe-geral-n b { font-family: 'Archivo', sans-serif; font-size: 24px; font-weight: 800; line-height: 1.05; }
-.qd-fe-geral-n span { display: inline-flex; align-items: flex-start; gap: 5px; font-size: 11.5px; line-height: 1.35; color: var(--tinta-media); }
-.qd-fe-geral-n span .qd-ico { flex: none; margin-top: 1px; }
+.qd-fe-geral-n span { font-size: 11.5px; line-height: 1.35; color: var(--tinta-media); }
 .qd-fe-geral-prox { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--tinta-media); }
 .qd-fe-geral-prox + .qd-fe-geral-prox { margin-top: 4px; }
 
-/* parâmetros */
+/* parametros */
 .qd-fe-param h4 { font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
   color: var(--tinta-media); margin: 16px 0 8px; }
 .qd-fe-param .campo input[type="number"] { max-width: 140px; }
@@ -892,52 +928,58 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
  */
 .qd-fe { container-type: inline-size; container-name: qdfe; }
 @container qdfe (max-width: 700px) {
-  /* calendário estreito: no lugar das pílulas, as formas do dia; o toque no dia abre a lista dele */
+  /* calendario estreito: no lugar das pilulas, os quadradinhos do dia; o toque no dia abre a lista dele */
   .bi-quadro .qd-fe-mes { border-spacing: 3px; width: calc(100% + 6px); margin: 0 -3px; }
   .bi-quadro .qd-fe-mes td { height: 52px; padding: 3px 3px 2px; border-radius: 8px; border-width: 1px; box-shadow: none; }
   .bi-quadro .qd-fe-mes td.hoje { border-width: 2px; }
-  .qd-fe-pilulas, .qd-fe-mais, .qd-fe-hoje, .qd-fe-legenda > .qd-fe-so-largo { display: none; }
+  .qd-fe-pilulas, .qd-fe-mais, .qd-fe-hoje, .qd-fe-cal-dica > .qd-fe-so-largo { display: none; }
   .qd-fe-dia-cab { margin: 0; min-height: 0; }
   .qd-fe-dia-n { font-size: 11.5px; }
   .qd-fe-dia.hoje .qd-fe-dia-n { min-width: 20px; height: 20px; }
-  .qd-fe-dia-bt { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: flex-end; align-items: center; gap: 1px;
+  .qd-fe-dia-bt { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: flex-end; align-items: center; gap: 2px;
     padding: 0 3px 5px; border: none; background: none; cursor: pointer; color: var(--tinta); font-family: 'Archivo', sans-serif; font-size: 10.5px; }
-  .qd-fe-dia-bt .qd-ico, .qd-fe-dia-bt .qd-fe-ico { width: 11px; height: 11px; }
   .qd-fe-dia-bt:focus-visible { outline-offset: -3px; }
   .qd-fe-longo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .qd-fe-curto, .qd-fe-so-estreito { display: inline; }
 }
 @container qdfe (max-width: 560px) {
-  /* celular: Lista | Calendário em duas metades; a linha em três andares (nome / turno e função / verbo) */
+  /* celular: Lista | Calendario em duas metades; a linha em tres andares (nome / turno e funcao / situacao) e os botoes embaixo */
   .qd-fe-cab-tit { width: 100%; }
   .qd-fe-vista { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .qd-fe-vista .qd-pill { min-height: 40px; }
+  .qd-fe-busca input { max-width: none; }
   .qd-fe-grupo-frase { width: 100%; order: 3; }
-  .qd-fe-item { grid-template-columns: 40px minmax(0, 1fr); grid-template-areas: 'folha quem' 'folha quando'; column-gap: 10px;
-    align-items: start; padding: 8px 2px 8px 0; }
-  .qd-fe-item.sem-folha { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'quem' 'quando'; }
+  .qd-fe-item { flex-wrap: wrap; padding: 0 0 8px; }
+  .qd-fe-abre { flex-basis: 100%; grid-template-columns: 40px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 2px 4px 0; }
+  .qd-fe-abre.sem-folha { grid-template-columns: minmax(0, 1fr); }
   .qd-fe-folha { margin-top: 2px; }
-  .qd-fe-abrir { display: none; }
   .qd-fe-nome { width: 100%; }
+  .qd-fe-acoes { width: 100%; justify-content: flex-end; padding-left: 50px; }
+  .qd-fe-abre.sem-folha + .qd-fe-acoes { padding-left: 0; }
+  .qd-fe-bt { min-height: 40px; padding: 0 14px; }
+  .qd-fe-det { width: 100%; }
+  .qd-fe-det::before { content: none; }
   .qd-fe-rod-acoes { margin-left: 0; width: 100%; }
-  .qd-fe-rodape .qd-link, .qd-fe-vencidos .qd-link, .qd-fe-dia-lista h4 .qd-link, .qd-fe-grupo-bt, .qd-fe-ninguem .qd-link, .qd-fe-aviso .qd-link,
-  .qd-fe-vazio .qd-link { display: inline-block; padding: 7px 0; }
+  .qd-fe-rodape .qd-link, .qd-fe-vencidos .qd-link, .qd-fe-dia-lista h4 .qd-link, .qd-fe-ninguem .qd-link, .qd-fe-aviso .qd-link,
+  .qd-fe-vazio .qd-link, .qd-fe-agora-bt { display: inline-block; padding: 7px 0; }
   .qd-fe-cal-tit > span { width: 100%; }
   .qd-fe-seta, .qd-fe-hoje-bt { min-height: 40px; min-width: 40px; }
 }
 @media (max-width: 760px) {
-  .qd-fe-ficha-datas { grid-template-columns: 1fr; }
+  .qd-fe-ficha-datas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .qd-fe-geral-n b { font-size: 21px; }
 }
+@media (max-width: 420px) {
+  .qd-fe-prog-campos { grid-template-columns: minmax(0, 1fr) 90px; }
+  .qd-fe-ficha .qd-fe-bt { min-height: 40px; }
+}
 @media (forced-colors: active) {
-  /* a cor some: ficam a forma, a palavra e o contorno. A faixa da folhinha e as pílulas cheias guardam o par de cores delas. */
-  .qd-fe-folha-mes, .qd-fe-pil.sair, .qd-fe-pil.avisar, .qd-fe-tempo i, .qd-fe-dia.hoje .qd-fe-dia-n { forced-color-adjust: none; }
-  .qd-fe-pil, .qd-fe-folha, .qd-fe-n, .qd-fe-tag, .qd-fe-vencidos, .qd-fe-aviso, .qd-fe-semdados, .qd-fe-geral-n button { border: 1px solid CanvasText; }
-  .qd-fe-pil.emdia, .qd-fe-item.vencido .qd-fe-folha { border-style: dashed; }
+  /* a cor some: ficam a palavra, a forma e o contorno. A faixa da folhinha e as pilulas cheias guardam o par de cores delas. */
+  .qd-fe-folha-mes, .qd-fe-pil, .qd-fe-tempo i, .qd-fe-dia.hoje .qd-fe-dia-n, .qd-fe-st > i, .qd-fe-legenda i, .qd-fe-ponto { forced-color-adjust: none; }
+  .qd-fe-pil, .qd-fe-folha, .qd-fe-n, .qd-fe-tag, .qd-fe-vencidos, .qd-fe-aviso, .qd-fe-semdados, .qd-fe-geral-n button, .qd-fe-bt { border: 1px solid CanvasText; }
   .bi-quadro .qd-fe-mes td.hoje { outline: 3px solid Highlight; outline-offset: -3px; }
   .bi-quadro .qd-fe-mes td.escolhido { outline: 3px dashed Highlight; outline-offset: -3px; }
-  .qd-fe-item:focus-visible, .qd-fe-pil:focus-visible, .qd-fe-dia-bt:focus-visible, .qd-fe-mais:focus-visible { outline: 3px dashed CanvasText; outline-offset: 2px; }
+  .qd-fe-abre:focus-visible, .qd-fe-bt:focus-visible, .qd-fe-pil:focus-visible, .qd-fe-dia-bt:focus-visible, .qd-fe-mais:focus-visible { outline: 3px dashed CanvasText; outline-offset: 2px; }
   .qd-fe-dia-bt:focus-visible { outline-offset: -4px; }       /* a celula corta o que passa dela */
-  .qd-fe-ico.prog, .qd-fe-ico.emdia { color: CanvasText; }
 }
 </style>

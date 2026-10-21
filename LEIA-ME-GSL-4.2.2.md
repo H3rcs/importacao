@@ -671,9 +671,9 @@ node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
 node testes/seguranca.js              # funções internas fechadas ao console
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos, rotinas que acertam o calendário (34 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias, painel desativado, fotos HEIC, marcar pessoa, excluir item do estoque (87 casos)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias, painel desativado, fotos HEIC, marcar pessoa, excluir item do estoque, programação das férias, ações só para os citados, planilha do aprendiz (100 casos)
 node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade, um arquivo da entrega anterior por vez (23 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral, rotinas, selo e marcação nos comentários, HEIC, painel desativado, fotos pela reserva, excluir item do estoque (95 cenários)
+node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral, rotinas, selo e marcação nos comentários, HEIC, painel desativado, fotos pela reserva, excluir item do estoque, férias com programação, relatórios Bartofil (100 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

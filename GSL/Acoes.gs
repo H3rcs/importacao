@@ -42,7 +42,7 @@ const PLANOS = {
 
 const ACOES_SITUACAO = { PENDENTE: 'PENDENTE', CONCLUIDA: 'CONCLUIDA', CANCELADA: 'CANCELADA' };
 
-const BUILD_ACOES = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_ACOES = '2026.10.21';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 /* De que plano e a linha. Linha antiga (sem PLANO) e do Calendario. */
 function planoDe_(r) {

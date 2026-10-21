@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.20'
+  build: '2026.10.21'
 };
 
 /*
@@ -41,21 +41,22 @@ const APP = {
  *   2026.10.19  = rotinas do calendario pelo dia da semana, selo e marcacao nos comentarios das acoes,
  *                 fotos HEIC e painel desativado fora do menu
  *   2026.10.20  = fotos e gravacoes pela pagina quando o Google barra a conversa; excluir item do estoque de verdade
+ *   2026.10.21  = ferias com programacao, acoes so para os citados, relatorios nas cores da Bartofil, planilha do aprendiz
  */
 function arquivosForaDaVersao_() {
-  const LIMPEZA = '2026.10.09', APRENDIZ = '2026.10.09c', FERIAS = '2026.10.14b', PEDIDO_19 = '2026.10.19', ENTREGA = APP.build;
+  const LIMPEZA = '2026.10.09', PEDIDO_19 = '2026.10.19', PEDIDO_20 = '2026.10.20', ENTREGA = APP.build;
   const carimbos = {
-    'Acoes.gs':     [PEDIDO_19, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
-    'Estoque.gs':   [ENTREGA,   typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
+    'Acoes.gs':     [ENTREGA,   typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Estoque.gs':   [PEDIDO_20, typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
     'Limpeza.gs':   [LIMPEZA,   typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
     'Emails.gs':    [PEDIDO_19, typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
-    'Instalacao.gs':[PEDIDO_19, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
+    'Instalacao.gs':[ENTREGA,   typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
     'Filiais.gs':   [PEDIDO_19, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
-    'Aprendiz.gs':  [APRENDIZ,  typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
+    'Aprendiz.gs':  [ENTREGA,   typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
     'Permissoes.gs':[PEDIDO_19, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
     'Auth.gs':      [PEDIDO_19, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
     'Banco.gs':     [PEDIDO_19, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO],
-    'Quadro.gs':    [FERIAS,    typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
+    'Quadro.gs':    [ENTREGA,   typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
     'Calendario.gs':[PEDIDO_19, typeof BUILD_CALENDARIO === 'undefined' ? '' : BUILD_CALENDARIO],
     'Config.gs':    [PEDIDO_19, typeof BUILD_CONFIG === 'undefined' ? '' : BUILD_CONFIG]
   };

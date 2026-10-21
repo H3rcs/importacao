@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`; os de 21/10, no pedido de 21/10 e no `GSL-21-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -35,6 +35,70 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Pedido de 21/10 (férias com programação, ações só para os citados, relatórios Bartofil, planilha do aprendiz)
+
+**Férias: programar a data e acompanhar até a saída**
+
+A aba Férias foi refeita em cima das quatro datas da aba FÉRIAS:
+- **pa_inicio e pa_fim:** o período aquisitivo.
+- **DTA_LIMITE:** a data em que a pessoa **pode sair** de férias. Uns 60 dias antes dela, a pessoa entra em **Programar**. Sem DTA_LIMITE, vale o dia seguinte ao pa_fim.
+- **DTA_LIMITEMAX:** o **limite máximo para sair**, o último dia para começar as férias. Ele não pode passar.
+
+**Programar:** quem pode trocar a planilha do Quadro clica em **Programar** e escolhe o início (entre "pode sair a partir de" e o limite máximo) e os dias (5 a 30, padrão 30). A janela mostra a volta e até quando entregar o aviso. A programação fica gravada no GSL; a planilha continua só de leitura. **Reprogramar** muda a data. Na ficha da pessoa ficam **Cancelar programação** e **Desfazer confirmação**.
+
+**As cores acompanham o tempo:**
+
+| Cor | Sem programação | Programada |
+|---|---|---|
+| **Azul** (no prazo) | Programar: pode sair a partir de… | Programada para… · aviso até… / Sai em… |
+| **Amarelo** (atenção) | Já pode sair desde… — sem programação | Entregar o aviso até… (a semana do aviso) |
+| **Laranja** (urgente) | Programe já: limite máximo em até 60 dias | Sai em N dias (a semana da saída) / Saída prevista — confirme |
+| **Vermelho** (crítico) | Programe hoje (o aviso já não cabe antes do limite) / Limite máximo vencido | Saiu de férias em…? Confirme (3 dias depois) / Programada depois do limite máximo |
+| **Verde** (resolvido) | — | De férias (STATUS da GERAL) / Férias cumpridas |
+| **Cinza** (nada a fazer) | Em dia: ainda falta para poder sair | — |
+
+- **Confirmar saída** fecha a programação. Quando a extração nova chega sem o período (o RH fechou), as férias contam como cumpridas sozinhas.
+- **Buscar pelo nome**, no alto da aba, acha qualquer pessoa, sem precisar de acento. Mostra também quem está em dia, para programar com antecedência.
+- A lista tem dois grupos, **Programar** e **Programadas**, e a linha "N de férias agora · N cumpridas nos últimos 60 dias". O calendário, a ficha, a Visão geral, o Copiar resumo e o Excel seguem a mesma lógica. O número na aba conta quem está em vermelho ou laranja.
+- **Parâmetros:** aviso de férias (30 dias); entra em Programar quantos dias antes de poder sair (60); urgente com o limite máximo em até (60); dias para confirmar a saída (3). Os parâmetros "Avisar" e "Programar" da versão anterior não são mais lidos.
+- Continua sem nenhuma palavra de multa.
+- Na primeira entrada depois de publicar, o banco de cada filial ganha sozinho a tabela FERIAS_PROG (esquema 8.11).
+
+**Plano de Ação: cada ação só aparece para quem está citado nela**
+- Nos dois planos (Calendário e Limpeza), uma ação só aparece para os **responsáveis** e para quem foi **marcado** num comentário dela. Isso vale para a lista, os filtros, a bolinha do menu, a Gestão da Limpeza, o link do e-mail, as fotos e os comentários.
+- O administrador, a gerência, a consulta e quem criou a ação **não veem** as ações em que não estão citados. Quem gere o plano continua criando ações. Editar, reabrir, cancelar e excluir só valem nas ações que a pessoa vê.
+- Quem cria uma ação sem ficar entre os responsáveis recebe o aviso "Ação criada. Ela aparece só para quem está citado nela: …", e a ação sai da lista dele.
+- Para quem gere o plano ficam só os números do plano inteiro (ranking por turno, total em aberto e atrasadas), sem mostrar nenhuma ação.
+- **Exceção:** ação sem responsável com e-mail (as que vieram da planilha antiga da Limpeza) fica com quem gere o plano até alguém ser escolhido como responsável em Editar.
+
+**Relatórios nas cores da Bartofil**
+- Todo relatório exportado (Nobreaks, Quadro do CD, Conferência, Férias, Estoque de TI e da Limpeza) sai com a marca.
+- **Excel:** título em azul, tarja verde e amarela, cabeçalho azul com texto branco, linhas zebradas, cabeçalho congelado e com filtro, e rodapé "GSL Bartofil · filial · Página X de Y". As situações vêm coloridas como na tela.
+- **PDF:** logo da Bartofil, título em azul, tarja azul/verde/amarela, tabelas com cabeçalho azul e o rodapé "GSL Bartofil" em toda página. As cores saem mesmo com "Gráficos de plano de fundo" desligado.
+- O vermelho só aparece como alerta: a marca não tem vermelho.
+
+**Jovem Aprendiz: leitura da planilha corrigida**
+- A aba de respostas é achada mesmo renomeada, em inglês ("Form Responses 1") ou com a Cronograma como primeira aba. Com o formulário religado, vale a aba nova ("Respostas ao formulário 2"). Antes, nesses casos, todos apareciam como "Não realizada".
+- Ligar a planilha agora exige as duas abas e diz qual falta.
+- Na Cronograma, rótulos como "Férias:", "Fim de contrato:", "Média Geral", o título e o cabeçalho não viram mais aprendiz. Bloco curto não pega os setores do vizinho. O contrato e as férias aparecem sem o rótulo.
+- Setor repetido no cronograma conta uma vez. A avaliação num setor fora do cronograma não deixa o aprendiz "Concluído". A lista e o painel mostram o mesmo.
+- A mais recente é sempre a do carimbo de data/hora, qualquer que seja a ordem da aba.
+- Nota em branco não conta como zero e aparece como "—".
+- Avaliação nova aparece em até 5 minutos para todos. "Trocar planilha" com o mesmo link lê na hora.
+- **Conferir na planilha:** o nome do aprendiz na Cronograma não pode ter data nem dois-pontos.
+
+**Arquivos desta entrega** (carimbo `2026.10.21`; enviados no `GSL-21-10.zip`). São os 9 que mudaram desde o pacote de 20/10:
+- `Acoes.gs`, `Aprendiz.gs`, `Codigo.gs`, `Instalacao.gs`, `Quadro.gs`;
+- `App.html`, `Aprendiz.html`, `Paineis.html`, `PaineisEstilo.html`.
+
+Como publicar: cole os 9 por cima, crie uma **Nova versão** da implantação e recarregue a página (F5). Se faltar algum, a faixa amarela diz qual.
+
+**Para conferir:**
+1. **Férias:** abra o Quadro do CD › Férias, busque uma pessoa pelo nome, clique em **Programar** e salve. Ela passa para **Programadas**, com a cor do prazo.
+2. **Plano de Ação:** como administrador, as ações em que você não é responsável nem marcado não aparecem mais.
+3. **Relatórios:** exporte o Excel do Estoque de TI e o PDF dos Nobreaks. Os dois saem nas cores da Bartofil.
+4. **Jovem Aprendiz:** abra o painel e confira se cada aprendiz está com os setores e as avaliações certas.
 
 ## Pedido de 20/10 (Google bloqueando a conexão, excluir item do estoque, primeira foto HEIC)
 
@@ -177,6 +241,8 @@ Extraia as férias do sistema e cole numa aba chamada **FÉRIAS**, na mesma plan
   - **Férias: sem linha na aba FÉRIAS:** a pessoa está ativa na GERAL, mas não tem linha ligada a ela. O aviso diz o motivo: a matrícula não veio na extração, ou veio com outro nome. Sem a linha, o GSL não tem como avisar o prazo.
 
 **A aba Férias**
+
+> A lógica de prazos e os parâmetros desta parte foram substituídos em 21/10 (programação das férias): veja o pedido de 21/10.
 
 A aba fica entre Movimentação e Conferência. A primeira versão desta aba (régua, duas colunas, escalonar, tira de meses, calendário com duas marcas por pessoa, mapa por turno) ficou cheia demais. Ela foi refeita no mesmo dia: agora é **um cartão só, "O que fazer e até quando"**. Cada pessoa aparece uma vez, com um verbo e uma data. A data é a de agir e fica numa folhinha de calendário no começo da linha.
 

@@ -718,6 +718,14 @@ const VALIDADE_TELA = 600;
  */
 const TELAS_PESSOAIS = { acoes: true, acessos: true, limpeza: true };
 
+/*
+ * Telas sem a copia da tela: a funcao delas ja guarda a copia da planilha de fora
+ * (Jovem Aprendiz: 5 minutos, ver dadosAprendiz). Com a copia da tela (10 min) por cima,
+ * a avaliacao nova levava ate 15 minutos para aparecer, e cada nivel (gerente, admin)
+ * via uma hora diferente da planilha ao mesmo tempo.
+ */
+const TELAS_SEM_COPIA = { aprendiz: true };
+
 function chaveDeTela(idTela, usuario, params) {
   const e = escopoDe(usuario);
   const dono = (e.tipo === 'PROPRIAS' || TELAS_PESSOAIS[idTela]) ? usuario.email : '';
@@ -757,8 +765,9 @@ function carregarTela(ctx, idTela, params) {
    * A geracao dentro da chave garante que qualquer gravacao invalida
    * tudo na hora — nao existe janela de dado velho depois de uma escrita.
    */
+  const semCopia = !!TELAS_SEM_COPIA[idTela];
   const chave = chaveDeTela(idTela, usuario, params);
-  const guardado = lerTextoCache(chave);
+  const guardado = semCopia ? null : lerTextoCache(chave);
   if (guardado) return guardado;
 
   const executor = globalThis[tela.funcao];
@@ -780,7 +789,7 @@ function carregarTela(ctx, idTela, params) {
     dados: executor(usuario, params || {})
   });
 
-  gravarTextoCache(chave, texto, VALIDADE_TELA);
+  if (!semCopia) gravarTextoCache(chave, texto, VALIDADE_TELA);
   return texto;
 }
 

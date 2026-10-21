@@ -380,7 +380,9 @@ function fazerAba(aba) {
     setColumnWidth() { return self; }, setColumnWidths() { return self; }, setRowHeight() { return self; },
     activate() { return self; }, protect() { return encadeavel('Protection'); },
     getIndex() { return aba.planilha.abas.indexOf(aba) + 1; },
-    getType() { return 'GRID'; }
+    getType() { return 'GRID'; },
+    // aba de respostas de um Formulario: o teste marca aba.formUrl (sem ela, null, como no Sheets)
+    getFormUrl() { return aba.formUrl || null; }
   };
   return estrito('Sheet', self);
 }

@@ -162,6 +162,9 @@ const APZ_PILARES_LONGO = ['Atenção Concentrada', 'Interesse', 'Proatividade',
 
 /* 3 -> "3"; 3.4 -> "3.4" — como o portal mostrava; no maximo uma casa (nota corrigida a mao, 14/3 -> 4.7). */
 const apzNum = (n) => String(Number((Number(n) || 0).toFixed(1)));
+/* Nota ou media que nao existe (nota em branco na planilha): um traco, nao zero. */
+const apzSemNota = (n) => n === null || n === undefined || n === '';
+const apzNota = (n) => apzSemNota(n) ? '—' : apzNum(n);
 const apzData = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
 
 function pintarAprendiz(r) {
@@ -275,7 +278,7 @@ function apzRelatorio(d) {
   }
   const linhaDoTempo = p.linhaDoTempo.length
     ? p.linhaDoTempo.map((s) => {
-        const t = { concluido: ['Concluído', 'Média: ' + apzNum(s.media)], fazendo: ['Em Destaque', 'Setor Atual'], pendente: ['Pendente', 'Aguardando'] }[s.status];
+        const t = { concluido: ['Concluído', 'Média: ' + apzNota(s.media)], fazendo: ['Em Destaque', 'Setor Atual'], pendente: ['Pendente', 'Aguardando'] }[s.status];
         return `<div class="apz-etapa ${s.status}"><span class="apz-etapa-selo ${s.status}">${t[0]}</span>
           <div class="apz-etapa-nome">${esc(s.setor)}</div><div class="apz-etapa-nota">${t[1]}</div></div>`;
       }).join('')
@@ -324,7 +327,7 @@ function apzRelatorio(d) {
       ${p.avaliacoes.length ? p.avaliacoes.map((a) => `
         <div class="apz-feedback">
           <div class="apz-feedback-cab"><h6>${esc(a.setor)}</h6><span class="apz-data">${esc(a.data)}</span></div>
-          <p class="apz-feedback-quem"><strong>Avaliador:</strong> ${esc(a.avaliador)} | <strong>Média:</strong> ${apzNum(a.mediaSetor)}</p>
+          <p class="apz-feedback-quem"><strong>Avaliador:</strong> ${esc(a.avaliador)} | <strong>Média:</strong> ${apzNota(a.mediaSetor)}</p>
           <div class="apz-feedback-colunas">
             <div><strong class="apz-positivo">\u{1F44D} Pontos Positivos:</strong>
               <ul>${a.pontosPositivos.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
@@ -397,7 +400,7 @@ function apzGraficoColunas(itens, W) {
   const rotulos = itens.map((it) => gira ? apzCaber(it.rotulo, fonte, (mB - 20) / 0.71) : apzCaber(it.rotulo, fonte, fatia - 4));
   // Muitas avaliacoes numa tela estreita: o numero em cima da coluna so quando cabe na fatia, e o
   // rotulo inclinado de k em k (o nome inteiro continua no balao de cada coluna).
-  const mostraValor = Math.max.apply(null, itens.map((it) => apzMedir(apzNum(it.valor), fonte, 600))) + 2 <= fatia;
+  const mostraValor = Math.max.apply(null, itens.map((it) => apzMedir(apzNota(it.valor), fonte, 600))) + 2 <= fatia;
   const passo = gira ? Math.max(1, Math.ceil((fonte + 2) / (fatia * 0.71))) : 1;
   const y = (v) => mT + (A - mT - mB) * (1 - Math.max(0, Math.min(5, v)) / 5);
   const base = A - mB + 15;
@@ -406,10 +409,10 @@ function apzGraficoColunas(itens, W) {
       <text x="${mL - 8}" y="${y(g) + 4}" text-anchor="end" font-size="${fonte}" fill="var(--apz-tinta-media)">${g}</text>`).join('')}
     ${itens.map((it, i) => {
       const cx = mL + fatia * i + fatia / 2, topo = y(it.valor), alt = y(0) - topo;
-      return `<g><title>${esc(it.dica || it.rotulo)}: média ${apzNum(it.valor)}</title>
+      return `<g><title>${esc(it.dica || it.rotulo)}: média ${apzNota(it.valor)}</title>
         <rect x="${cx - fatia / 2}" y="${mT}" width="${fatia}" height="${A - mT - mB}" fill="transparent"/>
         ${alt > 0 ? `<path d="${apzColuna(cx - barra / 2, topo, barra, alt)}" fill="var(--apz-serie)"/>` : ''}
-        ${mostraValor ? `<text x="${cx}" y="${topo - 6}" text-anchor="middle" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNum(it.valor)}</text>` : ''}
+        ${mostraValor ? `<text x="${cx}" y="${topo - 6}" text-anchor="middle" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNota(it.valor)}</text>` : ''}
         ${i % passo === 0 ? `<text x="${cx}" y="${base}" font-size="${fonte}" fill="var(--apz-tinta-media)" ${gira
           ? `text-anchor="end" transform="rotate(-45 ${cx + 4} ${base - 4})"` : 'text-anchor="middle"'}>${esc(rotulos[i])}</text>` : ''}</g>`;
     }).join('')}
@@ -426,11 +429,12 @@ function apzGraficoBarras(rotulos, valores, W) {
     ${[0, 1, 2, 3, 4, 5].map((g) => `<line x1="${x(g)}" x2="${x(g)}" y1="${mT}" y2="${A - mB}" stroke="var(--linha)" stroke-width="1"/>
       <text x="${x(g)}" y="${A - 8}" text-anchor="middle" font-size="11" fill="var(--apz-tinta-media)">${g}</text>`).join('')}
     ${rotulos.map((r, i) => {
-      const cy = mT + linha * i + linha / 2, v = Number(valores[i]) || 0, larg = x(v) - x(0), k = Math.min(4, larg);
-      return `<g><title>${esc(r)}: ${apzNum(v)}</title>
+      const vazia = apzSemNota(valores[i]);
+      const cy = mT + linha * i + linha / 2, v = vazia ? 0 : Number(valores[i]) || 0, larg = x(v) - x(0), k = Math.min(4, larg);
+      return `<g><title>${esc(r)}: ${vazia ? 'sem nota' : apzNum(v)}</title>
         <text x="${mL - 10}" y="${cy + 4}" text-anchor="end" font-size="${fonte}" fill="var(--apz-tinta)">${esc(apzCaber(r, fonte, mL - 14))}</text>
         ${larg > 0 ? `<path d="M${x(0)},${cy - e / 2}H${x(v) - k}Q${x(v)},${cy - e / 2} ${x(v)},${cy - e / 2 + k}V${cy + e / 2 - k}Q${x(v)},${cy + e / 2} ${x(v) - k},${cy + e / 2}H${x(0)}Z" fill="var(--apz-serie)"/>` : ''}
-        <text x="${x(v) + 6}" y="${cy + 4}" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNum(v)}</text></g>`;
+        <text x="${x(v) + 6}" y="${cy + 4}" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${vazia ? '—' : apzNum(v)}</text></g>`;
     }).join('')}
   </svg>`;
 }
@@ -445,13 +449,14 @@ function apzGraficoRadar(rotulos, valores, W) {
   const ponto = (i, v) => [cx + R * (v / 5) * Math.cos(ang(i)), cy + R * (v / 5) * Math.sin(ang(i))];
   const anel = (v) => rotulos.map((_, i) => ponto(i, v).map((c) => c.toFixed(1)).join(',')).join(' ');
   const vals = rotulos.map((_, i) => Math.max(0, Math.min(5, Number(valores[i]) || 0)));
+  const rotuloVal = (i) => apzSemNota(valores[i]) ? '—' : apzNum(vals[i]);
   return `<svg class="apz-grafico" width="${W}" height="${A}" viewBox="0 0 ${W} ${A}" role="img" aria-label="Média geral por competência">
     ${[1, 2, 3, 4, 5].map((v) => `<polygon points="${anel(v)}" fill="none" stroke="var(--linha)" stroke-width="1"/>`).join('')}
     ${rotulos.map((_, i) => { const p = ponto(i, 5); return `<line x1="${cx}" y1="${cy}" x2="${p[0]}" y2="${p[1]}" stroke="var(--linha)" stroke-width="1"/>`; }).join('')}
     ${[1, 2, 3, 4, 5].map((v) => `<text x="${cx + 4}" y="${cy - R * v / 5 + 4}" font-size="10" fill="var(--apz-tinta-media)">${v}</text>`).join('')}
     <polygon points="${vals.map((v, i) => ponto(i, v).map((c) => c.toFixed(1)).join(',')).join(' ')}"
       fill="var(--apz-serie)" fill-opacity=".14" stroke="var(--apz-serie)" stroke-width="2" stroke-linejoin="round"/>
-    ${vals.map((v, i) => { const p = ponto(i, v); return `<g><title>${esc(rotulos[i])}: ${apzNum(v)}</title>
+    ${vals.map((v, i) => { const p = ponto(i, v); return `<g><title>${esc(rotulos[i])}: ${rotuloVal(i)}</title>
       <circle cx="${p[0]}" cy="${p[1]}" r="11" fill="transparent"/>
       <circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="var(--apz-serie)" stroke="var(--apz-cartao)" stroke-width="2"/></g>`; }).join('')}
     ${rotulos.map((r, i) => {
@@ -459,7 +464,7 @@ function apzGraficoRadar(rotulos, valores, W) {
       const p = [cx + (R + 10) * c, cy + (R + 10) * sn + (sn < -0.5 ? -18 : (sn > 0.5 ? 10 : -4))];
       const ancora = Math.abs(c) < 0.2 ? 'middle' : (c > 0 ? 'start' : 'end');
       return `<text x="${p[0]}" y="${p[1]}" text-anchor="${ancora}" font-size="${fonte}" fill="var(--apz-tinta)">${esc(r)}
-        <tspan x="${p[0]}" dy="15" font-weight="700">${apzNum(vals[i])}</tspan></text>`;
+        <tspan x="${p[0]}" dy="15" font-weight="700">${rotuloVal(i)}</tspan></text>`;
     }).join('')}
   </svg>`;
 }

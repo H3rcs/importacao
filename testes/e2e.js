@@ -1591,6 +1591,22 @@ async function rodar() {
     await f.selectOption('#apz-sel', bruno);
     const etapasB = await f.evaluate(() => Array.from(document.querySelectorAll('.apz-etapa')).map((e) => e.className.replace('apz-etapa', '').trim()));
     afirmar(etapasB.join() === E.bruno.linha.join(), 'linha do tempo do Bruno: ' + etapasB.join());
+    // 21/10: nota em branco (Disciplina) numa linha sem a formula da media — um traco, nao zero; a media geral so com as notas dadas
+    abaResp.dados.splice(14, 0, [new s.mundo.DataDoScript(hj.getFullYear(), hj.getMonth(), hj.getDate(), 7, 0, 0), 'x@bartofil.com.br', 'Avaliador Doze',
+      'DEVOLUÇÃO', 'Daniela Esteves Teste', 4, '', 5, 3, 4, 'Atenta', 'Nada', '']);
+    await f.click('#acoes-topo button:has-text("Atualizar dados")');
+    await f.waitForFunction(() => DADOS && DADOS.lista && DADOS.lista.some((x) => x.nomeOriginal === 'Daniela Esteves Teste' && x.status === 'Pendente'), null, { timeout: 15000 });
+    await f.waitForSelector('#apz-sel', { timeout: 10000 });
+    await f.selectOption('#apz-sel', await f.evaluate(() => DADOS.lista.find((x) => x.nomeOriginal === 'Daniela Esteves Teste').chave));
+    await f.waitForSelector('.apz-feedback', { timeout: 10000 });
+    const semNota = await f.evaluate(() => ({
+      kpi: document.querySelector('[data-kpi="media"]').textContent,
+      barras: Array.from(document.querySelectorAll('#apz-competencias text[font-weight="600"]')).map((t) => t.textContent).join(' '),
+      radar: Array.from(document.querySelectorAll('#apz-g-radar tspan')).map((t) => t.textContent).join(' '),
+      media: document.querySelector('.apz-feedback-quem').textContent.replace(/\s+/g, ' ').trim()
+    }));
+    afirmar(semNota.kpi === '4 / 5' && semNota.barras === '4 5 3 4 —' && semNota.radar === '4 5 3 4 —' && /Média: 4$/.test(semNota.media),
+      'nota em branco: ' + JSON.stringify(semNota));
     if (process.env.FOTO_APRENDIZ) {
       // a pagina rola dentro da moldura do Apps Script: janela alta para caber a tela toda
       const foto = async (nome, w, h) => { await aba.page.setViewportSize({ width: w, height: h }); await aba.page.waitForTimeout(400);

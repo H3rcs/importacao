@@ -2342,6 +2342,171 @@ caso('jovem aprendiz: modulo no menu — gerente ve, coordenador so com o modulo
   afirmar(/relido/.test(acao(m, maria, 'atualizarAprendiz', {}).recado), 'atualizar le de novo');
 });
 
+/* 21/10 — "a planilha de aprendiz ta bugando em alguns pontos": um caso por ponto. */
+caso('jovem aprendiz: o mesmo setor duas vezes no cronograma conta uma, e avaliacao de setor fora do cronograma nao completa outro — a lista e o painel dizem o mesmo', () => {
+  const m = mundo(); const c = ctx(m); const D = m.DataDoScript;
+  const cab = ['Carimbo', 'Email', 'AVALIADOR', 'SETOR', 'NOME', 'AT', 'DI', 'IN', 'PR', 'AP', 'POS', 'MEL', 'MEDIA'];
+  const lin = (dia, setor, nome) => [new D(2026, 8, dia, 9, 0, 0), 'a@b', 'Avaliador', setor, nome, 4, 4, 4, 4, 4, 'ok', 'ok', 4];
+  const resp = [cab,
+    lin(1, 'DEVOLUÇÃO - A', 'Pessoa Repetida'), lin(8, 'INVENTARIO', 'Pessoa Repetida'), lin(15, 'LOJA', 'Pessoa Repetida'),
+    lin(1, 'CARREGAMENTO - A', 'Pessoa Grafia'), lin(8, 'LOJA', 'Pessoa Grafia'),
+    lin(1, 'DEVOLUÇÃO - A', 'Pessoa Fora'), lin(8, 'INVENTARIO', 'Pessoa Fora'), lin(10, 'LOJA', 'Pessoa Fora')];
+  const crono = [['Nome', 'Setor', 'Inicio', 'Final', '', 'Nome', 'Setor', 'Inicio', 'Final', '']];
+  const bloco = (nome, setores) => {
+    const b = Array.from({ length: 9 }, () => ['', '', '', '', '', '', '', '', '', '']);
+    b[0][0] = nome; setores.forEach((s, k) => { b[k][1] = s; }); return b;
+  };
+  crono.push(...bloco('Pessoa Repetida', ['Devolução', 'Inventario', 'Loja', 'Loja']),     // a Loja em dois periodos
+             ...bloco('Pessoa Grafia', ['C. Carregamento', 'Carregamento', 'Loja']),      // o mesmo setor escrito de dois jeitos
+             ...bloco('Pessoa Fora', ['Devolução', 'Inventario', 'Recebimento']));         // cobriu a Loja um dia
+  const d = JSON.parse(JSON.stringify(c.montarAprendiz_(resp, crono, 'America/Bahia')));
+  const de = (nome) => { const l = d.lista.find((x) => x.nomeOriginal === nome); return [l, d.paineis[l.chave]]; };
+  const ver = (l, p) => l.status + ' ' + p.vivenciados + '/' + p.totais + ' ' + p.progresso + '% ' + p.linhaDoTempo.map((s) => s.setor + '=' + s.status).join(',');
+  let [l, p] = de('Pessoa Repetida');
+  afirmar(l.status === 'Concluído' && p.vivenciados === 3 && p.totais === 3 && p.progresso === 100 && p.linhaDoTempo.length === 3, 'Loja duas vezes: ' + ver(l, p));
+  [l, p] = de('Pessoa Grafia');
+  afirmar(l.status === 'Concluído' && p.vivenciados === 2 && p.totais === 2 && p.linhaDoTempo.map((s) => s.setor).join() === 'C. Carregamento,Loja',
+    'C. Carregamento e Carregamento: ' + ver(l, p));
+  [l, p] = de('Pessoa Fora');
+  afirmar(l.status === 'Pendente' && p.vivenciados === 2 && p.totais === 3 && p.progresso === 66.7 &&
+    p.linhaDoTempo.map((s) => s.status).join() === 'concluido,concluido,fazendo', 'setor fora do cronograma: ' + ver(l, p));
+  afirmar(p.avaliacoes.length === 3 && p.avaliacoes[0].setor === 'LOJA', 'a avaliacao da Loja continua no feedback e nos graficos');
+  afirmar(d.cronograma.find((x) => x.nome === 'Pessoa Repetida').cronograma.length === 4, 'o cartao do cronograma geral continua com os dois periodos da Loja');
+});
+
+caso('jovem aprendiz: aba de respostas classificada com a mais nova em cima — a mais recente continua primeiro e as contas nao mudam', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const abas = planilhaAprendiz(m.DataDoScript, new Date());
+  const r = abas['Respostas ao formulário 1'];
+  abas['Respostas ao formulário 1'] = [r[0]].concat(r.slice(1).filter((l) => l[4]).sort((a, b) => b[0] - a[0]));   // Dados > Classificar Z -> A
+  acao(m, s, 'salvarFonteAprendiz', { link: planilhaAntiga(m, 'Imersão Corporativa (respostas)', abas) });
+  const d = tela(m, s, 'aprendiz');
+  const E = planilhaAprendiz.esperado;
+  afirmar(JSON.stringify(d.lista.map((x) => [x.nomeOriginal, x.status])) === JSON.stringify(E.lista), 'lista: ' + JSON.stringify(d.lista.map((x) => [x.nomeOriginal, x.status])));
+  const ana = d.paineis[d.lista[0].chave];
+  const dias = ana.avaliacoes.map((a) => a.data.split('/').reverse().join(''));
+  afirmar(ana.avaliacoes[0].setor === 'LOJA' && dias.every((x, i) => !i || dias[i - 1] >= x),
+    'a mais recente primeiro (detalhamento e feedback): ' + ana.avaliacoes.map((a) => a.setor + ' ' + a.data).join(' | '));
+  afirmar(ana.mediaGeral === E.ana.mediaGeral && JSON.stringify(ana.mediasPilares) === JSON.stringify(E.ana.mediasPilares) &&
+    ana.linhaDoTempo.find((x) => x.setor === 'Recebimento').media === E.ana.recebimento, 'medias da Ana: ' + ana.mediaGeral + ' ' + JSON.stringify(ana.mediasPilares));
+  const elias = d.paineis[d.lista.find((x) => x.nomeOriginal === 'ELIAS FORA DO CRONOGRAMA').chave];
+  afirmar(elias.linhaDoTempo.map((x) => x.setor).join() === 'INVENTARIO,LOJA', 'fora do cronograma, da mais recente para a mais antiga: ' + elias.linhaDoTempo.map((x) => x.setor).join());
+});
+
+caso('jovem aprendiz: a aba de respostas certa (renomeada, em ingles, Cronograma na frente, formulario religado); so com a Cronograma e recusada; aba que sumiu e dita na tela', () => {
+  const E = planilhaAprendiz.esperado;
+  const R = 'Respostas ao formulário 1';
+  const lista = (d) => JSON.stringify((d.lista || []).map((x) => [x.nomeOriginal, x.status]));
+  const ligar = (abasDe) => {
+    const m = mundo(); const s = entrar(m, DONO, '4321');
+    const link = planilhaAntiga(m, 'Imersão Corporativa (respostas)', abasDe(planilhaAprendiz(m.DataDoScript, new Date())));
+    return { m, s, p: m.planilhas.get(link.split('/')[5]), erro: erroDe(() => acao(m, s, 'salvarFonteAprendiz', { link })) };
+  };
+  // a Cronograma como primeira aba e a de respostas com outro nome: antes a propria Cronograma era lida como respostas
+  [['Respostas', (a) => ({ 'Cronograma': a.Cronograma, 'Respostas': a[R] })],
+   ['Form Responses 1', (a) => ({ 'Cronograma': a.Cronograma, 'Form Responses 1': a[R] })]].forEach(([nome, abasDe]) => {
+    const x = ligar(abasDe);
+    const d = tela(x.m, x.s, 'aprendiz');
+    afirmar(!x.erro && !d.erro && d.fonte.abaRespostas === nome && d.fonte.abaCronograma === 'Cronograma' && lista(d) === JSON.stringify(E.lista),
+      nome + ': ' + (x.erro || d.erro || JSON.stringify(d.fonte) + ' ' + lista(d)));
+  });
+  // formulario religado: o Google cria a "...formulario 2", que recebe; a 1 parou em 4 respostas
+  let x = ligar((a) => ({ [R]: a[R].slice(0, 5), 'Respostas ao formulário 2': a[R], 'Cronograma': a.Cronograma }));
+  let d = tela(x.m, x.s, 'aprendiz');
+  afirmar(d.fonte.abaRespostas === 'Respostas ao formulário 2' && lista(d) === JSON.stringify(E.lista), 'religado (sem acesso de edicao: a de numero maior): ' + d.fonte.abaRespostas);
+  // a aba ligada ao formulario vale mais que o nome: a nova foi renomeada, a antiga ficou com o nome padrao
+  x = ligar((a) => ({ [R]: a[R].slice(0, 5), 'Avaliações': a[R], 'Cronograma': a.Cronograma }));
+  x.p.abas.find((a) => a.nome === 'Avaliações').formUrl = 'https://docs.google.com/forms/d/formulario-de-teste/edit';
+  acao(x.m, x.s, 'atualizarAprendiz', {});
+  d = tela(x.m, x.s, 'aprendiz');
+  afirmar(d.fonte.abaRespostas === 'Avaliações' && lista(d) === JSON.stringify(E.lista), 'a ligada ao formulario: ' + d.fonte.abaRespostas);
+  // planilha so com uma "Cronograma" qualquer: recusada, dizendo o que falta
+  x = ligar(() => ({ 'Cronograma': [['Atividade', 'Responsavel'], ['Inventario geral', 'Fulano']] }));
+  afirmar(/abas esperadas: falta a aba das respostas do formulário/.test(x.erro) && !tela(x.m, x.s, 'aprendiz').configurado, 'so a Cronograma: ' + x.erro);
+  // ligada, e depois a Cronograma mudou de nome: a tela diz qual aba falta (e nao "sem acesso")
+  x = ligar((a) => a);
+  x.p.abas.find((a) => a.nome === 'Cronograma').nome = 'Rotação antiga';
+  acao(x.m, x.s, 'atualizarAprendiz', {});
+  d = tela(x.m, x.s, 'aprendiz');
+  afirmar(/falta a aba "Cronograma"/.test(d.erro || '') && !/acesso/.test(d.erro), 'aba que sumiu: ' + d.erro);
+});
+
+caso('jovem aprendiz: cronograma com rotulo escrito de outro jeito, titulo e cabecalho no alto e bloco curto — nenhum aprendiz a mais, nenhum setor do vizinho', () => {
+  const m = mundo(); const c = ctx(m);
+  const vazio = () => ['', '', '', '', '', '', '', '', '', ''];
+  const crono = [['ROTAÇÃO DOS JOVENS APRENDIZES', '', '', '', '', ''],
+                 ['Nome do aprendiz', 'Setor', 'Início', 'Final', '', 'Nome do aprendiz', 'Setor', 'Início', 'Final', '']];
+  const bloco = (linhas, nome, contrato, ferias, setores) => {
+    const b = Array.from({ length: linhas }, vazio);
+    b[0][0] = nome; b[1][0] = contrato; b[2][0] = ferias; setores.forEach((s, k) => { b[k][1] = s; }); return b;
+  };
+  crono.push(...bloco(9, 'Pessoa Um', 'Final de contrato: 10/01/28', 'Período de Ferias: 01/12/26 a 30/12/26', ['Devolução', 'Inventario', 'Recebimento', 'Loja']),
+             ...bloco(9, 'Pessoa Dois', 'Fim de contrato: 05/02/27', 'Férias: 01/12/26 a 15/12/26', ['Devolução', 'Inventario', 'Recebimento', 'Loja']),
+             ...bloco(4, 'Pessoa Tres', 'Final de contrato : 05/03/27', 'Periodo de ferias - 01/03/27 a 30/03/27', ['Loja', 'Recebimento']),   // bloco de 4 linhas
+             ...bloco(9, 'Pessoa Quatro', 'Final de contrato: 20/11/2026', 'Média Geral', ['Expedição', 'Loja', 'Devolução']));
+  const d = JSON.parse(JSON.stringify(c.montarAprendiz_([['h']], crono, 'America/Bahia')));
+  afirmar(d.lista.map((x) => x.nomeOriginal).sort().join() === 'Pessoa Dois,Pessoa Quatro,Pessoa Tres,Pessoa Um', 'aprendizes: ' + d.lista.map((x) => x.nomeOriginal).join(' | '));
+  const ver = (n) => { const x = d.cronograma.find((y) => y.nome === n); return x.final_contrato + ' | ' + x.ferias + ' | ' + x.cronograma.map((s) => s.setor).join(','); };
+  afirmar(ver('Pessoa Um') === '10/01/2028 | 01/12/2026 a 30/12/2026 | Devolução,Inventario,Recebimento,Loja', 'Pessoa Um: ' + ver('Pessoa Um'));
+  afirmar(ver('Pessoa Dois') === '05/02/2027 | 01/12/2026 a 15/12/2026 | Devolução,Inventario,Recebimento,Loja', '"Fim de contrato" e "Férias": ' + ver('Pessoa Dois'));
+  afirmar(ver('Pessoa Tres') === '05/03/2027 | 01/03/2027 a 30/03/2027 | Loja,Recebimento', 'bloco curto e rotulo com espaco/traco: ' + ver('Pessoa Tres'));
+  afirmar(ver('Pessoa Quatro') === '20/11/2026 |  | Expedição,Loja,Devolução', '"Média Geral" nao e aprendiz nem ferias: ' + ver('Pessoa Quatro'));
+  afirmar(d.paineis[d.lista.find((x) => x.nomeOriginal === 'Pessoa Dois').chave].fimContrato === '05/02/2027', 'o painel mostra o contrato do "Fim de contrato"');
+  afirmar(d.cronograma.map((x) => x.nome).join() === 'Pessoa Quatro,Pessoa Dois,Pessoa Tres,Pessoa Um', 'ordem de fim de contrato: ' + d.cronograma.map((x) => x.nome).join());
+});
+
+caso('jovem aprendiz: avaliacao nova aparece em ate 5 minutos para todos os niveis (a copia da tela nao estica a da planilha)', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321'); const ger = entrar(m, GERENTE, '5555');
+  const link = ligarAprendiz(m, adm);
+  const aba = m.planilhas.get(link.split('/')[5]).abas.find((a) => a.nome === 'Respostas ao formulário 1');
+  const passar = (min) => m.cache.forEach((e) => { e.expira -= min * 60000; });   // o relogio do cache anda
+  const caio = (s) => tela(m, s, 'aprendiz').lista.find((x) => x.nomeOriginal === 'CAIO DIAS TESTE').status;
+  afirmar(caio(ger) === 'Não realizada', 'antes da avaliacao');
+  passar(1);
+  const D = m.DataDoScript, h = new Date();
+  aba.dados.splice(14, 0, [new D(h.getFullYear(), h.getMonth(), h.getDate(), 8, 0, 0), 'x@bartofil.com.br', 'Avaliador Onze', 'DEVOLUÇÃO', 'CAIO DIAS TESTE', 4, 4, 4, 4, 4, 'Bom', 'Nada', 4]);
+  passar(3.8);
+  afirmar(caio(adm) === 'Não realizada', 'dentro dos 5 minutos da leitura: a copia guardada');
+  passar(1.7);
+  const g = caio(ger), a = caio(adm);
+  afirmar(g === 'Pendente' && a === 'Pendente', '6,5 minutos depois da leitura: gerente ' + g + ', administrador ' + a);
+});
+
+caso('jovem aprendiz: ligar de novo a mesma planilha ("Trocar planilha" com o mesmo link) le na hora', () => {
+  const m = mundo(); const s = entrar(m, DONO, '4321');
+  const link = ligarAprendiz(m, s);
+  const daniela = () => tela(m, s, 'aprendiz').lista.find((x) => x.nomeOriginal === 'Daniela Esteves Teste').status;
+  afirmar(daniela() === 'Não realizada', 'antes');
+  const aba = m.planilhas.get(link.split('/')[5]).abas.find((a) => a.nome === 'Respostas ao formulário 1');
+  const D = m.DataDoScript, h = new Date();
+  aba.dados.splice(14, 0, [new D(h.getFullYear(), h.getMonth(), h.getDate(), 8, 0, 0), 'x@bartofil.com.br', 'Avaliador Onze', 'DEVOLUÇÃO', 'Daniela Esteves Teste', 4, 4, 4, 4, 4, 'Bom', 'Nada', 4]);
+  afirmar(/ligado/.test(acao(m, s, 'salvarFonteAprendiz', { link }).recado), 'ligou de novo');
+  afirmar(daniela() === 'Pendente', 'depois de ligar de novo: ' + daniela());
+});
+
+caso('jovem aprendiz: nota em branco nao vale zero — media geral, radar e media do setor so com as notas dadas; "4,5" escrito como texto vale 4.5', () => {
+  const m = mundo(); const c = ctx(m); const D = m.DataDoScript;
+  const cab = ['Carimbo', 'Email', 'AVALIADOR', 'SETOR', 'NOME', 'AT', 'DI', 'IN', 'PR', 'AP', 'POS', 'MEL', 'MEDIA'];
+  const resp = [cab,
+    [new D(2026, 8, 1, 9), 'a@b', 'Avaliador', 'LOJA', 'Pessoa Nota', 3.5, '', 5, 3, 4, 'ok', 'ok', ''],
+    [new D(2026, 8, 2, 9), 'a@b', 'Avaliador', 'LOJA', 'Pessoa Nota', '', '', '', '', '', 'so o texto', '', ''],     // sem nota nenhuma
+    [new D(2026, 8, 3, 9), 'a@b', 'Avaliador', 'INVENTARIO', 'Pessoa Nota', '4,5', 4, 5, 3, 4, 'ok', 'ok', ''],
+    [new D(2026, 8, 1, 9), 'a@b', 'Avaliador', 'LOJA', 'Pessoa Sem Disciplina', 4, '', 4, 4, 4, 'ok', 'ok', '']];
+  const crono = [['Nome', 'Setor', 'Inicio', 'Final'], ['Pessoa Sem Avaliacao', 'Loja', '', '']];
+  const d = JSON.parse(JSON.stringify(c.montarAprendiz_(resp, crono, 'America/Bahia')));
+  const de = (nome) => d.paineis[d.lista.find((x) => x.nomeOriginal === nome).chave];
+  const p = de('Pessoa Nota');
+  // radar na ordem atencao, interesse, proatividade, aprendizado, disciplina
+  afirmar(JSON.stringify(p.mediasPilares) === '[4,5,3,4,4]' && p.mediaGeral === 4, 'medias: ' + JSON.stringify(p.mediasPilares) + ' geral ' + p.mediaGeral);
+  afirmar(JSON.stringify(p.avaliacoes.map((a) => a.mediaSetor)) === '[4.1,null,3.9]', 'media de cada avaliacao (sem nota: sem media): ' + JSON.stringify(p.avaliacoes.map((a) => a.mediaSetor)));
+  afirmar(JSON.stringify(p.avaliacoes[2].notas) === '[3.5,5,3,4,null]' && p.avaliacoes[1].notas.every((n) => n === null), 'notas em branco: ' + JSON.stringify(p.avaliacoes.map((a) => a.notas)));
+  afirmar(p.linhaDoTempo.map((x) => x.setor + '=' + x.media).join() === 'INVENTARIO=4.1,LOJA=3.9', 'media do setor sem a avaliacao sem nota: ' + p.linhaDoTempo.map((x) => x.setor + '=' + x.media).join());
+  const sd = de('Pessoa Sem Disciplina');
+  afirmar(JSON.stringify(sd.mediasPilares) === '[4,4,4,4,null]' && sd.mediaGeral === 4, 'competencia sem nota nenhuma: ' + JSON.stringify(sd.mediasPilares) + ' geral ' + sd.mediaGeral);
+  const sa = de('Pessoa Sem Avaliacao');
+  afirmar(JSON.stringify(sa.mediasPilares) === '[0,0,0,0,0]' && sa.mediaGeral === 0, 'sem avaliacao continua zero, como antes: ' + JSON.stringify(sa.mediasPilares));
+});
+
 caso('jovem aprendiz: a atualizacao (8.9) liga o painel na principal e libera o gerente nos niveis que ja existiam', () => {
   const m = mundo(); let c = ctx(m);
   // banco como a 8.8 deixou: painel sem o aprendiz e a coluna TELA_APRENDIZ ainda nao existe

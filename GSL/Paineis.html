@@ -52,33 +52,162 @@ const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) 
   : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 
 /*
- * EXPORTAR PARA EXCEL (.xlsx de verdade, sem biblioteca externa).
+ * CORES DA BARTOFIL NOS RELATORIOS (Excel e PDF). As mesmas do Marca.html,
+ * do Estilo.html e dos e-mails: azul com tarja verde e amarela. A marca NAO
+ * tem vermelho: vermelho e laranja so aparecem como sinal de alerta.
+ */
+const PN_MARCA = { azul: '111785', verde: '01973A', amarelo: 'FFEE03' };
+/* Tons de situacao: [fundo claro, texto escuro] — a celula { v, tom } do Excel e a etiqueta .tom do PDF. */
+const PN_TONS = {
+  azul: ['E7EAFE', '111785'], verde: ['D9F5E6', '016B2A'], amarelo: ['FFF6C2', '6B5300'], cinza: ['ECEEF3', '475569'],
+  laranja: ['FFE9D5', 'A34400'], vermelho: ['FDE7E5', '8E1B1B']
+};
+/* A classe do pn-chip da tela no tom do Excel (a mesma leitura de cor). */
+const PN_TOM_DO_CHIP = { ok: 'verde', atencao: 'laranja', alerta: 'vermelho', neutro: 'cinza' };
+
+/*
+ * EXPORTAR PARA EXCEL (.xlsx de verdade, sem biblioteca externa), nas cores da Bartofil.
  * abas: [{ nome, linhas: [[celula, ...], ...] }] — numero vira numero,
  * o resto vira texto. O arquivo e um zip "sem compressao" com o XML
- * minimo que o Excel, o LibreOffice e o Google Planilhas abrem.
+ * que o Excel, o LibreOffice e o Google Planilhas abrem.
+ *
+ * O formato das linhas e o de sempre; o estilo sai da posicao:
+ *   - linhas antes da 1a linha vazia, com uma celula so cada: a 1a e o TITULO
+ *     (azul, negrito, maior), as outras o subtitulo (cinza); a linha vazia
+ *     logo depois vira a tarja da marca (verde e amarelo);
+ *   - a 1a linha depois de uma linha vazia (ou a 1a da aba, se nao ha titulo)
+ *     e o CABECALHO: texto branco em negrito sobre o azul, filete verde embaixo;
+ *   - o resto e dado: linhas zebradas (azul-acinzentado bem claro), borda fina
+ *     clara, numero a direita;
+ *   - com uma tabela so na aba, o cabecalho fica congelado e com filtro.
+ *
+ * CELULA DE SITUACAO (opcional, qualquer tela pode usar): no lugar do valor,
+ *   { v: 'TEXTO', tom: 'verde' }
+ * sai com o fundo claro e o texto escuro do tom, em negrito e centralizada
+ * (v pode ser numero). Tons: 'azul', 'verde', 'amarelo', 'cinza' (identidade
+ * e informacao) e 'laranja', 'vermelho' (SO alerta: a marca nao tem vermelho).
+ * Sem tom, ou tom desconhecido, a celula sai como as outras.
+ * PN_TOM_DO_CHIP traduz a classe do pn-chip da tela (ok, atencao, alerta, neutro).
+ * No PDF o mesmo tom e a etiqueta <span class="tom verde">...</span> (pnImprimirRelatorio).
  */
 function pnBaixarXlsx(nomeArquivo, abas) {
+  pnBaixarBlob(nomeArquivo, pnZipSemCompressao(pnXlsxArquivos(abas)), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/* As partes do .xlsx: [[caminho no zip, texto XML], ...] (separado do download para os testes lerem o XML). */
+function pnXlsxArquivos(abas) {
   const xml = (t) => String(t).replace(/[\u000B\u000C]/g, ' ').replace(/[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]/g, '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const col = (i) => { let s = ''; i++; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
   const NS = 'http:\/\/schemas.openxmlformats.org';
   // (montado em pedacos: o HtmlService trataria o cabecalho XML como scriptlet)
   const XML_CAB = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>';
-  const planilha = (linhas) => {
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  // estilos (cellXfs): a ordem da lista E o numero usado no s="" das celulas
+  const TONS = Object.keys(PN_TONS);
+  const S = { titulo: 1, sub: 2, cab: 3, txt: 4, num: 5, txtZebra: 6, numZebra: 7, verde: 8, amarelo: 9, tom: 10 };
+  const cor = (rgb) => `<color rgb="FF${rgb}"/>`;
+  const fonte = (negrito, tam, rgb) => `<font>${negrito ? '<b/>' : ''}<sz val="${tam}"/>${rgb ? cor(rgb) : ''}<name val="Calibri"/><family val="2"/></font>`;
+  const fundo = (rgb) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${rgb}"/><bgColor indexed="64"/></patternFill></fill>`;
+  const lado = (l, estilo, rgb) => `<${l} style="${estilo}">${cor(rgb)}</${l}>`;
+  const fontes = [fonte(false, 11), fonte(true, 16, PN_MARCA.azul), fonte(false, 10, '4A4F6A'), fonte(true, 11, 'FFFFFF')]
+    .concat(TONS.map((t) => fonte(true, 11, PN_TONS[t][1])));
+  const fundos = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>',
+    fundo(PN_MARCA.azul), fundo('F3F5FA'), fundo(PN_MARCA.verde), fundo(PN_MARCA.amarelo)].concat(TONS.map((t) => fundo(PN_TONS[t][0])));
+  const bordas = ['<border><left/><right/><top/><bottom/><diagonal/></border>',
+    '<border>' + ['left', 'right', 'top', 'bottom'].map((l) => lado(l, 'thin', 'D5D9E8')).join('') + '<diagonal/></border>',
+    '<border>' + lado('left', 'thin', '3A3F9E') + lado('right', 'thin', '3A3F9E') + lado('top', 'thin', PN_MARCA.azul) + lado('bottom', 'medium', PN_MARCA.verde) + '<diagonal/></border>'];
+  const xf = (f, p, b, alinha) => `<xf numFmtId="0" fontId="${f}" fillId="${p}" borderId="${b}" xfId="0"` +
+    (f ? ' applyFont="1"' : '') + (p ? ' applyFill="1"' : '') + (b ? ' applyBorder="1"' : '') + (alinha ? ` applyAlignment="1"><alignment ${alinha}/></xf>` : '/>');
+  const MEIO = 'vertical="center"', DIREITA = 'horizontal="right" vertical="center"', CENTRO = 'horizontal="center" vertical="center"';
+  const estilos = [xf(0, 0, 0), xf(1, 0, 0, MEIO), xf(2, 0, 0, MEIO), xf(3, 2, 2, CENTRO), xf(0, 0, 1, MEIO), xf(0, 0, 1, DIREITA),
+    xf(0, 3, 1, MEIO), xf(0, 3, 1, DIREITA), xf(0, 4, 0), xf(0, 5, 0)].concat(TONS.map((t, k) => xf(4 + k, 6 + k, 1, CENTRO)));
+  const lista = (tag, itens) => `<${tag} count="${itens.length}">${itens.join('')}</${tag}>`;
+
+  // valor da celula: o proprio valor ou o v de { v, tom }
+  const comTom = (c) => !!c && typeof c === 'object' && 'v' in c;
+  const valor = (c) => comTom(c) ? c.v : c;
+  const vazio = (c) => { const v = valor(c); return v === null || v === undefined || v === ''; };
+  const vazia = (l) => !l || !l.some((c) => !vazio(c));
+  const rodape = xml('&L&8GSL Bartofil' + (filial ? ' · ' + filial.replace(/&/g, '&&') : '') + '&R&8Página &P de &N');
+
+  const planilha = (linhas, iAba) => {
+    // o papel de cada linha: titulo, sub, tarja, cab, dado ou vazia
+    const iVazia = linhas.findIndex(vazia);
+    const temTitulo = iVazia > 0 && linhas.slice(0, iVazia).every((l) => l.filter((c) => !vazio(c)).length <= 1) &&
+      linhas.slice(iVazia).some((l) => !vazia(l));
+    const papel = linhas.map((l, i) => {
+      if (vazia(l)) return temTitulo && i === iVazia ? 'tarja' : 'vazia';
+      if (temTitulo && i < iVazia) return i === 0 ? 'titulo' : 'sub';
+      return (i === 0 || vazia(linhas[i - 1])) ? 'cab' : 'dado';
+    });
+    // tabelas: do cabecalho ate a ultima linha de dado; a largura e a da linha mais comprida
+    const tabelas = [];
+    papel.forEach((p, i) => {
+      if (p === 'cab') tabelas.push({ ini: i, fim: i, larg: 0 });
+      const t = tabelas[tabelas.length - 1];
+      if (t && (p === 'cab' || (p === 'dado' && t.fim === i - 1))) { t.fim = i; t.larg = Math.max(t.larg, linhas[i].length); }
+    });
+    const tabelaDa = (i) => tabelas.find((t) => i >= t.ini && i <= t.fim);
+    // largura das colunas so pelas tabelas (o titulo transborda para as celulas vazias ao lado)
     const larg = [];
-    linhas.forEach((l) => l.forEach((c, j) => { larg[j] = Math.min(60, Math.max(larg[j] || 8, String(c === null || c === undefined ? '' : c).length + 2)); }));
+    papel.forEach((p, i) => {
+      if (p !== 'cab' && p !== 'dado') return;
+      linhas[i].forEach((c, j) => {
+        const n = String(vazio(c) ? '' : valor(c)).length;
+        const w = p === 'cab' ? Math.ceil(n * 1.15) + 3 : n + (comTom(c) ? 4 : 2);
+        larg[j] = Math.min(60, Math.max(larg[j] || 8, w));
+      });
+    });
     const cols = larg.length ? '<cols>' + larg.map((w, j) => `<col min="${j + 1}" max="${j + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>' : '';
-    const dados = linhas.map((l, i) => `<row r="${i + 1}">` + l.map((c, j) => {
-      const ref = col(j) + (i + 1);
-      if (c === null || c === undefined || c === '') return '';
-      if (typeof c === 'number' && isFinite(c)) return `<c r="${ref}"><v>${c}</v></c>`;
-      const negrito = i === 0 || (i > 0 && !linhas[i - 1].length);   // titulo e o cabecalho logo depois da linha vazia
-      return `<c r="${ref}" t="inlineStr"${negrito ? ' s="1"' : ''}><is><t xml:space="preserve">${xml(c)}</t></is></c>`;
-    }).join('') + '</row>').join('');
-    return `${XML_CAB}<worksheet xmlns="${NS}/spreadsheetml/2006/main">${cols}<sheetData>${dados}</sheetData></worksheet>`;
+    const celula = (ref, c, s) => {
+      const v = valor(c);
+      if (v === null || v === undefined || v === '') return `<c r="${ref}" s="${s}"/>`;
+      if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
+      return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+    };
+    const dados = linhas.map((l, i) => {
+      const p = papel[i], r = i + 1;
+      if (p === 'vazia') return '';
+      if (p === 'titulo' || p === 'sub') {
+        const j = l.findIndex((c) => !vazio(c));
+        return `<row r="${r}"${p === 'titulo' ? ' ht="26" customHeight="1"' : ''}>${celula(col(j) + r, l[j], p === 'titulo' ? S.titulo : S.sub)}</row>`;
+      }
+      if (p === 'tarja') {
+        const t = tabelas.find((x) => x.ini > i), w = Math.max(1, t ? t.larg : 1), meio = Math.ceil(w / 2);
+        return `<row r="${r}" ht="5" customHeight="1">` + Array.from({ length: w }, (_, j) => `<c r="${col(j)}${r}" s="${j < meio ? S.verde : S.amarelo}"/>`).join('') + '</row>';
+      }
+      const t = tabelaDa(i) || { ini: i - 1, larg: l.length }, zebra = p === 'dado' && (i - t.ini) % 2 === 0;
+      return `<row r="${r}"${p === 'cab' ? ' ht="21" customHeight="1"' : ''}>` + Array.from({ length: t.larg }, (_, j) => {
+        const c = l[j], ref = col(j) + r;
+        if (p === 'cab') return celula(ref, c, S.cab);
+        const k = comTom(c) ? TONS.indexOf(c.tom) : -1;
+        if (k !== -1 && !vazio(c)) return celula(ref, c, S.tom + k);
+        const v = valor(c), numero = typeof v === 'number' && isFinite(v);
+        return celula(ref, c, numero ? (zebra ? S.numZebra : S.num) : (zebra ? S.txtZebra : S.txt));
+      }).join('') + '</row>';
+    }).join('');
+    // cabecalho congelado (o da 1a tabela, se esta no alto) e filtro (so com uma tabela, com dados)
+    const t0 = tabelas[0];
+    const congela = t0 && t0.ini < 12 ? `<pane ySplit="${t0.ini + 1}" topLeftCell="A${t0.ini + 2}" activePane="bottomLeft" state="frozen"/>` +
+      `<selection pane="bottomLeft" activeCell="A${t0.ini + 2}" sqref="A${t0.ini + 2}"/>` : '';
+    const filtro = tabelas.length === 1 && t0.fim > t0.ini ? `$A$${t0.ini + 1}:$${col(t0.larg - 1)}$${t0.fim + 1}` : '';
+    const corpo = `${XML_CAB}<worksheet xmlns="${NS}/spreadsheetml/2006/main">` +
+      `<sheetPr><tabColor rgb="FF${PN_MARCA.azul}"/><pageSetUpPr fitToPage="1"/></sheetPr>` +
+      `<sheetViews><sheetView workbookViewId="0"${iAba === 0 ? ' tabSelected="1"' : ''}>${congela}</sheetView></sheetViews>` +
+      `<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${dados}</sheetData>` +
+      (filtro ? `<autoFilter ref="${filtro.replace(/\$/g, '')}"/>` : '') +
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.6" header="0.3" footer="0.3"/>' +
+      '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>' +
+      `<headerFooter><oddFooter>${rodape}</oddFooter></headerFooter></worksheet>`;
+    return { corpo, filtro };
   };
   const nomes = abas.map((a, i) => String(a.nome || ('Aba ' + (i + 1))).replace(/[\\\/?*\[\]:]/g, ' ').slice(0, 31));
-  const arquivos = [
+  const folhas = abas.map((a, i) => planilha(a.linhas || [], i));
+  // o filtro do Excel tem um nome escondido por aba (_FilterDatabase), como o proprio Excel grava
+  const nomesFiltro = folhas.map((f, i) => f.filtro ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">` +
+    xml('\x27' + nomes[i].replace(/\x27/g, '\x27\x27') + '\x27!' + f.filtro) + '</definedName>' : '').join('');
+  return [
     ['[Content_Types].xml', `${XML_CAB}<Types xmlns="${NS}/package/2006/content-types">` +
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
@@ -87,19 +216,17 @@ function pnBaixarXlsx(nomeArquivo, abas) {
     ['_rels/.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
       `<Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
     ['xl/workbook.xml', `${XML_CAB}<workbook xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheets>` +
-      nomes.map((n, i) => `<sheet name="${xml(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>'],
+      nomes.map((n, i) => `<sheet name="${xml(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets>' +
+      (nomesFiltro ? '<definedNames>' + nomesFiltro + '</definedNames>' : '') + '</workbook>'],
     ['xl/_rels/workbook.xml.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
       abas.map((a, i) => `<Relationship Id="rId${i + 1}" Type="${NS}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
       `<Relationship Id="rId${abas.length + 1}" Type="${NS}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
     ['xl/styles.xml', `${XML_CAB}<styleSheet xmlns="${NS}/spreadsheetml/2006/main">` +
-      '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="12"/><name val="Calibri"/></font></fonts>' +
-      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
-      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+      lista('fonts', fontes) + lista('fills', fundos) + lista('borders', bordas) +
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+      lista('cellXfs', estilos) +
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>']
-  ].concat(abas.map((a, i) => ['xl/worksheets/sheet' + (i + 1) + '.xml', planilha(a.linhas)]));
-  pnBaixarBlob(nomeArquivo, pnZipSemCompressao(arquivos), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  ].concat(folhas.map((f, i) => ['xl/worksheets/sheet' + (i + 1) + '.xml', f.corpo]));
 }
 
 /* Zip no modo "store": [[nome, texto], ...] -> Uint8Array. */
@@ -147,37 +274,108 @@ function pnBaixarBlob(nome, bytes, tipo) {
 }
 
 /*
+ * Logo da Bartofil para o relatorio: a MESMA imagem do Marca.html, lida da
+ * folha de estilo da pagina (getComputedStyle de um .logo-completa), sem
+ * copiar o base64 para ca. Sem a folha (nao deveria acontecer), '' — o
+ * relatorio cai no nome escrito no bloco azul.
+ */
+function pnLogoMarca(classe) {
+  const chave = classe || 'logo-completa';
+  pnLogoMarca.cache = pnLogoMarca.cache || {};
+  if (pnLogoMarca.cache[chave]) return pnLogoMarca.cache[chave];
+  try {
+    const d = document.createElement('div');
+    d.className = chave;
+    d.style.display = 'none';
+    document.body.appendChild(d);
+    const fundo = getComputedStyle(d).backgroundImage || '';
+    d.remove();
+    const url = fundo.replace(/^url\(|\)$/g, '').replace(/[\x22\x27]/g, '');
+    return url.indexOf('data:image') === 0 ? (pnLogoMarca.cache[chave] = url) : '';
+  } catch (e) { return ''; }
+}
+
+/*
  * RELATORIO EM PDF: abre o relatorio numa janela propria, ja formatado
  * para A4 deitado, e chama a impressao — no destino, "Salvar como PDF".
+ * Sai nas cores da Bartofil: logo, titulo em azul, tarja azul/verde/amarela,
+ * cabecalho de tabela azul com texto branco, linhas zebradas e, em toda
+ * pagina, o rodape "GSL Bartofil · filial · gerado em ...". As cores
+ * imprimem mesmo com "Graficos de plano de fundo" desligado
+ * (print-color-adjust: exact). Vermelho so como alerta (tr.alerta).
+ * O rodape repete por pagina com o espacador do tfoot da tabela que embrulha
+ * o relatorio (o Chrome repete o tfoot e desenha o fixed em cada folha).
+ * Etiqueta de situacao no corpo: <span class="tom verde">Normal</span>, com os
+ * tons do Excel (PN_TONS). cssExtra: o CSS proprio do relatorio (vem depois e
+ * pode sobrepor).
  */
 function pnImprimirRelatorio(titulo, subtitulo, corpoHtml, cssExtra) {
   const w = window.open('', '_blank');
   if (!w) return avisar('O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo.', true);
   const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const gerado = new Date().toLocaleString('pt-BR');
+  const logo = pnLogoMarca();
+  const marca = logo ? `<img class="logo" src="${esc(logo)}" alt="Bartofil Distribuidora">`
+    : '<div class="logo logo-texto" role="img" aria-label="Bartofil Distribuidora">BARTOFIL<small>DISTRIBUIDORA</small></div>';
+  const tarja = (cls) => `<div class="rel-tarja${cls ? ' ' + cls : ''}" aria-hidden="true"><i class="az"></i><i class="vd"></i><i class="am"></i></div>`;
   w.document.open();
   w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)} — ${esc(subtitulo)}</title>
     <style>
-      @page { size: A4 landscape; margin: 12mm; }
-      body { font-family: Arial, Helvetica, sans-serif; color: #14152B; font-size: 11px; margin: 0; }
-      header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #111785; padding-bottom: 8px; margin-bottom: 12px; }
-      header h1 { font-size: 18px; margin: 0; color: #111785; } header .sub { font-size: 12px; color: #555; margin-top: 2px; }
-      header .marca { text-align: right; font-size: 11px; color: #555; } header .marca b { color: #111785; font-size: 13px; }
-      h2 { font-size: 13px; margin: 16px 0 6px; color: #111785; }
-      table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #ddd; padding: 4px 5px; text-align: right; white-space: nowrap; }
-      th { background: #F1F2F8; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; text-align: center; }
-      th.en { color: #2563EB; border-bottom: 2px solid #3B82F6; } th.sa { color: #1B7F4B; border-bottom: 2px solid #1B7F4B; }
+      @page { size: A4 landscape; margin: 10mm 12mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html { background: #fff; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #14152B; font-size: 11px; margin: 0; background: #fff; }
+      .rel-cab { display: flex; align-items: center; gap: 14px; padding-bottom: 8px; }
+      .rel-cab .logo { display: block; height: 15mm; width: auto; border-radius: 3px; flex-shrink: 0; }
+      .rel-cab .logo-texto { width: 44mm; background: #111785; color: #fff; font-weight: 800; font-size: 20px; letter-spacing: .06em;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .rel-cab .logo-texto small { font-size: 7.5px; letter-spacing: .3em; font-weight: 700; }
+      .rel-tit { flex: 1; min-width: 0; }
+      .rel-tit h1 { font-size: 20px; line-height: 1.15; margin: 0; color: #111785; }
+      .rel-tit .sub { font-size: 12px; color: #4A4F6A; margin-top: 3px; }
+      .rel-info { text-align: right; font-size: 10.5px; line-height: 1.5; color: #4A4F6A; white-space: nowrap; }
+      .rel-info b { color: #111785; font-size: 12px; }
+      .rel-tarja { display: flex; height: 5px; margin: 0 0 14px; }
+      .rel-tarja i { display: block; height: 100%; }
+      .rel-tarja .az { flex: 6; background: #111785; } .rel-tarja .vd { flex: 2; background: #01973A; } .rel-tarja .am { flex: 2; background: #FFEE03; }
+      h2 { font-size: 13px; margin: 16px 0 6px; color: #111785; border-left: 4px solid #01973A; padding-left: 7px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #D5D9E8; padding: 4px 5px; text-align: right; white-space: nowrap; }
+      th { background: #111785; color: #fff; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; text-align: center; border-bottom: 2px solid #01973A; }
+      tbody tr:nth-child(even) td { background: #F3F5FA; }
+      th.en { background: #E7EAFE; color: #111785; border-bottom: 2px solid #111785; } th.sa { background: #D9F5E6; color: #016B2A; border-bottom: 2px solid #01973A; }
       td:first-child, td:nth-child(2) { text-align: left; } td.oc { text-align: left; white-space: normal; }
-      table.folha tr.novo td { border-top: 1.5px solid #999; } tr.alerta td { color: #C62828; }
+      table.folha tr.novo td { border-top: 1.5px solid #8A8FB8; } tr.alerta td { color: #C62828; }
       thead { display: table-header-group; } tr { page-break-inside: avoid; }
-      .nota { color: #666; font-size: 10px; margin-top: 8px; }
-      .barra { margin: 0 0 12px; } .barra button { font-size: 13px; padding: 6px 14px; }
+      .nota { color: #4A4F6A; font-size: 10px; margin-top: 8px; }
+      .tom { display: inline-block; padding: 1px 8px; border-radius: 9px; font-weight: 700; font-size: 9.5px; letter-spacing: .02em; }
+      ${Object.keys(PN_TONS).map((t) => `.tom.${t} { background: #${PN_TONS[t][0]}; color: #${PN_TONS[t][1]}; }`).join(' ')}
+      table.rel-pagina, table.rel-pagina > tbody > tr > td, table.rel-pagina > tfoot > tr > td { border: 0; padding: 0; text-align: left; white-space: normal; background: none; }
+      table.rel-pagina > tbody > tr, table.rel-pagina > tfoot > tr { page-break-inside: auto; break-inside: auto; }
+      .rel-esp-rod { height: 9mm; }
+      .rel-rod { position: fixed; left: 0; right: 0; bottom: 0; height: 6mm; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        border-top: 1px solid #C9CEE3; font-size: 9px; color: #4A4F6A; background: #fff; }
+      .rel-rod b { color: #111785; }
+      .rel-rod .rel-tarja { width: 34mm; height: 3px; margin: 0; flex-shrink: 0; }
+      .barra { margin: 0 0 14px; }
+      .barra button { font: 700 13px Arial, Helvetica, sans-serif; padding: 8px 16px; background: #111785; color: #fff; border: 0; border-bottom: 3px solid #01973A; border-radius: 6px; cursor: pointer; }
+      @media screen {
+        body { max-width: 1180px; margin: 0 auto; padding: 16px 20px; }
+        .rel-rod { position: static; height: auto; margin-top: 18px; padding-top: 6px; } .rel-esp-rod { display: none; }
+      }
       @media print { .barra { display: none; } }
       ${cssExtra || ''}
     </style></head><body>
     <div class="barra"><button onclick="window.print()">Imprimir / Salvar como PDF</button></div>
-    <header><div><h1>${esc(titulo)}</h1><div class="sub">${esc(subtitulo)}</div></div>
-      <div class="marca"><b>GSL Bartofil</b><br>${esc(filial)}<br>gerado em ${esc(new Date().toLocaleString('pt-BR'))}</div></header>
-    ${corpoHtml}</body></html>`);
+    <table class="rel-pagina"><tbody><tr><td>
+      <header class="rel-cab">${marca}
+        <div class="rel-tit"><h1>${esc(titulo)}</h1><div class="sub">${esc(subtitulo)}</div></div>
+        <div class="rel-info"><b>GSL Bartofil</b><br>${esc(filial)}<br>gerado em ${esc(gerado)}</div></header>
+      ${tarja('')}
+      ${corpoHtml}
+    </td></tr></tbody><tfoot><tr><td><div class="rel-esp-rod"></div></td></tr></tfoot></table>
+    <footer class="rel-rod"><span>${['<b>GSL Bartofil</b>', esc(filial), 'gerado em ' + esc(gerado)].filter(Boolean).join(' · ')}</span>${tarja('mini')}</footer>
+    </body></html>`);
   w.document.close();
   w.focus();
   setTimeout(() => { try { w.print(); } catch (e) {} }, 400);
@@ -844,6 +1042,9 @@ function nbExportarExcel() {
   const folhas = nbFolhasDoRelatorio();
   if (!folhas.length) return avisar('Nenhuma leitura no período escolhido.', true);
   const num = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '' : Number(Number(v).toFixed(casas));
+  // o que a folha em PDF pinta de vermelho (tensao fora da faixa, carga alta) sai no tom de alerta
+  const alerta = (v, sim) => sim && v !== '' ? { v, tom: 'vermelho' } : v;
+  const cargaAlta = (c) => c !== null && c !== undefined && c >= r.p.cargaAlerta;
   const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
   const abas = folhas.map((fl) => {
     const e = fl.e;
@@ -856,7 +1057,8 @@ function nbExportarExcel() {
     fl.dias.forEach((dd) => dd.leituras.forEach((x, i) => {
       const l = x.l || {}, av = x.av || {};
       linhas.push([i === 0 ? PN_SEMANA_LONGA[pnParaData(dd.dia).getDay()] : '', i === 0 ? pnDataLonga(dd.dia) : '', x.n + 'ª', l.hora || '',
-        num(l.vi, 1), num(l.ii, 2), num(l.pi, 0), num(l.vo, 1), num(l.io, 2), num(l.po, 0), x.l ? num(av.carga, 1) : '', l.ocorrencia || '']);
+        alerta(num(l.vi, 1), av.vi), num(l.ii, 2), num(l.pi, 0), alerta(num(l.vo, 1), av.vo), num(l.io, 2), num(l.po, 0),
+        x.l ? alerta(num(av.carga, 1), cargaAlta(av.carga)) : '', l.ocorrencia || '']);
     }));
     return { nome: (fl.codigo + ' ' + fl.inicio.slice(8, 10) + '-' + fl.inicio.slice(5, 7)).slice(0, 31), linhas };
   });
@@ -864,7 +1066,8 @@ function nbExportarExcel() {
     ['Nobreak', 'Local', 'Potência (VA)', 'Leituras', 'Carga média (%)', 'Carga máxima (%)', 'Leituras em alerta']]
     .concat(Object.keys(r.resumo).sort().map((k) => {
       const x = r.resumo[k], e = nbEquip(r.d, k) || {};
-      return [k, e.local || '', num(e.potencia, 0), x.n, x.nCarga ? num(x.somaCarga / x.nCarga, 1) : '', num(x.cargaMax, 1), x.alertas];
+      return [k, e.local || '', num(e.potencia, 0), x.n, x.nCarga ? num(x.somaCarga / x.nCarga, 1) : '', alerta(num(x.cargaMax, 1), cargaAlta(x.cargaMax)),
+        alerta(x.alertas, x.alertas > 0)];
     }));
   pnBaixarXlsx('Nobreaks ' + (NB_HIST.nobreak || 'todos') + ' ' + (NB_HIST.mes || 'ultimos-120-dias') + '.xlsx',
     [{ nome: 'Resumo', linhas: resumo }].concat(abas));
@@ -914,22 +1117,23 @@ function nbExportarPdf() {
       Linhas em branco: leitura não lançada.</p>`, `
       .folha-nb { page-break-after: always; break-after: page; }
       .folha-nb:last-of-type { page-break-after: auto; break-after: auto; }
-      .cab-folha { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px 14px; border: 1.5px solid #111785; border-radius: 6px;
-        padding: 8px 12px; margin-bottom: 8px; background: #F7F8FC; }
-      .cab-folha .rot { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #666; }
-      .cab-folha b { font-size: 12px; }
+      .cab-folha { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px 14px; border: 1.5px solid #111785; border-left-width: 5px; border-radius: 6px;
+        padding: 8px 12px; margin-bottom: 8px; background: #F3F5FA; }
+      .cab-folha .rot { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #4A4F6A; }
+      .cab-folha b { font-size: 12px; color: #111785; }
       table.nb-folha-pdf { border-collapse: collapse; width: 100%; font-size: 10.5px; }
-      .nb-folha-pdf th, .nb-folha-pdf td { border: 1px solid #C9CCD8; padding: 3px 5px; text-align: right; white-space: nowrap; }
-      .nb-folha-pdf th { background: #F1F2F8; text-align: center; font-size: 9.5px; }
+      .nb-folha-pdf th, .nb-folha-pdf td { border: 1px solid #C9CEE3; padding: 3px 5px; text-align: right; white-space: nowrap; }
+      .nb-folha-pdf th { background: #111785; color: #fff; border-color: #3A3F9E; text-align: center; font-size: 9.5px; }
       .nb-folha-pdf th.en, .nb-folha-pdf th.sa { text-transform: none; }
-      .nb-folha-pdf th.g-en { background: #DBEAFE; color: #1D4ED8; } .nb-folha-pdf th.g-sa { background: #D1FAE5; color: #047857; }
-      .nb-folha-pdf th.en { color: #2563EB; border-bottom: 2.5px solid #3B82F6; } .nb-folha-pdf th.sa { color: #059669; border-bottom: 2.5px solid #059669; }
-      .nb-folha-pdf td.dia { text-align: left; font-weight: 700; text-transform: uppercase; font-size: 9.5px; letter-spacing: .04em; color: #333; background: #FAFAFD; }
-      .nb-folha-pdf td.dia small { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: #777; font-size: 9.5px; }
+      .nb-folha-pdf th.g-en { background: #111785; color: #fff; } .nb-folha-pdf th.g-sa { background: #01973A; color: #fff; border-color: #01973A; }
+      .nb-folha-pdf th.en { background: #E7EAFE; color: #111785; border-color: #C9CEE3; border-bottom: 2.5px solid #111785; }
+      .nb-folha-pdf th.sa { background: #D9F5E6; color: #016B2A; border-color: #C9CEE3; border-bottom: 2.5px solid #01973A; }
+      .nb-folha-pdf td.dia { text-align: left; font-weight: 700; text-transform: uppercase; font-size: 9.5px; letter-spacing: .04em; color: #111785; background: #F3F5FA; }
+      .nb-folha-pdf td.dia small { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: #4A4F6A; font-size: 9.5px; }
       .nb-folha-pdf td.c { text-align: center; } .nb-folha-pdf td.oc { text-align: left; white-space: normal; min-width: 140px; }
-      .nb-folha-pdf tr.novo-dia td { border-top: 2px solid #8A8FA8; }
+      .nb-folha-pdf tr.novo-dia td { border-top: 2px solid #8A8FB8; }
       .nb-folha-pdf td.carga { font-weight: 700; } .nb-folha-pdf td.carga.alta, .nb-folha-pdf td.fora { color: #C62828; font-weight: 700; }
-      .nb-folha-pdf tbody tr:nth-child(even) td:not(.dia) { background: #FCFCFE; }`);
+      .nb-folha-pdf tbody tr:nth-child(even) td:not(.dia) { background: #F3F5FA; }`);
 }
 
 function nbAbrirSemanaDe(codigo, data) {
@@ -1783,7 +1987,7 @@ function qdConferencia() {
 function qdLinhasConferencia() {
   return [['GRAVIDADE', 'TIPO', 'NOME', 'COD', 'RH', 'EQUIPE', 'LINHA', 'DETALHE', 'COMO CORRIGIR']].concat(qdMemo().inc.map((x) => {
     const t = QD_TIPOS[x.tipo] || {};
-    return [x.gravidade === 'grave' ? 'GRAVE' : 'ATENÇÃO', t.titulo || x.tipo, qdItemDaPlanilha(x) ? x.nome : qdNomeTxt(x), x.cod || '', x.rh || '', x.equipe || '',
+    return [x.gravidade === 'grave' ? { v: 'GRAVE', tom: 'vermelho' } : { v: 'ATENÇÃO', tom: 'amarelo' }, t.titulo || x.tipo, qdItemDaPlanilha(x) ? x.nome : qdNomeTxt(x), x.cod || '', x.rh || '', x.equipe || '',
       x.linhas && x.linhas.length ? x.linhas.join(', ') : (x.linha || ''), x.detalhe, t.corrigir || ''];
   }));
 }
@@ -1954,6 +2158,13 @@ function qdListaAZ(lista) {
   ${ord.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='${ord.length - mostra.length > 100 ? '#qd-lista .qd-mais' : '#qd-lista .qd-tabela tbody tr:nth-child(' + (mostra.length + 1) + ')'}';QD.limite+=100;qdRedesenharLista()">Mostrar mais (${qdN(ord.length - mostra.length)})</button>` : ''}</div>`;
 }
 
+/* A situacao no Excel: disponivel sai normal; ferias, afastado e fora da empresa com o tom (nenhum e alerta). */
+function qdSituacaoExcel(g) {
+  if (!g.ativo) return { v: 'Fora da empresa', tom: 'cinza' };
+  const v = QD_SITUACAO[g.situacao];
+  return g.situacao === 'FERIAS' ? { v, tom: 'azul' } : (g.situacao === 'AFASTADO' ? { v, tom: 'amarelo' } : v);
+}
+
 /* Excel: a GERAL organizada e recortada (o que esta na tela) e, havendo, a Conferencia. */
 function qdExportarExcel() {
   const lista = qdListaDaTela();
@@ -1963,7 +2174,7 @@ function qdExportarExcel() {
   const linhas = [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS', 'SITUAÇÃO', apoio ? 'LINHA' : 'LINHA NA GERAL', 'PENDÊNCIA']].concat(lista
     .slice().sort((a, b) => ordem.indexOf(a.equipe || '') - ordem.indexOf(b.equipe || '') ||
       qdFuncaoTela(a).localeCompare(qdFuncaoTela(b)) || qdNomeTxt(a).localeCompare(qdNomeTxt(b)))
-    .map((g) => [g.equipe || g.equipeBruta || '', g.cod, qdNomeTxt(g), g.funcao, g.rh, g.status, g.ativo ? QD_SITUACAO[g.situacao] : 'Fora da empresa',
+    .map((g) => [g.equipe || g.equipeBruta || '', g.cod, qdNomeTxt(g), g.funcao, g.rh, g.status, qdSituacaoExcel(g),
       g.aba ? g.aba + ' ' + g.linha : g.linha, (pend[g.ref] || []).map((x) => x.detalhe).join(' | ')]));
   const abas = [{ nome: 'Quadro', linhas }];
   if (qdMemo().inc.length) abas.push({ nome: 'Conferência', linhas: qdLinhasConferencia() });
@@ -3290,14 +3501,15 @@ function estDadosRelatorio() {
 
 function estExportarExcel() {
   const r = estDadosRelatorio();
-  const sit = (i) => (EST_ROTULO[i.situacao] || [, i.situacao])[1];
+  // a situacao sai no tom do chip da tela (Normal verde, Repor laranja, Zerado vermelho, Inativo cinza)
+  const sit = (i) => { const x = EST_ROTULO[i.situacao] || [, i.situacao]; return x[0] ? { v: x[1], tom: PN_TOM_DO_CHIP[x[0]] } : x[1]; };
   const titulo = [[EST.t.nome + ' — ' + r.filtro], ['Filial: ' + ((SESSAO && SESSAO.filial && SESSAO.filial.nome) || '') + ' · gerado em ' + new Date().toLocaleString('pt-BR')], []];
   const estoque = [[EST.t.material, 'Código', 'Categoria', 'Marca', 'Modelo', 'Unidade', 'Estoque', 'Estoque mínimo', 'Estoque ideal', 'Falta p/ ideal', 'Situação', 'Local']]
     .concat(r.itens.map((i) => [i.nome, i.codigo, i.categoria, i.marca, i.modelo, i.unidade, Number(i.saldo) || 0,
       i.minimo || '', i.ideal || '', i.faltaIdeal || '', sit(i), i.local]));
   const movs = [['Data', 'Tipo', EST.t.material, 'Código', 'Quantidade', 'Setor', 'Usuário', 'Documento', 'Observação', 'Estornado']]
     .concat(r.movs.map((m) => { const i = estItem(m.item); return [pnDataLonga(m.data), EST_TIPO_NOME[m.tipo] || m.tipo, i ? i.nome : m.item, m.item,
-      Number(m.efeito) || 0, m.destino || '', m.solicitante || '', m.documento || '', m.observacao || '', m.estornado ? 'SIM' : '']; }));
+      Number(m.efeito) || 0, m.destino || '', m.solicitante || '', m.documento || '', m.observacao || '', m.estornado ? { v: 'SIM', tom: 'cinza' } : '']; }));
   pnBaixarXlsx(EST.t.nome + ' ' + r.d.hoje + '.xlsx',
     [{ nome: 'Estoque', linhas: titulo.concat(estoque) }, { nome: 'Movimentações', linhas: titulo.concat(movs) }]);
 }
@@ -3305,9 +3517,11 @@ function estExportarExcel() {
 function estExportarPdf() {
   const r = estDadosRelatorio();
   const alerta = r.itens.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO');
+  // a situacao na etiqueta do tom do chip da tela (a mesma cor do Excel)
+  const sit = (i) => { const x = EST_ROTULO[i.situacao] || [, i.situacao]; return x[0] ? `<span class="tom ${PN_TOM_DO_CHIP[x[0]]}">${esc(x[1])}</span>` : esc(x[1]); };
   const linha = (i) => `<tr class="${i.situacao === 'REPOR' || i.situacao === 'ZERADO' ? 'alerta' : ''}"><td><b>${esc(i.nome)}</b></td><td>${esc(i.codigo)}</td><td>${esc(i.categoria)}</td>
     <td>${pnNum(i.saldo, Number.isInteger(Number(i.saldo)) ? 0 : 2)} ${esc(i.unidade)}</td><td>${i.minimo ? pnNum(i.minimo) : '—'}</td><td>${i.ideal ? pnNum(i.ideal) : '—'}</td>
-    <td>${i.faltaIdeal ? pnNum(i.faltaIdeal) : '—'}</td><td>${(EST_ROTULO[i.situacao] || [, i.situacao])[1]}</td><td class="oc">${esc(i.local || '')}</td></tr>`;
+    <td>${i.faltaIdeal ? pnNum(i.faltaIdeal) : '—'}</td><td>${sit(i)}</td><td class="oc">${esc(i.local || '')}</td></tr>`;
   const movs = r.movs.slice(0, 300).map((m) => { const i = estItem(m.item); return `<tr${m.estornado ? ' style="text-decoration:line-through;color:#999"' : ''}><td>${pnDataLonga(m.data)}</td>
     <td>${EST_TIPO_NOME[m.tipo] || esc(m.tipo)}</td><td>${esc(i ? i.nome : m.item)}</td><td><b>${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</b></td>
     <td class="oc">${esc(m.destino || '')}</td><td class="oc">${esc(m.solicitante || '')}</td><td class="oc">${esc(m.documento || m.observacao || '')}</td></tr>`; }).join('');

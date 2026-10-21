@@ -1072,9 +1072,15 @@ function lpEstoqueVazio(d) {
       <button class="botao secundario" onclick="estFormLote()">Colar da planilha</button>` : ''}</div>`;
 }
 
-/* ---------- GESTAO — o resumo das duas coisas ---------- */
+/*
+ * ---------- GESTAO — o resumo das duas coisas ----------
+ * 21/10: as acoes (cartoes, "vencem primeiro") sao so as em que a pessoa esta
+ * citada, como no plano. Quem gere o plano ve tambem o total do plano inteiro
+ * (geral: so numeros, nenhuma acao) — "0 em aberto" nao pode parecer plano vazio.
+ */
 function lpGestao(d) {
-  const pl = d.plano, es = d.estoque, c = pl.contagens;
+  const pl = d.plano, es = d.estoque, c = pl.contagens, g = pl.geral;
+  const noPlano = (n) => (g ? ' · ' + n + ' no plano inteiro' : '');
   const abertas = (pl.lista || []).filter((a) => a.situacao === 'PENDENTE');
   const vencem = abertas.slice().sort((a, b) => (a.prazoISO || '9999').localeCompare(b.prazoISO || '9999')).slice(0, 8);
   const ativos = es.itens.filter((i) => i.ativo);
@@ -1085,8 +1091,8 @@ function lpGestao(d) {
   const altas = abertas.filter((a) => a.criticidade === 'Alta').length;
   return `
     <div class="grade grade-kpi" style="margin-bottom:16px">
-      ${pnKpi(c.abertas, 'Ações em aberto', 'azul', altas + ' de criticidade alta')}
-      ${pnKpi(c.atrasadas, 'Ações atrasadas', c.atrasadas ? 'vermelho' : 'verde', c.minhas + ' sob sua responsabilidade')}
+      ${pnKpi(c.abertas, 'Ações em aberto', 'azul', altas + ' de criticidade alta' + noPlano(g && g.abertas))}
+      ${pnKpi(c.atrasadas, 'Ações atrasadas', c.atrasadas ? 'vermelho' : 'verde', c.minhas + ' sob sua responsabilidade' + noPlano(g && g.atrasadas))}
       ${pnKpi(repor.length, 'Produtos para repor', repor.length ? 'vermelho' : 'verde',
         ativos.filter((i) => i.situacao === 'ZERADO').length + ' zerado(s)')}
       ${pnKpi(pnNum(saidasMes.reduce((s, m) => s + m.quantidade, 0)), 'Unidades entregues no mês', 'amarelo',
@@ -1100,7 +1106,9 @@ function lpGestao(d) {
           <td style="white-space:nowrap"><strong>${esc(a.prazo || '—')}</strong><div class="lp-sub">${planoPrazoTexto(a)}</div></td>
           <td><strong>${esc(a.acao)}</strong> ${typeof seloComentarios === 'function' && typeof podeComentarAcao === 'function' ? seloComentarios(a, podeComentarAcao(a, pl.permissoes)) : ''}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
           <td>${a.criticidade ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+          : g && g.abertas ? `<div class="vazio">Nenhuma ação em aberto em que você esteja citado (o plano tem ${g.abertas}).</div>`
           : '<div class="vazio">Nenhuma ação em aberto. 👍</div>'}
+        <p class="dica">Só as ações em que você está citado: como responsável ou marcado num comentário.</p>
       </div>
       <div class="cartao">
         <div class="cartao-titulo linha-titulo"><span>Precisa repor</span>

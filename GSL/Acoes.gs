@@ -16,7 +16,10 @@
  *   - quem CRIA e o gerente (capacidade GERIR_ACOES). O coordenador ve e
  *     conclui as que sao dele — o plano e feito PARA ele;
  *   - nao ha validacao. Concluiu, acabou. Nao existe o ciclo
- *     entregar/validar das atividades aqui.
+ *     entregar/validar das atividades aqui;
+ *   - (21/10) cada acao so aparece para quem esta CITADO nela: os
+ *     responsaveis e quem foi marcado num comentario. Nem quem cria, nem a
+ *     gerencia, nem o administrador veem as outras — ver acoesNoAlcance.
  */
 
 /*
@@ -132,10 +135,6 @@ function ehDonoDaAcao_(acao, email) {
   return acao.responsaveisEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
 }
 
-function ehMarcadoNaAcao_(acao, email) {
-  return acao.marcadosEmails.indexOf(String(email || '').toLowerCase().trim()) !== -1;
-}
-
 /*
  * As acoes de UM plano so com o que a linha tem (sem comentarios nem nomes).
  * E o que a contagem precisa: a bolinha do menu usa so isto; a tela usa isto
@@ -149,11 +148,20 @@ function acoesDoPlano_(idPlano) {
 /* As acoes de UM plano (o do Calendario, se nada for dito). */
 function listarAcoes(idPlano) {
   const plano = PLANOS[idPlano] ? idPlano : 'CALENDARIO';
+  return comHistorico_(plano, acoesDoPlano_(plano));
+}
+
+/*
+ * O historico (comentarios), quem criou e os marcados, com o nome do
+ * cadastro. A tela so pede o das acoes que a pessoa ve (21/10): o das outras
+ * nem e montado.
+ */
+function comHistorico_(plano, acoes) {
   const coment = comentariosPorAcao_(origensDoPlano_(plano));
   const pessoas = pessoasPorEmail_();
   // Marcados e mencoes vao com o nome do cadastro: a tela destaca o @Nome e lista os marcados (19/10).
   const comNome = function (e) { return { email: e, nome: nomeDoEmail_(pessoas, e) }; };
-  return acoesDoPlano_(plano).map(function (a) {
+  return acoes.map(function (a) {
     a.comentarios = (coment[a.id] || []).map(function (c) { c.mencoes = c.mencoes.map(comNome); return c; });
     a.criadoPorNome = nomeDoEmail_(pessoas, a.criadoPor);
     a.marcados = a.marcadosEmails.map(comNome);
@@ -278,22 +286,27 @@ function gravarComentario_(usuario, origem, idAcao, texto, situacao, depende, ti
   return autor;
 }
 
-/* Responsavel pela acao ou quem gere o plano: conclui, muda a situacao e comenta. */
+/*
+ * Cuida da acao (conclui, muda a situacao e o "depende de"): um dos
+ * responsaveis, ou quem gere o plano numa acao que ele VE (21/10: marcado
+ * nela, ou a acao sem responsavel). A gestao que nao esta citada nem enxerga
+ * a acao — nao cuida dela.
+ */
 function ehResponsavelOuGestor_(plano, usuario, registro) {
   const eu = String(usuario.email || '').toLowerCase().trim();
-  return emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) !== -1 || podeFazer(usuario, plano.cap);
+  return emailsDaAcao_(registro.RESPONSAVEL_EMAIL).indexOf(eu) !== -1 ||
+    (podeFazer(usuario, plano.cap) && podeVerRegistro_(plano, usuario, registro));
 }
 
-/* So os responsaveis pela acao ou quem gere o plano. */
+/* So os responsaveis pela acao ou quem gere o plano (e ve a acao). */
 function exigirResponsavelOuGestor_(plano, usuario, registro, mensagem) {
   if (!ehResponsavelOuGestor_(plano, usuario, registro)) throw new Error(mensagem);
 }
 
-/* Comentar: os responsaveis, a gestao e quem foi marcado num comentario desta acao (19/10). */
+/* Comentar: quem ve a acao — os responsaveis e quem foi marcado num comentario dela (19/10); ver acoesNoAlcance. */
 function exigirQuemComenta_(plano, usuario, registro) {
-  const eu = String(usuario.email || '').toLowerCase().trim();
-  if (!ehResponsavelOuGestor_(plano, usuario, registro) && emailsDaAcao_(registro.MARCADOS).indexOf(eu) === -1) {
-    throw new Error('Só os responsáveis pela ação, quem foi marcado nela ou a gestão podem comentar.');
+  if (!podeVerRegistro_(plano, usuario, registro)) {
+    throw new Error('Só os responsáveis pela ação e quem foi marcado nela podem comentar.');
   }
 }
 
@@ -306,8 +319,8 @@ const MENCOES_POR_COMENTARIO = 10;
  * o Oculto e so do administrador). Fora dela o comentario inteiro e
  * recusado — a tela so oferece essa lista. A recusa da o nome so de quem e
  * desta filial (os outros voltam pelo e-mail): ela nao e consulta ao
- * cadastro mestre. Devolve as pessoas como pessoasParaAcao as da (veTodas:
- * ja enxergava a acao antes de ser marcada). Marcar a si mesmo nao conta.
+ * cadastro mestre. Devolve as pessoas como pessoasParaAcao as da (gere:
+ * gere o plano — so isso nao faz ver a acao, 21/10). Marcar a si mesmo nao conta.
  */
 function mencoesDoPedido_(plano, usuario, params) {
   const eu = String(usuario.email || '').toLowerCase().trim();
@@ -386,12 +399,14 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
       const jaMarcados = emailsDaAcao_(registro.MARCADOS), responsaveis = emailsDaAcao_(registro.RESPONSAVEL_EMAIL);
       const novas = marcadas.filter(function (p) { return jaMarcados.indexOf(p.email) === -1 && responsaveis.indexOf(p.email) === -1; });
       if (novas.length) campos.MARCADOS = jaMarcados.concat(novas.map(emailDe)).join(',');
+      // Ja via antes de ser marcada so quem gere o plano, na acao sem responsavel (21/10).
+      const jaVia = function (p) { return p.gere && !responsaveis.length; };
       // A acao primeiro, o historico depois: se a acao nao gravar, nada fica apontando para fotos jogadas fora.
       if (Object.keys(campos).length) atualizar('ACOES', id, campos, usuario.email);
       const autor = gravarComentario_(usuario, 'ACOES', id, texto, cuida ? situacao : '',
         cuida && situacao !== 'Concluída' ? depende : '', concluiu ? 'CONCLUSAO' : 'COMENTARIO', gravadas, marcadas.map(emailDe));
       return { autor: autor, acao: Object.assign({}, registro, campos), concluiu: concluiu,
-               passaramAVer: novas.filter(function (p) { return !p.veTodas; }).map(emailDe) };
+               passaramAVer: novas.filter(function (p) { return !jaVia(p); }).map(emailDe) };
     });
   } catch (e) { jogarFotosFora_(gravadas); throw e; }
 
@@ -419,24 +434,60 @@ function avisarMarcadas_(plano, feito, texto, marcadas) {
 }
 
 /**
- * O que cada pessoa enxerga.
+ * O que cada pessoa enxerga — QUEM ESTA CITADO NA ACAO (21/10).
  *
- * Quem gere o plano (GERIR_ACOES) ou tem escopo TODOS (gerencia, consulta)
- * ve tudo. Os demais — o coordenador — veem SO as acoes em que sao
- * responsaveis (sozinhos ou junto com outros): cada um cuida das suas.
- * E as em que foram marcados num comentario (19/10): marcar e chamar a
- * pessoa para a conversa daquela acao (ver e responder; concluir, nao).
+ * Pedido do gerente: "as acoes so devem aparecer pras pessoas que estao
+ * citadas na acao". Citado e quem e responsavel (sozinho ou junto com
+ * outros) e quem foi marcado num comentario dela (19/10: marcar e chamar a
+ * pessoa para a conversa daquela acao — ver e responder; concluir, nao).
+ * So eles veem a acao: titulo, descricao, comentarios, fotos e historico,
+ * nos dois planos e em todo lugar que mostra acao (a lista e os filtros, o
+ * "Em aberto", a bolinha do menu, a Gestao da Limpeza, o link do e-mail, as
+ * fotos). Quem gere o plano (GERIR_ACOES / GERIR_LIMPEZA), o administrador
+ * e quem tem escopo TODOS (gerencia, consulta) NAO veem mais todas — antes
+ * viam. Gerir continua sendo criar, e editar, reabrir, cancelar e excluir
+ * as que a pessoa ve.
+ *
+ * A unica excecao e a acao SEM responsavel com e-mail (as que vieram da
+ * planilha antiga da limpeza traziam so o nome): ninguem esta citado nela,
+ * e ela sumiria para todo mundo sem ter como receber um responsavel. Essa
+ * fica com quem gere o plano (e com quem for marcado nela), ate a gestao
+ * escolher o responsavel em Editar — dai em diante vale a regra.
  */
 function acoesNoAlcance(usuario, todas, plano) {
   plano = plano || PLANOS.CALENDARIO;
-  if (podeFazer(usuario, plano.cap) || escopoDe(usuario).tipo === 'TODOS') return todas;
   const email = String(usuario.email || '').toLowerCase().trim();
-  return todas.filter(function (a) { return ehDonoDaAcao_(a, email) || ehMarcadoNaAcao_(a, email); });
+  const gere = podeFazer(usuario, plano.cap);
+  return todas.filter(function (a) { return vePelaCitacao_(email, gere, a.responsaveisEmails, a.marcadosEmails); });
+}
+
+/* A regra, sobre as listas de e-mails da acao. gere: a pessoa gere o plano (so conta na acao sem responsavel). */
+function vePelaCitacao_(email, gere, responsaveis, marcados) {
+  if (!email) return false;
+  return responsaveis.indexOf(email) !== -1 || marcados.indexOf(email) !== -1 || (gere && !responsaveis.length);
 }
 
 /* A mesma regra, para UMA acao (foto pedida pela tela). */
 function podeVerAcao_(plano, usuario, acao) {
   return acoesNoAlcance(usuario, [acao], plano).length === 1;
+}
+
+/* A mesma regra, na linha crua da planilha (o que grava confere nela, de novo dentro da trava). */
+function podeVerRegistro_(plano, usuario, registro) {
+  return vePelaCitacao_(String(usuario.email || '').toLowerCase().trim(), podeFazer(usuario, plano.cap),
+    emailsDaAcao_(registro.RESPONSAVEL_EMAIL), emailsDaAcao_(registro.MARCADOS));
+}
+
+/*
+ * A acao deste plano, se a pessoa a ve. A que ela nao ve "nao existe" — a
+ * mesma recusa do ID errado e da porta do outro plano: editar, reabrir,
+ * cancelar, excluir ou tirar foto de uma acao em que nao se esta citado nao
+ * passa nem conta que ela existe.
+ */
+function acaoQueVe_(plano, usuario, id) {
+  const r = acaoDoPlano_(plano, id);
+  if (!podeVerRegistro_(plano, usuario, r)) throw new Error('Ação não encontrada. Atualize a tela.');
+  return r;
 }
 
 /**
@@ -445,6 +496,10 @@ function podeVerAcao_(plano, usuario, acao) {
  * Quantas acoes cada turno propos e quantas fechou. O percentual e de
  * CONCLUSAO, nao de proposta: propor muito e concluir pouco nao e
  * desempenho, e fila.
+ *
+ * So numeros, sem nenhuma acao: por isso quem gere o plano ve o ranking do
+ * plano INTEIRO, tambem das acoes em que nao esta citado (21/10 — e o
+ * numero das auditorias). Os demais, o das acoes que veem.
  */
 function rankingAcoesPorTurno(acoes) {
   const mapa = {};
@@ -477,7 +532,10 @@ function rankingAcoesPorTurno(acoes) {
  * Os numeros do topo do plano ("Em aberto", "Atrasadas", "Sob sua
  * responsabilidade", "Concluidas"). A tela E a bolinha do menu usam ESTA
  * funcao, sobre a MESMA lista (acoesNoAlcance): o numero da bolinha e
- * sempre o "Em aberto" que a pessoa ve ao abrir o plano.
+ * sempre o "Em aberto" que a pessoa ve ao abrir o plano — e o numero de
+ * cartoes da lista dela (21/10: so as acoes em que esta citada, tambem para
+ * a gestao; o plano inteiro so no ranking e no "no plano inteiro" da Gestao
+ * da Limpeza, que nao mostram acao nenhuma).
  */
 function contagensDoPlano_(minhas, email) {
   const abertas = minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.PENDENTE; });
@@ -494,7 +552,8 @@ function contagensDoPlano_(minhas, email) {
  * usando: { calendario: {abertas, atrasadas, minhas}, limpeza: {...} }, so
  * dos planos cuja tela a pessoa abre NESTA filial (telasDe: nivel, ajuste
  * por modulo e painel). O caminho e o da tela: acoesDoPlano_ ->
- * acoesNoAlcance -> contagensDoPlano_.
+ * acoesNoAlcance -> contagensDoPlano_ (21/10: so as acoes em que a pessoa
+ * esta citada — a gestao tambem).
  *
  * Guardado numa chave SO por pessoa e filial (o cache tambem guarda as
  * sessoes e as telas de todo mundo; uma chave por geracao encheria o cache a
@@ -512,7 +571,8 @@ function pendenciasDoUsuario_(usuario) {
   const email = String(usuario.email || '').toLowerCase().trim();
   const chave = 'pend|' + filialAtual().codigo + '|' + email;
   const telas = telasDe(usuario);
-  const marca = [geracaoTabela('ACOES'), paraISO(hoje()), telas.map(function (t) { return t.id; }).join(','),
+  // 'citados' (21/10): a bolinha guardada com a regra de antes (a gestao contava todas) nao volta depois da atualizacao.
+  const marca = ['citados', APP.build, geracaoTabela('ACOES'), paraISO(hoje()), telas.map(function (t) { return t.id; }).join(','),
                  usuario.perfil, usuario.chaveModulos || '', escopoDe(usuario).tipo, usuario.turno || '',
                  usuario.simulado ? 'simulado' : ''].join('|');
   const cache = CacheService.getScriptCache();
@@ -550,7 +610,10 @@ function dadosPlano_(plano, usuario, params) {
   const filtroSituacao = String((params && params.situacao) || 'ABERTAS').toUpperCase().trim();
   const busca = String((params && params.busca) || '').toLowerCase().trim();
 
-  const minhas = acoesNoAlcance(usuario, listarAcoes(plano.id), plano);
+  // So as acoes em que a pessoa esta citada (21/10), e so delas o historico.
+  const todas = acoesDoPlano_(plano.id);
+  const minhas = comHistorico_(plano.id, acoesNoAlcance(usuario, todas, plano));
+  const gere = podeFazer(usuario, plano.cap);
 
   let lista = minhas.slice();
   // Sem filtro e '' (4.2.2). Antes 'Todos' era ao mesmo tempo "sem filtro" e
@@ -584,17 +647,24 @@ function dadosPlano_(plano, usuario, params) {
 
   const email = String(usuario.email || '').toLowerCase().trim();
 
+  /*
+   * Os numeros que nao mostram acao nenhuma (21/10): quem gere o plano ve o
+   * ranking por turno e o total em aberto/atrasadas do plano INTEIRO. Os
+   * cartoes do topo e a bolinha continuam sendo os da lista dele.
+   */
+  const geral = gere ? contagensDoPlano_(todas, email) : null;
   return {
     lista: lista,
     contagens: contagensDoPlano_(minhas, email),
-    ranking: rankingAcoesPorTurno(minhas),
+    geral: geral ? { abertas: geral.abertas, atrasadas: geral.atrasadas, total: todas.length } : null,
+    ranking: rankingAcoesPorTurno(gere ? todas : minhas),
     turnos: ACOES_TURNOS,
     pessoas: pessoasParaAcao(plano),
     filtro: { turno: filtroTurno, situacao: filtroSituacao, busca: busca },
     plano: plano.id,
     fotos: { porVez: FOTOS_POR_VEZ, porAcao: FOTOS_POR_ACAO },
     permissoes: {
-      gerir: podeFazer(usuario, plano.cap),
+      gerir: gere,
       email: email
     }
   };
@@ -604,8 +674,9 @@ function dadosPlano_(plano, usuario, params) {
  * Quem pode ser responsavel: gente ativa no cadastro de acessos que
  * ENXERGA o modulo do plano. Acao da limpeza dada a quem nao ve a Limpeza
  * chegava por e-mail e a pessoa nao tinha onde abrir. A mesma lista e a de
- * quem pode ser marcado num comentario (19/10); veTodas diz quem ja ve todas
- * as acoes do plano (a tela avisa "passa a ver esta ação" para os outros).
+ * quem pode ser marcado num comentario (19/10). gere: a pessoa gere o plano
+ * (21/10: isso nao a faz ver as acoes — so a acao sem responsavel; a tela
+ * avisa "passa a ver esta ação" para quem ainda nao esta citado).
  * abre: o painel do plano aparece para a pessoa nesta filial (Oculto: so o
  * administrador). Quem nao abre continua podendo ser responsavel (a acao
  * fica pronta antes de o painel ser mostrado), mas nao pode ser marcado: o
@@ -626,8 +697,7 @@ function pessoasParaAcao(plano) {
         nome: String(p.NOME || '').trim() || String(p.EMAIL || '').split('@')[0],
         turno: String(p.TURNO || '').toUpperCase().trim(),
         papel: String(p.PAPEL || '').trim(),
-        // A mesma regra de acoesNoAlcance.
-        veTodas: !!(plano && x.u) && (podeFazer(x.u, plano.cap) || escopoDe(x.u).tipo === 'TODOS'),
+        gere: !!(plano && x.u) && podeFazer(x.u, plano.cap),
         abre: !plano || !!(x.u && painelVisivel(x.u, plano.modulo))
       };
     })
@@ -661,7 +731,10 @@ function marcadosQueFicam_(marcados, responsaveis, desmarcados) {
 
 /*
  * Cria ou edita. So quem gere o plano (GERIR_ACOES no Calendario,
- * GERIR_LIMPEZA na Limpeza) — combinado: o gerente cria.
+ * GERIR_LIMPEZA na Limpeza) — combinado: o gerente cria. Editar, so a acao
+ * que a pessoa ve (21/10: citada nela, ou a acao sem responsavel). Quem
+ * cria e nao fica entre os responsaveis nao ve mais a acao depois de
+ * salvar — o recado diz para quem ela aparece.
  */
 function salvarAcaoDoPlano_(plano, usuario, params) {
   exigirCapacidade(usuario, plano.cap);
@@ -677,8 +750,8 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
 
   let id = String(params.id || '').trim();
   const nova = !id;
-  // Existe e e deste plano? Confere antes de tudo (e antes de subir foto para o Drive).
-  const antes = nova ? null : acaoDoPlano_(plano, id);
+  // Existe, e deste plano e a pessoa a ve? Confere antes de tudo (e antes de subir foto para o Drive).
+  const antes = nova ? null : acaoQueVe_(plano, usuario, id);
 
   // Um ou mais responsaveis (acao conjunta) — gente que enxerga o plano.
   // Quem ja era responsavel continua valendo (pode ter perdido o acesso depois).
@@ -719,6 +792,7 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
   if (nova) id = gerarId('ACOES');
   else if (lerAnexos_(antes.ANEXOS).length + fotos.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
   const gravadas = gravarFotos_(usuario, id, fotos);
+  let marcadosDepois = [];       // quem continua marcado depois de salvar (o recado diz quem ve a acao)
 
   try {
     comTrava(function () {
@@ -733,7 +807,7 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
         inserir('ACOES', campos, usuario.email);
         return;
       }
-      const atual = acaoDoPlano_(plano, id);
+      const atual = acaoQueVe_(plano, usuario, id);
       if (gravadas.length) {
         const lista = lerAnexos_(atual.ANEXOS);
         if (lista.length + gravadas.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
@@ -742,6 +816,7 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
       if ('MARCADOS' in atual) {
         const marcados = emailsDaAcao_(atual.MARCADOS), ficam = marcadosQueFicam_(marcados, emails, params.desmarcados);
         if (ficam.length !== marcados.length) campos.MARCADOS = ficam.join(',');
+        marcadosDepois = ficam;
       }
       atualizar('ACOES', id, campos, usuario.email);
     });
@@ -759,21 +834,36 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
   });
   if (falhas.length) avisoEmail = 'Ação salva, mas o aviso por e-mail não saiu para: ' + falhas.join('; ');
 
+  // Quem salvou e nao esta citado deixa de ver a acao (21/10): o recado diz para quem ela aparece.
+  const some = !podeVerRegistro_(plano, usuario, { RESPONSAVEL_EMAIL: campos.RESPONSAVEL_EMAIL, MARCADOS: marcadosDepois.join(',') });
+  const citados = some ? nomes.concat(marcadosDepois.map(function (e) { return nomeDoEmail_(conhecidos, e); })) : [];
+  const aviso = some ? (nova ? ' Ela aparece só para quem está citado nela: ' : ' Você não está citado nela: agora ela aparece só para ') +
+    listaEmPortugues_(citados) + '.' : '';
   const r = { id: id, recado: (nova ? 'Ação criada.' : 'Ação atualizada.') +
-    (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') };
-  if (avisoEmail) r.avisoEmail = avisoEmail;
+    (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') + aviso };
+  if (avisoEmail) r.avisoEmail = avisoEmail + aviso;
   return r;
+}
+
+/* ['Ana'] -> 'Ana' · ['Ana', 'Rui', 'Bia'] -> 'Ana, Rui e Bia' */
+function listaEmPortugues_(nomes) {
+  const l = nomes.filter(Boolean);
+  return l.length > 1 ? l.slice(0, -1).join(', ') + ' e ' + l[l.length - 1] : (l[0] || '');
 }
 
 /**
  * Concluir. Sem validacao de ninguem — foi o combinado.
- * Pode concluir: o responsavel pela acao, ou quem gere o plano.
+ * Pode concluir: o responsavel pela acao, ou quem gere o plano e ve a acao.
  * A foto (opcional) vai junto do registro da conclusao no historico.
  */
 function concluirAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   const fotos = fotosDoPedido_(params);
-  const naoEDele = function (r) { return 'Esta ação é de ' + (r.RESPONSAVEL || 'outra pessoa') + '. Só o responsável a conclui.'; };
+  // O nome do responsavel so para quem ve a acao (21/10: quem nao esta citado nao fica sabendo de quem ela e).
+  const naoEDele = function (r) {
+    return podeVerRegistro_(plano, usuario, r) ? 'Esta ação é de ' + (r.RESPONSAVEL || 'outra pessoa') + '. Só o responsável a conclui.'
+      : 'Só o responsável pela ação a conclui.';
+  };
 
   const antes = acaoDoPlano_(plano, id);
   exigirResponsavelOuGestor_(plano, usuario, antes, naoEDele(antes));
@@ -820,12 +910,12 @@ function concluirAcaoDoPlano_(plano, usuario, params) {
   } catch (e) { jogarFotosFora_(gravadas); throw e; }
 }
 
-/** Voltar atras: a acao volta para a fila. */
+/** Voltar atras: a acao volta para a fila. Reabrir, cancelar e excluir: a gestao, so nas acoes que ve (21/10). */
 function reabrirAcaoDoPlano_(plano, usuario, params) {
   exigirCapacidade(usuario, plano.cap);
   const id = String(params.id || '').trim();
   return comTrava(function () {
-    acaoDoPlano_(plano, id);
+    acaoQueVe_(plano, usuario, id);
     atualizar('ACOES', id, {
       SITUACAO: ACOES_SITUACAO.PENDENTE,
       CONCLUIDO_EM: '', CONCLUIDO_POR: '', ANDAMENTO: 'Em andamento'
@@ -841,7 +931,7 @@ function cancelarAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   const motivo = String(params.motivo || '').trim();
   return comTrava(function () {
-    acaoDoPlano_(plano, id);
+    acaoQueVe_(plano, usuario, id);
     atualizar('ACOES', id, {
       SITUACAO: ACOES_SITUACAO.CANCELADA,
       OBSERVACAO: motivo, DEPENDE: ''
@@ -855,7 +945,7 @@ function excluirAcaoDoPlano_(plano, usuario, params) {
   exigirCapacidade(usuario, plano.cap);
   const id = String(params.id || '').trim();
   return comTrava(function () {
-    acaoDoPlano_(plano, id);
+    acaoQueVe_(plano, usuario, id);
     excluir('ACOES', id, usuario.email);
     return { recado: 'Ação excluída.' };
   });
@@ -926,7 +1016,7 @@ function fotosDaCelula_(valor) {
 }
 
 /*
- * Ver uma foto. So quem enxerga a acao (a mesma regra da lista), e so foto
+ * Ver uma foto. So quem enxerga a acao (a mesma regra da lista: quem esta citado nela), e so foto
  * que e da acao ou de um comentario dela — o ID de um arquivo qualquer do
  * Drive nao passa por aqui.
  * HEIC (iPhone) gravada sem converter — foto de antes de 19/10, ou o Google
@@ -953,12 +1043,12 @@ function fotoDoPlano_(plano, usuario, params) {
   return { ok: true, nome: b.nome, tipo: b.tipo, dados: b.dados, semMiniatura: heic, desistiu: conv.desistiu };
 }
 
-/* Tirar uma foto da acao (as dos comentarios ficam: o historico nao se apaga). */
+/* Tirar uma foto da acao (as dos comentarios ficam: o historico nao se apaga). Gestao, e so na acao que ve. */
 function removerFotoDoPlano_(plano, usuario, params) {
   exigirCapacidade(usuario, plano.cap);
   const id = String(params.id || '').trim();
   return comTrava(function () {
-    acaoDoPlano_(plano, id);
+    acaoQueVe_(plano, usuario, id);
     removerAnexo(usuario, 'ACOES', id, params.arquivo);
     return { ok: true, recado: 'Foto removida.' };
   });
@@ -1012,7 +1102,7 @@ function acaoConverterFoto(usuario, params) {
  * Converter e o primeiro passo de anexar: so quem pode anexar a foto onde ela
  * vai. A tela diz onde (plano, uso e acao); o servidor confere como no gravar:
  * comentario ('cm': responsavel, gestao ou quem foi marcado na acao), conclusao
- * ('cc': responsavel ou gestao) ou a propria acao, nova ou editada (quem gere o plano).
+ * ('cc': responsavel ou gestao) ou a propria acao, nova ou editada (quem gere o plano; a editada, se ele a ve).
  */
 function exigirQuemAnexaFoto_(usuario, params) {
   const plano = String(params.plano || '').toUpperCase() === PLANOS.LIMPEZA.id ? PLANOS.LIMPEZA : PLANOS.CALENDARIO;
@@ -1021,6 +1111,7 @@ function exigirQuemAnexaFoto_(usuario, params) {
   if (params.uso === 'cm') return exigirQuemComenta_(plano, usuario, acaoDoPlano_(plano, id));
   if (params.uso === 'cc') return exigirResponsavelOuGestor_(plano, usuario, acaoDoPlano_(plano, id), 'Só o responsável pela ação anexa a foto da conclusão.');
   exigirCapacidade(usuario, plano.cap);
+  if (id) acaoQueVe_(plano, usuario, id);      // editar: so a acao que a pessoa ve (21/10)
 }
 
 /* Conta a conversao da pessoa (janelas de 10 min no cache) antes de subir qualquer coisa ao Drive do dono. */
@@ -1210,7 +1301,7 @@ function avisarAcaoNova(campos, email, nova, id, plano) {
  * Quem foi marcado num comentario (19/10) recebe o comentario, a acao e o
  * botao que abre o historico dela no GSL (?tela=...&acao=ID). r: a linha da
  * acao ja com o que o comentario mudou. passouAVer: a pessoa nao enxergava
- * a acao antes (o coordenador de outro turno) — o e-mail diz que agora ve.
+ * a acao antes (nao estava citada — 21/10: a gestao tambem) — o e-mail diz que agora ve.
  * O "Responder" do e-mail vai para quem marcou (nao para a conta que roda o
  * GSL), e o texto pede a resposta pelo botao, que e a que entra no historico.
  */

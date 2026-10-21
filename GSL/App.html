@@ -4601,7 +4601,8 @@ function blocoNiveis(d) {
       <div class="cartao-titulo">Níveis de acesso</div>
       <p class="dica" style="margin:-4px 0 12px">Clique numa célula para ligar ou desligar.
          O <b>alcance</b> decide o quanto o nível enxerga: a operação inteira, o próprio turno,
-         ou só as atividades em que a pessoa é responsável.</p>
+         ou só as atividades em que a pessoa é responsável. No Plano de Ação (do Calendário e da Limpeza)
+         cada pessoa vê só as ações em que está citada, qualquer que seja o nível.</p>
       <div style="overflow-x:auto"><table>
         <thead><tr><th>Nível</th><th>Alcance</th>${cabecalho}</tr></thead>
         <tbody>${d.perfis.map((p) => `<tr>
@@ -4832,8 +4833,13 @@ function barra(rotulo, texto, maximo, numero, cor) {
      garantir que todas as lâmpadas foram trocadas
      Responsável Hércules — Entregar até dia 25/09
 
-   Quem cria é o gerente. O coordenador vê as do turno dele e conclui as
-   que são dele — não há validação, foi o combinado: concluiu, acabou.
+   Quem cria é o gerente. O coordenador conclui as que são dele — não há
+   validação, foi o combinado: concluiu, acabou.
+
+   QUEM VÊ (21/10): cada ação aparece só para quem está citado nela — os
+   responsáveis e quem foi marcado num comentário. A gestão, o administrador
+   e a consulta também: nenhum deles vê a ação em que não está citado (a
+   lista já vem filtrada do servidor). Ver acoesNoAlcance, no Acoes.gs.
 
    DOIS PLANOS, O MESMO DESENHO (4.2.2). O Plano de Ação da Limpeza CD é
    este mesmo, desenhado pelas mesmas funções: PLANO diz qual está na tela
@@ -5015,13 +5021,16 @@ const pessoaDoPlano = (email) => (planoD().pessoas || []).find((p) => p.email ==
 
 function mencaoCandidatos(filtro) {
   const a = MENCAO.acao || {}, eu = meuEmail(), f = semAcento(filtro);
+  // Ja veem a acao: quem esta citado nela e, na acao sem responsavel, quem gere o plano (21/10).
+  // veTodas: o Acoes.gs de antes de 21/10, em que a gestao e a consulta viam todas.
   const jaVeem = (a.responsaveisEmails || []).concat(a.marcadosEmails || []);
+  const semResponsavel = !(a.responsaveisEmails || []).length;
   const todas = (planoD().pessoas || [])
     .filter((p) => p.email !== eu && p.abre !== false && MENCAO.escolhidas.indexOf(p.email) === -1)
     .filter((p) => !f || semAcento([p.nome, p.papel, p.turno ? 'turno ' + p.turno : ''].join(' ')).indexOf(f) !== -1);
   // Sem filtro ("@" sozinho, o botao): todas, na lista que rola. Filtrando: as primeiras.
   return (f ? todas.slice(0, SUGESTOES_MAX) : todas)
-    .map((p) => Object.assign({}, p, { passaAVer: !p.veTodas && jaVeem.indexOf(p.email) === -1 }));
+    .map((p) => Object.assign({}, p, { passaAVer: !p.veTodas && jaVeem.indexOf(p.email) === -1 && !(semResponsavel && p.gere) }));
 }
 function mencaoPintarLista() {
   const caixa = el('cm-sugestoes'), campo = el('cm-texto');
@@ -5232,6 +5241,8 @@ function planoHtml(d) {
       ${kpi(c.minhas, 'Sob sua responsabilidade', 'amarelo')}
       ${kpi(c.concluidas, 'Concluídas', 'verde')}
     </div>
+    ${d.geral ? `<p class="dica" style="margin:-6px 0 14px">No plano inteiro: <b>${d.geral.abertas}</b> em aberto,
+       <b>${d.geral.atrasadas}</b> atrasada(s) — só os números. As ações aparecem só para quem está citado nelas.</p>` : ''}
 
     <div class="cartao" style="margin-bottom:14px">
       <div class="filtros-acao">
@@ -5264,6 +5275,8 @@ function planoHtml(d) {
 
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">${lista.length} ação(ões)</div>
+      <p class="dica" style="margin:-4px 0 12px">Aparecem aqui só as ações em que você está citado: como responsável
+         ou marcado num comentário.</p>
       ${lista.length ? lista.map((a) => cartaoAcao(a, p)).join('')
         : '<div class="vazio">Nenhuma ação com estes filtros.</div>'}
     </div>
@@ -5273,7 +5286,9 @@ function planoHtml(d) {
       <div class="cartao-titulo">Ranking de ações por turno — para as auditorias</div>
       <p class="dica" style="margin:-4px 0 12px">Quantas ações cada turno recebeu e quantas
          fechou. O percentual é de <b>conclusão</b>: propor muito e concluir pouco não é
-         desempenho, é fila. Ações canceladas ficam fora da conta.</p>
+         desempenho, é fila. Ações canceladas ficam fora da conta.
+         ${d.geral ? 'Conta todas as ações do plano, também as em que você não está citado (só os números).'
+           : 'Conta as ações em que você está citado.'}</p>
       <div style="overflow-x:auto">
         <table><thead><tr>
           <th>Turno</th><th class="numero">Propostas</th><th class="numero">Concluídas</th>
@@ -5338,6 +5353,8 @@ function cartaoAcao(a, p) {
         ${aviso}
         ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
       </div>
+      ${p.gerir && !(a.responsaveisEmails || []).length ? `<div class="acao-origem">Sem responsável com e-mail: só a gestão do plano vê esta ação.
+        Marque o responsável em <b>Editar</b>.</div>` : ''}
       ${a.origem || (a.plano === 'LIMPEZA' && a.abertaEm) ? `<div class="acao-origem">${a.origem ? 'Origem: ' + esc(a.origem) : ''}${a.plano === 'LIMPEZA' && a.abertaEm ? (a.origem ? ' · ' : '') + 'aberta em ' + pnDataLonga(a.abertaEm) : ''}</div>` : ''}
       ${a.situacao === 'PENDENTE' && (a.andamento || a.depende) ? `<div class="acao-andamento">
         ${a.andamento ? `<span class="pill-andamento">${esc(a.andamento)}</span>` : ''}
@@ -5450,6 +5467,8 @@ function formAcao(id) {
   abrirJanela(a ? 'Editar ação' : 'Nova ação', `
     <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
       O responsável recebe um e-mail com a ação e o prazo assim que você salvar.
+      A ação aparece só para quem está citado nela (os responsáveis e quem for marcado num comentário):
+      se você não estiver entre os responsáveis, ela sai da sua lista.
     </p>
     <div class="campo"><label>Ação</label>
       <input id="ac-acao" value="${a ? esc(a.acao) : ''}" placeholder="${ex ? 'Ex.: Banheiro da central sem papel toalha' : 'Ex.: Iluminação do Flow'}"></div>
@@ -5468,7 +5487,7 @@ function formAcao(id) {
       <div class="campo"><label>Aberta em</label><input type="date" id="ac-aberta" value="${esc(a ? a.abertaEm : (d.hoje || (DADOS && DADOS.hoje) || ''))}"></div>
     </div>` : ''}
     <div class="campo"><label>Responsáveis (marque um ou mais — ação conjunta)</label>
-      ${antigo ? `<p class="dica" style="margin:0 0 8px">Registrado antes como <b>${esc(antigo)}</b>, sem e-mail. Marque quem acompanha esta ação para ela aparecer para a pessoa (ou deixe como está).</p>` : ''}
+      ${antigo ? `<p class="dica" style="margin:0 0 8px">Registrado antes como <b>${esc(antigo)}</b>, sem e-mail — por isso, por enquanto, só a gestão do plano vê esta ação. Marque quem acompanha esta ação para ela aparecer para a pessoa (ou deixe como está).</p>` : ''}
       <input placeholder="Procurar pessoa…" oninput="const t=this.value.toLowerCase();document.querySelectorAll('.ac-pessoa').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(t)===-1?'none':''})">
       <div class="ac-pessoas">
         ${pessoas.map((pe) => `

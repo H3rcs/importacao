@@ -245,12 +245,12 @@ caso('limpeza: responsavel precisa enxergar a Limpeza; quem tem o modulo so em "
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
   acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'limpeza', modo: 'VER' });
   acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], zona: 'Z7', criticidade: 'Alta' });
-  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+  const idDoGerente = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
   const maria = entrar(m, COORD, '1234');
   const dm = tela(m, maria, 'limpeza');
   afirmar(dm.plano.lista.length === 1 && dm.plano.lista[0].acao === 'Da Maria' && !dm.plano.permissoes.gerir, 'maria ve so a dela: ' + dm.plano.lista.map((a) => a.acao).join());
   afirmar(!dm.estoque.permissoes.cadastrar && !dm.estoque.permissoes.movimentar, 'estoque so para ver');
-  const doGerente = tela(m, adm, 'limpeza').plano.lista.find((a) => a.acao === 'Do gerente');
+  const doGerente = { id: idDoGerente };      // 21/10: o admin, que criou e nao esta citado, nem a ve
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, maria, 'comentarAcaoLimpeza', { id: doGerente.id, texto: 'oi' }))), 'nao comenta a do gerente');
   acao(m, maria, 'comentarAcaoLimpeza', { id: dm.plano.lista[0].id, texto: 'Feito', situacao: 'Concluída' });
   afirmar(tela(m, maria, 'limpeza').plano.lista[0].situacao === 'CONCLUIDA', 'concluiu a dela');
@@ -261,8 +261,9 @@ caso('limpeza: responsavel precisa enxergar a Limpeza; quem tem o modulo so em "
 caso('planos separados: a acao de um plano nao abre pela porta do outro, e cada tela so lista as suas', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   acao(m, adm, 'salvarUsuario', { email: SUP, nome: 'Sup Limpeza', perfil: 'SUPERVISOR', turno: '', filiais: '*', papel: 'Supervisor' });
-  acao(m, adm, 'salvarAcao', { acao: 'Do calendario', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1)] });
-  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da limpeza', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], fotos: [foto(2)] });
+  // 21/10: so quem esta citado ve a acao — o admin fica entre os responsaveis para conferir as duas listas
+  acao(m, adm, 'salvarAcao', { acao: 'Do calendario', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [foto(1)] });
+  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da limpeza', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP, DONO], fotos: [foto(2)] });
   const cal = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista;
   const lim = tela(m, adm, 'limpeza').plano.lista;
   afirmar(cal.length === 1 && cal[0].acao === 'Do calendario' && lim.length === 1 && lim[0].acao === 'Da limpeza', 'listas: ' + cal.map((a) => a.acao) + ' / ' + lim.map((a) => a.acao));
@@ -286,9 +287,10 @@ caso('planos separados: a acao de um plano nao abre pela porta do outro, e cada 
 caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga a acao ve; foto de outra acao nao passa; a gestao remove', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   acao(m, adm, 'salvarUsuario', { email: 'pedro@bartofil.com.br', nome: 'Pedro', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coord' });
-  const r = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1), foto(2)] });
+  // 21/10: o admin entre os responsaveis — so quem esta citado ve a acao (e tira foto dela)
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [foto(1), foto(2)] });
   afirmar(/2 foto/.test(r.recado), 'recado: ' + r.recado);
-  acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'B', responsaveisEmails: ['pedro@bartofil.com.br'], fotos: [foto(9)] });
+  acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'B', responsaveisEmails: ['pedro@bartofil.com.br', DONO], fotos: [foto(9)] });
   const lista = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista;
   const a = lista.find((x) => x.id === r.id), outra = lista.find((x) => x.acao === 'Outra');
   afirmar(a.fotos.length === 2 && a.fotos[0].nome === 'foto1.jpg' && !('url' in a.fotos[0]), 'fotos na acao: ' + JSON.stringify(a.fotos));
@@ -315,7 +317,7 @@ caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga
   acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id });
   let depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
   afirmar(depois.fotos.length === 1 && depois.fotos[0].id === a.fotos[1].id && m.arquivos.get(a.fotos[0].id).lixo, 'removida e na lixeira');
-  acao(m, adm, 'salvarAcao', { id: a.id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(4)] });
+  acao(m, adm, 'salvarAcao', { id: a.id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [foto(4)] });
   depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
   afirmar(depois.fotos.length === 2, 'editar acrescenta: ' + depois.fotos.length);
   acao(m, maria, 'concluirAcao', { id: a.id, observacao: 'feito', fotos: [foto(5)] });
@@ -325,7 +327,7 @@ caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga
 
 caso('fotos: tipo errado, grande demais e mais de 5 de uma vez sao recusados; falha ao gravar nao deixa foto orfa no Drive', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
-  const base = () => ({ acao: 'Teste', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  const base = () => ({ acao: 'Teste', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
   const antes = m.arquivos.size;
   afirmar(/não é uma foto/.test(erroDe(() => acao(m, adm, 'salvarAcao', Object.assign(base(), { fotos: [foto(1, 'application/pdf')] })))), 'pdf recusado');
   afirmar(/no máximo 5/.test(erroDe(() => acao(m, adm, 'salvarAcao', Object.assign(base(), { fotos: [1, 2, 3, 4, 5, 6].map((n) => foto(n)) })))), 'seis recusadas');
@@ -424,7 +426,7 @@ caso('fotos HEIC: converterFoto recusa o que nao e HEIC pelos bytes, mais de 10 
  * 19/10 (revisao): converter e o primeiro passo de anexar. Antes, qualquer um que visse o Calendario
  * ou a Limpeza — ate a CONSULTA, pelo console — subia ate 10 MB por chamada ao Drive do dono.
  */
-caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o plano; comentario: responsavel, gestao ou marcado; conclusao: responsavel ou gestao) — CONSULTA sem contexto e recusada, marcada converte; no maximo 30 por pessoa a cada 10 min', () => {
+caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o plano; comentario: quem esta citado — responsavel ou marcado; conclusao: responsavel ou gestao) — CONSULTA sem contexto e recusada, marcada converte; no maximo 30 por pessoa a cada 10 min', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m);
   const CARLA = 'carla.dias@bartofil.com.br';
@@ -438,7 +440,9 @@ caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o pla
   const antes = noDrive();
   afirmar(/nao pode executar/.test(conv(carla, {})), 'CONSULTA sem contexto (o console): recusada');
   afirmar(/nao pode executar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'CONSULTA nao cria acao: recusada');
-  afirmar(/Só os responsáveis pela ação, quem foi marcado nela ou a gestão podem comentar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), 'CONSULTA no comentario de uma acao em que nao foi marcada: recusada');
+  afirmar(/Só os responsáveis pela ação e quem foi marcado nela podem comentar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), 'CONSULTA no comentario de uma acao em que nao foi marcada: recusada');
+  afirmar(/Só os responsáveis pela ação e quem foi marcado nela podem comentar/.test(conv(adm, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), '21/10: nem o admin, no comentario da acao em que nao esta citado');
+  afirmar(/Ação não encontrada/.test(conv(adm, { plano: 'CALENDARIO', uso: 'ac', id: daMaria })), '21/10: nem na foto da acao que ele editaria (nao a ve)');
   afirmar(/Ação não encontrada/.test(conv(carla, { plano: 'LIMPEZA', uso: 'cm', id: doDono })), 'pela porta do outro plano a acao nao existe');
   afirmar(noDrive() === antes, 'as recusas nao subiram nada ao Drive');
   afirmar(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: doDono }) === '', 'CONSULTA marcada converte no comentario da acao');
@@ -478,7 +482,7 @@ caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou min
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m);
   // como a versao anterior gravava: a HEIC crua, image/heic
-  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [heic('IMG_0009.HEIC'), foto(1)] });
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [heic('IMG_0009.HEIC'), foto(1)] });
   acao(m, adm, 'comentarAcao', { id: r.id, texto: 'Antes do conserto', fotos: [heic('IMG_0010.HEIC')] });
   const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === r.id);
   const v = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[0].id });
@@ -492,7 +496,7 @@ caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou min
   const o = acao(m, adm, 'fotoAcao', { id: r.id, arquivo: a.fotos[0].id });
   afirmar(o.tipo === 'image/heic' && o.dados === HEIC_MINI && !o.convertida && drive.log.length === 5, 'sem miniatura (5 consultas, 6 s): ' + o.tipo + ' ' + drive.log.length);
   drive.roteiro.nunca = false;
-  const l = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE], fotos: [heic('IMG_0011.HEIC')] });
+  const l = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, DONO], fotos: [heic('IMG_0011.HEIC')] });
   const al = tela(m, adm, 'limpeza').plano.lista.find((x) => x.id === l.id);
   const vl = acao(m, adm, 'fotoAcaoLimpeza', { id: l.id, arquivo: al.fotos[0].id });
   afirmar(vl.convertida && vl.dados === JPEG_MINI && vl.nome === 'IMG_0011.jpg', 'limpeza: ' + JSON.stringify(vl).slice(0, 120));
@@ -502,7 +506,7 @@ caso('fotos HEIC: o visor converte a HEIC ja gravada (da versao anterior, ou min
 caso('fotos HEIC: a HEIC gravada que o Google nao miniaturiza — a 2a abertura em 10 min consulta uma vez (sem os 6 s); gravada ha mais de 10 min, o servidor desiste (a tela para de prometer)', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m, { nunca: true });
-  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 4', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [heic('IMG_0020.HEIC'), foto(1)] });
+  const r = acao(m, adm, 'salvarAcao', { acao: 'Doca 4', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [heic('IMG_0020.HEIC'), foto(1)] });
   const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === r.id);
   const abrir = (arquivo) => { drive.log.length = 0; const v = acao(m, adm, 'fotoAcao', { id: r.id, arquivo }); return [v.tipo, !!v.semMiniatura, !!v.desistiu, drive.log.length].join(' '); };
   afirmar(abrir(a.fotos[0].id) === 'image/heic true false 5', 'primeira: espera a miniatura (5 consultas, 6 s)');
@@ -916,7 +920,7 @@ caso('painel Desativado ou "Nao usar nesta filial" some para todos, inclusive o 
   afirmar(/não está ligado na filial CD Feira de Santana/.test(erroDe(() => acao(m, s, 'semanaNobreak', {}))), 'ADMIN: acao recusada');
   afirmar(!tela(m, s, 'inicio').atalhos.some((t) => t.id === 'nobreaks'), 'ADMIN: sem o atalho na Central');
   // bolinha: o Calendario desativado com acao em aberto nao conta nem para o ADMIN
-  acao(m, s, 'salvarAcao', { acao: 'Lâmpadas do flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  acao(m, s, 'salvarAcao', { acao: 'Lâmpadas do flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
   afirmar(acao(m, s, 'pendencias').pendencias.calendario.abertas === 1, 'antes: bolinha do calendario');
   acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'DESATIVADO' });
   const p = acao(m, s, 'pendencias');
@@ -1806,8 +1810,8 @@ caso('bolinha do menu: o numero de cada modulo e o "Em aberto" do plano — por 
   acao(m, adm, 'salvarAcao', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
   acao(m, adm, 'salvarAcao', { acao: 'Atrasada conjunta', prazo: ontem, turno: 'A', responsaveisEmails: [COORD, GERENTE] });
   acao(m, adm, 'salvarAcao', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
-  acao(m, adm, 'salvarAcao', { acao: 'Cancelada', prazo: ontem, turno: 'A', responsaveisEmails: [COORD] });
-  acao(m, adm, 'cancelarAcao', { id: tela(m, adm, 'acoes').lista.find((a) => a.acao === 'Cancelada').id, motivo: 'x' });
+  const idCancelada = acao(m, adm, 'salvarAcao', { acao: 'Cancelada', prazo: ontem, turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+  acao(m, adm, 'cancelarAcao', { id: idCancelada, motivo: 'x' });
   acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Doca', prazo: '2026-12-01', turno: 'B', responsaveisEmails: [SUP_B], zona: 'Z3' });
   const bolinha = (s) => acao(m, s, 'pendencias').pendencias;
   const confere = (s, quem) => {
@@ -1819,11 +1823,14 @@ caso('bolinha do menu: o numero de cada modulo e o "Em aberto" do plano — por 
     return b;
   };
   const maria = entrar(m, COORD, '1234');
-  afirmar(confere(adm, 'admin').calendario.abertas === 3, 'admin: as 3 em aberto (a cancelada nao conta)');
+  // 21/10: o admin criou as quatro e so esta citado na cancelada (que nao conta) — a bolinha dele e zero
+  const ba = confere(adm, 'admin');
+  afirmar(ba.calendario.abertas === 0 && ba.limpeza.abertas === 0, 'admin: nenhuma em que esteja citado: ' + JSON.stringify(ba));
   const bm = confere(maria, 'maria');
   afirmar(bm.calendario.abertas === 2 && bm.calendario.atrasadas === 1 && !bm.limpeza, 'maria: so as dela, sem limpeza: ' + JSON.stringify(bm));
   afirmar(confere(entrar(m, SUP_B, '2222'), 'supervisor').limpeza.abertas === 1, 'supervisor: so a limpeza');
-  confere(entrar(m, GERENTE, '5555'), 'gerente');
+  const bg = confere(entrar(m, GERENTE, '5555'), 'gerente');
+  afirmar(bg.calendario.abertas === 2 && bg.calendario.atrasadas === 1 && bg.limpeza.abertas === 0, 'gerente: so as 2 em que esta citado: ' + JSON.stringify(bg));
   acao(m, maria, 'concluirAcao', { id: tela(m, maria, 'acoes').lista.find((a) => a.acao === 'Da Maria').id });
   afirmar(bolinha(maria).calendario.abertas === 1, 'depois de concluir: ' + JSON.stringify(bolinha(maria)));
   const carga = (html) => JSON.parse(/CARGA_INICIAL\s*=\s*(\{.*?\});/s.exec(html)[1].replace(/\\u002f/g, '/').replace(/\\u003c/g, '<'));
@@ -1864,7 +1871,7 @@ caso('comentarios: historico no Plano de Acao (andamento, depende de, concluir) 
 caso('historico das acoes: cada registro guarda quem fez (e-mail, nome do cadastro, funcao) — inclusive concluir, reabrir e cancelar', () => {
   const m = mundo();
   const adm = entrar(m, DONO, '4321');
-  acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
   const maria = entrar(m, COORD, '1234');
   let a = tela(m, maria, 'acoes', { situacao: 'TODAS' }).lista[0];
   acao(m, maria, 'comentarAcao', { id: a.id, texto: 'Comprei as lâmpadas', situacao: 'Em andamento', autor: 'falsificado@x.com', nome: 'Outro' });
@@ -1912,13 +1919,13 @@ const paginaPost = (m, campos) => cargaDe(ctx(m, 'computador.cd@bartofil.com.br'
 caso('comentarios: concluir, reabrir e cancelar SEM texto sao registros automaticos (o selo e o "Comentarios (N)" nao contam); com texto, sao de alguem', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const maria = entrar(m, COORD, '1234');
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Almoxarifado', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Almoxarifado', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, maria, 'concluirAcao', { id });
   acao(m, adm, 'reabrirAcao', { id });
   acao(m, adm, 'cancelarAcao', { id });
   const h = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((a) => a.id === id).comentarios;
   afirmar(h.length === 3 && h.every((c) => c.automatico === true), 'automaticos: ' + JSON.stringify(h.map((c) => [c.tipo, c.texto, c.automatico])));
-  const id2 = acao(m, adm, 'salvarAcao', { acao: 'Doca', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id2 = acao(m, adm, 'salvarAcao', { acao: 'Doca', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, maria, 'comentarAcao', { id: id2, texto: 'Ação concluída.' });
   acao(m, maria, 'concluirAcao', { id: id2, observacao: 'Feito com a manutenção' });
   acao(m, adm, 'reabrirAcao', { id: id2, motivo: 'Faltou a doca 4' });
@@ -1949,7 +1956,7 @@ caso('comentarios: os registros que a Limpeza antiga (LP_ACOES) escrevia sozinha
 caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail por marcado (o autor nao) com o comentario escapado e o link que abre a acao; o recado conta os avisados', () => {
   const { m } = mundoComMencoes();
   const ger = entrar(m, GERENTE, '5555');
-  const id = acao(m, ger, 'salvarAcao', { acao: 'Iluminação do Flow', descricao: 'Trocar as lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id = acao(m, ger, 'salvarAcao', { acao: 'Iluminação do Flow', descricao: 'Trocar as lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, GERENTE] }).id;
   const e0 = m.emails.length;
   const r = acao(m, ger, 'comentarAcao', { id, texto: '@Pedro Alves tem extintor <b>sobrando</b> & pronto?', situacao: 'Aguardando', depende: 'extintores do turno B',
     mencoes: [PEDRO, DONO, GERENTE, PEDRO.toUpperCase()] });
@@ -1966,7 +1973,8 @@ caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail p
   afirmar(/João Lima<\/b> \(Gerente\) marcou você num comentário do Plano de Ação/.test(mp.htmlBody) && /Trocar as lâmpadas/.test(mp.htmlBody) &&
     /extintores do turno B/.test(mp.htmlBody) && /Aguardando/.test(mp.htmlBody), 'corpo com a acao: ' + mp.htmlBody.slice(0, 300));
   afirmar(new RegExp('[?&]tela=acoes&acao=' + id + '$').test(linkDoEmail(mp)) && />Abrir a ação no GSL</.test(mp.htmlBody), 'link: ' + linkDoEmail(mp));
-  afirmar(/passou a acompanhar/.test(mp.htmlBody) && !/passou a acompanhar/.test(md.htmlBody), 'so quem nao via a acao recebe o "passou a acompanhar"');
+  // 21/10: o administrador tambem nao via a acao (nao estava citado) — os dois passam a acompanhar
+  afirmar(/passou a acompanhar/.test(mp.htmlBody) && /passou a acompanhar/.test(md.htmlBody), 'quem nao estava citado recebe o "passou a acompanhar"');
   const a = tela(m, ger, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
   afirmar(JSON.stringify(a.comentarios[0].mencoes) === JSON.stringify([{ email: PEDRO, nome: 'Pedro Alves' }, { email: DONO, nome: a.comentarios[0].mencoes[1].nome }]) &&
     a.marcados.map((x) => x.nome).join() === a.comentarios[0].mencoes.map((x) => x.nome).join(), 'nomes do servidor: ' + JSON.stringify([a.comentarios[0].mencoes, a.marcados]));
@@ -1982,7 +1990,7 @@ caso('marcar pessoa: grava MENCOES no comentario e MARCADOS na acao; um e-mail p
 caso('marcar pessoa: o e-mail guarda as linhas do comentario; o link leva a filial (tambem a principal); "Responder" vai para quem marcou e o texto pede a resposta pelo botao', () => {
   const { m } = mundoComMencoes();
   const ger = entrar(m, GERENTE, '5555');
-  const id = acao(m, ger, 'salvarAcao', { acao: 'Extintores', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id = acao(m, ger, 'salvarAcao', { acao: 'Extintores', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, GERENTE] }).id;
   const e0 = m.emails.length;
   acao(m, ger, 'comentarAcao', { id, texto: '@Pedro Alves preciso de:\n- 2 extintores\r\n- 1 mangueira <b>já</b>', mencoes: [PEDRO] });
   const mp = m.emails.slice(e0).find((e) => e.to === PEDRO);
@@ -2000,8 +2008,8 @@ caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordena
   acao(m, adm, 'salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador', codigo: 'SSA', paineis: { calendario: 'ATIVO' } });
   acao(m, adm, 'salvarUsuario', { email: 'davi@bartofil.com.br', nome: 'Davi Souza', perfil: 'COORDENADOR', turno: 'C', filiais: 'SSA', papel: 'Coord' });
   acao(m, adm, 'salvarUsuario', { email: 'ines@bartofil.com.br', nome: 'Inês Prado', perfil: 'COORDENADOR', turno: 'C', filiais: '*', papel: 'Coord', ativo: false });
-  const idC = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-  const idL = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro sem papel', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], zona: 'Z7' }).id;
+  const idC = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+  const idL = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro sem papel', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP, DONO], zona: 'Z7' }).id;
   const n0 = ctx(m).listar('COMENTARIOS').length, e0 = m.emails.length, d0 = m.arquivos.size;
   const recusa = (nome, id, mencoes) => erroDe(() => acao(m, adm, nome, { id, texto: 'Vejam isto', mencoes, fotos: [foto(1)] }));
   const casos = [
@@ -2023,7 +2031,7 @@ caso('marcar pessoa: mais de 10, ou quem nao abre o plano nesta filial (coordena
 caso('marcar pessoa: a marcacao so e conferida depois da acao e de quem comenta — id inventado, acao alheia ou cancelada nao viram consulta de quem tem cadastro', () => {
   const { m, adm } = mundoComMencoes();
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-  const cancelada = acao(m, adm, 'salvarAcao', { acao: 'Pintura', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const cancelada = acao(m, adm, 'salvarAcao', { acao: 'Pintura', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'cancelarAcao', { id: cancelada });
   const pedro = entrar(m, PEDRO, '2222'), maria = entrar(m, COORD, '1234');
   // a supervisora da limpeza nao abre este plano; o fulano nem tem cadastro: antes a recusa dizia os nomes
@@ -2035,7 +2043,7 @@ caso('marcar pessoa: a marcacao so e conferida depois da acao e de quem comenta 
 
 caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em aberto, bolinha e foto) e a responder — sem concluir nem mudar a situacao; "Sob sua responsabilidade" nao muda; editar a acao mantem os marcados', () => {
   const { m, adm } = mundoComMencoes();
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1)] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [foto(1)] }).id;
   const outra = acao(m, adm, 'salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
   const pedro = entrar(m, PEDRO, '2222');
   afirmar(!tela(m, pedro, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.id === id), 'antes da mencao o Pedro nao ve a acao da Maria');
@@ -2057,15 +2065,15 @@ caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em 
   const ult = depois.comentarios.slice(-1)[0];
   afirmar(ult.autor === PEDRO && ult.tipo === 'COMENTARIO' && !ult.situacao && !ult.depende, 'registro do marcado: ' + JSON.stringify(ult));
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
-  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD] });
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, DONO] });
   afirmar(ctx(m).obter('ACOES', id).MARCADOS === PEDRO && tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'editar a acao mantem o marcado');
-  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, PEDRO] });
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, PEDRO, DONO] });
   afirmar(!tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id).marcados.length, 'virou responsavel: sai de "Marcados" (sem repetir no cartao)');
 });
 
 caso('desmarcar (Editar a acao): a gestao tira quem foi marcado por engano — a pessoa deixa de ver e de comentar; ninguem entra por ali; tela antiga nao mexe; quem vira responsavel sai dos marcados e nao volta', () => {
   const { m, adm } = mundoComMencoes();
-  const base = { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] };
+  const base = { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] };
   const id = acao(m, adm, 'salvarAcao', base).id;
   const editar = (extra) => acao(m, adm, 'salvarAcao', Object.assign({ id }, base, extra));
   const marcados = () => ctx(m).obter('ACOES', id).MARCADOS;
@@ -2082,7 +2090,7 @@ caso('desmarcar (Editar a acao): a gestao tira quem foi marcado por engano — a
   afirmar(marcados() === CONSULTA, 'ninguem entra pela edicao: ' + marcados());
   const coord = entrar(m, COORD, '1234');
   afirmar(/nao pode executar|não pode/i.test(erroDe(() => acao(m, coord, 'salvarAcao', Object.assign({ id, desmarcados: [CONSULTA] }, base)))) && marcados() === CONSULTA, 'so a gestao edita');
-  editar({ responsaveisEmails: [COORD, CONSULTA] });
+  editar({ responsaveisEmails: [COORD, CONSULTA, DONO] });
   afirmar(!marcados(), 'virou responsavel: sai de MARCADOS — ' + marcados());
   editar({});
   const a = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
@@ -2091,7 +2099,7 @@ caso('desmarcar (Editar a acao): a gestao tira quem foi marcado por engano — a
 
 caso('marcar pessoa: com o painel do plano Oculto (so o administrador abre), os outros nao sao marcados — recusa com o nome, nada gravado nem enviado; continuam podendo ser responsaveis', () => {
   const { m, adm } = mundoComMencoes();
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, DONO] }).id;
   acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'OCULTO' });
   const abre = (e) => (tela(m, adm, 'acoes').pessoas.find((p) => p.email === e) || {}).abre;
   afirmar(abre(COORD) === false && abre(GERENTE) === false && abre(DONO) === true, 'abre: ' + JSON.stringify(tela(m, adm, 'acoes').pessoas.map((p) => [p.email, p.abre])));
@@ -2099,34 +2107,44 @@ caso('marcar pessoa: com o painel do plano Oculto (so o administrador abre), os 
   const e = erroDe(() => acao(m, adm, 'comentarAcao', { id, texto: '@Maria Souza confere?', mencoes: [COORD] }));
   afirmar(e.endsWith(': Não dá para marcar quem não abre o Plano de Ação nesta filial: Maria Souza.'), 'recusa: ' + e);
   afirmar(m.emails.length === e0 && ctx(m).listar('COMENTARIOS').length === n0 && !ctx(m).obter('ACOES', id).MARCADOS, 'nada gravado nem enviado');
-  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, COORD] });
-  afirmar(ctx(m).obter('ACOES', id).RESPONSAVEL_EMAIL === GERENTE + ',' + COORD, 'responsavel continua valendo com o painel Oculto');
+  acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, COORD, DONO] });
+  afirmar(ctx(m).obter('ACOES', id).RESPONSAVEL_EMAIL === GERENTE + ',' + COORD + ',' + DONO, 'responsavel continua valendo com o painel Oculto');
   acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'ATIVO' });
   afirmar(/1 pessoa marcada/.test(acao(m, adm, 'comentarAcao', { id, texto: '@Pedro Alves confere?', mencoes: [PEDRO] }).recado), 'painel Ativo: marca de novo');
 });
 
-caso('marcar pessoa: quem ja via tudo (gestao, CONSULTA) entra em MARCADOS sem o "passou a acompanhar"; a CONSULTA passa a responder so naquela acao; a lista de pessoas diz quem ja ve todas', () => {
+caso('marcar pessoa (21/10): a gestao e a CONSULTA nao veem nem comentam a acao em que nao estao citadas; marcadas, passam a ver so aquela (com o "passou a acompanhar") e a responder; a gestao marcada cuida dela; a lista de pessoas diz quem gere o plano', () => {
   const { m, adm } = mundoComMencoes();
   const id = acao(m, adm, 'salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
   const outra = acao(m, adm, 'salvarAcao', { acao: 'Outra', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-  const pessoas = tela(m, adm, 'acoes').pessoas;
-  const ve = (e) => (pessoas.find((p) => p.email === e) || {}).veTodas;
-  afirmar(ve(GERENTE) === true && ve(CONSULTA) === true && ve(DONO) === true && ve(PEDRO) === false && ve(COORD) === false, 'veTodas: ' + JSON.stringify(pessoas.map((p) => [p.email, p.veTodas])));
-  const carla = entrar(m, CONSULTA, '7777');
-  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'oi' }))), 'a CONSULTA nao comentava');
+  const maria = entrar(m, COORD, '1234');
+  const pessoas = tela(m, maria, 'acoes').pessoas;
+  const gere = (e) => (pessoas.find((p) => p.email === e) || {}).gere;
+  afirmar(gere(GERENTE) === true && gere(DONO) === true && gere(CONSULTA) === false && gere(PEDRO) === false && gere(COORD) === false &&
+    !pessoas.some((p) => 'veTodas' in p), 'gere: ' + JSON.stringify(pessoas.map((p) => [p.email, p.gere, p.veTodas])));
+  const carla = entrar(m, CONSULTA, '7777'), ger = entrar(m, GERENTE, '5555');
+  const ids = (s) => tela(m, s, 'acoes', { situacao: 'TODAS' }).lista.map((a) => a.id).join();
+  afirmar(ids(carla) === '' && ids(ger) === '', 'antes de marcar, nem a CONSULTA nem o gerente veem: ' + ids(carla) + ' / ' + ids(ger));
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'oi' }))), 'a CONSULTA nao comenta');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, ger, 'comentarAcao', { id, texto: 'oi' }))), 'nem o gerente (gere o plano, mas nao esta citado)');
   const e0 = m.emails.length;
-  acao(m, entrar(m, COORD, '1234'), 'comentarAcao', { id, texto: '@Carla Dias @João Lima confere na auditoria?', mencoes: [CONSULTA, GERENTE] });
+  acao(m, maria, 'comentarAcao', { id, texto: '@Carla Dias @João Lima confere na auditoria?', mencoes: [CONSULTA, GERENTE] });
   const mails = m.emails.slice(e0);
-  afirmar(mails.length === 2 && mails.every((e) => !/passou a acompanhar/.test(e.htmlBody)), 'sem "passou a acompanhar": ' + mails.map((e) => e.to).join());
+  afirmar(mails.length === 2 && mails.every((e) => /passou a acompanhar/.test(e.htmlBody)), 'os dois passam a acompanhar: ' + mails.map((e) => e.to).join());
   afirmar(ctx(m).obter('ACOES', id).MARCADOS === CONSULTA + ',' + GERENTE, 'MARCADOS: ' + ctx(m).obter('ACOES', id).MARCADOS);
+  afirmar(ids(carla) === id && ids(ger) === id, 'marcados, veem so aquela: ' + ids(carla) + ' / ' + ids(ger));
   afirmar(acao(m, carla, 'comentarAcao', { id, texto: 'Conferido' }).recado === 'Comentário registrado.', 'a CONSULTA responde');
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
+  // o gerente marcado gere o plano E ve a acao: muda a situacao e pode cancelar; a outra continua "nao existe" para ele
+  acao(m, ger, 'comentarAcao', { id, texto: 'Pedi a recarga', situacao: 'Aguardando', depende: 'empresa de extintores' });
+  afirmar(ctx(m).obter('ACOES', id).ANDAMENTO === 'Aguardando', 'o gerente marcado muda a situacao');
+  afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, ger, 'cancelarAcao', { id: outra }))), 'a outra: nao encontrada');
 });
 
 caso('marcar pessoa: o e-mail recusado nao desfaz o comentario — volta o avisoEmail (tambem pela reserva por POST); o recado conta so quem recebeu', () => {
   const { m, adm } = mundoComMencoes();
   acao(m, adm, 'salvarUsuario', { email: 'joana.invalido@bartofil.com.br', nome: 'Joana Prado', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   const r = acao(m, adm, 'comentarAcao', { id, texto: '@Joana Prado @Pedro Alves vejam', mencoes: ['joana.invalido@bartofil.com.br', PEDRO] });
   afirmar(/^Comentário registrado, mas o aviso por e-mail não saiu para: joana\.invalido@bartofil\.com\.br \(/.test(r.avisoEmail || ''), 'avisoEmail: ' + r.avisoEmail);
   afirmar(r.recado === 'Comentário registrado. 1 pessoa marcada foi avisada por e-mail.', 'recado: ' + r.recado);
@@ -2156,7 +2174,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
   afirmar(m.props.script.VERSAO_ESQUEMA === '8.10', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);
   afirmar(c2.obter('ACOES', id).MARCADOS === GERENTE && c2.listar('COMENTARIOS')[0].MENCOES === GERENTE, 'a mencao gravou');
@@ -2205,13 +2223,130 @@ caso('link do e-mail de mencao: ?tela=acoes&acao=ID volta como acaoDepois (so te
   afirmar(!paginaGet(m, { tela: 'acoes', acao: '<script>' }).acaoDepois && !paginaGet(m, { tela: 'acoes', acao: 'A'.repeat(41) }).acaoDepois, 'ID invalido');
   afirmar(!paginaGet(m, { acao: 'ACO-1A' }).acaoDepois, 'sem tela');
   // a acao do link pode estar concluida: o plano vem com todas, numa ida so
-  const id = acao(m, adm, 'salvarAcao', { acao: 'Concluída antes do clique', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+  const id = acao(m, adm, 'salvarAcao', { acao: 'Concluída antes do clique', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, DONO] }).id;
   acao(m, adm, 'concluirAcao', { id });
   const r = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '5555', '', '', '', 'acoes', '{"situacao":"TODAS"}').valor);
   afirmar(r.telaEmbutida && r.telaEmbutida.params.situacao === 'TODAS' && r.telaEmbutida.resposta.dados.lista.some((a) => a.id === id), 'entrar: ' + JSON.stringify(r.telaEmbutida && r.telaEmbutida.params));
   const pg = paginaPost(m, { email: GERENTE, pin: '5555', tela: 'acoes', p: '{"situacao":"TODAS"}' });
   afirmar(pg.entrada === 'APP' && pg.telaEmbutida && pg.telaEmbutida.params.situacao === 'TODAS' && pg.telaEmbutida.resposta.dados.lista.some((a) => a.id === id),
     'formulario da reserva: ' + JSON.stringify(pg.telaEmbutida && pg.telaEmbutida.params));
+});
+
+/* ------------------------------------------------------------------ */
+/* QUEM VE A ACAO (21/10): so quem esta citado nela                    */
+/* "as ações só devem aparecer pras pessoas que estão citadas na ação" */
+/* ------------------------------------------------------------------ */
+caso('quem ve a acao (21/10): ADMIN, GERENTE e CONSULTA nao citados nao veem nada dela — lista, filtros, Em aberto, bolinha, Gestao da Limpeza, foto, comentario e a tela do link; os citados veem; nos dois planos', () => {
+  const { m, adm } = mundoComMencoes();
+  const ger = entrar(m, GERENTE, '5555'), carla = entrar(m, CONSULTA, '7777');
+  const maria = entrar(m, COORD, '1234'), sup = entrar(m, SUP, '2222');
+  const ontem = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+  // criadas pelo admin, que nao fica citado: a do calendario e da Maria, a da limpeza e da Sueli
+  const idC = acao(m, adm, 'salvarAcao', { acao: 'Extintor XPTO vencido', descricao: 'Recarga ZZTOP', prazo: ontem, turno: 'A', responsaveisEmails: [COORD], fotos: [foto(1)] }).id;
+  const idL = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Banheiro QWERTY sem papel', descricao: 'Repor YUIOP', prazo: ontem, turno: 'B', responsaveisEmails: [SUP], zona: 'Z7', fotos: [foto(2)] }).id;
+  acao(m, maria, 'comentarAcao', { id: idC, texto: 'Comentario ASDFG da Maria', fotos: [foto(3)] });
+  acao(m, sup, 'comentarAcaoLimpeza', { id: idL, texto: 'Comentario HJKLC da Sueli', fotos: [foto(4)] });
+  const c = ctx(m);
+  const fotoC = JSON.parse(c.obter('ACOES', idC).ANEXOS)[0].id, fotoL = JSON.parse(c.obter('ACOES', idL).ANEXOS)[0].id;
+  const fotoCm = JSON.parse(c.listar('COMENTARIOS').find((x) => x.ACAO_ID === idC).ANEXOS)[0].id;
+  const segredos = /XPTO|ZZTOP|ASDFG|QWERTY|YUIOP|HJKLC/;
+  [['admin', adm], ['gerente', ger], ['consulta', carla]].forEach(([quem, s]) => {
+    [['TODAS', ''], ['ABERTAS', 'extintor'], ['ATRASADAS', '']].forEach(([situacao, busca]) => {
+      const d = tela(m, s, 'acoes', { situacao, busca });
+      afirmar(!d.lista.length && !segredos.test(JSON.stringify(d)), quem + ' › acoes ' + situacao + ': ' + JSON.stringify(d.lista.map((a) => a.acao)));
+      afirmar(d.contagens.abertas === 0 && d.contagens.atrasadas === 0, quem + ' › Em aberto: ' + JSON.stringify(d.contagens));
+    });
+    const l = tela(m, s, 'limpeza');
+    afirmar(!l.plano.lista.length && !segredos.test(JSON.stringify(l)) && l.plano.contagens.abertas === 0,
+      quem + ' › limpeza (Gestao e Plano de Acao): ' + JSON.stringify(l.plano.lista.map((a) => a.acao)));
+    const b = acao(m, s, 'pendencias').pendencias;
+    afirmar(b.calendario.abertas === 0 && b.limpeza.abertas === 0, quem + ' › bolinha: ' + JSON.stringify(b));
+    afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcao', { id: idC, arquivo: fotoC }))), quem + ' › foto da acao');
+    afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcao', { id: idC, arquivo: fotoCm }))), quem + ' › foto do comentario');
+    afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcaoLimpeza', { id: idL, arquivo: fotoL }))), quem + ' › foto da limpeza');
+    afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, s, 'comentarAcao', { id: idC, texto: 'oi' }))), quem + ' › comentar');
+    afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, s, 'comentarAcaoLimpeza', { id: idL, texto: 'oi' }))), quem + ' › comentar na limpeza');
+  });
+  // os citados veem tudo: a acao, o historico, as fotos, a bolinha
+  const dm = tela(m, maria, 'acoes', { situacao: 'TODAS' });
+  afirmar(dm.lista.length === 1 && dm.lista[0].id === idC && dm.lista[0].comentarios.length === 1 && dm.contagens.atrasadas === 1, 'a Maria ve a dela: ' + JSON.stringify(dm.contagens));
+  afirmar(acao(m, maria, 'fotoAcao', { id: idC, arquivo: fotoC }).dados === PNG_1x1 && acao(m, maria, 'fotoAcao', { id: idC, arquivo: fotoCm }).dados === PNG_1x1, 'a Maria ve as fotos');
+  afirmar(acao(m, maria, 'pendencias').pendencias.calendario.abertas === 1, 'bolinha da Maria');
+  const ls = tela(m, sup, 'limpeza').plano;
+  afirmar(ls.lista.length === 1 && ls.lista[0].id === idL && ls.contagens.abertas === 1 && acao(m, sup, 'fotoAcaoLimpeza', { id: idL, arquivo: fotoL }).dados === PNG_1x1, 'a Sueli ve a dela');
+  // numeros sem acao nenhuma: quem gere o plano ve o ranking e o total do plano inteiro; os outros, so os das acoes que veem
+  const da = tela(m, adm, 'acoes', { situacao: 'TODAS' });
+  afirmar(da.geral && da.geral.abertas === 1 && da.geral.atrasadas === 1 && da.ranking.length === 1 && da.ranking[0].turno === 'A' && da.ranking[0].total === 1,
+    'admin: ranking e total do plano inteiro: ' + JSON.stringify([da.geral, da.ranking]));
+  const lg = tela(m, ger, 'limpeza').plano;
+  afirmar(lg.geral && lg.geral.abertas === 1 && lg.geral.atrasadas === 1 && lg.ranking.length === 1 && lg.ranking[0].turno === 'B', 'gerente na Limpeza: o plano inteiro em numeros: ' + JSON.stringify([lg.geral, lg.ranking]));
+  const dc = tela(m, carla, 'acoes', { situacao: 'TODAS' });
+  afirmar(dc.geral === null && !dc.ranking.length, 'consulta: sem os numeros do plano inteiro');
+  afirmar(dm.geral === null && dm.ranking.length === 1 && dm.ranking[0].total === 1, 'Maria: o ranking das que ve');
+  // a tela que o link do e-mail abre (?tela=acoes&acao=ID) e a mesma lista: para quem nao esta citado, a acao nao vem
+  const r = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '5555', '', '', '', 'acoes', '{"situacao":"TODAS"}').valor);
+  afirmar(r.telaEmbutida && !r.telaEmbutida.resposta.dados.lista.length && !segredos.test(JSON.stringify(r)), 'link do e-mail: a tela embutida nao traz a acao');
+  const rm = JSON.parse(chamar(m, COORD, 'entrar', COORD, '1234', '', '', '', 'acoes', '{"situacao":"TODAS"}').valor);
+  afirmar(rm.telaEmbutida && rm.telaEmbutida.resposta.dados.lista.some((a) => a.id === idC), 'link do e-mail: para a Maria, a acao vem');
+});
+
+caso('quem ve a acao (21/10): quem cria sem ser responsavel recebe o recado de para quem ela aparece e a perde (tambem editando, na Limpeza, pela reserva por POST e com o e-mail que nao saiu); a gestao nao edita, conclui, reabre, cancela, exclui nem tira foto da acao em que nao esta citada', () => {
+  const { m, adm } = mundoComMencoes();
+  const ger = entrar(m, GERENTE, '5555');
+  const r1 = acao(m, ger, 'salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, PEDRO], fotos: [foto(1)] });
+  afirmar(r1.recado === 'Ação criada. 1 foto(s) anexada(s). Ela aparece só para quem está citado nela: Maria Souza e Pedro Alves.', 'recado: ' + r1.recado);
+  afirmar(!tela(m, ger, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.id === r1.id), 'saiu da lista de quem criou');
+  afirmar(tela(m, entrar(m, PEDRO, '2222'), 'acoes').lista.some((a) => a.id === r1.id), 'o Pedro ve');
+  // criando como um dos responsaveis, nada muda; editando para fora, o recado avisa e ela some
+  const r2 = acao(m, ger, 'salvarAcao', { acao: 'Doca 4', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE, COORD] });
+  afirmar(r2.recado === 'Ação criada.' && tela(m, ger, 'acoes').lista.some((a) => a.id === r2.id), 'citado: ' + r2.recado);
+  const r3 = acao(m, ger, 'salvarAcao', { id: r2.id, acao: 'Doca 4', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+  afirmar(r3.recado === 'Ação atualizada. Você não está citado nela: agora ela aparece só para Maria Souza.', 'editar para fora: ' + r3.recado);
+  afirmar(!tela(m, ger, 'acoes', { situacao: 'TODAS' }).lista.some((a) => a.id === r2.id), 'e some');
+  // a acao que a gestao nao ve "nao existe" para ela: nada muda
+  const foto1 = JSON.parse(ctx(m).obter('ACOES', r1.id).ANEXOS)[0].id;
+  const antes = JSON.stringify(ctx(m).obter('ACOES', r1.id)), n0 = ctx(m).listar('COMENTARIOS').length;
+  [['salvarAcao', { id: r1.id, acao: 'Sequestrada', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }],
+   ['reabrirAcao', { id: r1.id }], ['cancelarAcao', { id: r1.id, motivo: 'x' }], ['excluirAcao', { id: r1.id }],
+   ['removerFotoAcao', { id: r1.id, arquivo: foto1 }], ['converterFoto', { foto: heic(), plano: 'CALENDARIO', uso: 'ac', id: r1.id }]
+  ].forEach(([nome, p]) => { const e = erroDe(() => acao(m, ger, nome, p)); afirmar(/Ação não encontrada/.test(e), 'gerente › ' + nome + ': ' + e); });
+  const ec = erroDe(() => acao(m, ger, 'concluirAcao', { id: r1.id }));
+  afirmar(/Só o responsável pela ação a conclui\.$/.test(ec) && !/Maria|Pedro/.test(ec), 'concluir, sem dizer de quem e: ' + ec);
+  afirmar(JSON.stringify(ctx(m).obter('ACOES', r1.id)) === antes && ctx(m).listar('COMENTARIOS').length === n0 && !m.arquivos.get(foto1).lixo, 'nada mudou');
+  // Limpeza: a mesma regra
+  const rl = acao(m, ger, 'salvarAcaoLimpeza', { acao: 'Lixeira da doca', prazo: '2026-12-01', turno: 'B', responsaveisEmails: [SUP], zona: 'Z3' });
+  afirmar(rl.recado === 'Ação criada. Ela aparece só para quem está citado nela: Sueli Ramos.', 'limpeza: ' + rl.recado);
+  afirmar(!tela(m, ger, 'limpeza').plano.lista.some((a) => a.id === rl.id), 'limpeza: saiu da lista de quem criou');
+  afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, ger, 'cancelarAcaoLimpeza', { id: rl.id, motivo: 'x' }))), 'limpeza: nao cancela');
+  // pela reserva (canal barrado): o mesmo recado chega na pagina, e a tela que volta nao traz a acao
+  const pg = paginaPost(m, { t: ger.t, filial: ger.f, tela: 'acoes', acao: 'salvarAcao', idem: '21212121-2222-4333-8444-555555555555',
+    ap: JSON.stringify({ acao: 'Pela reserva', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }) });
+  afirmar(pg.resultadoAcao && pg.resultadoAcao.ok && pg.resultadoAcao.recado === 'Ação criada. Ela aparece só para quem está citado nela: Maria Souza.' &&
+    !pg.telaEmbutida.resposta.dados.lista.some((a) => a.acao === 'Pela reserva'), 'pela reserva: ' + JSON.stringify(pg.resultadoAcao));
+  // o e-mail que nao saiu: o aviso (que a tela mostra no lugar do recado) tambem diz para quem a acao aparece
+  acao(m, adm, 'salvarUsuario', { email: 'joana.invalido@bartofil.com.br', nome: 'Joana Prado', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+  const rj = acao(m, ger, 'salvarAcao', { acao: 'Com e-mail recusado', prazo: '2026-12-01', turno: 'A', responsaveisEmails: ['joana.invalido@bartofil.com.br'] });
+  afirmar(/^Ação salva, mas o aviso por e-mail não saiu para: joana\.invalido@bartofil\.com\.br \(.*\) Ela aparece só para quem está citado nela: Joana Prado\.$/.test(rj.avisoEmail || ''), 'avisoEmail: ' + rj.avisoEmail);
+});
+
+caso('quem ve a acao (21/10): a acao sem responsavel com e-mail (a da planilha antiga da limpeza) fica com quem gere o plano e com quem for marcado nela; escolhido o responsavel, vale a regra', () => {
+  const { m, adm } = mundoComMencoes();
+  const ger = entrar(m, GERENTE, '5555'), sup = entrar(m, SUP, '2222'), carla = entrar(m, CONSULTA, '7777');
+  const r0 = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Piso com óleo', prazo: '2026-12-01', turno: 'A', responsavel: 'Equipe do turno', zona: 'Z2' });
+  afirmar(r0.recado === 'Ação criada.', 'sem responsavel com e-mail, a gestao continua vendo: ' + r0.recado);
+  const id = r0.id;
+  const ve = (s) => tela(m, s, 'limpeza').plano.lista.some((a) => a.id === id);
+  afirmar(ve(adm) && ve(ger) && ve(sup) && !ve(carla), 'a gestao do plano ve; a consulta nao');
+  afirmar(acao(m, sup, 'pendencias').pendencias.limpeza.abertas === 1 && acao(m, carla, 'pendencias').pendencias.limpeza.abertas === 0, 'bolinha');
+  const e0 = m.emails.length;
+  acao(m, sup, 'comentarAcaoLimpeza', { id, texto: '@Carla Dias @João Lima vejam', mencoes: [CONSULTA, GERENTE] });
+  const mails = m.emails.slice(e0), para = (e) => mails.find((x) => x.to === e) || {};
+  afirmar(/passou a acompanhar/.test(para(CONSULTA).htmlBody) && !/passou a acompanhar/.test(para(GERENTE).htmlBody || 'x'), 'so a consulta passou a acompanhar (o gerente ja via)');
+  afirmar(ve(carla) && ve(adm) && ve(sup), 'marcada, a consulta passa a ver; a gestao continua vendo');
+  // a gestao escolhe o responsavel sem ficar entre eles: o recado diz quem esta citado e a acao sai da lista dela
+  const r = acao(m, adm, 'salvarAcaoLimpeza', { id, acao: 'Piso com óleo', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [SUP], zona: 'Z2' });
+  afirmar(r.recado === 'Ação atualizada. Você não está citado nela: agora ela aparece só para Sueli Ramos, Carla Dias e João Lima.', 'recado: ' + r.recado);
+  afirmar(!ve(adm) && ve(sup) && ve(carla) && ve(ger), 'agora so os citados (a Sueli responsavel; a Carla e o João marcados)');
 });
 
 /* ------------------------------------------------------------------ */

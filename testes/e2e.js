@@ -583,7 +583,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     // 19/10: o "novo" do selo de comentario fica neste aparelho — so com IDs (da acao e do comentario)
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
     dono('comentarAcao', { id, texto: 'Lâmpadas compradas' });
     const aba = await abrirAba(s, GERAL);
     await entrar(aba, COORD, '1234', true);
@@ -2007,12 +2007,13 @@ async function rodar() {
     const dono = pelaPorta(s, DONO, DONO, '4321');
     const maria = pelaPorta(s, GERAL, COORD, '1234');
     const gerente = pelaPorta(s, GERAL, GERENTE, '5555');
-    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-    dono('salvarAcao', { acao: 'Pintura da faixa de pedestres', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD] });
-    const a3 = dono('salvarAcao', { acao: 'Organizar o almoxarifado', prazo: '2026-11-10', turno: 'A', responsaveisEmails: [COORD] }).id;
+    // 21/10: so quem esta citado ve a acao — o dono, que olha a lista, fica entre os responsaveis
+    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+    dono('salvarAcao', { acao: 'Pintura da faixa de pedestres', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, DONO] });
+    const a3 = dono('salvarAcao', { acao: 'Organizar o almoxarifado', prazo: '2026-11-10', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
     maria('comentarAcao', { id: a1, texto: 'Lâmpadas compradas, aguardando a manutenção', situacao: 'Aguardando', depende: 'manutenção' });
     maria('concluirAcao', { id: a3 });                                  // so o registro automatico "Ação concluída."
-    const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [GERENTE] }).id;
+    const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [GERENTE, DONO] }).id;
     gerente('comentarAcaoLimpeza', { id: l1, texto: 'Papel acabou no estoque, pedi compra' });
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321');
@@ -2054,9 +2055,10 @@ async function rodar() {
   await cenario('plano de acao: selos — "novo" sai quando eu respondo (tambem de outro aparelho); o leitor de tela ouve "2 comentários, com comentário novo"; "@ você" nao fica na cancelada; sem localStorage, abrir o historico tira o "novo" ate recarregar', async () => {
     const s = await subir(); instalarComPessoas(s);
     const dono = pelaPorta(s, DONO, DONO, '4321'), joao = pelaPorta(s, GERAL, GERENTE, '5555'), maria = pelaPorta(s, GERAL, COORD, '1234');
-    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-    const a2 = dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD] }).id;
-    const a3 = dono('salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-03', turno: 'A', responsaveisEmails: [GERENTE] }).id;
+    // 21/10: so quem esta citado comenta — o João junto com a Maria; o dono na dos extintores
+    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, GERENTE] }).id;
+    const a2 = dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD, GERENTE] }).id;
+    const a3 = dono('salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-03', turno: 'A', responsaveisEmails: [GERENTE, DONO] }).id;
     joao('comentarAcao', { id: a1, texto: 'Comprei as lâmpadas' });
     joao('comentarAcao', { id: a1, texto: 'A manutenção vem quinta' });
     joao('comentarAcao', { id: a2, texto: 'Maria, a tinta chegou' });
@@ -2100,7 +2102,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321');
     await esperarTela(aba, ['aplicacao']);
@@ -2154,7 +2156,8 @@ async function rodar() {
     const mails = s.mundo.emails.slice(antes);
     const mp = mails.find((m) => m.to === PEDRO), mg = mails.find((m) => m.to === GERENTE);
     afirmar(mails.length === 2 && mp && mg && /marcou você numa ação: Iluminação do Flow$/.test(mp.subject), 'um e-mail para cada marcado: ' + mails.map((m) => m.to + ' | ' + m.subject).join(' ;; '));
-    afirmar(/passou a acompanhar/.test(mp.htmlBody) && !/passou a acompanhar/.test(mg.htmlBody), 'so o Pedro (que nao via a acao) passou a acompanhar');
+    // 21/10: o gerente tambem nao via a acao (nao estava citado) — os dois passam a acompanhar
+    afirmar(/passou a acompanhar/.test(mp.htmlBody) && /passou a acompanhar/.test(mg.htmlBody), 'quem nao estava citado passou a acompanhar');
     // o historico destaca quem foi marcado; o cartao diz quem esta marcado
     await f.waitForSelector('.cartao-acao button:has-text("Comentários (1)")', { timeout: 15000 });
     const card = await f.evaluate(() => document.querySelector('.cartao-acao .acao-meta').textContent.replace(/\s+/g, ' '));
@@ -2179,7 +2182,7 @@ async function rodar() {
       .forEach(([email, nome, turno]) => cadastrar(s, email, nome, 'COORDENADOR', turno, 'Coordenador'));
     cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321');
     await esperarTela(aba, ['aplicacao']);
@@ -2315,8 +2318,8 @@ async function rodar() {
     cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
     cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-    dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD] });
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+    dono('salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-02', turno: 'A', responsaveisEmails: [COORD, DONO] });
     dono('comentarAcao', { id, texto: '@Pedro Alves @Carla Dias vejam', mencoes: [PEDRO, CONSULTA] });
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321');
@@ -2346,7 +2349,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     cadastrar(s, 'bia.admin@bartofil.com.br', 'Bia Admin', 'ADMIN', '', 'Administradora');
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
     dono('alterarPainel', { codigo: 'FSA', painel: 'calendario', estado: 'OCULTO' });
     const aba = await abrirAba(s, DONO);
     await entrar(aba, DONO, '4321');
@@ -2372,10 +2375,11 @@ async function rodar() {
     cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
     criarPin(s, GERAL, PEDRO, '2345'); criarPin(s, GERAL, CONSULTA, '7777');
     const dono = pelaPorta(s, DONO, DONO, '4321'), maria = pelaPorta(s, GERAL, COORD, '1234');
-    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-    const a2 = dono('salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
-    const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [GERENTE] }).id;
-    const l2 = dono('salvarAcaoLimpeza', { acao: 'Lixeira quebrada', prazo: '2026-12-01', turno: 'A', zona: 'Z2', responsaveisEmails: [GERENTE] }).id;
+    // 21/10: so quem esta citado comenta (e marca) — o dono fica entre os responsaveis
+    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+    const a2 = dono('salvarAcao', { acao: 'Extintores vencidos', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+    const l1 = dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [GERENTE, DONO] }).id;
+    const l2 = dono('salvarAcaoLimpeza', { acao: 'Lixeira quebrada', prazo: '2026-12-01', turno: 'A', zona: 'Z2', responsaveisEmails: [GERENTE, DONO] }).id;
     dono('comentarAcao', { id: a1, texto: '@Pedro Alves tem extintor sobrando?', mencoes: [PEDRO] });
     dono('comentarAcao', { id: a2, texto: '@Pedro Alves confere a validade?', mencoes: [PEDRO] });
     dono('comentarAcaoLimpeza', { id: l1, texto: '@Carla Dias confere na auditoria?', mencoes: [CONSULTA] });
@@ -2469,6 +2473,56 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  /*
+   * QUEM VE A ACAO (21/10) — "as ações só devem aparecer pras pessoas que estão citadas na ação".
+   * O gerente gere o plano, mas nao esta citado em nada: nem o link do e-mail, nem a lista, nem a
+   * bolinha, nem a Gestao da Limpeza mostram as acoes dos outros (so os numeros do plano inteiro).
+   * Criando sem ficar entre os responsaveis, o recado diz para quem a acao aparece.
+   */
+  await cenario('plano de acao — quem ve (21/10): o gerente nao citado so ve o aviso no link de mencao encaminhado, nenhuma bolinha e a Gestao da limpeza sem a acao (so o total do plano); criar sem ser responsavel mostra o recado e a acao sai da lista', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, GERENTE, '5555');
+    const a1 = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
+    dono('comentarAcao', { id: a1, texto: '@Pedro Alves tem extintor sobrando?', mencoes: [PEDRO] });
+    dono('salvarAcaoLimpeza', { acao: 'Banheiro da central sem papel', prazo: '2026-12-01', turno: 'A', zona: 'Z7', responsaveisEmails: [DONO] });
+    const q1 = linkDaMencao(s, PEDRO, /Iluminação/);
+    // (1) o link do e-mail do Pedro aberto pelo gerente: ele nao esta citado — so o aviso, sem janela nem cartao
+    const aba = await abrirAba(s, GERAL, { query: q1 });
+    await entrar(aba, GERENTE, '5555');
+    const f = await frame(aba);
+    await f.waitForFunction(() => el('recado').textContent === 'Esta ação não está mais disponível para você.', null, { timeout: 20000 });
+    const pag = await f.evaluate(() => ({ janela: !el('janela').classList.contains('oculto'), pagina: paginaAtual,
+      cartoes: document.querySelectorAll('.cartao-acao').length, texto: el('pagina').innerText.replace(/\s+/g, ' ') }));
+    afirmar(!pag.janela && pag.pagina === 'acoes' && !pag.cartoes && !/Iluminação/.test(pag.texto) && /No plano inteiro: 1 em aberto/.test(pag.texto) &&
+      /Aparecem aqui só as ações em que você está citado/.test(pag.texto), 'o link: ' + JSON.stringify(pag).slice(0, 500));
+    // (2) o menu: nenhuma bolinha — nada em aberto em que ele esteja citado
+    await f.evaluate(() => abrirModulos());
+    await f.waitForFunction(() => paginaAtual === 'modulos' && PENDENCIAS && PENDENCIAS.modulos && PENDENCIAS.modulos.limpeza && PENDENCIAS.modulos.calendario, null, { timeout: 15000 });
+    const bol = await f.evaluate(() => ({ cal: PENDENCIAS.modulos.calendario.abertas, lp: PENDENCIAS.modulos.limpeza.abertas, bolinhas: document.querySelectorAll('.holo-bolinha').length }));
+    afirmar(bol.cal === 0 && bol.lp === 0 && !bol.bolinhas, 'sem bolinha: ' + JSON.stringify(bol));
+    // (3) a Gestao da limpeza: a acao do dono nao aparece — so o total do plano inteiro
+    await f.evaluate(() => { esquecerTelas(); abrir('limpeza'); });
+    await f.waitForFunction(() => paginaAtual === 'limpeza' && !!document.querySelector('#conteudo-lp .kpi'), null, { timeout: 15000 });
+    const gestao = (await f.evaluate(() => el('conteudo-lp').innerText)).replace(/\s+/g, ' ');
+    afirmar(!/Banheiro da central/.test(gestao) && /1 no plano inteiro/.test(gestao) && /Nenhuma ação em aberto em que você esteja citado \(o plano tem 1\)/.test(gestao), 'Gestao: ' + gestao.slice(0, 500));
+    // (4) criar pela tela sem ficar entre os responsaveis: o formulario avisa, o recado diz para quem ela aparece e ela nao entra na lista
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes', { situacao: 'TODAS' }); });
+    await f.waitForFunction(paginaPronta, 'acoes', { timeout: 15000 });
+    await f.evaluate(() => formAcao());
+    afirmar(/A ação aparece só para quem está citado nela/.test(await f.evaluate(() => el('janela').innerText)), 'o formulario avisa');
+    await f.fill('#ac-acao', 'Pintura da faixa');
+    await f.fill('#ac-prazo', '2026-12-01');
+    await f.check('.ac-resp[value="' + COORD + '"]');
+    const recado = await recadoDe(f, () => f.click('#janela-rodape .botao >> text=Criar ação'));
+    afirmar(recado === 'Ação criada. Ela aparece só para quem está citado nela: Maria Souza.', 'recado: ' + recado);
+    await f.waitForFunction(() => paginaAtual === 'acoes' && DADOS && DADOS.geral && DADOS.geral.abertas === 2, null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => !document.querySelector('.cartao-acao') && !DADOS.lista.length), 'a acao nao entra na lista do gerente (o plano tem 2 em aberto)');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('implantacao pela metade: App.html de antes com o Paineis.html desta versao — a Limpeza CD abre (Gestao e Plano), so sem o selo', async () => {
     const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
     let velho;
@@ -2501,7 +2555,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     const dono = pelaPorta(s, DONO, DONO, '4321');
     criarPin(s, GERAL, COORD, '1234');
-    const id = dono('salvarAcao', { acao: 'Iluminação do Flow — trocar as lâmpadas queimadas do corredor 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+    const id = dono('salvarAcao', { acao: 'Iluminação do Flow — trocar as lâmpadas queimadas do corredor 3', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
     dono('comentarAcao', { id, texto: '@Maria Souza consegue até sexta? A auditoria é segunda.', mencoes: [COORD] });
     dono('salvarAcao', { acao: 'Pintura', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD] });
     const contexto = await navegador.newContext({ viewport: { width: 390, height: 844 } });
@@ -2545,7 +2599,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     cadastrar(s, PEDRO, 'Pedro Alves', 'COORDENADOR', 'B', 'Coordenador');
     const dono = pelaPorta(s, DONO, DONO, '4321');
-    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] });
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] });
     const contexto = await navegador.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
     const aba = await abrirAba(s, DONO, { contexto });
     await entrar(aba, DONO, '4321');

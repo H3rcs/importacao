@@ -77,6 +77,58 @@ function prepararAssiduidade(s) {
 
 function repetidas(lista) { return lista.filter((d, i) => lista.indexOf(d) !== i); }
 
+/*
+ * RELATORIOS NAS CORES DA BARTOFIL (21/10). O .xlsx baixado: cada parte e
+ * XML bem formado (o DOMParser do proprio Chromium confere), os count="" do
+ * styles.xml batem com os itens e as cores da marca estao la (azul no
+ * cabecalho com texto branco, filete verde, tarja amarela, zebra, titulo azul).
+ * Devolve { caminho no zip: texto } para o cenario conferir as abas.
+ */
+async function conferirXlsxDaMarca(aba, caminho) {
+  const cp = require('child_process');
+  const nomes = cp.execSync('unzip -Z1 "' + caminho + '"').toString().split('\n').filter(Boolean);
+  const partes = {};
+  nomes.forEach((n) => { partes[n] = cp.execSync('unzip -p "' + caminho + '" "' + n.replace(/[[\]]/g, '\\$&') + '"').toString(); });
+  afirmar(['[Content_Types].xml', 'xl/workbook.xml', 'xl/styles.xml', 'xl/worksheets/sheet1.xml'].every((n) => partes[n]), 'partes do xlsx: ' + nomes.join());
+  for (const n of nomes) {
+    const erro = await aba.page.evaluate((x) => {
+      const e = new DOMParser().parseFromString(x, 'application/xml').getElementsByTagName('parsererror')[0];
+      return e ? e.textContent : '';
+    }, partes[n]);
+    afirmar(!erro, 'xlsx: ' + n + ' nao e XML bem formado: ' + erro);
+  }
+  const est = partes['xl/styles.xml'];
+  [['fonts', '<font>'], ['fills', '<fill>'], ['borders', '<border>'], ['cellXfs', '<xf ']].forEach(([tag, filho]) => {
+    const m = est.match(new RegExp('<' + tag + ' count="(\\d+)">([\\s\\S]*?)</' + tag + '>'));
+    afirmar(m && Number(m[1]) === m[2].split(filho).length - 1, 'styles.xml: count de ' + tag + ' nao bate: ' + (m ? m[1] : 'sem ' + tag));
+  });
+  afirmar(/<fgColor rgb="FF111785"\/>/.test(est) && /<b\/><sz val="11"\/><color rgb="FFFFFFFF"\/>/.test(est) &&
+    /<bottom style="medium"><color rgb="FF01973A"\/><\/bottom>/.test(est) && /<fgColor rgb="FFFFEE03"\/>/.test(est) &&
+    /<fgColor rgb="FFF3F5FA"\/>/.test(est) && /<b\/><sz val="16"\/><color rgb="FF111785"\/>/.test(est), 'styles.xml sem as cores da Bartofil: ' + est.slice(0, 500));
+  return partes;
+}
+
+/* A janela do relatorio em PDF nas cores da Bartofil: logo, titulo azul, tarja, cabecalho de tabela azul e o rodape. */
+async function conferirPdfDaMarca(janela) {
+  await janela.waitForFunction(() => { const l = document.querySelector('.rel-cab img.logo'); return !l || l.complete; }, null, { timeout: 10000 });
+  const m = await janela.evaluate(() => {
+    const cs = (sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e) : {}; };
+    const logo = document.querySelector('.rel-cab img.logo');
+    return {
+      logo: logo ? logo.getAttribute('src').slice(0, 22) : '', carregou: !!(logo && logo.naturalWidth > 100),
+      h1: cs('.rel-cab h1').color, th: cs('table:not(.rel-pagina) th').backgroundColor, thTexto: cs('table:not(.rel-pagina) th').color,
+      tarja: Array.from(document.querySelectorAll('.rel-cab + .rel-tarja i')).map((i) => getComputedStyle(i).backgroundColor).join(' '),
+      rodape: ((document.querySelector('.rel-rod') || {}).textContent || '').replace(/\s+/g, ' ').trim(),
+      ajuste: getComputedStyle(document.body).getPropertyValue('-webkit-print-color-adjust')
+    };
+  });
+  afirmar(m.logo === 'data:image/png;base64,' && m.carregou, 'logo da Bartofil no relatorio: ' + JSON.stringify(m).slice(0, 300));
+  afirmar(m.h1 === 'rgb(17, 23, 133)' && m.th === 'rgb(17, 23, 133)' && m.thTexto === 'rgb(255, 255, 255)', 'titulo e cabecalho de tabela no azul: ' + JSON.stringify(m));
+  afirmar(m.tarja === 'rgb(17, 23, 133) rgb(1, 151, 58) rgb(255, 238, 3)', 'tarja azul/verde/amarela: ' + m.tarja);
+  afirmar(/^GSL Bartofil · .+ · gerado em \d\d\/\d\d\/\d{4}/.test(m.rodape), 'rodape: ' + m.rodape);
+  afirmar(m.ajuste === 'exact', 'cores na impressao (print-color-adjust): ' + m.ajuste);
+}
+
 /* Uma "aba" com uma conta Google. Devolve page e o frame do GSL. */
 async function abrirAba(s, conta, extras) {
   const contexto = extras && extras.contexto ? extras.contexto : await navegador.newContext();
@@ -1873,9 +1925,19 @@ async function rodar() {
     const lista = require('child_process').execSync('unzip -l "' + caminho + '"').toString();
     const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet2.xml').toString();
     if (process.env.GUARDAR_XLSX) require('fs').copyFileSync(caminho, process.env.GUARDAR_XLSX);
+    const partes = await conferirXlsxDaMarca(aba, caminho);
     require('fs').unlinkSync(caminho);
     afirmar(/xl\/workbook.xml/.test(lista) && /sheet2.xml/.test(lista), 'zip: ' + lista);
     afirmar(/08:30/.test(folha) && /<v>960<\/v>/.test(folha), 'planilha: ' + folha.slice(0, 300));
+    // nas cores da Bartofil: titulo (s=1), tarja verde/amarela (s=8/9), cabecalho azul (s=3) congelado e com filtro, numero a direita (s=5/7), zebra
+    afirmar(/<row r="1" ht="26" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">Folha de leituras — /.test(folha) &&
+      /<row r="3" ht="5" customHeight="1"><c r="A3" s="8"\/>.*<c r="L3" s="9"\/><\/row>/.test(folha) &&
+      /<c r="A4" s="3" t="inlineStr"><is><t xml:space="preserve">Dia<\/t>/.test(folha) && /<c r="L4" s="3" t="inlineStr">/.test(folha) &&
+      /<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"\/>/.test(folha) && /<autoFilter ref="A4:L25"\/>/.test(folha) &&
+      /<c r="J\d+" s="[57]"><v>960<\/v><\/c>/.test(folha) && / s="6"/.test(folha) && / s="7"/.test(folha), 'planilha nas cores da Bartofil: ' + folha.slice(0, 900));
+    afirmar(/<autoFilter ref="A4:G5"\/>/.test(partes['xl/worksheets/sheet1.xml']) &&
+      /<definedName name="_xlnm\._FilterDatabase" localSheetId="1" hidden="1">'NB-01 [^<']+'!\$A\$4:\$L\$25<\/definedName>/.test(partes['xl/workbook.xml']),
+      'filtro do Excel: ' + partes['xl/workbook.xml']);
     // PDF (janela de impressao)
     const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
     await janela.waitForLoadState();
@@ -1883,7 +1945,13 @@ async function rodar() {
     afirmar(/Folha de leituras/.test(texto) && /08:30/.test(texto) && /ENTRADA/.test(texto) && /SAÍDA/.test(texto), 'pdf: ' + texto.slice(0, 200));
     const linhasFolha = await janela.evaluate(() => document.querySelectorAll('table.nb-folha-pdf tbody tr').length);
     afirmar(linhasFolha === 21, 'folha com 7 dias x 3 leituras: ' + linhasFolha);
+    await conferirPdfDaMarca(janela);
+    // entrada no azul e saida no verde da marca (identidade, nao alerta)
+    const grupos = await janela.evaluate(() => ['th.g-en', 'th.g-sa', 'th.en', 'th.sa'].map((s) => getComputedStyle(document.querySelector('.nb-folha-pdf ' + s)).backgroundColor).join(' '));
+    afirmar(grupos === 'rgb(17, 23, 133) rgb(1, 151, 58) rgb(231, 234, 254) rgb(217, 245, 230)', 'entrada/saida nas cores da marca: ' + grupos);
     if (process.env.FOTO_PDF) await janela.screenshot({ path: process.env.FOTO_PDF, fullPage: true });
+    // o PDF como o Chrome imprime, SEM "graficos de plano de fundo": as cores saem pelo print-color-adjust
+    if (process.env.GUARDAR_PDF) await janela.pdf({ path: process.env.GUARDAR_PDF, preferCSSPageSize: true });
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });
@@ -1934,11 +2002,43 @@ async function rodar() {
     const caminho = require('path').join(require('os').tmpdir(), 'gsl-ti-' + Date.now() + '.xlsx');
     await down.saveAs(caminho);
     const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet1.xml').toString();
+    if (process.env.GUARDAR_XLSX) require('fs').copyFileSync(caminho, process.env.GUARDAR_XLSX);
+    const partes = await conferirXlsxDaMarca(aba, caminho);
     require('fs').unlinkSync(caminho);
     afirmar(/Mouse/.test(folha) && /Estoque ideal/.test(folha), 'planilha do estoque');
+    // titulo azul, cabecalho azul congelado com filtro e a situacao no tom do chip da tela (Normal = verde, s=11)
+    afirmar(/<c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">Estoque de TI — /.test(folha) && /<c r="K4" s="3" t="inlineStr"><is><t xml:space="preserve">Situação<\/t>/.test(folha) &&
+      /<c r="K5" s="11" t="inlineStr"><is><t xml:space="preserve">Normal<\/t>/.test(folha) && /<pane ySplit="4" /.test(folha) && /<autoFilter ref="A4:L5"\/>/.test(folha) &&
+      /<c r="A4" s="3"/.test(partes['xl/worksheets/sheet2.xml']), 'estoque nas cores da Bartofil: ' + folha.slice(0, 900));
+    /*
+     * O pnBaixarXlsx com o que as outras telas podem mandar: celula { v, tom } (tom desconhecido sai normal),
+     * duas tabelas na aba (sem filtro, congela a 1a), aba sem titulo (cabecalho na linha 1) e nome com
+     * apostrofo no filtro; caractere de controle no texto. Tudo XML bem formado e com o estilo certo.
+     */
+    const teste = await f.evaluate(() => pnXlsxArquivos([
+      { nome: 'Duas tabelas', linhas: [['Título do teste'], ['Subtítulo'], [], ['A', 'B', 'C'], [1, { v: 'GRAVE', tom: 'vermelho' }, 'x\u0001y'],
+        [2.5, { v: 'ok', tom: 'roxo' }, ''], [3, { v: 7, tom: 'verde' }], [], ['D', 'E'], ['y', { v: 'Férias', tom: 'azul' }]] },
+      { nome: "Sem d'título", linhas: [['COL1', 'COL2'], ['a', 1], ['b', { v: 'ATENÇÃO', tom: 'amarelo' }]] }
+    ]).reduce((o, [n, x]) => { o[n] = x; return o; }, {}));
+    for (const n of Object.keys(teste)) {
+      const erro = await f.evaluate((x) => { const e = new DOMParser().parseFromString(x, 'application/xml').getElementsByTagName('parsererror')[0]; return e ? e.textContent : ''; }, teste[n]);
+      afirmar(!erro, 'pnXlsxArquivos: ' + n + ' nao e XML bem formado: ' + erro);
+    }
+    const t1 = teste['xl/worksheets/sheet1.xml'], t2 = teste['xl/worksheets/sheet2.xml'];
+    afirmar(/<c r="B5" s="15" t="inlineStr"><is><t xml:space="preserve">GRAVE<\/t>/.test(t1) && /<c r="C5" s="4" t="inlineStr"><is><t xml:space="preserve">xy<\/t>/.test(t1) &&
+      /<c r="A6" s="7"><v>2.5<\/v><\/c><c r="B6" s="6" t="inlineStr"><is><t xml:space="preserve">ok<\/t><\/is><\/c><c r="C6" s="6"\/>/.test(t1) &&
+      /<c r="B7" s="11"><v>7<\/v><\/c><c r="C7" s="4"\/>/.test(t1) && /<c r="A9" s="3" t="inlineStr"><is><t xml:space="preserve">D</.test(t1) &&
+      /<c r="B10" s="10" t="inlineStr"><is><t xml:space="preserve">Férias</.test(t1) && /<pane ySplit="4" /.test(t1) && !/<autoFilter/.test(t1) && /<c r="A3" s="8"\/><c r="B3" s="8"\/><c r="C3" s="9"\/>/.test(t1),
+      'aba com duas tabelas e tons: ' + t1.slice(0, 1500));
+    afirmar(/<row r="1" ht="21" customHeight="1"><c r="A1" s="3"/.test(t2) && /<pane ySplit="1" topLeftCell="A2"/.test(t2) && /<autoFilter ref="A1:B3"\/>/.test(t2) &&
+      /<c r="B3" s="12" t="inlineStr"><is><t xml:space="preserve">ATENÇÃO<\/t>/.test(t2) && !/tabSelected/.test(t2) && /tabSelected="1"/.test(t1) &&
+      /localSheetId="1" hidden="1">'Sem d''título'!\$A\$1:\$B\$3<\/definedName>/.test(teste['xl/workbook.xml']) && !/localSheetId="0"/.test(teste['xl/workbook.xml']),
+      'aba sem titulo: ' + t2.slice(0, 900) + ' / ' + teste['xl/workbook.xml']);
     const [janela] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 15000 }), f.click('text=Exportar PDF')]);
     await janela.waitForLoadState();
     afirmar(/estoque de TI/i.test(await janela.evaluate(() => document.body.innerText)), 'relatorio PDF');
+    await conferirPdfDaMarca(janela);
+    if (process.env.FOTO_PDF_ESTOQUE) await janela.screenshot({ path: process.env.FOTO_PDF_ESTOQUE, fullPage: true });
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });

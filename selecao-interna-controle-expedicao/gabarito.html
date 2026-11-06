@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gabarito - Seleção Interna - Controle de Expedição</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --navy:#14146b; --yellow:#fbb917; --yellow-soft:#fff4d1; --green:#1e9e57; --green-soft:#e3f6eb; --red:#c73a3a; --red-soft:#fdeaea; --ink:#1b1b33; --muted:#666b80; --line:#d8dbea; --soft:#f4f5fb; }
+  @page{ size:A4; margin:12mm 12mm 15mm 12mm; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:"Inter",Arial,sans-serif; color:var(--ink); font-size:10pt; line-height:1.38; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sheet{ max-width:186mm; margin:0 auto; }
+  h1,h2,h3{ font-family:"Poppins",Arial,sans-serif; }
+  .top{ background:var(--navy); color:#fff; border-radius:16px; padding:14px 20px; display:flex; align-items:center; gap:16px; }
+  .top h1{ margin:0; font-size:22pt; line-height:1; }
+  .top p{ margin:3px 0 0; font-size:9.5pt; opacity:.9; }
+  .seal{ margin-left:auto; background:var(--red); color:#fff; font-family:"Poppins"; font-weight:700; font-size:8.5pt; padding:6px 12px; border-radius:20px; text-align:center; line-height:1.2; }
+  h2{ break-after:avoid; font-size:13pt; color:var(--navy); margin:14px 0 6px; display:flex; align-items:center; gap:8px; }
+  h2 i{ font-style:normal; width:24px; height:24px; border-radius:7px; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:11pt; }
+  .c1{ background:var(--navy); } .c2{ background:var(--green); } .c3{ background:var(--yellow); color:var(--navy)!important; }
+
+  .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .col{ border:1.5px solid var(--line); border-radius:12px; overflow:hidden; }
+  .col h3{ margin:0; padding:6px 10px; font-size:10pt; color:#fff; display:flex; justify-content:space-between; }
+  .col h3.y{ color:var(--navy); }
+  table.ans{ width:100%; border-collapse:collapse; font-size:9.5pt; }
+  table.ans td{ padding:4px 8px; border-top:1px solid var(--line); }
+  table.ans td:first-child{ font-family:"Poppins"; font-weight:700; color:var(--muted); width:28px; }
+  table.ans td.a{ font-family:"Poppins"; font-weight:800; color:var(--navy); letter-spacing:.5px; }
+  table.ans td.p{ text-align:right; color:var(--muted); font-size:8.5pt; width:40px; }
+  table.ans tr.t td{ background:var(--soft); font-weight:700; }
+
+  .rules{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .rule{ background:var(--soft); border-radius:12px; padding:8px 11px; font-size:9.3pt; }
+  .rule b{ color:var(--navy); font-family:"Poppins"; display:block; font-size:9.8pt; margin-bottom:1px; }
+
+  .exp{ border:1.5px solid var(--line); border-radius:12px; padding:2px 0; }
+  .exp div{ display:grid; grid-template-columns:34px 52px 1fr; gap:8px; padding:4px 10px; border-top:1px solid var(--line); font-size:9.3pt; align-items:baseline; break-inside:avoid; }
+  .exp div:first-child{ border-top:0; }
+  .exp .n{ font-family:"Poppins"; font-weight:700; color:var(--muted); }
+  .exp .r{ font-family:"Poppins"; font-weight:800; color:var(--navy); }
+
+  .rub{ width:100%; border-collapse:separate; border-spacing:0; border:1.5px solid var(--line); border-radius:12px; overflow:hidden; font-size:9.3pt; }
+  .rub th{ background:var(--yellow); color:var(--navy); text-align:left; padding:6px 10px; font-family:"Poppins"; font-size:9.5pt; }
+  .rub td{ padding:6px 10px; border-top:1px solid var(--line); vertical-align:top; }
+  .rub td.pt{ font-family:"Poppins"; font-weight:700; color:var(--navy); white-space:nowrap; text-align:center; }
+  .box{ border-radius:12px; padding:8px 12px; font-size:9.3pt; margin-top:8px; }
+  .box.ok{ background:var(--green-soft); } .box.no{ background:var(--red-soft); } .box.tip{ background:var(--yellow-soft); }
+  .box b{ font-family:"Poppins"; }
+  .box ul{ margin:3px 0 0; padding-left:18px; }
+  .newpage{ break-before:page; }
+  @media screen{ body{ background:#e9ebf3; padding:16px 8px; } .sheet{ background:#fff; padding:14mm 12mm; border-radius:12px; } }
+  @media screen and (max-width:640px){ .grid,.rules{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<div class="top">
+  <div>
+    <h1>Gabarito</h1>
+    <p>Prova da Seleção Interna · Controle de Expedição (Auxiliar de Supervisão)</p>
+  </div>
+  <div class="seal">USO EXCLUSIVO<br>DE QUEM CORRIGE</div>
+</div>
+
+<h2>Respostas rápidas</h2>
+<div class="grid">
+  <div class="col">
+    <h3 class="c1">Parte 1 · Logística <span>40</span></h3>
+    <table class="ans">
+      <tr><td>1</td><td class="a">6 · 1 · 4 · 5 · 3 · 2</td><td class="p">6</td></tr>
+      <tr><td>2</td><td class="a">5 · 2 · 6 · 3 · 1 · 4</td><td class="p">4</td></tr>
+      <tr><td>3</td><td class="a">B</td><td class="p">3</td></tr>
+      <tr><td>4</td><td class="a">C</td><td class="p">3</td></tr>
+      <tr><td>5</td><td class="a">A</td><td class="p">3</td></tr>
+      <tr><td>6</td><td class="a">4 · 2 · 3 · 1</td><td class="p">4</td></tr>
+      <tr><td>7</td><td class="a">B</td><td class="p">3</td></tr>
+      <tr><td>8</td><td class="a">D</td><td class="p">4</td></tr>
+      <tr><td>9</td><td class="a">V · F · F · V · V</td><td class="p">5</td></tr>
+      <tr><td>10</td><td class="a">B</td><td class="p">5</td></tr>
+    </table>
+  </div>
+  <div class="col">
+    <h3 class="c2">Parte 2 · Informática <span>28</span></h3>
+    <table class="ans">
+      <tr><td>11</td><td class="a">4 · 5 · 1 · 3 · 2</td><td class="p">5</td></tr>
+      <tr><td>12</td><td class="a">C</td><td class="p">4</td></tr>
+      <tr><td>13</td><td class="a">B</td><td class="p">4</td></tr>
+      <tr><td>14</td><td class="a">2 · 4 · 1 · 3</td><td class="p">4</td></tr>
+      <tr><td>15</td><td class="a">D</td><td class="p">3</td></tr>
+      <tr><td>16</td><td class="a">A</td><td class="p">4</td></tr>
+      <tr><td>17</td><td class="a">C</td><td class="p">4</td></tr>
+    </table>
+  </div>
+  <div class="col">
+    <h3 class="c3 y">Parte 3 · Situações <span>32</span></h3>
+    <table class="ans">
+      <tr><td>18</td><td class="a">C</td><td class="p">3</td></tr>
+      <tr><td>19</td><td class="a">A</td><td class="p">3</td></tr>
+      <tr><td>20</td><td class="a">D</td><td class="p">3</td></tr>
+      <tr><td>21</td><td class="a">B</td><td class="p">3</td></tr>
+      <tr><td>22</td><td class="a">C</td><td class="p">3</td></tr>
+      <tr><td>23</td><td class="a">A</td><td class="p">3</td></tr>
+      <tr><td>24</td><td class="a">D</td><td class="p">3</td></tr>
+      <tr><td>25</td><td class="a">B</td><td class="p">3</td></tr>
+      <tr><td>26</td><td class="a">Ver critérios</td><td class="p">8</td></tr>
+    </table>
+  </div>
+</div>
+<p style="font-size:8.8pt;color:var(--muted);margin:5px 2px 0">Nas questões de ligar e de ordenar, os números estão na ordem em que os parênteses aparecem na prova, de cima para baixo (na questão 2, que tem duas colunas, leia linha por linha, da esquerda para a direita).</p>
+
+<h2>Como pontuar</h2>
+<div class="rules">
+  <div class="rule"><b>Marcar (A, B, C, D)</b>Uma resposta só. Duas marcadas, rasura que não dá para entender ou em branco: zero.</div>
+  <div class="rule"><b>Ligar (questões 1, 6, 11 e 14)</b>1 ponto por parêntese certo. Ex.: na questão 1, acertou 4 de 6 = 4 pontos.</div>
+  <div class="rule"><b>V ou F (questão 9)</b>1 ponto por afirmação certa.</div>
+  <div class="rule"><b>Ordenar (questão 2)</b>Sequência toda certa: 4 pontos. Só dois itens trocados entre si: 2 pontos. Mais erros que isso: zero.</div>
+  <div class="rule"><b>Questão aberta (26)</b>Até 8 pontos, pela tabela de critérios na próxima página.</div>
+  <div class="rule"><b>Nota final</b>Soma das três partes, de 0 a 100. Anote cada parte no quadro da capa da prova.</div>
+</div>
+
+<div class="box tip"><b>Sugestão para a seleção:</b> a Parte 3 mostra como a pessoa decide no dia a dia, que é o centro da função. Se usar nota de corte, uma referência é 60 pontos no total. Para desempate, vale primeiro a maior nota na Parte 3 e, depois, na Parte 1.</div>
+
+<!-- ============ PÁGINA 2 ============ -->
+<h2 class="newpage"><i class="c1">1</i>Por que essa é a resposta</h2>
+<div class="exp">
+  <div><span class="n">1</span><span class="r">—</span><span>Doca = encosto do caminhão · Picking = retirar do endereço · Romaneio = lista da carga · Conferência = checar pedido e nota · Avaria = produto danificado · Filme stretch = plástico que firma a carga.</span></div>
+  <div><span class="n">2</span><span class="r">—</span><span>Pedido liberado (1) → Separação (2) → Conferência (3) → Paletização e filme (4) → Carregamento (5) → Saída com nota e romaneio (6).</span></div>
+  <div><span class="n">3</span><span class="r">B</span><span>Produto com validade sai pelo que vence primeiro (FEFO), não pelo que entrou primeiro. O Palete B vence em fevereiro.</span></div>
+  <div><span class="n">4</span><span class="r">C</span><span>A última entrega vai no fundo e a primeira fica na porta. Assim o motorista não precisa descarregar um cliente para chegar no outro.</span></div>
+  <div><span class="n">5</span><span class="r">A</span><span>Peso embaixo, carga alinhada dentro do palete e amarrada com filme. O B tem peso em cima e o C tem caixa para fora e torta.</span></div>
+  <div><span class="n">6</span><span class="r">—</span><span>Cálice = frágil (4) · Guarda-chuva = proteger da umidade (2) · Caixas com número = empilhamento máximo (3) · Setas = este lado para cima (1).</span></div>
+  <div><span class="n">7</span><span class="r">B</span><span>Rua 03, Prédio 04, Nível 3 (contando do chão). A troca prédio e nível; C conta o nível de cima para baixo; D está no prédio errado.</span></div>
+  <div><span class="n">8</span><span class="r">D</span><span>Nunca completar com outro produto nem mexer na nota à mão. Recontar, procurar e, se faltar mesmo, registrar e avisar.</span></div>
+  <div><span class="n">9</span><span class="r">VFFVV</span><span>Ninguém sobe no garfo. Extintor e saídas de emergência ficam sempre livres, mesmo "por pouco tempo".</span></div>
+  <div><span class="n">10</span><span class="r">B</span><span>400 − 8 = 392 pedidos certos. 392 ÷ 400 = 0,98 = 98%.</span></div>
+</div>
+
+<h2><i class="c2">2</i>Informática</h2>
+<div class="exp">
+  <div><span class="n">11</span><span class="r">—</span><span>Ctrl+C copiar (1) · Ctrl+V colar (2) · Ctrl+X recortar (3) · Ctrl+Z desfazer (4) · Ctrl+P imprimir (5).</span></div>
+  <div><span class="n">12</span><span class="r">C</span><span>120 + 85 + 95 + 100 = 400.</span></div>
+  <div><span class="n">13</span><span class="r">B</span><span>=MÁXIMO mostra o maior valor (120). SOMA soma tudo, MÉDIA tira a média, MÍNIMO mostra o menor.</span></div>
+  <div><span class="n">14</span><span class="r">—</span><span>.xlsx planilha (2) · .docx texto (4) · .pdf documento pronto (1) · .jpg imagem (3).</span></div>
+  <div><span class="n">15</span><span class="r">D</span><span>CC manda cópia e todos veem quem recebeu. No CCO o nome fica escondido.</span></div>
+  <div><span class="n">16</span><span class="r">A</span><span>Sinais de golpe: endereço estranho (.xyz), urgência e ameaça, pedido de dados bancários, anexo .exe. Não clicar e avisar a TI.</span></div>
+  <div><span class="n">17</span><span class="r">C</span><span>Leitor só vê. Editor e Proprietário podem alterar.</span></div>
+</div>
+
+<h2><i class="c3">3</i>Situações</h2>
+<div class="exp">
+  <div><span class="n">18</span><span class="r">C</span><span>Equilibra prazo e controle: avisa, procura rápido e não deixa a falta sem registro. Segurar sem limite (D) prejudica a rota inteira.</span></div>
+  <div><span class="n">19</span><span class="r">A</span><span>Primeiro esfria a situação, depois conversa em particular. Foco no erro, não na pessoa. Expor (D) e tomar partido (C) pioram o clima.</span></div>
+  <div><span class="n">20</span><span class="r">D</span><span>O auxiliar não espera parado: avisa o supervisor e já leva uma proposta, priorizando pelo horário de saída.</span></div>
+  <div><span class="n">21</span><span class="r">B</span><span>Risco de acidente se resolve na hora. Deixar para o fim do turno (D) pode ser tarde demais.</span></div>
+  <div><span class="n">22</span><span class="r">C</span><span>Quanto antes avisar, mais fácil corrigir com o cliente. Registrar serve para achar a causa, não um culpado.</span></div>
+  <div><span class="n">23</span><span class="r">A</span><span>A passagem de turno leva as pendências, para o próximo turno não começar no escuro.</span></div>
+  <div><span class="n">24</span><span class="r">D</span><span>Atende com educação, mas segue o fluxo. Pedido fora do fluxo vira erro de carga e de nota.</span></div>
+  <div><span class="n">25</span><span class="r">B</span><span>Aciona quem resolve (TI), mantém a liderança informada e a operação segue com controle em papel.</span></div>
+</div>
+
+<h2><i class="c3">26</i>Questão aberta · critérios (até 8 pontos)</h2>
+<p style="margin:0 0 6px;font-size:9.5pt">"Um colaborador novo na conferência está errando muitos pedidos. Como auxiliar, o que você faria?"<br>Dê 2 pontos para cada ideia que aparecer na resposta, mesmo com outras palavras.</p>
+<table class="rub">
+  <tr><th>O que procurar na resposta</th><th style="width:70px;text-align:center">Pontos</th></tr>
+  <tr><td><b>Conversa com respeito e em particular</b>, sem expor nem humilhar o colega.</td><td class="pt">2</td></tr>
+  <tr><td><b>Procura entender a causa</b>: falta de treinamento, pressa, endereço confuso, dúvida no produto, problema no equipamento.</td><td class="pt">2</td></tr>
+  <tr><td><b>Ensina na prática</b>: mostra como fazer, confere junto, coloca um colega experiente para acompanhar.</td><td class="pt">2</td></tr>
+  <tr><td><b>Acompanha a evolução</b>: dá retorno, confere de novo nos dias seguintes e avisa o supervisor se não melhorar.</td><td class="pt">2</td></tr>
+</table>
+
+<div class="box ok"><b>Exemplo de resposta nota 8:</b> "Chamaria ele num canto para conversar, sem expor na frente dos outros, e perguntaria onde ele tem dúvida. Mostraria na prática como conferir e ficaria junto nos primeiros pedidos. Depois iria acompanhando nos próximos dias e, se continuasse errando, conversaria com o supervisor sobre um novo treinamento."</div>
+
+<div class="box no"><b>Tira pontos (até zerar):</b>
+  <ul>
+    <li>Brigar, humilhar ou corrigir na frente de todo mundo.</li>
+    <li>Ameaçar ou falar direto em advertência ou demissão, sem antes orientar.</li>
+    <li>Fazer o serviço no lugar dele e não ensinar.</li>
+  </ul>
+</div>
+
+<div class="box tip"><b>Dica para quem corrige:</b> não desconte por erro de português nem por letra. O que vale é a atitude que a pessoa mostra.</div>
+
+</div>
+</body>
+</html>

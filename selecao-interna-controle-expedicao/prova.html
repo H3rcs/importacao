@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prova - Seleção Interna - Controle de Expedição</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#14146b; --navy2:#23238a; --yellow:#fbb917; --yellow-soft:#fff4d1;
+    --green:#1e9e57; --green-soft:#e3f6eb; --sky:#4fb6e8; --sky-soft:#e6f5fd;
+    --ink:#1b1b33; --muted:#666b80; --line:#d8dbea; --soft:#f4f5fb;
+  }
+  @page{ size:A4; margin:12mm 12mm 15mm 12mm; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ font-family:"Inter",Arial,sans-serif; color:var(--ink); font-size:10.5pt; line-height:1.35;
+        -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sheet{ max-width:186mm; margin:0 auto; }
+  h1,h2,h3,.ttl{ font-family:"Poppins",Arial,sans-serif; }
+
+  /* ---------- capa ---------- */
+  .top{ background:var(--navy); color:#fff; border-radius:16px; padding:16px 20px; position:relative; overflow:hidden; }
+  .top:after{ content:""; position:absolute; right:-40px; top:-40px; width:170px; height:170px; border-radius:50%; background:var(--yellow); opacity:.95; }
+  .top .tag{ display:inline-block; background:var(--yellow); color:var(--navy); font-weight:700; font-size:8.5pt; padding:3px 10px; border-radius:20px; letter-spacing:.5px; font-family:"Poppins"; }
+  .top h1{ margin:8px 0 2px; font-size:24pt; line-height:1.05; font-weight:800; position:relative; z-index:1; }
+  .top p{ margin:0; opacity:.9; font-size:10pt; position:relative; z-index:1; }
+  .top .stripe{ display:flex; gap:6px; margin-top:12px; }
+  .top .stripe i{ height:5px; width:60px; border-radius:3px; background:var(--green); }
+  .top .stripe i+i{ background:var(--yellow); }
+
+  .ident{ display:grid; grid-template-columns:2.2fr 1fr; gap:8px 14px; margin:12px 0 8px; }
+  .field{ border-bottom:1.5px solid var(--navy); padding:12px 0 2px; font-size:8.5pt; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
+  .turnos{ display:flex; gap:12px; align-items:flex-end; padding-top:10px; font-size:8.5pt; font-weight:600; color:var(--muted); text-transform:uppercase; }
+  .turnos span{ display:inline-flex; align-items:center; gap:4px; color:var(--ink); font-size:10pt; text-transform:none; }
+  .box{ width:14px; height:14px; border:1.6px solid var(--navy); border-radius:3px; display:inline-block; }
+
+  .rules{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0; }
+  .rule{ background:var(--soft); border-radius:12px; padding:9px 10px; display:flex; gap:8px; align-items:center; font-size:9pt; line-height:1.25; }
+  .rule b{ display:block; font-family:"Poppins"; font-size:11pt; color:var(--navy); }
+  .rule svg{ flex:0 0 30px; }
+
+  .score{ display:grid; grid-template-columns:repeat(4,1fr); border:1.5px solid var(--navy); border-radius:12px; overflow:hidden; margin-bottom:6px; }
+  .score div{ padding:6px 10px; border-right:1px solid var(--line); font-size:8.5pt; color:var(--muted); }
+  .score div:last-child{ border-right:0; background:var(--yellow-soft); }
+  .score b{ display:block; font-family:"Poppins"; color:var(--navy); font-size:10pt; }
+  .score .blank{ display:block; height:16px; border-bottom:1px dashed #aab; margin-top:2px; }
+  .note{ font-size:8.5pt; color:var(--muted); text-align:center; margin:4px 0 0; }
+
+  /* ---------- partes ---------- */
+  .part{ display:flex; align-items:center; gap:14px; border-radius:14px; padding:10px 16px; margin:14px 0 8px; color:#fff; break-after:avoid; }
+  .part.p1{ background:var(--navy); }
+  .part.p2{ background:var(--green); }
+  .part.p3{ background:var(--yellow); color:var(--navy); }
+  .part .pn{ font-family:"Poppins"; font-weight:800; font-size:26pt; line-height:1; opacity:.9; }
+  .part h2{ margin:0; font-size:15pt; line-height:1.1; }
+  .part p{ margin:2px 0 0; font-size:9pt; opacity:.92; }
+  .part .pp{ margin-left:auto; font-family:"Poppins"; font-weight:700; font-size:10pt; background:rgba(255,255,255,.2); padding:4px 10px; border-radius:20px; white-space:nowrap; }
+  .part.p3 .pp{ background:rgba(20,20,107,.12); }
+  .newpage{ break-before:page; }
+
+  /* ---------- questões ---------- */
+  .q{ border:1.5px solid var(--line); border-radius:14px; padding:10px 13px 11px; margin:9px 0; break-inside:avoid; }
+  .qh{ display:flex; align-items:flex-start; gap:10px; }
+  .num{ flex:0 0 28px; height:28px; border-radius:8px; background:var(--navy); color:#fff; font-family:"Poppins"; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:11pt; }
+  .p2q .num{ background:var(--green); }
+  .p3q .num{ background:var(--yellow); color:var(--navy); }
+  .qt{ flex:1; font-weight:600; font-size:10.5pt; padding-top:4px; }
+  .qt small{ display:block; font-weight:400; color:var(--muted); font-size:9pt; margin-top:1px; }
+  .pts{ flex:0 0 auto; font-size:8pt; font-weight:700; color:var(--navy); background:var(--soft); border-radius:20px; padding:3px 8px; margin-top:4px; }
+  .qb{ margin-top:8px; }
+
+  .opts{ display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; margin-top:8px; }
+  .opts.one{ grid-template-columns:1fr; gap:5px; }
+  .opt{ display:flex; gap:8px; align-items:flex-start; font-size:10pt; }
+  .bub{ flex:0 0 21px; height:21px; border:1.7px solid var(--navy); border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:"Poppins"; font-weight:700; font-size:8.5pt; color:var(--navy); margin-top:-1px; }
+
+  .assoc{ display:grid; grid-template-columns:.9fr 1.6fr; gap:10px 18px; align-items:start; }
+  .terms{ display:flex; flex-direction:column; gap:5px; }
+  .term{ display:flex; align-items:center; gap:8px; background:var(--soft); border-radius:10px; padding:5px 9px; font-weight:600; font-size:10pt; }
+  .term i{ font-style:normal; flex:0 0 22px; height:22px; border-radius:50%; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:center; font-family:"Poppins"; font-size:9pt; }
+  .p2q .term i{ background:var(--green); }
+  .defs{ display:flex; flex-direction:column; gap:6px; }
+  .def{ display:flex; gap:9px; align-items:center; font-size:10pt; }
+  .paren{ flex:0 0 30px; height:24px; border:1.6px solid var(--navy); border-radius:7px; }
+
+  .vf{ display:flex; flex-direction:column; gap:5px; }
+  .vfrow{ display:flex; gap:10px; align-items:center; font-size:10pt; }
+  .vfbox{ display:flex; gap:4px; }
+  .vfbox span{ width:24px; height:22px; border:1.6px solid var(--navy); border-radius:6px; font-family:"Poppins"; font-weight:700; font-size:8.5pt; color:var(--navy); display:flex; align-items:center; justify-content:center; }
+
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .card{ border-radius:12px; padding:9px 11px; background:var(--soft); }
+  .card .ttl{ font-weight:700; color:var(--navy); font-size:11pt; display:flex; align-items:center; gap:8px; }
+  .card .kv{ display:flex; justify-content:space-between; font-size:9.5pt; border-top:1px dashed var(--line); padding-top:4px; margin-top:4px; }
+  .card .kv b{ font-family:"Poppins"; }
+
+  svg text{ font-family:"Inter",Arial,sans-serif; }
+  .fig{ display:flex; justify-content:center; margin:4px 0; }
+
+  /* planilha */
+  table.xl{ border-collapse:collapse; font-size:9.5pt; margin:0 auto; }
+  table.xl th{ background:#e9ebf3; color:#555a6e; font-weight:600; font-size:8.5pt; border:1px solid #c5c9d8; padding:2px 10px; }
+  table.xl td{ border:1px solid #c5c9d8; padding:3px 12px; min-width:80px; }
+  table.xl td.rh{ background:#e9ebf3; color:#555a6e; font-weight:600; font-size:8.5pt; min-width:0; text-align:center; padding:3px 8px; }
+  table.xl td.n{ text-align:right; }
+  table.xl tr.hd td{ font-weight:700; }
+  table.xl td.sel{ outline:2.5px solid var(--green); outline-offset:-2px; background:var(--green-soft); }
+  .fx{ display:flex; align-items:center; gap:0; border:1px solid #c5c9d8; border-radius:6px; overflow:hidden; font-size:9.5pt; width:max-content; margin:0 auto 6px; }
+  .fx span{ padding:3px 9px; background:#e9ebf3; font-weight:700; color:#555a6e; font-style:italic; }
+  .fx code{ padding:3px 12px; font-family:"DejaVu Sans Mono",monospace; }
+
+  kbd{ display:inline-flex; align-items:center; justify-content:center; min-width:30px; padding:3px 7px; border:1.5px solid #9aa0b8; border-bottom-width:3.5px; border-radius:7px; background:#fff; font-family:"Poppins"; font-weight:700; font-size:9pt; color:var(--ink); }
+
+  /* email */
+  .mail{ border:1.5px solid #c5c9d8; border-radius:12px; overflow:hidden; font-size:9.5pt; }
+  .mail .bar{ background:#eef0f6; padding:5px 10px; display:flex; gap:6px; align-items:center; }
+  .mail .bar i{ width:9px; height:9px; border-radius:50%; background:#c9cdda; display:inline-block; }
+  .mail .hd{ padding:6px 12px; border-bottom:1px solid var(--line); }
+  .mail .hd div{ margin:1px 0; }
+  .mail .hd b{ color:var(--muted); font-weight:600; display:inline-block; width:58px; }
+  .mail .bd{ padding:8px 12px; }
+  .mail .btn{ display:inline-block; background:#d93a3a; color:#fff; font-weight:700; padding:4px 12px; border-radius:6px; margin:4px 0; }
+  .mail .att{ display:inline-flex; gap:6px; align-items:center; border:1px solid var(--line); border-radius:6px; padding:3px 8px; margin-top:4px; font-size:9pt; }
+
+  /* situações */
+  .sit{ display:flex; gap:10px; background:var(--yellow-soft); border-radius:10px; padding:8px 10px; margin-top:7px; align-items:center; font-size:10pt; }
+  .sit svg{ flex:0 0 38px; }
+
+  .lines{ margin-top:10px; }
+  .lines div{ border-bottom:1.3px solid #b9bdd0; height:25px; }
+
+  .end{ text-align:center; margin-top:8px; padding:8px; break-inside:avoid; border-radius:14px; background:var(--navy); color:#fff; }
+  .end b{ font-family:"Poppins"; font-size:12pt; display:block; }
+  .end span{ font-size:9.5pt; opacity:.9; }
+
+  @media screen{
+    body{ background:#e9ebf3; padding:16px 8px; }
+    .sheet{ background:#fff; padding:14mm 12mm; border-radius:12px; box-shadow:0 4px 18px rgba(0,0,0,.08); }
+  }
+  @media screen and (max-width:640px){
+    .ident,.rules,.score,.row2,.assoc,.opts{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<!-- =================== CAPA =================== -->
+<div class="top">
+  <span class="tag">SELEÇÃO INTERNA · ETAPA DE PROVA</span>
+  <h1>Controle de Expedição</h1>
+  <p>Auxiliar de Supervisão · Centro de Distribuição de Feira de Santana</p>
+  <div class="stripe"><i></i><i></i></div>
+</div>
+
+<div class="ident">
+  <div class="field">Nome completo</div>
+  <div class="field">Matrícula</div>
+  <div class="field">Setor / função atual</div>
+  <div class="turnos">Turno atual:
+    <span><i class="box"></i> A</span>
+    <span><i class="box"></i> B</span>
+    <span><i class="box"></i> C</span>
+  </div>
+</div>
+
+<div class="rules">
+  <div class="rule">
+    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13" fill="none" stroke="#14146b" stroke-width="2.4"/><path d="M15 8v7l5 3" stroke="#fbb917" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>
+    <div><b>60 min</b>de prova</div>
+  </div>
+  <div class="rule">
+    <svg width="30" height="30" viewBox="0 0 30 30"><path d="M7 23l2-6L21 5l4 4-12 12z" fill="#fbb917" stroke="#14146b" stroke-width="2"/><path d="M7 23l6-2" stroke="#14146b" stroke-width="2"/></svg>
+    <div><b>Caneta</b>azul ou preta</div>
+  </div>
+  <div class="rule">
+    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13" fill="none" stroke="#14146b" stroke-width="2.4"/><circle cx="15" cy="15" r="6" fill="#1e9e57"/></svg>
+    <div><b>1 resposta</b>por questão de marcar</div>
+  </div>
+  <div class="rule">
+    <svg width="30" height="30" viewBox="0 0 30 30"><path d="M15 3l3.5 7.5 8 1-6 5.6 1.6 8L15 21l-7.1 4.1 1.6-8-6-5.6 8-1z" fill="#fbb917" stroke="#14146b" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    <div><b>100 pontos</b>no total</div>
+  </div>
+</div>
+
+<div class="score">
+  <div><b>Parte 1</b>Logística · 40 pts<span class="blank"></span></div>
+  <div><b>Parte 2</b>Informática · 28 pts<span class="blank"></span></div>
+  <div><b>Parte 3</b>Situações · 32 pts<span class="blank"></span></div>
+  <div><b>NOTA</b>de 0 a 100<span class="blank"></span></div>
+</div>
+<p class="note">Quadro acima: uso de quem corrige. Não tem pegadinha. Na Parte 3, pense no que você faria de verdade no dia a dia do CD.</p>
+
+<!-- =================== PARTE 1 =================== -->
+<div class="part p1">
+  <div class="pn">1</div>
+  <div><h2>Logística no CD</h2><p>O caminho do produto, da prateleira até o caminhão</p></div>
+  <div class="pp">40 pontos</div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">1</div><div class="qt">Ligue cada palavra ao seu significado.<small>Escreva o número da palavra dentro do parêntese.</small></div><div class="pts">6 pts</div></div>
+  <div class="qb assoc">
+    <div class="terms">
+      <div class="term"><i>1</i>Doca</div>
+      <div class="term"><i>2</i>Picking (separação)</div>
+      <div class="term"><i>3</i>Romaneio</div>
+      <div class="term"><i>4</i>Conferência</div>
+      <div class="term"><i>5</i>Avaria</div>
+      <div class="term"><i>6</i>Filme stretch</div>
+    </div>
+    <div class="defs">
+      <div class="def"><span class="paren"></span>Plástico que envolve e firma a carga no palete.</div>
+      <div class="def"><span class="paren"></span>Local onde o caminhão encosta para carregar ou descarregar.</div>
+      <div class="def"><span class="paren"></span>Checar se o que foi separado bate com o pedido e a nota.</div>
+      <div class="def"><span class="paren"></span>Produto danificado: amassado, molhado, furado ou vazando.</div>
+      <div class="def"><span class="paren"></span>Lista da carga do caminhão: clientes, notas e volumes.</div>
+      <div class="def"><span class="paren"></span>Retirar do endereço os produtos de cada pedido.</div>
+    </div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">2</div><div class="qt">Coloque as etapas da expedição em ordem.<small>Numere de 1 (primeira) a 6 (última).</small></div><div class="pts">4 pts</div></div>
+  <div class="qb">
+    <svg width="100%" height="14" viewBox="0 0 600 14" preserveAspectRatio="none"><defs><linearGradient id="g1"><stop offset="0" stop-color="#14146b"/><stop offset="1" stop-color="#1e9e57"/></linearGradient></defs><rect x="0" y="5" width="585" height="4" rx="2" fill="url(#g1)"/><path d="M585 0l15 7-15 7z" fill="#1e9e57"/></svg>
+    <div class="defs" style="display:grid;grid-template-columns:1fr 1fr;gap:7px 18px;margin-top:6px">
+      <div class="def"><span class="paren"></span>Carregamento do caminhão na doca</div>
+      <div class="def"><span class="paren"></span>Separação (picking) dos produtos</div>
+      <div class="def"><span class="paren"></span>Saída do veículo com notas e romaneio</div>
+      <div class="def"><span class="paren"></span>Conferência dos volumes separados</div>
+      <div class="def"><span class="paren"></span>Pedido liberado para o CD</div>
+      <div class="def"><span class="paren"></span>Paletização e filme stretch</div>
+    </div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">3</div><div class="qt">Dois paletes do mesmo produto estão no estoque. Qual deve sair <u>primeiro</u> para o cliente?</div><div class="pts">3 pts</div></div>
+  <div class="qb row2">
+    <div class="card">
+      <div class="ttl"><svg width="26" height="22" viewBox="0 0 26 22"><rect x="2" y="2" width="22" height="13" rx="2" fill="#fbb917" stroke="#14146b" stroke-width="1.6"/><rect x="1" y="16" width="24" height="4" fill="#a0703a"/></svg>Palete A · Achocolatado 400 g</div>
+      <div class="kv"><span>Entrou no CD</span><b>02/10/2026</b></div>
+      <div class="kv"><span>Validade</span><b>30/04/2027</b></div>
+    </div>
+    <div class="card">
+      <div class="ttl"><svg width="26" height="22" viewBox="0 0 26 22"><rect x="2" y="2" width="22" height="13" rx="2" fill="#4fb6e8" stroke="#14146b" stroke-width="1.6"/><rect x="1" y="16" width="24" height="4" fill="#a0703a"/></svg>Palete B · Achocolatado 400 g</div>
+      <div class="kv"><span>Entrou no CD</span><b>20/10/2026</b></div>
+      <div class="kv"><span>Validade</span><b>28/02/2027</b></div>
+    </div>
+  </div>
+  <div class="opts">
+    <div class="opt"><span class="bub">A</span>Palete A, porque entrou primeiro.</div>
+    <div class="opt"><span class="bub">B</span>Palete B, porque vence primeiro.</div>
+    <div class="opt"><span class="bub">C</span>Tanto faz, é o mesmo produto.</div>
+    <div class="opt"><span class="bub">D</span>O que estiver mais perto da doca.</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">4</div><div class="qt">O caminhão vai entregar na ordem do mapa. Qual cliente deve ser carregado <u>primeiro</u>, lá no fundo do baú?</div><div class="pts">3 pts</div></div>
+  <div class="fig">
+    <svg width="560" height="150" viewBox="0 0 560 150">
+      <!-- rota -->
+      <path d="M40 30 C110 5 150 55 210 30 S310 5 360 30 S460 55 520 30" fill="none" stroke="#9aa0b8" stroke-width="2.5" stroke-dasharray="6 5"/>
+      <rect x="20" y="14" width="40" height="32" rx="6" fill="#14146b"/><text x="40" y="35" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">CD</text>
+      <g font-size="12" font-weight="700" text-anchor="middle">
+        <circle cx="210" cy="30" r="15" fill="#fbb917" stroke="#14146b" stroke-width="2"/><text x="210" y="34" fill="#14146b">1</text>
+        <circle cx="360" cy="30" r="15" fill="#fbb917" stroke="#14146b" stroke-width="2"/><text x="360" y="34" fill="#14146b">2</text>
+        <circle cx="520" cy="30" r="15" fill="#fbb917" stroke="#14146b" stroke-width="2"/><text x="520" y="34" fill="#14146b">3</text>
+      </g>
+      <g font-size="10" fill="#666b80" text-anchor="middle"><text x="210" y="60">Cliente 1</text><text x="360" y="60">Cliente 2</text><text x="520" y="60">Cliente 3</text><text x="40" y="60">saída</text></g>
+            <!-- caminhão -->
+      <g transform="translate(110,72)">
+        <path d="M0 52 V22 Q0 12 10 10 H40 L58 28 V52 Z" fill="#14146b"/>
+        <rect x="10" y="16" width="22" height="13" rx="2" fill="#bfe6fb"/>
+        <rect x="62" y="0" width="290" height="52" rx="4" fill="#fff" stroke="#14146b" stroke-width="2.5"/>
+        <line x1="159" y1="0" x2="159" y2="52" stroke="#c5c9d8" stroke-width="2" stroke-dasharray="4 3"/>
+        <line x1="256" y1="0" x2="256" y2="52" stroke="#c5c9d8" stroke-width="2" stroke-dasharray="4 3"/>
+        <text x="110" y="31" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">FUNDO</text>
+        <text x="207" y="31" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">MEIO</text>
+        <text x="304" y="31" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">PORTA</text>
+        <rect x="350" y="2" width="6" height="48" fill="#fbb917"/>
+        <circle cx="32" cy="58" r="10" fill="#333" stroke="#fff" stroke-width="3"/>
+        <circle cx="110" cy="58" r="10" fill="#333" stroke="#fff" stroke-width="3"/>
+        <circle cx="300" cy="58" r="10" fill="#333" stroke="#fff" stroke-width="3"/>
+        <circle cx="325" cy="58" r="10" fill="#333" stroke="#fff" stroke-width="3"/>
+      </g>
+    </svg>
+  </div>
+  <div class="opts" style="grid-template-columns:repeat(4,1fr)">
+    <div class="opt"><span class="bub">A</span>Cliente 1</div>
+    <div class="opt"><span class="bub">B</span>Cliente 2</div>
+    <div class="opt"><span class="bub">C</span>Cliente 3</div>
+    <div class="opt"><span class="bub">D</span>Tanto faz</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">5</div><div class="qt">Qual palete está montado do jeito <u>certo</u>?</div><div class="pts">3 pts</div></div>
+  <div class="fig">
+    <svg width="540" height="160" viewBox="0 0 540 160">
+      <defs>
+        <g id="plt"><rect x="0" y="0" width="130" height="8" fill="#a0703a"/><rect x="4" y="8" width="16" height="9" fill="#a0703a"/><rect x="57" y="8" width="16" height="9" fill="#a0703a"/><rect x="110" y="8" width="16" height="9" fill="#a0703a"/><rect x="0" y="17" width="130" height="5" fill="#8a5d2e"/></g>
+      </defs>
+      <!-- A correto -->
+      <g transform="translate(20,10)">
+        <rect x="0" y="62" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="32" y="91" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <rect x="66" y="62" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="98" y="91" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <rect x="0" y="30" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="21" y="50" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <rect x="44" y="30" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="65" y="50" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <rect x="88" y="30" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="109" y="50" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <g stroke="#4fb6e8" stroke-width="3" opacity=".55"><line x1="-2" y1="100" x2="132" y2="70"/><line x1="-2" y1="70" x2="132" y2="40"/><line x1="-2" y1="44" x2="132" y2="100"/></g>
+        <use href="#plt" x="0" y="110"/>
+        <circle cx="65" cy="148" r="0" />
+      </g>
+      <!-- B pesado em cima -->
+      <g transform="translate(205,10)">
+        <rect x="0" y="78" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="21" y="98" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <rect x="44" y="78" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="65" y="98" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <rect x="88" y="78" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="109" y="98" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        <rect x="0" y="30" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="32" y="59" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <rect x="66" y="30" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="98" y="59" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <g stroke="#4fb6e8" stroke-width="3" opacity=".55"><line x1="-2" y1="100" x2="132" y2="70"/><line x1="-2" y1="70" x2="132" y2="40"/><line x1="-2" y1="44" x2="132" y2="100"/></g>
+        <use href="#plt" x="0" y="110"/>
+      </g>
+      <!-- C para fora / torto -->
+      <g transform="translate(390,10)">
+        <rect x="-22" y="62" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="10" y="91" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <rect x="58" y="62" width="64" height="48" rx="2" fill="#f2c27a" stroke="#14146b" stroke-width="1.6"/><text x="90" y="91" text-anchor="middle" font-size="11" font-weight="700" fill="#14146b">20 kg</text>
+        <g transform="rotate(-9 60 46)">
+          <rect x="6" y="28" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="27" y="48" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+          <rect x="50" y="28" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="71" y="48" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+          <rect x="94" y="28" width="42" height="32" rx="2" fill="#f7dcae" stroke="#14146b" stroke-width="1.4"/><text x="115" y="48" text-anchor="middle" font-size="9" fill="#14146b">3 kg</text>
+        </g>
+        <use href="#plt" x="0" y="110"/>
+      </g>
+      <g font-family="Poppins" font-size="15" font-weight="800" text-anchor="middle">
+        <circle cx="85" cy="150" r="0"/>
+      </g>
+    </svg>
+  </div>
+  <div class="opts" style="grid-template-columns:repeat(3,1fr);text-align:center">
+    <div class="opt" style="justify-content:center"><span class="bub">A</span>Palete A</div>
+    <div class="opt" style="justify-content:center"><span class="bub">B</span>Palete B</div>
+    <div class="opt" style="justify-content:center"><span class="bub">C</span>Palete C</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">6</div><div class="qt">Esses símbolos aparecem nas caixas. Ligue cada símbolo ao seu significado.<small>Escreva o número do símbolo dentro do parêntese.</small></div><div class="pts">4 pts</div></div>
+  <div class="qb" style="display:grid;grid-template-columns:1.25fr 1fr;gap:14px;align-items:center">
+    <svg width="330" height="96" viewBox="0 0 330 96">
+      <g font-family="Poppins" font-weight="700" font-size="11" fill="#fff" text-anchor="middle">
+        <!-- 1 setas -->
+        <rect x="2" y="2" width="74" height="74" rx="10" fill="#fff" stroke="#1b1b33" stroke-width="2"/>
+        <g fill="#1b1b33"><path d="M26 20l-9 14h6v18h6V34h6z"/><path d="M52 20l-9 14h6v18h6V34h6z"/><rect x="14" y="56" width="50" height="5"/></g>
+        <!-- 2 guarda-chuva -->
+        <rect x="86" y="2" width="74" height="74" rx="10" fill="#fff" stroke="#1b1b33" stroke-width="2"/>
+        <g fill="#1b1b33"><path d="M98 42 Q123 12 148 42 Z"/><rect x="121.5" y="41" width="3" height="20"/><path d="M124 61 q0 6 -6 6 q-5 0 -5 -5" fill="none" stroke="#1b1b33" stroke-width="3"/><path d="M104 12l-2 5M116 9l-2 5M132 9l-2 5M144 12l-2 5" stroke="#1b1b33" stroke-width="2.4"/></g>
+        <!-- 3 empilhamento -->
+        <rect x="170" y="2" width="74" height="74" rx="10" fill="#fff" stroke="#1b1b33" stroke-width="2"/>
+        <g fill="none" stroke="#1b1b33" stroke-width="2.4"><rect x="190" y="50" width="34" height="16"/><rect x="190" y="34" width="34" height="16"/></g>
+        <rect x="182" y="24" width="50" height="5" fill="#1b1b33"/>
+        <text x="207" y="20" fill="#1b1b33" font-size="13">4</text>
+        <!-- 4 cálice -->
+        <rect x="254" y="2" width="74" height="74" rx="10" fill="#fff" stroke="#1b1b33" stroke-width="2"/>
+        <g fill="#1b1b33"><path d="M276 14 h32 q2 22 -16 26 q-18 -4 -16 -26z"/><rect x="290" y="39" width="4" height="18"/><rect x="280" y="57" width="24" height="5" rx="2"/></g>
+        <!-- números -->
+        <circle cx="39" cy="88" r="8" fill="#14146b"/><text x="39" y="92">1</text>
+        <circle cx="123" cy="88" r="8" fill="#14146b"/><text x="123" y="92">2</text>
+        <circle cx="207" cy="88" r="8" fill="#14146b"/><text x="207" y="92">3</text>
+        <circle cx="291" cy="88" r="8" fill="#14146b"/><text x="291" y="92">4</text>
+      </g>
+    </svg>
+    <div class="defs">
+      <div class="def"><span class="paren"></span>Frágil</div>
+      <div class="def"><span class="paren"></span>Proteger da umidade</div>
+      <div class="def"><span class="paren"></span>Empilhamento máximo</div>
+      <div class="def"><span class="paren"></span>Este lado para cima</div>
+    </div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">7</div><div class="qt">A etiqueta diz que o produto está no endereço <b style="background:var(--yellow);padding:1px 7px;border-radius:5px">03-04-3</b>. Qual letra marca o lugar dele?<small>O endereço segue a regra RUA – PRÉDIO – NÍVEL. O nível 1 é o de baixo, no chão.</small></div><div class="pts">3 pts</div></div>
+  <div class="fig">
+    <svg width="430" height="190" viewBox="0 0 430 190">
+      <text x="225" y="14" text-anchor="middle" font-family="Poppins" font-weight="700" font-size="12" fill="#14146b">RUA 03</text>
+      <g stroke="#14146b" stroke-width="3">
+        <line x1="60" y1="22" x2="60" y2="160"/><line x1="130" y1="22" x2="130" y2="160"/><line x1="200" y1="22" x2="200" y2="160"/><line x1="270" y1="22" x2="270" y2="160"/><line x1="340" y1="22" x2="340" y2="160"/><line x1="410" y1="22" x2="410" y2="160"/>
+      </g>
+      <g stroke="#fbb917" stroke-width="5">
+        <line x1="58" y1="58" x2="412" y2="58"/><line x1="58" y1="92" x2="412" y2="92"/><line x1="58" y1="126" x2="412" y2="126"/><line x1="58" y1="160" x2="412" y2="160"/>
+      </g>
+      <g fill="#f7dcae" stroke="#a0703a" stroke-width="1">
+        <rect x="70" y="132" width="50" height="25"/><rect x="140" y="132" width="50" height="25"/><rect x="210" y="132" width="50" height="25"/><rect x="350" y="132" width="50" height="25"/>
+        <rect x="70" y="98" width="50" height="25"/><rect x="280" y="64" width="50" height="25"/><rect x="350" y="98" width="50" height="25"/><rect x="70" y="30" width="50" height="25"/>
+      </g>
+      <g font-family="Poppins" font-weight="800" font-size="13" text-anchor="middle">
+        <circle cx="235" cy="41" r="13" fill="#14146b"/><text x="235" y="46" fill="#fff">A</text>
+        <circle cx="305" cy="75" r="13" fill="#14146b"/><text x="305" y="80" fill="#fff">B</text>
+        <circle cx="305" cy="109" r="13" fill="#14146b"/><text x="305" y="114" fill="#fff">C</text>
+        <circle cx="165" cy="75" r="13" fill="#14146b"/><text x="165" y="80" fill="#fff">D</text>
+      </g>
+      <g font-size="10" fill="#666b80" text-anchor="middle">
+        <text x="95" y="176">Prédio 01</text><text x="165" y="176">Prédio 02</text><text x="235" y="176">Prédio 03</text><text x="305" y="176">Prédio 04</text><text x="375" y="176">Prédio 05</text>
+      </g>
+      <g font-size="10" fill="#666b80" text-anchor="end">
+        <text x="52" y="44">Nível 4</text><text x="52" y="78">Nível 3</text><text x="52" y="112">Nível 2</text><text x="52" y="146">Nível 1</text>
+      </g>
+    </svg>
+  </div>
+  <div class="opts" style="grid-template-columns:repeat(4,1fr)">
+    <div class="opt"><span class="bub">A</span>Letra A</div>
+    <div class="opt"><span class="bub">B</span>Letra B</div>
+    <div class="opt"><span class="bub">C</span>Letra C</div>
+    <div class="opt"><span class="bub">D</span>Letra D</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">8</div><div class="qt">Na conferência, a nota diz <b>20 caixas</b> de sabão em pó, mas no palete só tem <b>18</b>. O certo é:</div><div class="pts">4 pts</div></div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Completar com 2 caixas de outro sabão parecido.</div>
+    <div class="opt"><span class="bub">B</span>Liberar assim mesmo. Se faltar, o cliente avisa depois.</div>
+    <div class="opt"><span class="bub">C</span>Riscar a nota e escrever "18" à caneta.</div>
+    <div class="opt"><span class="bub">D</span>Recontar e procurar. Confirmada a falta, registrar a divergência e avisar a liderança.</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">9</div><div class="qt">Segurança no CD: marque <b>V</b> (verdadeiro) ou <b>F</b> (falso).</div><div class="pts">5 pts</div></div>
+  <div class="qb vf">
+    <div class="vfrow"><div class="vfbox"><span>V</span><span>F</span></div>Para levantar uma caixa pesada do chão, dobre os joelhos e mantenha as costas retas.</div>
+    <div class="vfrow"><div class="vfbox"><span>V</span><span>F</span></div>Pode subir no garfo da empilhadeira para pegar um volume no alto, se for rapidinho.</div>
+    <div class="vfrow"><div class="vfbox"><span>V</span><span>F</span></div>Um palete pode ficar na frente do extintor, desde que seja por pouco tempo.</div>
+    <div class="vfrow"><div class="vfbox"><span>V</span><span>F</span></div>Produto avariado deve ser separado e registrado, e não seguir para o cliente.</div>
+    <div class="vfrow"><div class="vfbox"><span>V</span><span>F</span></div>Só quem é habilitado e autorizado pode operar a empilhadeira.</div>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh"><div class="num">10</div><div class="qt">No mês, a expedição enviou <b>400 pedidos</b>. Desses, <b>8</b> foram com erro (produto trocado ou faltando). Qual foi a acuracidade (% de pedidos certos)?</div><div class="pts">5 pts</div></div>
+  <div class="qb" style="display:flex;gap:14px;align-items:center">
+    <svg width="210" height="34" viewBox="0 0 210 34">
+      <rect x="0" y="8" width="210" height="18" rx="9" fill="#e3f6eb"/>
+      <rect x="0" y="8" width="160" height="18" rx="9" fill="#1e9e57"/>
+      <text x="80" y="21" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">pedidos certos</text>
+      <text x="186" y="21" text-anchor="middle" font-size="10" font-weight="700" fill="#1e9e57">?</text>
+    </svg>
+    <div class="opts" style="flex:1;grid-template-columns:repeat(4,1fr);margin:0">
+      <div class="opt"><span class="bub">A</span>92%</div>
+      <div class="opt"><span class="bub">B</span>98%</div>
+      <div class="opt"><span class="bub">C</span>99,2%</div>
+      <div class="opt"><span class="bub">D</span>80%</div>
+    </div>
+  </div>
+</div>
+
+<!-- =================== PARTE 2 =================== -->
+<div class="part p2 newpage">
+  <div class="pn">2</div>
+  <div><h2>Informática no dia a dia</h2><p>Planilha, e-mail e cuidado com golpes</p></div>
+  <div class="pp">28 pontos</div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">11</div><div class="qt">Ligue cada atalho de teclado ao que ele faz.<small>Escreva o número do atalho dentro do parêntese.</small></div><div class="pts">5 pts</div></div>
+  <div class="qb assoc" style="grid-template-columns:1fr 1.4fr">
+    <div class="terms">
+      <div class="term"><i>1</i><kbd>Ctrl</kbd> + <kbd>C</kbd></div>
+      <div class="term"><i>2</i><kbd>Ctrl</kbd> + <kbd>V</kbd></div>
+      <div class="term"><i>3</i><kbd>Ctrl</kbd> + <kbd>X</kbd></div>
+      <div class="term"><i>4</i><kbd>Ctrl</kbd> + <kbd>Z</kbd></div>
+      <div class="term"><i>5</i><kbd>Ctrl</kbd> + <kbd>P</kbd></div>
+    </div>
+    <div class="defs" style="gap:13px;padding-top:4px">
+      <div class="def"><span class="paren"></span>Desfazer a última ação</div>
+      <div class="def"><span class="paren"></span>Imprimir</div>
+      <div class="def"><span class="paren"></span>Copiar</div>
+      <div class="def"><span class="paren"></span>Recortar (tirar de um lugar para colar em outro)</div>
+      <div class="def"><span class="paren"></span>Colar</div>
+    </div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">12</div><div class="qt">Olhe a planilha e responda as questões 12 e 13.<small>Questão 12: qual resultado aparece na célula B6?</small></div><div class="pts">4 pts</div></div>
+  <div class="qb" style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px;align-items:center">
+    <div>
+      <div class="fx"><span>fx</span><code>=SOMA(B2:B5)</code></div>
+      <table class="xl">
+        <tr><th></th><th>A</th><th>B</th></tr>
+        <tr class="hd"><td class="rh">1</td><td>Rota</td><td>Volumes</td></tr>
+        <tr><td class="rh">2</td><td>Rota 1</td><td class="n">120</td></tr>
+        <tr><td class="rh">3</td><td>Rota 2</td><td class="n">85</td></tr>
+        <tr><td class="rh">4</td><td>Rota 3</td><td class="n">95</td></tr>
+        <tr><td class="rh">5</td><td>Rota 4</td><td class="n">100</td></tr>
+        <tr class="hd"><td class="rh">6</td><td>Total</td><td class="n sel">?</td></tr>
+      </table>
+    </div>
+    <div class="opts one">
+      <div class="opt"><span class="bub">A</span>300</div>
+      <div class="opt"><span class="bub">B</span>385</div>
+      <div class="opt"><span class="bub">C</span>400</div>
+      <div class="opt"><span class="bub">D</span>4</div>
+    </div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">13</div><div class="qt">Na mesma planilha, qual fórmula mostra sozinha o <u>maior</u> número de volumes?</div><div class="pts">4 pts</div></div>
+  <div class="opts" style="grid-template-columns:repeat(4,1fr)">
+    <div class="opt"><span class="bub">A</span>=SOMA(B2:B5)</div>
+    <div class="opt"><span class="bub">B</span>=MÁXIMO(B2:B5)</div>
+    <div class="opt"><span class="bub">C</span>=MÉDIA(B2:B5)</div>
+    <div class="opt"><span class="bub">D</span>=MÍNIMO(B2:B5)</div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">14</div><div class="qt">Que tipo de arquivo é cada um?<small>Escreva o número do arquivo dentro do parêntese.</small></div><div class="pts">4 pts</div></div>
+  <div class="qb assoc" style="grid-template-columns:1fr 1.5fr">
+    <div class="terms">
+      <div class="term"><i>1</i>relatorio.pdf</div>
+      <div class="term"><i>2</i>cargas.xlsx</div>
+      <div class="term"><i>3</i>foto_avaria.jpg</div>
+      <div class="term"><i>4</i>comunicado.docx</div>
+    </div>
+    <div class="defs" style="gap:10px;padding-top:3px">
+      <div class="def"><span class="paren"></span>Planilha, com linhas, colunas e fórmulas</div>
+      <div class="def"><span class="paren"></span>Texto para editar, como um comunicado</div>
+      <div class="def"><span class="paren"></span>Documento pronto para imprimir ou enviar</div>
+      <div class="def"><span class="paren"></span>Imagem ou foto</div>
+    </div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">15</div><div class="qt">Você vai mandar o relatório do turno para o supervisor e quer que o gerente receba uma <u>cópia</u>, com todos vendo quem recebeu. O e-mail do gerente vai no campo:</div><div class="pts">3 pts</div></div>
+  <div class="opts" style="grid-template-columns:repeat(4,1fr)">
+    <div class="opt"><span class="bub">A</span>Para</div>
+    <div class="opt"><span class="bub">B</span>Assunto</div>
+    <div class="opt"><span class="bub">C</span>CCO (cópia oculta)</div>
+    <div class="opt"><span class="bub">D</span>CC (com cópia)</div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">16</div><div class="qt">Este e-mail chegou para você. O que fazer?</div><div class="pts">4 pts</div></div>
+  <div class="qb" style="display:grid;grid-template-columns:1.25fr 1fr;gap:14px;align-items:center">
+    <div class="mail">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="hd">
+        <div><b>De:</b>Folha de Pagamento &lt;rh-pagamento@folha-atualiza.xyz&gt;</div>
+        <div><b>Assunto:</b><strong>URGENTE!!! Seu salário será BLOQUEADO hoje</strong></div>
+      </div>
+      <div class="bd">
+        Atualize seus dados bancários em até 1 hora, ou o pagamento será suspenso.<br>
+        <span class="btn">CLIQUE AQUI</span><br>
+        <span class="att"><b style="color:#666b80;font-weight:600">Anexo:</b> comprovante.exe</span>
+      </div>
+    </div>
+    <div class="opts one">
+      <div class="opt"><span class="bub">A</span>Não clicar, não abrir o anexo e avisar a TI.</div>
+      <div class="opt"><span class="bub">B</span>Clicar logo e atualizar os dados, para não perder o salário.</div>
+      <div class="opt"><span class="bub">C</span>Responder pedindo mais informações e mandar o CPF.</div>
+      <div class="opt"><span class="bub">D</span>Abrir só o anexo, para ver o que é.</div>
+    </div>
+  </div>
+</div>
+
+<div class="q p2q">
+  <div class="qh"><div class="num">17</div><div class="qt">Você compartilhou uma planilha no Google Drive com o líder do outro turno. Ele precisa <u>ver</u>, mas não pode <u>alterar</u> nada. Qual permissão você dá?</div><div class="pts">4 pts</div></div>
+  <div class="opts">
+    <div class="opt"><span class="bub">A</span>Editor</div>
+    <div class="opt"><span class="bub">B</span>Proprietário</div>
+    <div class="opt"><span class="bub">C</span>Leitor</div>
+    <div class="opt"><span class="bub">D</span>Qualquer pessoa com o link pode editar</div>
+  </div>
+</div>
+
+<!-- =================== PARTE 3 =================== -->
+<div class="part p3">
+  <div class="pn">3</div>
+  <div><h2>E se fosse com você?</h2><p>Situações reais do CD. Marque o que você faria como auxiliar de supervisão.</p></div>
+  <div class="pp">32 pontos</div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">18</div><div class="qt">Caminhão com saída marcada</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><rect x="7" y="13" width="15" height="11" rx="1.5" fill="#14146b"/><path d="M22 16h5l4 4v4h-9z" fill="#14146b"/><circle cx="12" cy="26" r="2.6" fill="#fff" stroke="#14146b" stroke-width="1.6"/><circle cx="27" cy="26" r="2.6" fill="#fff" stroke="#14146b" stroke-width="1.6"/></svg>
+    <div>O caminhão sai às <b>07h00</b>. Na conferência, faltam <b>3 volumes</b> de um cliente e eles não estão no endereço. O motorista já quer sair.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Libera o caminhão e não fala nada. Depois alguém resolve.</div>
+    <div class="opt"><span class="bub">B</span>Pega 3 volumes de um produto parecido para completar a carga.</div>
+    <div class="opt"><span class="bub">C</span>Avisa a liderança, faz uma busca rápida e, se não achar, registra a falta antes de liberar.</div>
+    <div class="opt"><span class="bub">D</span>Segura o caminhão o tempo que for preciso, mesmo que atrase todas as entregas da rota.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">19</div><div class="qt">Discussão na doca</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><path d="M7 10h14a2 2 0 012 2v7a2 2 0 01-2 2h-8l-4 3v-3H7a2 2 0 01-2-2v-7a2 2 0 012-2z" fill="#14146b"/><path d="M17 17h12a2 2 0 012 2v6a2 2 0 01-2 2h-1v3l-4-3h-7a2 2 0 01-2-2z" fill="#fff" stroke="#14146b" stroke-width="1.6"/><text x="14" y="19" font-size="8" font-weight="800" fill="#fbb917" text-anchor="middle">!!</text></svg>
+    <div>Dois conferentes estão discutindo alto sobre quem errou um pedido, na frente dos motoristas.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Separa os dois, acalma a situação e depois conversa em particular, focando em corrigir o erro.</div>
+    <div class="opt"><span class="bub">B</span>Deixa eles se resolverem sozinhos. Isso não é problema seu.</div>
+    <div class="opt"><span class="bub">C</span>Dá razão ao que tem mais tempo de empresa, porque ele conhece melhor o serviço.</div>
+    <div class="opt"><span class="bub">D</span>Chama a atenção dos dois na frente de todo mundo, para servir de exemplo.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">20</div><div class="qt">Faltas no começo do turno</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><circle cx="13" cy="13" r="4" fill="#14146b"/><path d="M6 28a7 7 0 0114 0z" fill="#14146b"/><circle cx="26" cy="13" r="4" fill="none" stroke="#14146b" stroke-width="1.8" stroke-dasharray="2 2"/><path d="M19 28a7 7 0 0114 0z" fill="none" stroke="#14146b" stroke-width="1.8" stroke-dasharray="2 2"/></svg>
+    <div>Começou o turno, faltaram <b>2 conferentes</b> e hoje é dia de pico de carregamento.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Espera o supervisor chegar para decidir alguma coisa.</div>
+    <div class="opt"><span class="bub">B</span>Cancela parte dos carregamentos do dia.</div>
+    <div class="opt"><span class="bub">C</span>Faz toda a conferência sozinho e não comenta com ninguém.</div>
+    <div class="opt"><span class="bub">D</span>Avisa o supervisor e propõe remanejar pessoas, priorizando os caminhões pelo horário de saída.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">21</div><div class="qt">Empilhadeira no corredor</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><path d="M19 7l13 23H6z" fill="#14146b"/><rect x="17.6" y="14" width="2.8" height="9" rx="1.2" fill="#fbb917"/><circle cx="19" cy="26" r="1.7" fill="#fbb917"/></svg>
+    <div>Você vê um colega andando de empilhadeira em alta velocidade num corredor com gente circulando.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Não faz nada. Ele é experiente e sabe o que está fazendo.</div>
+    <div class="opt"><span class="bub">B</span>Pede para ele parar com segurança, orienta e comunica a liderança.</div>
+    <div class="opt"><span class="bub">C</span>Comenta com os colegas no intervalo, para todo mundo ficar sabendo.</div>
+    <div class="opt"><span class="bub">D</span>Anota e conta para o supervisor só no fim do turno.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">22</div><div class="qt">Pedido no caminhão errado</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><rect x="9" y="11" width="20" height="16" rx="2" fill="#14146b"/><path d="M14 15l10 8M24 15l-10 8" stroke="#fbb917" stroke-width="2.6" stroke-linecap="round"/></svg>
+    <div>O caminhão já saiu e você descobre que o pedido de um cliente foi carregado na <b>rota errada</b>.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Fica calado e torce para ninguém perceber.</div>
+    <div class="opt"><span class="bub">B</span>Vai atrás de quem separou para saber de quem foi a culpa.</div>
+    <div class="opt"><span class="bub">C</span>Avisa na hora a liderança, para acionar o motorista e o cliente, e registra o erro para achar a causa.</div>
+    <div class="opt"><span class="bub">D</span>Espera o cliente reclamar para então agir.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">23</div><div class="qt">Passagem de turno</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><path d="M8 15h18l-4-4M30 23H12l4 4" fill="none" stroke="#14146b" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>Seu turno está acabando. O que você <b>não pode deixar de passar</b> para o próximo turno?</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>As pendências: caminhões em carregamento, divergências, avarias, equipamento com problema e recados.</div>
+    <div class="opt"><span class="bub">B</span>Só os nomes de quem faltou.</div>
+    <div class="opt"><span class="bub">C</span>Nada. Cada turno resolve os seus próprios problemas.</div>
+    <div class="opt"><span class="bub">D</span>Só o que deu certo, para não preocupar ninguém.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">24</div><div class="qt">"Só mais um pedidinho"</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><path d="M12 8c2 0 3 4 3 5s-2 2-2 3 3 6 6 8c1 0 2-2 3-2s5 1 5 3-2 4-4 4C16 29 9 21 9 13c0-2 1-5 3-5z" fill="#14146b"/></svg>
+    <div>Um vendedor liga pedindo para incluir mais um pedido num caminhão que já está <b>fechado e conferido</b>.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Abre o caminhão e coloca. O cliente tem sempre razão.</div>
+    <div class="opt"><span class="bub">B</span>Diz que não dá e desliga o telefone na cara.</div>
+    <div class="opt"><span class="bub">C</span>Coloca o pedido sem registrar nada, para ganhar tempo.</div>
+    <div class="opt"><span class="bub">D</span>Explica o procedimento e consulta o supervisor. Só inclui se ele autorizar, com nota, conferência e romaneio.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">25</div><div class="qt">O sistema caiu</div><div class="pts">3 pts</div></div>
+  <div class="sit">
+    <svg width="38" height="38" viewBox="0 0 38 38"><circle cx="19" cy="19" r="19" fill="#fbb917"/><rect x="9" y="9" width="20" height="14" rx="2" fill="#14146b"/><rect x="15" y="24" width="8" height="3" fill="#14146b"/><rect x="12" y="27" width="14" height="2.5" rx="1" fill="#14146b"/><path d="M15 13l8 6M23 13l-8 6" stroke="#fbb917" stroke-width="2.4" stroke-linecap="round"/></svg>
+    <div>No meio do carregamento, o sistema fica <b>fora do ar</b>.</div>
+  </div>
+  <div class="opts one">
+    <div class="opt"><span class="bub">A</span>Libera a equipe para ir para casa mais cedo.</div>
+    <div class="opt"><span class="bub">B</span>Aciona a TI, avisa o supervisor e segue o plano de contingência (registro em papel) para lançar depois.</div>
+    <div class="opt"><span class="bub">C</span>Carrega tudo sem conferência, para não atrasar.</div>
+    <div class="opt"><span class="bub">D</span>Para tudo e espera o sistema voltar, sem fazer nada.</div>
+  </div>
+</div>
+
+<div class="q p3q">
+  <div class="qh"><div class="num">26</div><div class="qt">Com as suas palavras<small>Um colaborador novo na conferência está errando muitos pedidos. Como auxiliar, o que você faria? Responda em até 5 linhas.</small></div><div class="pts">8 pts</div></div>
+  <div class="lines"><div></div><div></div><div></div><div></div><div></div></div>
+</div>
+
+<div class="end">
+  <b>Fim da prova. Obrigado pela participação!</b>
+  <span>Antes de entregar, confira se todas as questões estão respondidas.</span>
+</div>
+
+</div>
+</body>
+</html>

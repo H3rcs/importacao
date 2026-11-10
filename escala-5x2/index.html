@@ -116,7 +116,7 @@ input[type=time],input[type=number],input[type=text],input[type=date]{border:1.5
 .mv{display:flex;flex-direction:column;gap:4px;justify-content:center}
 .mv .rb{width:28px;height:26px;font-size:15px}
 .pilula{align-self:flex-start;background:var(--alerta);color:#fff;font-weight:700;font-size:12.5px;border-radius:99px;padding:3px 10px}
-.pilula.ok{background:var(--amarelo);color:var(--tinta)}
+.pilula.ok{background:var(--amarelo);color:var(--tinta)}.pilula.des{background:#fff;color:var(--tinta);border:1.5px dashed var(--neutro)}
 .legenda{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--suave);align-items:center}
 .legenda span{display:inline-flex;align-items:center;gap:5px}
 .novo{display:flex;gap:8px;flex-wrap:wrap}
@@ -231,7 +231,7 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 
 <section id="vagas">
   <h2>Vagas sugeridas</h2>
-  <p class="sub">Escolha um cenário. As vagas aparecem como bonecos amarelos na semana, nas funções e nos checkouts.</p>
+  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. As vagas aparecem como bonecos amarelos nas funções e entram na conta da semana e dos checkouts.</p>
   <div class="cen" id="o-cen"></div>
   <div class="cartao" id="o-vagas" style="display:flex;flex-direction:column;gap:14px"></div>
   <p class="aviso" id="o-teto"></p>
@@ -264,12 +264,12 @@ var MAPA=[
 var CAT={sep:'Separação',conf:'Conferência',sup:'Supervisão',out:'Apoio e movimentação'};
 var TODO=['Confirmar com a gerência os horários novos dos três turnos','Confirmar com o RH a jornada diária e o intervalo na escala 5x2','Conferir as funções da 2ª página do mapa e dividir em subturnos','Informar quantos checkouts existem na miudeza e no nobre','Confirmar se os operadores de empilhadeira trabalham em pares','Escolher o cenário de vagas e abrir as vagas com o RH','Comunicar a cada colaborador o seu subturno e a data de início'];
 var CHAVE='escala5x2-v1';
-function padrao(){return {v:1,fn:MAPA.map(function(r){return {n:r[0],cat:r[1],a:r[2],b:r[3],c:r[4],a1:r[5],c1:r[6]};}),extra:{a:10,b:11,c:5},t:{aE:'06:00',aS:'17:00',bE:'15:00',bS:'00:00',cE:'00:00',cS:'06:00'},ck:{miu:'',nob:''},scen:'atual',todo:[],campo:{inicio:'',resp:'',ger:''},tab:'a',filt:'todas',ts:0};}
+function padrao(){return {v:1,fn:MAPA.map(function(r){return {n:r[0],cat:r[1],a:r[2],b:r[3],c:r[4],a1:r[5],c1:r[6]};}),extra:{a:10,b:11,c:5},t:{aE:'06:00',aS:'17:00',bE:'15:00',bS:'00:00',cE:'00:00',cS:'06:00'},ck:{miu:'',nob:''},scen:'comp',m:2,todo:[],campo:{inicio:'',resp:'',ger:''},tab:'a',filt:'todas',ts:0};}
 var S=padrao(),db=null,timer=null;
 function $(s){return document.querySelector(s);}
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function valido(o){return o&&o.v===1&&Array.isArray(o.fn)&&o.t&&o.ck&&o.extra;}
-function adota(o){var d=padrao();for(var k in d){if(o[k]===undefined)o[k]=d[k];}S=o;}
+function adota(o){if(!o.m){o.scen='comp';o.m=2;}var d=padrao();for(var k in d){if(o[k]===undefined)o[k]=d[k];}S=o;}
 
 /* ---------- cálculo ---------- */
 var LIM={atual:0,min:1,rec:2,comp:3};
@@ -277,14 +277,15 @@ function plano(sh,lim){
   if(lim===undefined)lim=LIM[S.scen];
   return S.fn.map(function(f,i){
     var t=f[sh]||0,s1=Math.max(0,Math.min(f[sh+'1']||0,t)),s2=t-s1,pr=0,v1=0,v2=0;
-    if(t===1)pr=1;else if(t%2===1)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
-    if(pr&&pr<=lim){if(s1<=s2)v1=1;else v2=1;}
+    var d=Math.abs(s1-s2);
+    if(t>0&&(s1===0||s2===0))pr=1;else if(d>0)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
+    if(pr&&pr<=lim){var n=lim===1?1:d;if(s1<s2)v1=n;else v2=n;}
     return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2};
   });
 }
 function soma(l,k){return l.reduce(function(s,x){return s+x[k];},0);}
 function descobertas(sh){return plano(sh).filter(function(x){return x.t>0&&(x.s1+x.v1===0||x.s2+x.v2===0);});}
-function vagasDe(sh,lim){return plano(sh,lim).filter(function(x){return x.v1+x.v2>0;});}
+function nVagas(sh,lim){var l=plano(sh,lim);return soma(l,'v1')+soma(l,'v2');}
 function totalB(){return S.fn.reduce(function(s,f){return s+(f.b||0);},0);}
 function mins(h){var p=String(h||'00:00').split(':');return (+p[0]||0)*60+(+p[1]||0);}
 function trechos(e,s){e=mins(e);s=mins(s);if(s<=e)s+=1440;return s<=1440?[[e,s]]:[[e,1440],[0,s-1440]];}
@@ -359,7 +360,7 @@ function rFuncoes(){
         h+='<div class="mv"><button class="rb" data-act="to1" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'1"'+(x.s2?'':' disabled')+'>‹</button><button class="rb" data-act="to2" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'2"'+(x.s1?'':' disabled')+'>›</button></div>';
         h+='<div class="raia r2'+(a2===0?' vazia':'')+'"><div class="rh"><span>'+U+'2</span><span class="num">'+a2+'</span></div><div class="pws">'+pw(x.s2,'p2')+pw(x.v2,'vg')+'</div></div></div>';
         if(al)h+='<span class="pilula">Sem ninguém na '+(a1===0?'terça':'segunda')+'</span>';
-        else if(x.v1+x.v2)h+='<span class="pilula ok">1 vaga sugerida</span>';
+        else if(x.v1+x.v2)h+='<span class="pilula ok">Contratar '+(x.v1+x.v2)+' para igualar '+U+'1 e '+U+'2</span>';else if(x.s1!==x.s2)h+='<span class="pilula des">'+U+'1 e '+U+'2 desiguais</span>';
       }
       h+='</div>';});
   }
@@ -401,12 +402,12 @@ function rCheckV(){
   });
 }
 function rVagas(){
-  var C=[['atual','Quadro atual','Sem contratar'],['min','Mínimo','Nenhuma função fica sem ninguém'],['rec','Recomendado','Mínimo + separação e conferência com subturnos iguais'],['comp','Completo','Todas as funções com subturnos iguais']];
-  $('#o-cen').innerHTML=C.map(function(c){var l=LIM[c[0]],n=vagasDe('a',l).length+vagasDe('c',l).length;
+  var C=[['comp','Balanceado','Todas as funções com os dois subturnos iguais'],['rec','Separação e conferência','Cobre as funções vazias e iguala separação e conferência'],['min','Mínimo','Só cobre a função que fica sem ninguém'],['atual','Quadro atual','Sem contratar']];
+  $('#o-cen').innerHTML=C.map(function(c){var l=LIM[c[0]],n=nVagas('a',l)+nVagas('c',l);
     return '<button data-scen="'+c[0]+'" aria-pressed="'+(S.scen===c[0])+'"><span class="t">'+c[1]+'</span><span class="n">'+n+'</span><span class="e">'+c[2]+'</span></button>';}).join('');
-  var P=[[1,'Prioridade 1 · função com 1 pessoa'],[2,'Prioridade 2 · separação e conferência com número ímpar'],[3,'Prioridade 3 · demais funções com número ímpar']],lim=LIM[S.scen],h='';
+  var P=[[1,'Prioridade 1 · função sem ninguém em um dia'],[2,'Prioridade 2 · separação e conferência desiguais'],[3,'Prioridade 3 · demais funções desiguais']],lim=LIM[S.scen],h='';
   P.forEach(function(p){var l=[];['a','c'].forEach(function(sh){plano(sh,3).forEach(function(x){if(x.pr===p[0])l.push([sh.toUpperCase(),x]);});});
-    h+='<div class="pri"><h3>'+p[1]+' <span class="num">('+l.length+')</span></h3><div class="vagas">'+(l.length?l.map(function(v){return '<span class="vg-c'+(p[0]<=lim?' on':'')+'"><i>'+v[0]+'</i>'+esc(v[1].f.n)+' <span class="num">'+v[1].t+' → '+(v[1].t+1)+'</span></span>';}).join(''):'<span class="sub" style="margin:0">Nenhuma.</span>')+'</div></div>';});
+    h+='<div class="pri"><h3>'+p[1]+' <span class="num">('+l.length+')</span></h3><div class="vagas">'+(l.length?l.map(function(v){return '<span class="vg-c'+(p[0]<=lim?' on':'')+'"><i>'+v[0]+'</i>'+esc(v[1].f.n)+' <span class="num">'+v[1].t+' → '+(v[1].t+v[1].v1+v[1].v2)+'</span></span>';}).join(''):'<span class="sub" style="margin:0">Nenhuma.</span>')+'</div></div>';});
   $('#o-vagas').innerHTML=h;
   var ta=soma(plano('a'),'t')+S.extra.a,tc=soma(plano('c'),'t')+S.extra.c;
   $('#o-teto').textContent='Referência: se a jornada diária não aumentar, cada pessoa trabalha 1 dia a menos por semana. São '+ta+' dias de trabalho a menos por semana no Turno A e '+tc+' no Turno C, o equivalente a cerca de '+Math.round(ta/5)+' e '+Math.round(tc/5)+' pessoas.';

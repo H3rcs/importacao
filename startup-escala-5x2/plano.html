@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virada 5x2 - Plano de negócio</title>
+<style>
+:root{
+  /* Layout: folhas A4 com faixa de título à esquerda do número da página, blocos em grade de 12 colunas. */
+  --tinta:#10243E; --suave:#566377; --linha:#D5DBE5; --fundo:#F3F5F9;
+  --laranja:#E8590C; --verde:#0B7A53; --amarelo:#FFD43B; --azul:#1C4FA1;
+  --display:'Inter Display','Inter','Helvetica Neue',Arial,sans-serif;
+  --corpo:'Inter','Helvetica Neue',Arial,sans-serif;
+  color-scheme:light;
+}
+@page{size:A4;margin:0}
+*{box-sizing:border-box}
+html,body{margin:0;background:#8a93a3}
+body{font-family:var(--corpo);color:var(--tinta);font-size:10.4pt;line-height:1.42;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{width:210mm;height:297mm;background:#fff;margin:6mm auto;padding:15mm 16mm 14mm;position:relative;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;gap:4.2mm}
+@media print{html,body{background:#fff}.page{margin:0}}
+h1,h2,h3,h4{font-family:var(--display);margin:0;line-height:1.08;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:23pt;font-weight:800}
+h2 small{display:block;font-family:var(--corpo);font-size:8.6pt;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--laranja);margin-bottom:1.6mm}
+h3{font-size:12.2pt;font-weight:800}
+h4{font-size:9.6pt;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--suave)}
+p{margin:0}
+.lead{font-size:11.6pt;line-height:1.4;max-width:165mm}
+.rod{position:absolute;left:16mm;right:16mm;bottom:7mm;display:flex;justify-content:space-between;font-size:7.6pt;color:var(--suave);border-top:1px solid var(--linha);padding-top:1.6mm}
+sup{font-size:6.6pt;color:var(--azul);font-weight:700;margin-left:.4pt}
+.g{display:grid;gap:4mm}
+.g4 .num{font-size:20pt}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+.card{border:1px solid var(--linha);border-radius:3mm;padding:3.6mm 4mm;display:flex;flex-direction:column;gap:1.4mm}
+.card.f{background:var(--fundo);border-color:var(--fundo)}
+.card.t{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.card.l{border-left:2.2mm solid var(--laranja)}
+.card.v{border-left:2.2mm solid var(--verde)}
+.num{font-family:var(--display);font-weight:800;font-size:25pt;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.num.o{color:var(--laranja)} .num.v{color:var(--verde)}
+.k{font-size:7.8pt;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--suave)}
+.card.t .k{color:#B9C6DA}
+.p{font-size:8.9pt;color:var(--suave);line-height:1.35}
+.card.t .p{color:#D6DEEA}
+ul{margin:0;padding-left:4.2mm;display:flex;flex-direction:column;gap:1.1mm}
+li::marker{color:var(--laranja)}
+table{border-collapse:collapse;width:100%;font-size:8.9pt}
+th{text-align:left;font-size:7.6pt;letter-spacing:.07em;text-transform:uppercase;color:var(--suave);border-bottom:1.6px solid var(--tinta);padding:1.4mm 1.6mm}
+td{border-bottom:1px solid var(--linha);padding:1.5mm 1.6mm;vertical-align:top}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.tot td{font-weight:800;border-bottom:0;border-top:1.6px solid var(--tinta)}
+.tag{display:inline-block;border-radius:99px;padding:.4mm 2.4mm;font-size:7.6pt;font-weight:700;background:var(--amarelo)}
+.tag.v{background:#D7F0E5;color:var(--verde)} .tag.o{background:#FDE3D3;color:#9C3A05}
+.nota{font-size:8.3pt;color:var(--suave);border-left:1.2mm solid var(--amarelo);padding-left:2.6mm}
+svg text{font-family:var(--corpo)}
+/* capa */
+.capa{padding:0;background:var(--tinta);color:#fff;gap:0}
+.capa .topo{padding:18mm 18mm 0;display:flex;justify-content:space-between;font-size:8.6pt;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:#B9C6DA}
+.capa .meio{padding:0 18mm;margin-top:26mm}
+.capa .marca{font-family:var(--display);font-weight:800;font-size:92pt;line-height:.86;letter-spacing:-.04em}
+.capa .marca span{color:var(--laranja)}
+.capa .sub{font-size:17pt;line-height:1.25;max-width:150mm;margin-top:8mm;font-weight:500}
+.capa .faixa{margin-top:14mm;background:var(--laranja);padding:7mm 18mm;display:grid;grid-template-columns:auto 1fr;gap:8mm;align-items:center}
+.capa .faixa .num{font-size:54pt;color:#fff}
+.capa .faixa p{font-size:12.5pt;line-height:1.3;font-weight:600}
+.capa .base{margin-top:auto;padding:0 18mm 16mm;display:grid;grid-template-columns:1fr 1fr;gap:10mm;font-size:9.6pt}
+.capa .base h4{color:#B9C6DA;margin-bottom:2mm}
+.capa .lin{border-bottom:1px solid #5C6F8A;height:7.4mm}
+/* passos */
+.passos{display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+.passo{background:var(--fundo);padding:3.4mm 3.4mm 3.4mm 6mm;clip-path:polygon(0 0,calc(100% - 4mm) 0,100% 50%,calc(100% - 4mm) 100%,0 100%,4mm 50%);display:flex;flex-direction:column;gap:1mm;min-height:39mm}
+.passo:first-child{clip-path:polygon(0 0,calc(100% - 4mm) 0,100% 50%,calc(100% - 4mm) 100%,0 100%);padding-left:3.6mm}
+.passo b.n{font-family:var(--display);font-size:20pt;font-weight:800;color:var(--laranja);line-height:1}
+.passo h3{font-size:10.6pt}
+.passo .p{font-size:8pt;padding-right:3mm}
+.pw{width:3.1mm;height:4.2mm;display:inline-block;vertical-align:middle;margin-right:.5mm}
+.canvas{display:grid;grid-template-columns:repeat(10,1fr);grid-template-rows:auto auto auto;gap:0;border:1.4px solid var(--tinta);border-radius:2mm;overflow:hidden;font-size:7.7pt;line-height:1.3}
+.canvas>div{padding:2mm 2.2mm;border-right:1px solid var(--linha);border-bottom:1px solid var(--linha)}
+.canvas h4{font-size:7pt;color:var(--laranja);margin-bottom:.8mm}
+.fontes{font-size:6.1pt;line-height:1.27;color:var(--suave);columns:3;column-gap:4mm;word-break:break-word}
+.fontes{font-feature-settings:"calt" 0}.fontes p{margin-bottom:.8mm;break-inside:avoid}
+.fontes b{color:var(--tinta)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><symbol id="p" viewBox="0 0 12 16"><circle cx="6" cy="3.6" r="3"/><path d="M1 15.4c0-5.2 2-7.6 5-7.6s5 2.4 5 7.6z"/></symbol></svg>
+
+<!-- 1 CAPA -->
+<section class="page capa">
+  <div class="topo"><span>Plano de negócio</span><span>Empretec · Feira de Santana · novembro de 2026</span></div>
+  <div class="meio">
+    <div class="marca">Virada<br><span>5x2</span></div>
+    <p class="sub">Consultoria que leva empresas da escala 6x1 para a 5x2 sem perder performance.</p>
+  </div>
+  <div class="faixa">
+    <div class="num">36 dias</div>
+    <p>É o prazo que resta, a partir de 10/11/2026, para toda empresa do país dar duas folgas por semana. A regra vale em 16 de dezembro de 2026.<sup>1</sup></p>
+  </div>
+  <div class="base">
+    <div><h4>Equipe</h4><div class="lin"></div><div class="lin"></div><div class="lin"></div><div class="lin"></div><div class="lin"></div></div>
+    <div><h4>Turma e facilitadores</h4><div class="lin"></div><div class="lin"></div><h4 style="margin-top:5mm">Nome de trabalho</h4><p style="color:#D6DEEA;margin-top:1mm">"Virada 5x2" é um nome provisório. Antes de registrar, consultar a Junta Comercial e o INPI.</p></div>
+  </div>
+</section>
+
+<!-- 2 RESUMO -->
+<section class="page">
+  <h2><small>1 · Resumo executivo</small>A lei mudou e 14,8 milhões de empregos precisam de uma escala nova até dezembro</h2>
+  <p class="lead">A Emenda Constitucional 141, promulgada em 16/10/2026, acabou com a escala 6x1. A Virada 5x2 redesenha a escala de cada empresa, função por função, para cumprir a regra com o menor custo e sem queda de atendimento ou de produção.</p>
+  <div class="g g4">
+    <div class="card f"><span class="k">Empregos em 6x1 no Brasil</span><span class="num">14,8 mi</span><span class="p">29,9% dos vínculos formais em dez/2025<sup>4</sup></span></div>
+    <div class="card f"><span class="k">Na Bahia</span><span class="num">596,5 mil</span><span class="p">32,5% dos trabalhadores com jornada identificada<sup>6</sup></span></div>
+    <div class="card f"><span class="k">Custo se nada for redesenhado</span><span class="num o">até +7,8%</span><span class="p">na folha: de 4,7% (MTE) a 7,84% (Ipea)<sup>7,8</sup></span></div>
+    <div class="card f"><span class="k">Sem plano</span><span class="num o">22%</span><span class="p">dos pequenos negócios que esperam impacto ainda não sabem o que fazer<sup>10</sup></span></div>
+  </div>
+  <div class="card">
+    <h4>Linha do tempo da lei</h4>
+    <svg viewBox="0 0 680 118" width="100%" role="img" aria-label="Linha do tempo da Emenda Constitucional 141">
+      <line x1="30" y1="46" x2="650" y2="46" stroke="#10243E" stroke-width="2"/>
+      <rect x="185" y="40" width="135" height="12" fill="#E8590C"/>
+      <circle cx="30" cy="46" r="7" fill="#10243E"/><circle cx="185" cy="46" r="7" fill="#fff" stroke="#E8590C" stroke-width="3"/><circle cx="320" cy="46" r="9" fill="#E8590C"/><circle cx="650" cy="46" r="9" fill="#0B7A53"/>
+      <text x="30" y="26" font-size="11" font-weight="800" fill="#10243E">16/10/2026</text>
+      <text x="30" y="72" font-size="9.5" fill="#566377">Emenda 141 promulgada</text>
+      <text x="30" y="85" font-size="9.5" fill="#566377">Senado: 75 votos a 1</text>
+      <text x="185" y="26" font-size="11" font-weight="800" fill="#E8590C" text-anchor="middle">10/11/2026</text>
+      <text x="185" y="72" font-size="9.5" fill="#566377" text-anchor="middle">Hoje</text>
+      <text x="252" y="35" font-size="9.5" font-weight="800" fill="#E8590C" text-anchor="middle">36 dias</text>
+      <text x="320" y="26" font-size="11" font-weight="800" fill="#10243E" text-anchor="middle">16/12/2026</text>
+      <text x="320" y="72" font-size="9.5" fill="#566377" text-anchor="middle">Duas folgas por semana</text>
+      <text x="320" y="85" font-size="9.5" fill="#566377" text-anchor="middle">obrigatórias. Teto de 42 horas</text>
+      <text x="320" y="98" font-size="9.5" fill="#566377" text-anchor="middle">(com acordo coletivo)</text>
+      <text x="485" y="35" font-size="9.5" font-weight="700" fill="#566377" text-anchor="middle">12 meses: segunda onda de ajustes</text>
+      <text x="650" y="26" font-size="11" font-weight="800" fill="#0B7A53" text-anchor="end">16/12/2027</text>
+      <text x="650" y="72" font-size="9.5" fill="#566377" text-anchor="end">Teto definitivo de</text>
+      <text x="650" y="85" font-size="9.5" fill="#566377" text-anchor="end">40 horas semanais</text>
+    </svg>
+    <p class="p">Fontes: Agência Brasil e Senado.<sup>1,2</sup> O decreto que detalha a regra estava previsto para 9/11 e foi adiado para depois de 16/11.<sup>15</sup></p>
+  </div>
+  <div class="g g2">
+    <div class="card l">
+      <h3>A empresa em cinco linhas</h3>
+      <ul>
+        <li><b>Cliente:</b> comércio, alimentação, hospedagem, atacado e logística que hoje operam em 6x1.</li>
+        <li><b>Problema:</b> cumprir a lei em semanas, sem estourar a folha nem deixar função descoberta.</li>
+        <li><b>Solução:</b> diagnóstico, escala nova por função, plano de contratação e acompanhamento por indicadores.</li>
+        <li><b>Receita:</b> projeto fechado por porte (R$ 890 a R$ 7.900) e acompanhamento mensal.</li>
+        <li><b>Meta de 12 meses:</b> 46 empresas atendidas e R$ 134 mil de receita.</li>
+      </ul>
+    </div>
+    <div class="card v">
+      <h3>Por que agora e por que nós</h3>
+      <ul>
+        <li>O prazo é legal e tem data. A demanda não depende de convencer o cliente de que o problema existe.</li>
+        <li>Quem já migrou mostra que o resultado depende do desenho: houve queda de 30% na rotatividade em um caso e pressão de custos em outro.<sup>11,12</sup></li>
+        <li>A equipe já tem um simulador próprio, funcional, que divide cada função em grupos de folga e aponta onde falta gente.</li>
+        <li>Há uma segunda onda garantida: a redução para 40 horas em dezembro de 2027.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>2</span></div>
+</section>
+
+<!-- 3 PROBLEMA -->
+<section class="page">
+  <h2><small>2 · O problema</small>Três pressões ao mesmo tempo: prazo, custo e risco jurídico</h2>
+  <div class="g g3">
+    <div class="card t"><span class="k">Prazo</span><span class="num">16/12/2026</span><span class="p">Duas folgas semanais passam a ser obrigatórias. Cláusulas de convenção coletiva com 44 horas ou uma folga só deixam de valer nessa data.<sup>3</sup></span></div>
+    <div class="card t"><span class="k">Custo</span><span class="num">até +13%</span><span class="p">na folha de empresas com até 9 funcionários que cobrirem a mudança só com hora extra, segundo a CNI. A média geral estimada é de 7%.<sup>9</sup></span></div>
+    <div class="card t"><span class="k">Risco</span><span class="num">em dobro</span><span class="p">É como se paga a folga não concedida. Hora acima do limite custa no mínimo 50% a mais. A fiscalização é dos auditores do trabalho.<sup>18,22</sup></span></div>
+  </div>
+  <div class="g g2">
+    <div class="card">
+      <h4>Setores com mais trabalhadores em 6x1</h4>
+      <svg viewBox="0 0 320 150" width="100%" role="img" aria-label="Percentual de trabalhadores em 6x1 por setor">
+        <g font-size="10" fill="#10243E">
+          <text x="0" y="22">Transporte aéreo</text><rect x="112" y="10" width="165" height="16" fill="#E8590C"/><text x="282" y="22" font-weight="800">53,2%</text>
+          <text x="0" y="52">Alojamento</text><rect x="112" y="40" width="161" height="16" fill="#E8590C"/><text x="278" y="52" font-weight="800">52,0%</text>
+          <text x="0" y="82">Alimentação</text><rect x="112" y="70" width="146" height="16" fill="#E8590C"/><text x="263" y="82" font-weight="800">47,1%</text>
+          <text x="0" y="112">Comércio</text><rect x="112" y="100" width="131" height="16" fill="#E8590C"/><text x="248" y="112" font-weight="800">42,2%</text>
+          <text x="0" y="142" fill="#566377">Média dos vínculos</text><rect x="112" y="130" width="103" height="16" fill="#9AA6B8"/><text x="220" y="142" font-weight="800" fill="#566377">33,2%</text>
+        </g>
+      </svg>
+      <p class="p">Fonte: Dieese e MTE, com dados do eSocial.<sup>5</sup></p>
+    </div>
+    <div class="card">
+      <h4>Quanto a mudança pesa na folha</h4>
+      <table>
+        <tr><th>Estimativa</th><th class="n">Impacto</th></tr>
+        <tr><td>Ministério do Trabalho (média; faixa de 1,6% a 10,5% por setor)<sup>8</sup></td><td class="n"><b>+4,7%</b></td></tr>
+        <tr><td>CNI (média)<sup>9</sup></td><td class="n"><b>+7%</b></td></tr>
+        <tr><td>Ipea (44 h para 40 h em 5x2)<sup>7</sup></td><td class="n"><b>+7,84%</b></td></tr>
+        <tr><td>CNI, até 9 funcionários, só com hora extra<sup>9</sup></td><td class="n"><b>até +13%</b></td></tr>
+      </table>
+      <p class="p">Para a CNI, cobrir a mudança com hora extra custa 50% mais do que contratar, nas pequenas empresas.<sup>9</sup> O desenho da escala decide em que ponta dessa faixa a empresa fica.</p>
+    </div>
+  </div>
+  <div class="g g2">
+    <div class="card l">
+      <h3>Onde a regra ainda está em aberto</h3>
+      <ul>
+        <li>O teto de 42 horas na transição só é seguro com convenção ou acordo coletivo. Sem isso, o limite prático é de 40 horas, e acordo individual não resolve.<sup>3</sup></li>
+        <li>O decreto regulamentador ainda não saiu. O governo antecipou a garantia de 8 folgas a cada 30 dias.<sup>15,20</sup></li>
+        <li>O Senado prepara uma PEC paralela para categorias com jornadas especiais.<sup>16</sup></li>
+        <li>Escalas 12x36 cabem em 42 horas, mas passam do teto de 40 horas em 2027.<sup>3</sup></li>
+      </ul>
+    </div>
+    <div class="card l">
+      <h3>Quem sente mais</h3>
+      <ul>
+        <li>Dos 14,8 milhões de empregos em 6x1, 7,9 milhões estão em médias e grandes empresas. Os outros 6,9 milhões, aproximadamente, estão em micro e pequenas.<sup>4</sup></li>
+        <li>Nas empresas com até 9 empregados, cerca de 88% dos vínculos têm jornada de 44 horas.<sup>7</sup></li>
+        <li>No comércio paulista, a rotatividade chegou a 63,3% em 12 meses, a maior desde 2022. Trocar gente no meio da transição encarece tudo.<sup>13</sup></li>
+        <li>Pequenos negócios que preveem impacto planejam subir preços (29%), reorganizar turnos (24%) ou cortar pessoal (21%).<sup>10</sup></li>
+      </ul>
+    </div>
+  </div>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>3</span></div>
+</section>
+
+<!-- 4 PROVA -->
+<section class="page">
+  <h2><small>3 · A evidência</small>Dá para migrar sem perder performance, mas o resultado depende do desenho</h2>
+  <p class="lead">Empresas brasileiras que já saíram da 6x1 mostram ganhos reais e também os pontos em que a transição aperta. A consultoria existe para repetir o que deu certo e evitar o que deu errado.</p>
+  <table>
+    <tr><th style="width:27%">Empresa</th><th style="width:36%">O que fez</th><th>O que aconteceu</th></tr>
+    <tr><td><b>Gurumê</b> (restaurantes)<sup>12</sup></td><td>5x2 em parte das unidades, com escala flexível: menos gente na abertura e no fechamento.</td><td><span class="tag v">-30% de rotatividade</span> e queda nas faltas. Jornada média de cerca de 38 horas.</td></tr>
+    <tr><td><b>Grupo Savegnago</b> (77 supermercados)<sup>11</sup></td><td>Começou em nov/2025 e hoje cobre as 77 lojas, mantendo 44 horas em cinco dias.</td><td><span class="tag v">+120% de procura por vagas</span> Mais produtividade e, segundo o presidente, impacto zero no custo. A rotatividade não mudou (4,8% ao mês).</td></tr>
+    <tr><td><b>C&amp;A</b> (60 lojas em teste)<sup>11</sup></td><td>Teste em cerca de 18% das lojas, com ferramentas para distribuir tarefas.</td><td><span class="tag v">Faltas caíram</span> <span class="tag o">Custos pressionados</span> O domingo, com shopping cheio, é o maior desafio.</td></tr>
+    <tr><td><b>RD Saúde e DPSP</b> (farmácias)<sup>11</sup></td><td>Eliminaram a 6x1 nas lojas de Raia, Drogasil, Drogaria São Paulo e Pacheco.</td><td>Números não divulgados. Mostram que redes com funcionamento estendido conseguem operar em 5x2.</td></tr>
+    <tr><td><b>Piloto 4 Day Week Brasil</b> (19 empresas, FGV)<sup>21</sup></td><td>Seis meses com 80% do tempo, 100% do salário e meta de 100% da produtividade.</td><td><span class="tag v">71,5%</span> dos participantes relataram mais produtividade e 60,3%, mais engajamento.</td></tr>
+  </table>
+  <div class="g g2">
+    <div class="card v">
+      <h3>O que os casos de sucesso têm em comum</h3>
+      <ul>
+        <li><b>Mapa da demanda:</b> conhecem os dias e horários fracos e colocam ali as folgas.<sup>17</sup></li>
+        <li><b>Escala flexível:</b> o número de pessoas acompanha o movimento, hora a hora.<sup>12</sup></li>
+        <li><b>Tarefas redistribuídas:</b> usam ferramentas e polivalência para cobrir funções.<sup>11</sup></li>
+        <li><b>Teste antes da virada:</b> começam por um piloto de semanas e só depois ampliam.<sup>11</sup></li>
+      </ul>
+    </div>
+    <div class="card l">
+      <h3>Onde a transição costuma falhar</h3>
+      <ul>
+        <li>Função com uma pessoa só fica sem ninguém no dia da folga.</li>
+        <li>A cobertura é feita com hora extra permanente, a saída mais cara.<sup>9</sup></li>
+        <li>O dia de maior movimento fica com a equipe reduzida.<sup>11</sup></li>
+        <li>A jornada passa de 8 horas por dia sem acordo coletivo.<sup>3</sup></li>
+      </ul>
+    </div>
+  </div>
+  <p class="nota">Leitura honesta dos dados: os resultados positivos vêm de relatos das próprias empresas e de pilotos com adesão voluntária. Nem todo indicador melhora em todo caso. Por isso o método da Virada 5x2 mede antes e depois em cada cliente.</p>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>4</span></div>
+</section>
+
+<!-- 5 SOLUÇÃO -->
+<section class="page">
+  <h2><small>4 · A solução</small>Um método de cinco passos, da escala atual à escala nova medida por indicadores</h2>
+  <div class="passos">
+    <div class="passo"><b class="n">1</b><h3>Mapear</h3><p class="p">Quadro por função e turno. Movimento por dia e hora. Regras da convenção coletiva.</p><p class="p"><b>2 a 3 dias</b></p></div>
+    <div class="passo"><b class="n">2</b><h3>Simular</h3><p class="p">Três cenários no simulador: custo, cobertura por função e vagas necessárias.</p><p class="p"><b>2 dias</b></p></div>
+    <div class="passo"><b class="n">3</b><h3>Negociar</h3><p class="p">Roteiro para o acordo com o sindicato e comunicação com a equipe.</p><p class="p"><b>1 semana</b></p></div>
+    <div class="passo"><b class="n">4</b><h3>Implantar</h3><p class="p">Escala publicada, treinamento de polivalência e piloto antes da virada.</p><p class="p"><b>1 a 2 semanas</b></p></div>
+    <div class="passo"><b class="n">5</b><h3>Medir</h3><p class="p">Painel de indicadores em 30, 60 e 90 dias, com ajustes na escala.</p><p class="p"><b>90 dias</b></p></div>
+  </div>
+  <div class="g g2">
+    <div class="card">
+      <h4>O simulador: exemplo ilustrativo de uma loja</h4>
+      <table>
+        <tr><th>Função</th><th>Grupo 1 · folga dom e seg</th><th>Grupo 2 · folga dom e ter</th></tr>
+        <tr><td><b>Vendedor</b> (6)</td><td><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg></td><td><svg class="pw" fill="#0B7A53"><use href="#p"/></svg><svg class="pw" fill="#0B7A53"><use href="#p"/></svg><svg class="pw" fill="#0B7A53"><use href="#p"/></svg></td></tr>
+        <tr><td><b>Caixa</b> (3)</td><td><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg><svg class="pw" fill="#FFD43B" stroke="#10243E" stroke-width="1.2"><use href="#p"/></svg></td><td><svg class="pw" fill="#0B7A53"><use href="#p"/></svg><svg class="pw" fill="#0B7A53"><use href="#p"/></svg></td></tr>
+        <tr><td><b>Estoquista</b> (2)</td><td><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg></td><td><svg class="pw" fill="#0B7A53"><use href="#p"/></svg></td></tr>
+        <tr><td><b>Gerente</b> (1)</td><td><svg class="pw" fill="#1C4FA1"><use href="#p"/></svg></td><td><span class="tag o">sem ninguém na segunda</span></td></tr>
+      </table>
+      <p class="p">Cada boneco é uma pessoa. O amarelo é uma vaga sugerida para igualar os grupos. A função de pessoa única aparece em alerta: ou contrata, ou treina alguém para cobrir. O cliente escolhe função por função.</p>
+    </div>
+    <div class="card">
+      <h4>O que o cliente recebe</h4>
+      <ul>
+        <li>Escala nova por função e por dia, pronta para publicar.</li>
+        <li>Três cenários comparados: reorganizar, contratar ou pagar hora extra.</li>
+        <li>Lista de vagas por prioridade, com o custo de cada uma.</li>
+        <li>Roteiro de pontos para levar ao sindicato e ao contador.</li>
+        <li>Comunicado para a equipe e plano do piloto.</li>
+        <li>Painel de indicadores antes e depois.</li>
+      </ul>
+      <p class="nota">A Virada 5x2 não presta assessoria jurídica. A parte legal é validada pelo advogado trabalhista e pelo contador do cliente, ou por parceiros indicados.</p>
+    </div>
+  </div>
+  <div class="card f">
+    <h4>Como medimos "sem perder performance"</h4>
+    <div class="g g5" style="gap:3mm">
+      <div><b>Cobertura mínima</b><p class="p">Nenhuma função abaixo do mínimo em nenhum dia.</p></div>
+      <div><b>Horas extras</b><p class="p">Horas por pessoa no mês, antes e depois.</p></div>
+      <div><b>Faltas</b><p class="p">Absenteísmo mensal por turno.</p></div>
+      <div><b>Rotatividade</b><p class="p">Desligamentos sobre o quadro médio.</p></div>
+      <div><b>Produção por hora</b><p class="p">Vendas, pedidos ou volumes por hora trabalhada.</p></div>
+    </div>
+    <p class="p">A meta de cada indicador é combinada com o cliente no passo 1 e conferida no passo 5. É isso que separa o serviço de uma simples tabela de horários.</p>
+  </div>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>5</span></div>
+</section>
+
+<!-- 6 MERCADO -->
+<section class="page">
+  <h2><small>5 · Mercado e concorrência</small>Começar pela Bahia: 596,5 mil trabalhadores em 6x1 e uma meta de 0,25% deles</h2>
+  <div class="g g2">
+    <div class="card">
+      <h4>Do mercado total à meta do primeiro ano</h4>
+      <svg viewBox="0 0 320 168" width="100%" role="img" aria-label="Funil de mercado">
+        <polygon points="0,4 320,4 290,52 30,52" fill="#10243E"/>
+        <text x="160" y="25" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">14,8 milhões</text>
+        <text x="160" y="41" text-anchor="middle" fill="#B9C6DA" font-size="9.5">empregos em 6x1 no Brasil</text>
+        <polygon points="33,58 287,58 257,106 63,106" fill="#1C4FA1"/>
+        <text x="160" y="79" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">596.501</text>
+        <text x="160" y="95" text-anchor="middle" fill="#D6DEEA" font-size="9.5">trabalhadores em 6x1 na Bahia</text>
+        <polygon points="66,112 254,112 224,160 96,160" fill="#E8590C"/>
+        <text x="160" y="133" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">cerca de 1.470</text>
+        <text x="160" y="149" text-anchor="middle" fill="#fff" font-size="9.5">meta: equipes de 46 empresas</text>
+      </svg>
+      <p class="p">Fontes: MTE e 4intelligence.<sup>4,6</sup> A meta é uma premissa da equipe: 24 empresas de 10 pessoas, 18 de 35 e 4 de 150, em média.</p>
+    </div>
+    <div class="card">
+      <h4>Público-alvo, por ordem de prioridade</h4>
+      <table>
+        <tr><th>Segmento</th><th>Por que primeiro</th></tr>
+        <tr><td><b>Supermercados e varejo</b></td><td>42,2% do comércio está em 6x1 e abre sábado e domingo.<sup>5</sup></td></tr>
+        <tr><td><b>Bares, restaurantes e hotéis</b></td><td>Maior incidência de 6x1 depois da aviação.<sup>5</sup></td></tr>
+        <tr><td><b>Atacado e centros de distribuição</b></td><td>Vários turnos e muitas funções: é onde o simulador mais ajuda.</td></tr>
+        <tr><td><b>Clínicas, vigilância e limpeza</b></td><td>Escalas 12x36 terão de ser revistas até 2027.<sup>3</sup></td></tr>
+      </table>
+      <p class="p">Feira de Santana é a base: teve o segundo maior saldo de empregos formais da Bahia em 2025, com 6.208 vagas.<sup>23</sup></p>
+    </div>
+  </div>
+  <h3>Quem já atende esse cliente e onde entramos</h3>
+  <table>
+    <tr><th style="width:24%">Alternativa</th><th style="width:34%">O que entrega</th><th>O que falta</th></tr>
+    <tr><td><b>Escala Sebrae</b> (simulador gratuito, desde 21/10)<sup>17</sup></td><td>Cenários e custo para micro e pequenas empresas, preenchido pelo próprio dono.</td><td>Não implanta, não trata função por função em vários turnos e não acompanha indicadores.</td></tr>
+    <tr><td><b>Calculadoras de contabilidade</b><sup>9</sup></td><td>Impacto na folha: hora extra ou contratação.</td><td>Só a conta. Não desenha a escala.</td></tr>
+    <tr><td><b>Sistemas de RH e ponto</b></td><td>Registro de jornada e folha por assinatura.</td><td>O sistema executa a escala que alguém precisa desenhar.</td></tr>
+    <tr><td><b>Advogados e contadores</b></td><td>Segurança jurídica e cálculo da folha.</td><td>Não olham a operação: quem cobre quem, em que dia.</td></tr>
+    <tr class="tot"><td>Virada 5x2</td><td>Desenho da operação por função, implantação e medição.</td><td>Depende de parceiros para a parte jurídica e de folha.</td></tr>
+  </table>
+  <p class="nota">Estratégia: tratar o simulador do Sebrae, os contadores e os advogados como porta de entrada e canal de indicação. Quem simulou e viu que precisa mudar a operação é o nosso cliente.</p>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>6</span></div>
+</section>
+
+<!-- 7 MODELO -->
+<section class="page">
+  <h2><small>6 · Modelo de negócio</small>Projeto com preço fechado por porte e acompanhamento mensal depois da virada</h2>
+  <div class="g g4">
+    <div class="card"><span class="k">Express · até 15 pessoas</span><span class="num">R$ 890</span><span class="p">Uma visita, escala pronta, lista de vagas e roteiro legal. Entrega em 3 dias.</span></div>
+    <div class="card l"><span class="k">Completa · 16 a 60 pessoas</span><span class="num o">R$ 2.900</span><span class="p">Os cinco passos, três cenários, piloto e painel em 30 dias.</span></div>
+    <div class="card"><span class="k">Multiturno · 61 a 300 pessoas</span><span class="num">R$ 7.900</span><span class="p">Vários turnos e sobreposição, plano de contratação e 90 dias de medição.</span></div>
+    <div class="card v"><span class="k">Acompanhamento</span><span class="num v">R$ 490/mês</span><span class="p">Indicadores, ajuste de escala e preparação para as 40 horas de 2027.</span></div>
+  </div>
+  <p class="nota">Os preços são uma proposta da equipe e equivalem a cerca de R$ 50 a R$ 80 por colaborador. Serão validados nas dez primeiras entrevistas com clientes.</p>
+  <div class="g g2">
+    <div class="card t">
+      <h4 style="color:#B9C6DA">A conta do cliente: empresa com 30 pessoas</h4>
+      <table style="color:#fff">
+        <tr><td style="border-color:#3A506E">Salário médio de admissão (Caged, set/2026)<sup style="color:#FFD43B">14</sup></td><td class="n" style="border-color:#3A506E">R$ 2.429,41</td></tr>
+        <tr><td style="border-color:#3A506E">Folha mensal de 30 pessoas, sem encargos</td><td class="n" style="border-color:#3A506E">R$ 72.882</td></tr>
+        <tr><td style="border-color:#3A506E">Impacto de 4,7% a 7% na folha<sup style="color:#FFD43B">8,9</sup></td><td class="n" style="border-color:#3A506E">R$ 3.425 a R$ 5.102/mês</td></tr>
+        <tr><td style="border-color:#3A506E">Hora extra com teto de 42 h (divisor 210, +50%)</td><td class="n" style="border-color:#3A506E">R$ 17,35</td></tr>
+        <tr><td style="border-color:#3A506E">2 horas extras por semana para cada um</td><td class="n" style="border-color:#3A506E">R$ 4.508/mês</td></tr>
+      </table>
+      <p class="p">O pacote Completo custa R$ 2.900 uma vez. Se a escala nova evitar só essas duas horas extras semanais, ele se paga em menos de um mês.</p>
+    </div>
+    <div class="card">
+      <h4>Canais de venda</h4>
+      <ul>
+        <li><b>Contadores e advogados trabalhistas:</b> indicam clientes e validam a parte legal.</li>
+        <li><b>CDL, associação comercial e sindicatos patronais:</b> palestra gratuita "5x2 em 36 dias" com diagnóstico no local.</li>
+        <li><b>Sebrae:</b> clientes que usaram o simulador e precisam implantar. Verificar o credenciamento como prestador.</li>
+        <li><b>Rede do Empretec:</b> cada participante indica duas empresas.</li>
+        <li><b>Venda direta:</b> visita a supermercados, restaurantes e atacados de Feira de Santana.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="canvas">
+    <div style="grid-column:span 2;grid-row:span 2"><h4>Parceiros</h4>Contadores, advogados trabalhistas, Sebrae, CDL, sindicatos patronais.</div>
+    <div style="grid-column:span 2"><h4>Atividades</h4>Diagnóstico, simulação, implantação, medição.</div>
+    <div style="grid-column:span 2;grid-row:span 2"><h4>Proposta de valor</h4>Cumprir a 5x2 no prazo, com o menor custo e sem função descoberta, medido por indicadores.</div>
+    <div style="grid-column:span 2"><h4>Relacionamento</h4>Projeto presencial e acompanhamento mensal.</div>
+    <div style="grid-column:span 2;grid-row:span 2;border-right:0"><h4>Clientes</h4>Empresas de 5 a 300 pessoas em 6x1: varejo, alimentação, hospedagem, atacado e logística.</div>
+    <div style="grid-column:span 2"><h4>Recursos</h4>Simulador próprio, método, equipe com vivência em operação.</div>
+    <div style="grid-column:span 2"><h4>Canais</h4>Indicação, palestras, venda direta.</div>
+    <div style="grid-column:span 5;border-bottom:0"><h4>Custos</h4>Tempo da equipe, deslocamento, contador, divulgação e impostos.</div>
+    <div style="grid-column:span 5;border-bottom:0;border-right:0"><h4>Receitas</h4>Projetos de R$ 890 a R$ 7.900 e acompanhamento de R$ 490 por mês.</div>
+  </div>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>7</span></div>
+</section>
+
+<!-- 8 FINANÇAS -->
+<section class="page">
+  <h2><small>7 · Projeção financeira</small>R$ 134 mil de receita em 12 meses, com 46 projetos e 881 horas de trabalho</h2>
+  <div class="g g4">
+    <div class="card f"><span class="k">Receita em 12 meses</span><span class="num">R$ 134.070</span><span class="p">R$ 105.160 de projetos e R$ 28.910 de acompanhamento</span></div>
+    <div class="card f"><span class="k">Impostos e custos</span><span class="num">R$ 37.321</span><span class="p">Simples a 15,5%, custos variáveis e fixos</span></div>
+    <div class="card f"><span class="k">Resultado</span><span class="num v">R$ 96.749</span><span class="p">antes da remuneração dos sócios</span></div>
+    <div class="card f"><span class="k">Por hora trabalhada</span><span class="num v">R$ 110</span><span class="p">resultado dividido por 881 horas</span></div>
+  </div>
+  <div class="card">
+    <h4>Receita mês a mês (R$)</h4>
+    <svg viewBox="0 0 680 190" width="100%" role="img" aria-label="Receita mensal projetada">
+      <line x1="20" y1="150" x2="670" y2="150" stroke="#10243E" stroke-width="1.5"/>
+      <g font-size="9.5" text-anchor="middle">
+        <rect x="32" y="122.3" width="34" height="27.7" fill="#9AA6B8"/><text x="49" y="117" font-weight="800">4.680</text><text x="49" y="164" fill="#566377">nov/26</text>
+        <rect x="86" y="25.5" width="34" height="124.5" fill="#E8590C"/><text x="103" y="20" font-weight="800">21.050</text><text x="103" y="164" fill="#566377">dez</text>
+        <rect x="140" y="25" width="34" height="125" fill="#E8590C"/><text x="157" y="20" font-weight="800">21.140</text><text x="157" y="164" fill="#566377">jan/27</text>
+        <rect x="194" y="88.3" width="34" height="61.7" fill="#9AA6B8"/><text x="211" y="83" font-weight="800">10.430</text><text x="211" y="164" fill="#566377">fev</text>
+        <rect x="248" y="46.9" width="34" height="103.1" fill="#9AA6B8"/><text x="265" y="42" font-weight="800">17.440</text><text x="265" y="164" fill="#566377">mar</text>
+        <rect x="302" y="104.9" width="34" height="45.1" fill="#9AA6B8"/><text x="319" y="100" font-weight="800">7.620</text><text x="319" y="164" fill="#566377">abr</text>
+        <rect x="356" y="110.2" width="34" height="39.8" fill="#9AA6B8"/><text x="373" y="105" font-weight="800">6.730</text><text x="373" y="164" fill="#566377">mai</text>
+        <rect x="410" y="63.5" width="34" height="86.5" fill="#9AA6B8"/><text x="427" y="58" font-weight="800">14.630</text><text x="427" y="164" fill="#566377">jun</text>
+        <rect x="464" y="107.3" width="34" height="42.7" fill="#9AA6B8"/><text x="481" y="102" font-weight="800">7.220</text><text x="481" y="164" fill="#566377">jul</text>
+        <rect x="518" y="104.4" width="34" height="45.6" fill="#9AA6B8"/><text x="535" y="99" font-weight="800">7.710</text><text x="535" y="164" fill="#566377">ago</text>
+        <rect x="572" y="104.4" width="34" height="45.6" fill="#9AA6B8"/><text x="589" y="99" font-weight="800">7.710</text><text x="589" y="164" fill="#566377">set</text>
+        <rect x="626" y="104.4" width="34" height="45.6" fill="#9AA6B8"/><text x="643" y="99" font-weight="800">7.710</text><text x="643" y="164" fill="#566377">out</text>
+      </g>
+      <text x="20" y="184" font-size="9.5" fill="#566377">Em laranja, os dois meses do prazo legal. Os picos de março e junho são projetos Multiturno.</text>
+    </svg>
+  </div>
+  <div class="g g2">
+    <div class="card">
+      <h4>Premissas (cenário conservador)</h4>
+      <table>
+        <tr><th>Item</th><th class="n">Em 12 meses</th></tr>
+        <tr><td>Projetos Express a R$ 890</td><td class="n">24</td></tr>
+        <tr><td>Projetos Completos a R$ 2.900</td><td class="n">18</td></tr>
+        <tr><td>Projetos Multiturno a R$ 7.900</td><td class="n">4</td></tr>
+        <tr><td>Clientes em acompanhamento ao fim do ano (40% dos Completos e Multiturno)</td><td class="n">8</td></tr>
+        <tr><td>Horas por projeto: 6, 20 e 50. Acompanhamento: 3 por mês</td><td class="n">881 h</td></tr>
+        <tr><td>Pico de carga, em dezembro e janeiro</td><td class="n">140 h/mês</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>Custos considerados</h4>
+      <table>
+        <tr><th>Item</th><th class="n">Valor</th></tr>
+        <tr><td>Simples Nacional, Anexo V, alíquota inicial<sup>19</sup></td><td class="n">15,5% da receita</td></tr>
+        <tr><td>Deslocamento e material por projeto</td><td class="n">R$ 60, R$ 150 e R$ 400</td></tr>
+        <tr><td>Contador</td><td class="n">R$ 350/mês</td></tr>
+        <tr><td>Site, domínio e ferramentas</td><td class="n">R$ 150/mês</td></tr>
+        <tr><td>Divulgação</td><td class="n">R$ 400/mês</td></tr>
+        <tr><td>Investimento inicial (abertura, marca, material)</td><td class="n">cerca de R$ 2.500</td></tr>
+      </table>
+    </div>
+  </div>
+  <p class="nota">Os custos são estimativas da equipe, a confirmar com o contador. Um projeto Completo por mês já cobre os custos fixos de R$ 900. Com pró-labore acima de 28% da receita, a empresa pode ir para o Anexo III, com alíquota inicial de 6%.<sup>19</sup></p>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>8</span></div>
+</section>
+
+<!-- 9 PLANO -->
+<section class="page">
+  <h2><small>8 · Plano de ação e riscos</small>Os primeiros 90 dias: vender antes do prazo legal e documentar os casos</h2>
+  <div class="g g3">
+    <div class="card l"><span class="k">10 a 20 de novembro</span><h3>Validar</h3><ul><li>10 entrevistas com donos e gerentes.</li><li>2 pilotos com desconto em troca de depoimento e dados.</li><li>Parceria com 1 contador e 1 advogado trabalhista.</li><li>Ler o decreto assim que sair e ajustar o método.</li></ul></div>
+    <div class="card l"><span class="k">21 de novembro a 16 de dezembro</span><h3>Vender e implantar</h3><ul><li>Palestra na CDL ou associação comercial.</li><li>Abrir o CNPJ e emitir nota.</li><li>Entregar os primeiros projetos antes de 16/12.</li><li>Publicar 2 casos com números.</li></ul></div>
+    <div class="card l"><span class="k">17 de dezembro a 10 de fevereiro</span><h3>Reter e medir</h3><ul><li>Medição de 30 e 60 dias nos clientes.</li><li>Converter projetos em acompanhamento mensal.</li><li>Atender quem deixou para depois do prazo.</li><li>Preparar a oferta das 40 horas de 2027.</li></ul></div>
+  </div>
+  <div class="g g2">
+    <div class="card">
+      <h4>Metas</h4>
+      <table>
+        <tr><th>Meta</th><th class="n">Prazo</th></tr>
+        <tr><td>10 entrevistas e 2 pilotos fechados</td><td class="n">20/11/2026</td></tr>
+        <tr><td>12 projetos entregues e R$ 25 mil de receita acumulada</td><td class="n">31/12/2026</td></tr>
+        <tr><td>2 clientes em acompanhamento mensal</td><td class="n">31/01/2027</td></tr>
+        <tr><td>4 casos documentados com indicadores antes e depois</td><td class="n">28/02/2027</td></tr>
+        <tr><td>46 projetos e R$ 134 mil de receita</td><td class="n">31/10/2027</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h4>Formalização</h4>
+      <ul>
+        <li>Atividade: consultoria em gestão empresarial, CNAE 7020-4/00.<sup>19</sup></li>
+        <li>Esse CNAE não pode ser MEI. O caminho é microempresa no Simples Nacional.<sup>19</sup></li>
+        <li>Sociedade limitada entre os integrantes, com acordo de sócios sobre horas e divisão do resultado.</li>
+        <li>Verificar a exigência de registro no Conselho Regional de Administração.</li>
+        <li>Contrato deixando claro que o serviço não é assessoria jurídica.</li>
+      </ul>
+    </div>
+  </div>
+  <h3>Riscos e respostas</h3>
+  <table>
+    <tr><th style="width:36%">Risco</th><th>Resposta</th></tr>
+    <tr><td><b>A regra muda</b> com o decreto, a PEC paralela ou decisões da Justiça.<sup>3,15,16</sup></td><td>O método é por indicadores, não por um formato fixo de escala. Contrato prevê uma revisão sem custo se a norma mudar em 90 dias.</td></tr>
+    <tr><td><b>Demanda de uma vez só:</b> o pico acaba depois de dezembro.</td><td>Acompanhamento mensal, segunda onda das 40 horas em dez/2027 e revisão de escalas 12x36.</td></tr>
+    <tr><td><b>Ferramentas gratuitas</b> como o simulador do Sebrae.<sup>17</sup></td><td>Posicionar como passo seguinte: quem simulou precisa implantar. Buscar parceria em vez de disputar.</td></tr>
+    <tr><td><b>Capacidade da equipe</b> no pico de 140 horas por mês.</td><td>Dividir por porte de cliente, padronizar o Express e limitar a agenda de dezembro.</td></tr>
+    <tr><td><b>Responsabilidade</b> por um desenho que gere passivo trabalhista.</td><td>Validação jurídica obrigatória por advogado antes de publicar a escala e cláusula de limite de responsabilidade.</td></tr>
+  </table>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>9</span></div>
+</section>
+
+<!-- 10 EMPRETEC + FONTES -->
+<section class="page" style="gap:3mm">
+  <h2><small>9 · Empretec e fontes</small>Como o plano exercita as 10 características do comportamento empreendedor</h2>
+  <table>
+    <tr><th style="width:15%">Conjunto</th><th style="width:30%">Característica</th><th>No plano</th></tr>
+    <tr><td rowspan="5"><b>Realização</b></td><td>Busca de oportunidades e iniciativa</td><td>Negócio criado 25 dias depois da emenda, antes de a regra valer.</td></tr>
+    <tr><td>Persistência</td><td>Segunda onda em 2027 e acompanhamento mensal para depois do pico.</td></tr>
+    <tr><td>Correr riscos calculados</td><td>Investimento inicial de cerca de R$ 2.500 e pilotos antes de escalar.</td></tr>
+    <tr><td>Exigência de qualidade e eficiência</td><td>Cinco indicadores medidos antes e depois em cada cliente.</td></tr>
+    <tr><td>Comprometimento</td><td>Entrega antes de 16/12 e revisão sem custo se a norma mudar.</td></tr>
+    <tr><td rowspan="3"><b>Planejamento</b></td><td>Busca de informações</td><td>23 fontes públicas e 10 entrevistas com clientes na primeira semana.</td></tr>
+    <tr><td>Estabelecimento de metas</td><td>Cinco metas com número e data, de 20/11/2026 a 31/10/2027.</td></tr>
+    <tr><td>Planejamento e monitoramento sistemáticos</td><td>Plano de 90 dias em três etapas e projeção mês a mês.</td></tr>
+    <tr><td rowspan="2"><b>Poder</b></td><td>Persuasão e rede de contatos</td><td>Contadores, advogados, CDL, Sebrae e a rede do Empretec como canais.</td></tr>
+    <tr><td>Independência e autoconfiança</td><td>Método e simulador próprios, sem depender de software de terceiros.</td></tr>
+  </table>
+  <h4>Fontes consultadas em 9 e 10/11/2026</h4>
+  <p class="p">Projeções, preços, metas e custos são premissas da equipe. Este plano não substitui orientação jurídica ou contábil.</p>
+  <div class="fontes">
+    <p><b>1</b> Agência Brasil, 16/10/2026. Congresso promulga emenda do fim da 6x1. agenciabrasil.ebc.com.br/politica/noticia/2026-10/congresso-promulga-emenda-do-fim-da-6x1-escala-5x2-comeca-em-60-dias</p>
+    <p><b>2</b> Senado Notícias, out/2026. Senado aprova PEC que acaba com a escala 6x1. www12.senado.leg.br/noticias/videos/2026/10/senado-aprova-pec-que-acaba-com-a-escala-6x1-e-reduz-jornada-para-40-horas</p>
+    <p><b>3</b> ConJur, 25/10/2026. Fim da escala 6x1: o que já vale e o que ainda vai parar na Justiça (artigo de opinião). conjur.com.br/2026-out-25/fim-da-escala-6x1-o-que-ja-vale-e-o-que-ainda-vai-parar-na-justica/</p>
+    <p><b>4</b> Folhapress em Mais Goiás, 16/10/2026. 3 em cada 10 empregos formais têm escala 6x1 (4intelligence, dados do MTE). maisgoias.com.br/brasil/economia/3-em-cada-10-empregos-formais-tem-escala-6x1-no-brasil-diz-estudo/</p>
+    <p><b>5</b> CUT, 2026, com dados do Dieese e do MTE. Setores mais afetados pela escala 6x1. cut.org.br/noticias/fim-da-escala-6x1-aguarda-votacao-no-senado-saiba-os-setores-que-ais-sofrem-com-95c8</p>
+    <p><b>6</b> Bahia Notícias, mai/2026. Mais de 596,5 mil trabalhadores baianos (MTE). bahianoticias.com.br/noticia/317238-mais-de-5965-mil-trabalhadores-baianos-podem-ser-beneficiados-com-fim-da-escala-6x1</p>
+    <p><b>7</b> Folhapress em Jornal de Brasília, 24/04/2026. Estudo do Ipea com a Rais 2023. jornaldebrasilia.com.br/noticias/brasil/escala-6x1-profissional-que-trabalha-mais-tem-salario-58-menor-em-media-diz-estudo/</p>
+    <p><b>8</b> Vermelho, 12/03/2026. Relatório do MTE sobre viabilidade e impactos da redução da jornada. vermelho.org.br/2026/03/12/no-brasil-72-das-empresas-que-adotaram-escala-5x2-tiveram-aumento-de-receita/</p>
+    <p><b>9</b> Conta Azul, 2026. Calculadora da escala 6x1, com estimativas da CNI de fev/2026. contaazul.com/materiais/calculadora-escala-6x1</p>
+    <p><b>10</b> Sebrae, Pesquisa Pulso dos Pequenos Negócios, 12ª edição (fev e mar/2026), em Contracs, 18/08/2026. contracs.org.br/2026/08/18/maioria-dos-pequenos-negocios-afirma-que-fim-da-escala-6x1-nao-prejudicara-empresas/</p>
+    <p><b>11</b> Só Notícia Boa, 07/11/2026. Teste da escala 5x2 na C&amp;A, farmácias e supermercados. sonoticiaboa.com.br/2026/11/07/teste-escala-5x2-reduz-faltas-melhora-produtividade</p>
+    <p><b>12</b> Jornal de Alagoas, 17/04/2026. Empresário adota escala 5x2 em restaurantes e vê resultados. jornaldealagoas.com.br/economia/2026/04/17/6746-mesmo-contrario-empresario-adota-escala-5x2-em-restaurantes-e-ve-resultados</p>
+    <p><b>13</b> Times Brasil, 16/10/2026. Comércio paulista vê rotatividade subir a 63,3% (FecomercioSP). timesbrasil.com.br/empresas-e-negocios/servicos-e-varejo/comercio-paulista-ve-rotatividade-subir-a-633-e-enfrenta-custos-maiores-para-recompor-equipes/</p>
+    <p><b>14</b> Agência Gov, 04/11/2026. Novo Caged de setembro de 2026. agenciagov.ebc.com.br/noticias/202611/brasil-gera-121-3-mil-empregos-formais-em-setembro-e-saldo-no-ano-chega-a-1-24-milhao-de-novos-postos-com-carteira-assinada</p>
+    <p><b>15</b> Folhapress em ICL Notícias, 09/11/2026. Decreto que regulamenta fim da 6x1 deve sair após viagem de Lula. iclnoticias.com.br/decreto-que-regulamenta-fim-6x1-tem-publicacao/</p>
+    <p><b>16</b> Exame, out/2026. Senado prepara PEC para deixar categorias fora das regras. exame.com/brasil/fim-da-escala-6x1-senado-prepara-pec-para-deixar-categorias-fora-das-regras/</p>
+    <p><b>17</b> Contábeis, out/2026. Sebrae cria simulador para reorganizar escala de trabalho. contabeis.com.br/noticias/80271/sebrae-cria-simulador-para-reorganizar-escala-de-trabalho/</p>
+    <p><b>18</b> CSB, 09/11/2026. O que fazer se a empresa descumprir a nova jornada. csb.org.br/noticias/fim-escala-6x1-saiba-fazer-empresa-descumprir-nova-jornada</p>
+    <p><b>19</b> Contabilidade Zen, 2026. CNAE para consultoria empresarial. contabilidadezen.com.br/blog/cnae-consultoria-empresarial-2026/</p>
+    <p><b>20</b> Agência Brasil, 04/11/2026. Governo prevê decreto do fim da escala 6x1. agenciabrasil.ebc.com.br/economia/noticia/2026-11/governo-preve-decreto-do-fim-da-escala-6x1-para-segunda-feira</p>
+    <p><b>21</b> FGV EAESP e 4 Day Week Brazil, 2024, em Site Contábil. sitecontabil.com.br/noticias_empresariais/ler/semana-de-4-dias-de-trabalho-no-brasil--estudo-traz-resultados-do-piloto-2024</p>
+    <p><b>22</b> VLV Advogados, out/2026. O que fazer se a empresa não der as duas folgas. vlvadvogados.com/empresa-nao-cumpre-fim-da-escala-6x1/</p>
+    <p><b>23</b> Jornal Grande Bahia, 2026. Feira de Santana registra saldo de 6,2 mil empregos formais em 2025. jornalgrandebahia.com.br/?p=1322362</p>
+  </div>
+  <div class="rod"><span>Virada 5x2 · Plano de negócio</span><span>10</span></div>
+</section>
+</body>
+</html>

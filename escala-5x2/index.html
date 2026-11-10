@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escala 5x2 dos Turnos A e C</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: faixa azul no topo, seções em coluna única, um cartão por função com duas raias (subturno 1 azul, subturno 2 verde). */
+  --azul:#111785; --verde:#01973A; --amarelo:#FFEE03; --alerta:#C4281C;
+  --tinta:#14183A; --suave:#5B607F; --papel:#F3F4FA; --cartao:#FFFFFF; --linha:#D9DCEC; --neutro:#6A7196;
+  --display:'Barlow Condensed','Arial Narrow',Arial,sans-serif;
+  --corpo:'Barlow',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--papel);color:var(--tinta);font-family:var(--corpo);font-size:15px;line-height:1.4;-webkit-text-size-adjust:100%}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--amarelo);outline-offset:2px;box-shadow:0 0 0 5px var(--azul)}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.05;letter-spacing:.01em}
+.num{font-family:var(--display);font-variant-numeric:tabular-nums}
+
+header.topo{background:var(--azul);color:#fff;padding:20px 16px 0}
+.topo .in{max-width:1080px;margin:0 auto;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;justify-content:space-between;padding-bottom:16px}
+.topo h1{font-size:40px;text-transform:uppercase}
+.topo p{margin:4px 0 0;color:#D5D8F5;font-size:14px}
+.tarja{height:6px;background:linear-gradient(90deg,var(--verde) 0 50%,var(--amarelo) 50% 100%);margin:0 -16px}
+.salvo{font-size:12.5px;font-weight:600;background:rgba(255,255,255,.14);border-radius:99px;padding:5px 12px;white-space:nowrap}
+
+nav.atalhos{position:sticky;top:0;z-index:5;background:var(--cartao);border-bottom:1px solid var(--linha)}
+nav.atalhos .in{max-width:1080px;margin:0 auto;display:flex;gap:6px;overflow-x:auto;padding:8px 16px}
+nav.atalhos button{flex:none;border:1px solid var(--linha);background:var(--papel);border-radius:99px;padding:6px 12px;font-weight:600;font-size:13.5px}
+
+main{max-width:1080px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:28px}
+section{display:flex;flex-direction:column;gap:12px;scroll-margin-top:60px}
+section>h2{font-size:28px;text-transform:uppercase;color:var(--azul)}
+.sub{color:var(--suave);margin:-6px 0 0;max-width:65ch}
+.cartao{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:14px}
+
+/* resumo */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:12px 14px;border-top:6px solid var(--azul);display:flex;flex-direction:column;gap:2px}
+.tile .k{font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--suave)}
+.tile .v{font-family:var(--display);font-size:52px;font-weight:700;line-height:1}
+.tile .d{font-size:13px;color:var(--suave)}
+.tile.b{border-top-color:var(--neutro)}
+.tile.ruim{border-top-color:var(--alerta)} .tile.ruim .v{color:var(--alerta)}
+.tile.bom{border-top-color:var(--verde)} .tile.bom .v{color:var(--verde)}
+.tile.vaga{border-top-color:var(--amarelo)}
+
+/* linha do dia */
+.dia{display:flex;flex-direction:column;gap:6px}
+.faixa{display:grid;grid-template-columns:84px 1fr;gap:8px;align-items:center}
+.faixa .rot{font-weight:700;font-size:13px;line-height:1.15}.faixa .rot small{display:block;font-weight:500;font-size:11.5px;color:var(--suave);font-variant-numeric:tabular-nums}
+.trilho{position:relative;height:30px;background:repeating-linear-gradient(90deg,var(--papel) 0,var(--papel) calc(12.5% - 1px),var(--linha) calc(12.5% - 1px),var(--linha) 12.5%);border-radius:6px;overflow:hidden}
+.barra{position:absolute;top:3px;bottom:3px;border-radius:5px;color:#fff;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden}
+.barra.a{background:var(--azul)} .barra.b{background:var(--neutro)} .barra.c{background:var(--verde)}
+.barra.j{top:0;bottom:0;border-radius:0;background:var(--amarelo);opacity:.92;color:var(--tinta);border-left:2px solid var(--tinta);border-right:2px solid var(--tinta)}
+.horas{display:grid;grid-template-columns:84px 1fr;gap:8px}
+.horas div{display:flex;justify-content:space-between;font-size:11.5px;color:var(--suave);font-variant-numeric:tabular-nums}
+.grupo-t{font-family:var(--display);font-size:18px;text-transform:uppercase;margin-top:6px}
+.junto{display:inline-flex;align-items:center;gap:8px;background:var(--amarelo);border-radius:8px;padding:6px 12px;font-weight:700;align-self:flex-start}
+.junto .num{font-size:26px;line-height:1}
+.horarios{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.horarios .h{border:1px solid var(--linha);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.horarios .h b{font-family:var(--display);font-size:18px;text-transform:uppercase}
+.horarios .par{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.horarios label{font-size:12px;color:var(--suave);display:flex;flex-direction:column;gap:2px}
+input[type=time],input[type=number],input[type=text],input[type=date]{border:1.5px solid var(--neutro);border-radius:8px;padding:6px 8px;background:#fff;min-width:0}
+.aviso{font-size:13px;color:var(--suave);border-left:4px solid var(--amarelo);padding:2px 0 2px 10px}
+
+/* semana */
+.semana{display:grid;grid-template-columns:54px repeat(7,1fr);gap:4px;font-size:12.5px}
+.semana .d{font-weight:700;text-align:center;color:var(--suave);text-transform:uppercase;font-size:11.5px}
+.semana .r{font-family:var(--display);font-size:20px;font-weight:700;display:flex;align-items:center}
+.cel{border-radius:7px;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1.05}
+.cel .num{font-size:22px}
+.cel small{font-size:10px;font-weight:600;opacity:.9}
+.cel.t1{background:var(--azul)} .cel.t2{background:var(--verde)}
+.cel.f{background:repeating-linear-gradient(135deg,#fff 0 5px,var(--linha) 5px 7px);color:var(--suave);border:1px dashed var(--neutro);font-size:10.5px;text-transform:uppercase}
+
+/* funções */
+.seg{display:inline-flex;border:1.5px solid var(--azul);border-radius:10px;overflow:hidden;align-self:flex-start;flex-wrap:wrap}
+.seg button{border:0;background:#fff;padding:8px 14px;font-weight:700;color:var(--azul)}
+.seg button[aria-pressed=true]{background:var(--azul);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{border:1px solid var(--linha);background:#fff;border-radius:99px;padding:5px 12px;font-size:13.5px;font-weight:600}
+.chips button[aria-pressed=true]{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px}
+.fn{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.fn.al{border-color:var(--alerta);box-shadow:inset 5px 0 0 var(--alerta)}
+.fn.zero{opacity:.6}
+.fh{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.fh .nm{font-weight:700;font-size:15.5px;line-height:1.15}
+.fh .tag{display:block;font-size:11px;font-weight:600;color:var(--suave);text-transform:uppercase;letter-spacing:.05em}
+.passo{display:flex;align-items:center;gap:4px;flex:none}
+.passo b{font-family:var(--display);font-size:30px;min-width:34px;text-align:center;line-height:1;font-variant-numeric:tabular-nums}
+.rb{width:32px;height:32px;border-radius:8px;border:1.5px solid var(--neutro);background:#fff;font-weight:700;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.rb:disabled{opacity:.3;cursor:default}
+.raias{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:stretch}
+.raia{border-radius:8px;padding:6px 8px;min-height:58px;display:flex;flex-direction:column;gap:4px;background:var(--papel)}
+.raia .rh{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.raia .rh .num{font-size:22px;line-height:1}
+.raia.r1 .rh{color:var(--azul)} .raia.r2 .rh{color:var(--verde)} .raia.rb0 .rh{color:var(--neutro)}
+.raia.vazia{background:#FBE9E7;outline:1.5px dashed var(--alerta)}
+.raia.vazia .rh{color:var(--alerta)}
+.pws{display:flex;flex-wrap:wrap;gap:2px}
+.pw{width:11px;height:15px;flex:none}
+.pw.p1{fill:var(--azul)} .pw.p2{fill:var(--verde)} .pw.pb{fill:var(--neutro)}
+.pw.vg{fill:var(--amarelo);stroke:var(--tinta);stroke-width:1.2}
+.mv{display:flex;flex-direction:column;gap:4px;justify-content:center}
+.mv .rb{width:28px;height:26px;font-size:15px}
+.pilula{align-self:flex-start;background:var(--alerta);color:#fff;font-weight:700;font-size:12.5px;border-radius:99px;padding:3px 10px}
+.pilula.ok{background:var(--amarelo);color:var(--tinta)}.pilula.des{background:#fff;color:var(--tinta);border:1.5px dashed var(--neutro)}
+.legenda{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--suave);align-items:center}
+.legenda span{display:inline-flex;align-items:center;gap:5px}
+.novo{display:flex;gap:8px;flex-wrap:wrap}
+.novo input{flex:1 1 180px}
+.bt{border:0;background:var(--azul);color:#fff;font-weight:700;border-radius:8px;padding:8px 14px}
+.bt.sec{background:#fff;color:var(--tinta);border:1.5px solid var(--neutro)}
+.bt.per{background:var(--alerta)}
+
+/* checkouts */
+.areas{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+.area{display:flex;flex-direction:column;gap:8px}
+.area h3{font-size:22px;text-transform:uppercase}
+.area .qt{display:flex;align-items:center;gap:8px;font-weight:600}
+.area .qt input{width:76px;font-family:var(--display);font-size:22px;text-align:center}
+.ck{display:grid;grid-template-columns:118px 1fr;gap:4px 8px;align-items:center;font-size:12.5px}
+.ck .gt{grid-column:1/-1;font-family:var(--display);font-size:16px;text-transform:uppercase;margin-top:6px;color:var(--suave)}
+.ck .lb{font-weight:600;line-height:1.15}
+.slots{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.sl{width:16px;height:16px;border-radius:3px;border:1.5px solid var(--neutro);background:#fff}
+.sl.on{background:var(--azul);border-color:var(--azul)}
+.sl.onb{background:var(--neutro)}
+.nota{font-weight:700;font-size:12px;margin-left:4px;white-space:nowrap}
+.nota.falta{color:var(--suave)} .nota.sobra{color:var(--alerta)} .nota.certo{color:var(--verde)}
+
+/* vagas */
+.cen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.cen button{text-align:left;border:1.5px solid var(--linha);background:#fff;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.cen button[aria-pressed=true]{border-color:var(--tinta);background:var(--amarelo)}
+.cen .t{font-weight:700;text-transform:uppercase;font-size:12.5px;letter-spacing:.05em}
+.cen .n{font-family:var(--display);font-size:44px;font-weight:700;line-height:1}
+.cen .e{font-size:12.5px;color:var(--suave)}
+.cen button[aria-pressed=true] .e{color:var(--tinta)}
+.pri{display:flex;flex-direction:column;gap:6px}
+.pri h3{font-size:19px;text-transform:uppercase}
+.vagas{display:flex;flex-wrap:wrap;gap:6px}
+.vg-c{display:inline-flex;align-items:center;gap:6px;border:1.5px dashed var(--neutro);border-radius:8px;padding:4px 9px;font-size:13.5px;font-weight:600;background:#fff}
+.vg-c:disabled{opacity:.55;cursor:default}.alt{align-self:flex-start;display:inline-flex;align-items:center;gap:8px;border:1.5px dashed var(--neutro);background:#fff;border-radius:8px;padding:5px 10px;font-weight:700;font-size:13px;text-align:left}.alt::before{content:'';width:16px;height:16px;flex:none;border:2px solid var(--tinta);border-radius:4px;background:#fff}.alt[aria-pressed=true]{border-style:solid;border-color:var(--tinta);background:var(--amarelo)}.alt[aria-pressed=true]::before{background:var(--tinta);box-shadow:inset 0 0 0 2px var(--amarelo)}.vg-c.on{border-style:solid;border-color:var(--tinta);background:var(--amarelo)}
+.vg-c i{font-style:normal;font-family:var(--display);font-size:17px;font-weight:700}
+
+/* pendências */
+.todo{display:flex;flex-direction:column;gap:2px}
+.todo label{display:flex;gap:10px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--linha)}
+.todo input{width:20px;height:20px;flex:none;accent-color:var(--verde);margin-top:1px}
+.todo input:checked+span{color:var(--suave);text-decoration:line-through}
+.campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.campos label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;color:var(--suave)}
+footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:var(--suave);font-size:13px}
+@media (max-width:420px){.topo h1{font-size:34px}.tile .v{font-size:44px}.ck{grid-template-columns:96px 1fr}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="p" viewBox="0 0 12 16"><circle cx="6" cy="3.6" r="3"/><path d="M1 15.4c0-5.2 2-7.6 5-7.6s5 2.4 5 7.6z"/></symbol></svg>
+
+<header class="topo">
+  <div class="in">
+    <div>
+      <h1>Escala 5x2</h1>
+      <p>Mudança de 6x1 para 5x2 · turnos A, B e C · CD Feira de Santana</p>
+    </div>
+    <span class="salvo" id="salvo" role="status">Carregando</span>
+  </div>
+  <div class="tarja"></div>
+</header>
+
+<nav class="atalhos" aria-label="Seções"><div class="in">
+  <button data-ir="resumo">Resumo</button><button data-ir="turnos">Horários</button><button data-ir="semana">Semana</button><button data-ir="funcoes">Funções</button><button data-ir="checkouts">Checkouts</button><button data-ir="vagas">Vagas</button><button data-ir="pendencias">Pendências</button>
+</div></nav>
+
+<main>
+<section id="resumo">
+  <h2>Resumo</h2>
+  <div class="tiles" id="o-resumo"></div>
+</section>
+
+<section id="turnos">
+  <h2>Horários do dia</h2>
+  <p class="sub">Na escala nova o Turno A fica um período junto com o Turno B. Mude os horários abaixo e o desenho acompanha.</p>
+  <div class="cartao dia" id="o-dia"></div>
+  <div class="horarios" id="c-horarios"></div>
+  <p class="aviso">Os horários novos são um exemplo. Troque pelos horários aprovados pela gerência.</p>
+</section>
+
+<section id="semana">
+  <h2>Semana</h2>
+  <p class="sub">A1 e C1 folgam domingo e segunda. A2 e C2 folgam domingo e terça. O número é quantas pessoas trabalham no dia.</p>
+  <div class="cartao"><div class="semana" id="o-semana"></div></div>
+  <p class="aviso" id="o-semana-nota"></p>
+</section>
+
+<section id="funcoes">
+  <h2>Funções por subturno</h2>
+  <p class="sub">Cada boneco é uma pessoa. Use + e − para mudar o total da função e as setas para passar uma pessoa de um subturno para o outro.</p>
+  <div class="seg" id="c-tab" role="group" aria-label="Turno"></div>
+  <div class="chips" id="c-filt" role="group" aria-label="Filtro"></div>
+  <div class="legenda">
+    <span><svg class="pw p1"><use href="#p"/></svg> subturno 1 (folga dom e seg)</span>
+    <span><svg class="pw p2"><use href="#p"/></svg> subturno 2 (folga dom e ter)</span>
+    <span><svg class="pw vg"><use href="#p"/></svg> vaga sugerida</span>
+  </div>
+  <div class="lista" id="o-funcoes"></div>
+  <div class="novo">
+    <input type="text" id="nova-funcao" placeholder="Nome de uma função que falta" aria-label="Nome de uma função que falta">
+    <button class="bt sec" data-act="add">Adicionar função</button>
+  </div>
+</section>
+
+<section id="checkouts">
+  <h2>Checkouts da conferência</h2>
+  <p class="sub">Informe quantos checkouts existem em cada área. Cada quadrado é um checkout; os preenchidos têm conferente.</p>
+  <div class="areas" id="o-check"></div>
+</section>
+
+<section id="vagas">
+  <h2>Vagas sugeridas</h2>
+  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. Você decide função por função: toque na vaga para marcar ou desmarcar. As vagas marcadas aparecem como bonecos amarelos e entram na conta da semana e dos checkouts.</p>
+  <div class="cen" id="o-cen"></div>
+  <div class="cartao" id="o-vagas" style="display:flex;flex-direction:column;gap:14px"></div>
+  <p class="aviso" id="o-teto"></p>
+</section>
+
+<section id="pendencias">
+  <h2>Pendências e aprovação</h2>
+  <div class="cartao todo" id="c-todo"></div>
+  <div class="campos" id="c-campos"></div>
+</section>
+</main>
+
+<footer>
+  <span>Números de partida: Mapa de Funções por Turno (1ª página). As demais funções entram como total, sem divisão.</span>
+  <button class="bt sec" id="reset" data-act="reset">Restaurar números do mapa</button>
+</footer>
+
+<script>
+(function(){
+'use strict';
+var MAPA=[
+['Separador nobre','sep',19,17,6,9,3],['Aux. expedição I','out',10,16,7,5,3],['Sep. grandeza I','sep',9,7,4,5,2],
+['Descarregador','out',11,6,0,5,0],['Op. empilhadeira','out',6,7,4,3,2],['Sep. miudeza I','sep',5,7,5,3,3],
+['Conf. nobre','conf',5,6,3,2,1],['Conf. miudeza II','conf',4,6,3,2,2],['Repositor manual','out',5,5,2,3,1],
+['Arrumador carga','out',3,3,3,1,1],['Controle expedição','out',0,5,1,0,1],['Sup. carregamento','sup',4,3,2,2,1],
+['Suporte logística','out',3,1,0,2,0],['Operador de apoio','out',4,2,1,2,0],['Montador de carga I','out',1,4,2,0,1],
+['Faxina','out',3,2,1,2,1],['Central miudeza','out',2,1,2,1,1],['Conf. grandeza II','conf',1,3,1,0,0],
+['Controle de CAI I','out',3,2,0,2,0],['Controle devolução','out',2,2,0,1,0],['Rec. mercadoria','out',3,2,0,1,0],
+['Arrumador de rua miudeza','out',2,2,0,1,0],['Aux. arrumador','out',1,2,1,1,1]];
+var CAT={sep:'Separação',conf:'Conferência',sup:'Supervisão',out:'Apoio e movimentação'};
+var TODO=['Confirmar com a gerência os horários novos dos três turnos','Confirmar com o RH a jornada diária e o intervalo na escala 5x2','Conferir as funções da 2ª página do mapa e dividir em subturnos','Informar quantos checkouts existem na miudeza e no nobre','Confirmar se os operadores de empilhadeira trabalham em pares','Escolher o cenário de vagas e abrir as vagas com o RH','Comunicar a cada colaborador o seu subturno e a data de início'];
+var CHAVE='escala5x2-v1';
+function padrao(){return {v:1,fn:MAPA.map(function(r){return {n:r[0],cat:r[1],a:r[2],b:r[3],c:r[4],a1:r[5],c1:r[6]};}),extra:{a:10,b:11,c:5},t:{aE:'06:00',aS:'17:00',bE:'15:00',bS:'00:00',cE:'00:00',cS:'06:00'},ck:{miu:'',nob:''},scen:'comp',m:2,todo:[],campo:{inicio:'',resp:'',ger:''},tab:'a',filt:'todas',ts:0};}
+var S=padrao(),db=null,timer=null;
+function $(s){return document.querySelector(s);}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function valido(o){return o&&o.v===1&&Array.isArray(o.fn)&&o.t&&o.ck&&o.extra;}
+function adota(o){if(!o.m){o.scen='comp';o.m=2;}var d=padrao();for(var k in d){if(o[k]===undefined)o[k]=d[k];}S=o;}
+
+/* ---------- cálculo ---------- */
+var LIM={atual:0,min:1,rec:2,comp:3};
+function plano(sh,lim){
+  if(lim===undefined)lim=LIM[S.scen];
+  return S.fn.map(function(f,i){
+    var t=f[sh]||0,s1=Math.max(0,Math.min(f[sh+'1']||0,t)),s2=t-s1,pr=0,v1=0,v2=0;
+    var d=Math.abs(s1-s2);
+    if(t>0&&(s1===0||s2===0))pr=1;else if(d>0)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
+    var sug=pr>0&&pr<=lim,off=!!f['n'+sh],n=sug?(lim===1?1:d):0;
+    if(sug&&!off){if(s1<s2)v1=n;else v2=n;}
+    return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2,sug:sug,off:off,n:n};
+  });
+}
+function soma(l,k){return l.reduce(function(s,x){return s+x[k];},0);}
+function descobertas(sh){return plano(sh).filter(function(x){return x.t>0&&(x.s1+x.v1===0||x.s2+x.v2===0);});}
+function nVagas(sh,lim){var l=plano(sh,lim);return soma(l,'v1')+soma(l,'v2');}
+function totalB(){return S.fn.reduce(function(s,f){return s+(f.b||0);},0);}
+function mins(h){var p=String(h||'00:00').split(':');return (+p[0]||0)*60+(+p[1]||0);}
+function trechos(e,s){e=mins(e);s=mins(s);if(s<=e)s+=1440;return s<=1440?[[e,s]]:[[e,1440],[0,s-1440]];}
+function cruzam(x,y){var r=[];x.forEach(function(a){y.forEach(function(b){var i=Math.max(a[0],b[0]),f=Math.min(a[1],b[1]);if(f>i)r.push([i,f]);});});return r;}
+function dur(l){return l.reduce(function(s,x){return s+x[1]-x[0];},0);}
+function hm(m){var h=Math.floor(m/60),r=m%60;return h+' h'+(r?' '+r+' min':'');}
+
+/* ---------- desenho ---------- */
+function pw(n,c){var s='';for(var i=0;i<n;i++)s+='<svg class="pw '+c+'"><use href="#p"/></svg>';return s;}
+function rResumo(){
+  var pa=plano('a'),pc=plano('c'),da=descobertas('a').length,dc=descobertas('c').length,d=da+dc;
+  var va=soma(pa,'v1')+soma(pa,'v2'),vc=soma(pc,'v1')+soma(pc,'v2');
+  var h='';
+  h+='<div class="tile"><span class="k">Turno A</span><span class="v">'+(soma(pa,'t')+S.extra.a)+'</span><span class="d">A1 '+soma(pa,'s1')+' · A2 '+soma(pa,'s2')+' · demais '+S.extra.a+'</span></div>';
+  h+='<div class="tile b"><span class="k">Turno B</span><span class="v">'+(totalB()+S.extra.b)+'</span><span class="d">sem divisão em subturnos</span></div>';
+  h+='<div class="tile"><span class="k">Turno C</span><span class="v">'+(soma(pc,'t')+S.extra.c)+'</span><span class="d">C1 '+soma(pc,'s1')+' · C2 '+soma(pc,'s2')+' · demais '+S.extra.c+'</span></div>';
+  h+='<div class="tile '+(d?'ruim':'bom')+'"><span class="k">Funções sem ninguém</span><span class="v">'+d+'</span><span class="d">'+(d?'na segunda ou na terça · A '+da+' · C '+dc:'todas cobertas na segunda e na terça')+'</span></div>';
+  h+='<div class="tile vaga"><span class="k">Vagas no cenário</span><span class="v">'+(va+vc)+'</span><span class="d">Turno A '+va+' · Turno C '+vc+'</span></div>';
+  $('#o-resumo').innerHTML=h;
+}
+function barras(l,c,txt){return l.map(function(x){return '<div class="barra '+c+'" style="left:'+(x[0]/14.4)+'%;width:'+((x[1]-x[0])/14.4)+'%">'+txt+'</div>';}).join('');}
+function rDia(){
+  var t=S.t,A=trechos(t.aE,t.aS),B=trechos(t.bE,t.bS),C=trechos(t.cE,t.cS),J=cruzam(A,B),j=dur(J);
+  var h='<div class="grupo-t">Hoje · 6x1</div>';
+  h+='<div class="faixa"><span class="rot">A · B · C</span><div class="trilho">'+barras([[0,360]],'c','C')+barras([[360,900]],'a','A')+barras([[900,1440]],'b','B')+'</div></div>';
+  h+='<div class="grupo-t">Escala nova · 5x2</div>';
+  h+='<div class="faixa"><span class="rot">Turno C<small>'+esc(t.cE)+' às '+esc(t.cS)+'</small></span><div class="trilho">'+barras(C,'c','C')+'</div></div>';
+  h+='<div class="faixa"><span class="rot">Turno A<small>'+esc(t.aE)+' às '+esc(t.aS)+'</small></span><div class="trilho">'+barras(A,'a','A')+barras(J,'j','')+'</div></div>';
+  h+='<div class="faixa"><span class="rot">Turno B<small>'+esc(t.bE)+' às '+esc(t.bS)+'</small></span><div class="trilho">'+barras(B,'b','B')+barras(J,'j','')+'</div></div>';
+  h+='<div class="horas"><span></span><div><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>00h</span></div></div>';
+  h+='<div class="junto"><span class="num">'+(j?hm(j):'0 h')+'</span><span>'+(j?'com os turnos A e B juntos no CD':'Os turnos A e B não se encontram nesses horários')+'</span></div>';
+  $('#o-dia').innerHTML=h;
+}
+function cHorarios(){
+  var t=S.t,d=[['a','Turno A'],['b','Turno B'],['c','Turno C']],h='';
+  d.forEach(function(x){var k=x[0];
+    h+='<div class="h"><b>'+x[1]+'</b><div class="par"><label>Entrada<input type="time" id="t-'+k+'E" data-t="'+k+'E" value="'+esc(t[k+'E'])+'"></label><label>Saída<input type="time" id="t-'+k+'S" data-t="'+k+'S" value="'+esc(t[k+'S'])+'"></label><span class="d" id="dur-'+k+'"></span></div></div>';});
+  $('#c-horarios').innerHTML=h;rDur();
+}
+function rDur(){['a','b','c'].forEach(function(k){var e=$('#dur-'+k);if(e)e.textContent=hm(dur(trechos(S.t[k+'E'],S.t[k+'S'])))+' no CD';});}
+function rSemana(){
+  var pa=plano('a'),pc=plano('c'),dias=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+  var L=[['A1',1,soma(pa,'s1')+soma(pa,'v1')],['A2',2,soma(pa,'s2')+soma(pa,'v2')],['C1',1,soma(pc,'s1')+soma(pc,'v1')],['C2',2,soma(pc,'s2')+soma(pc,'v2')]];
+  var h='<span></span>'+dias.map(function(d){return '<span class="d">'+d+'</span>';}).join('');
+  L.forEach(function(l){
+    h+='<span class="r">'+l[0]+'</span>';
+    for(var d=0;d<7;d++){var folga=d===6||(l[1]===1&&d===0)||(l[1]===2&&d===1);
+      h+=folga?'<div class="cel f">folga</div>':'<div class="cel t'+l[1]+'"><span class="num">'+l[2]+'</span></div>';}
+  });
+  $('#o-semana').innerHTML=h;
+  var ta=L[0][2]+L[1][2],tc=L[2][2]+L[3][2];
+  $('#o-semana-nota').textContent='Turno A: '+L[1][2]+' pessoas na segunda, '+L[0][2]+' na terça e '+ta+' de quarta a sábado. Turno C: '+L[3][2]+' na segunda, '+L[2][2]+' na terça e '+tc+' de quarta a sábado. Fora desta conta: '+S.extra.a+' pessoas do A e '+S.extra.c+' do C nas demais funções.';
+}
+function cTab(){
+  $('#c-tab').innerHTML=[['a','Turno A'],['c','Turno C'],['b','Turno B']].map(function(x){return '<button data-tab="'+x[0]+'" aria-pressed="'+(S.tab===x[0])+'">'+x[1]+'</button>';}).join('');
+  $('#c-filt').innerHTML=[['todas','Todas'],['desc','Sem ninguém em um dia'],['sep','Separação'],['conf','Conferência'],['sup','Supervisão']].map(function(x){return '<button data-filt="'+x[0]+'" aria-pressed="'+(S.filt===x[0])+'">'+x[1]+'</button>';}).join('');
+}
+function rFuncoes(){
+  var sh=S.tab,h='',U=sh.toUpperCase();
+  if(sh==='b'){
+    S.fn.forEach(function(f,i){var t=f.b||0;
+      if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;if(S.filt==='desc')return;
+      h+='<div class="fn'+(t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span><span class="passo"><button class="rb" data-act="dec" data-i="'+i+'" aria-label="Tirar uma pessoa de '+esc(f.n)+'"'+(t?'':' disabled')+'>−</button><b>'+t+'</b><button class="rb" data-act="inc" data-i="'+i+'" aria-label="Pôr uma pessoa em '+esc(f.n)+'">+</button></span></div>';
+      if(t)h+='<div class="raia rb0"><div class="rh"><span>Turno B</span></div><div class="pws">'+pw(t,'pb')+'</div></div>';
+      h+='</div>';});
+  }else{
+    plano(sh).forEach(function(x){var f=x.f,i=x.i,a1=x.s1+x.v1,a2=x.s2+x.v2,al=x.t>0&&(a1===0||a2===0);
+      if(S.filt==='desc'&&!al)return;if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;
+      h+='<div class="fn'+(al?' al':'')+(x.t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span><span class="passo"><button class="rb" data-act="dec" data-i="'+i+'" aria-label="Tirar uma pessoa de '+esc(f.n)+'"'+(x.t?'':' disabled')+'>−</button><b>'+x.t+'</b><button class="rb" data-act="inc" data-i="'+i+'" aria-label="Pôr uma pessoa em '+esc(f.n)+'">+</button></span></div>';
+      if(x.t){
+        h+='<div class="raias"><div class="raia r1'+(a1===0?' vazia':'')+'"><div class="rh"><span>'+U+'1</span><span class="num">'+a1+'</span></div><div class="pws">'+pw(x.s1,'p1')+pw(x.v1,'vg')+'</div></div>';
+        h+='<div class="mv"><button class="rb" data-act="to1" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'1"'+(x.s2?'':' disabled')+'>‹</button><button class="rb" data-act="to2" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'2"'+(x.s1?'':' disabled')+'>›</button></div>';
+        h+='<div class="raia r2'+(a2===0?' vazia':'')+'"><div class="rh"><span>'+U+'2</span><span class="num">'+a2+'</span></div><div class="pws">'+pw(x.s2,'p2')+pw(x.v2,'vg')+'</div></div></div>';
+        if(al)h+='<span class="pilula">Sem ninguém na '+(a1===0?'terça':'segunda')+'</span>';
+        else if(!x.sug&&x.s1!==x.s2)h+='<span class="pilula des">'+U+'1 e '+U+'2 desiguais</span>';
+        if(x.sug)h+='<button class="alt" data-act="vg" data-i="'+i+'" data-sh="'+sh+'" aria-pressed="'+(!x.off)+'">'+(x.off?'Não contratar nesta função':'Contratar '+x.n+' para igualar '+U+'1 e '+U+'2')+'</button>';
+      }
+      h+='</div>';});
+  }
+  if(S.filt==='todas'){
+    h+='<div class="fn"><div class="fh"><span class="nm">Demais funções<span class="tag">2ª página do mapa · sem divisão</span></span><span class="passo"><button class="rb" data-act="xdec" aria-label="Tirar uma pessoa das demais funções"'+(S.extra[sh]?'':' disabled')+'>−</button><b>'+S.extra[sh]+'</b><button class="rb" data-act="xinc" aria-label="Pôr uma pessoa nas demais funções">+</button></span></div><div class="raia rb0"><div class="rh"><span>Centrais, motorista, vigia e outras</span></div><div class="pws">'+pw(S.extra[sh],'pb')+'</div></div></div>';
+  }
+  if(!h)h='<p class="sub" style="margin:0">Nenhuma função neste filtro.</p>';
+  $('#o-funcoes').innerHTML=h;
+}
+function conf(nome){for(var i=0;i<S.fn.length;i++)if(S.fn[i].n===nome)return i;return -1;}
+function linhaCk(rot,n,ck,b){
+  var h='<span class="lb">'+rot+'</span><div class="slots">';
+  if(ck>0){for(var i=0;i<ck;i++)h+='<span class="sl'+(i<n?' on':'')+'"></span>';
+    if(n>ck)h+='<span class="nota sobra">'+(n-ck)+' sem checkout</span>';else if(n<ck)h+='<span class="nota falta">'+(ck-n)+' vazio'+(ck-n>1?'s':'')+'</span>';else h+='<span class="nota certo">completo</span>';}
+  else h+=(n?pw(n,b?'pb':'p1'):'')+'<span class="nota falta">'+n+' conferente'+(n===1?'':'s')+'</span>';
+  return h+'</div>';
+}
+function rCheck(){
+  var pa=plano('a'),pc=plano('c'),h='';
+  [['miu','Miudeza','Conf. miudeza II'],['nob','Nobre','Conf. nobre']].forEach(function(a){
+    var i=conf(a[2]),ck=parseInt(S.ck[a[0]],10)||0;
+    var A=i<0?{s1:0,s2:0,v1:0,v2:0}:pa[i],C=i<0?{s1:0,s2:0,v1:0,v2:0}:pc[i],B=i<0?0:(S.fn[i].b||0);
+    var a1=A.s1+A.v1,a2=A.s2+A.v2,c1=C.s1+C.v1,c2=C.s2+C.v2;
+    h+='<div class="cartao area"><h3>'+a[1]+'</h3><label class="qt">Checkouts existentes <input type="number" min="0" max="60" inputmode="numeric" id="ck-'+a[0]+'" data-ck="'+a[0]+'" value="'+esc(S.ck[a[0]])+'" placeholder="?"></label><div class="ck" id="ckv-'+a[0]+'"></div></div>';
+  });
+  $('#o-check').innerHTML=h;rCheckV();
+}
+function rCheckV(){
+  var pa=plano('a'),pc=plano('c');
+  [['miu','Conf. miudeza II'],['nob','Conf. nobre']].forEach(function(a){
+    var i=conf(a[1]),ck=parseInt(S.ck[a[0]],10)||0,z={s1:0,s2:0,v1:0,v2:0};
+    var A=i<0?z:pa[i],C=i<0?z:pc[i],B=i<0?0:(S.fn[i].b||0);
+    var a1=A.s1+A.v1,a2=A.s2+A.v2,c1=C.s1+C.v1,c2=C.s2+C.v2,h='';
+    h+='<span class="gt">Turno A sozinho</span>'+linhaCk('Segunda (só A2)',a2,ck)+linhaCk('Terça (só A1)',a1,ck)+linhaCk('Quarta a sábado',a1+a2,ck);
+    h+='<span class="gt">Turnos A e B juntos</span>'+linhaCk('Segunda (A2 + B)',a2+B,ck)+linhaCk('Terça (A1 + B)',a1+B,ck)+linhaCk('Quarta a sábado',a1+a2+B,ck);
+    h+='<span class="gt">Turno B sozinho</span>'+linhaCk('Todos os dias',B,ck,1);
+    h+='<span class="gt">Turno C</span>'+linhaCk('Segunda (só C2)',c2,ck)+linhaCk('Terça (só C1)',c1,ck)+linhaCk('Quarta a sábado',c1+c2,ck);
+    var e=$('#ckv-'+a[0]);if(e)e.innerHTML=h;
+  });
+}
+function rVagas(){
+  var C=[['comp','Balanceado','Todas as funções com os dois subturnos iguais'],['rec','Separação e conferência','Cobre as funções vazias e iguala separação e conferência'],['min','Mínimo','Só cobre a função que fica sem ninguém'],['atual','Quadro atual','Sem contratar']];
+  $('#o-cen').innerHTML=C.map(function(c){var l=LIM[c[0]],n=nVagas('a',l)+nVagas('c',l);
+    return '<button data-scen="'+c[0]+'" aria-pressed="'+(S.scen===c[0])+'"><span class="t">'+c[1]+'</span><span class="n">'+n+'</span><span class="e">'+c[2]+'</span></button>';}).join('');
+  var P=[[1,'Prioridade 1 · função sem ninguém em um dia'],[2,'Prioridade 2 · separação e conferência desiguais'],[3,'Prioridade 3 · demais funções desiguais']],lim=LIM[S.scen],h='';
+  P.forEach(function(p){var l=[];['a','c'].forEach(function(sh){plano(sh,3).forEach(function(x){if(x.pr===p[0])l.push([sh.toUpperCase(),x]);});});
+    h+='<div class="pri"><h3>'+p[1]+' <span class="num">('+l.length+')</span></h3><div class="vagas">'+(l.length?l.map(function(v){var x=v[1],on=p[0]<=lim&&!x.off;return '<button class="vg-c'+(on?' on':'')+'" data-act="vg" data-i="'+x.i+'" data-sh="'+v[0].toLowerCase()+'" aria-pressed="'+on+'"'+(p[0]<=lim?'':' disabled')+'><i>'+v[0]+'</i>'+esc(x.f.n)+' <span class="num">'+x.t+' → '+(x.t+x.n)+'</span></button>';}).join(''):'<span class="sub" style="margin:0">Nenhuma.</span>')+'</div></div>';});
+  $('#o-vagas').innerHTML=h;
+  var ta=soma(plano('a'),'t')+S.extra.a,tc=soma(plano('c'),'t')+S.extra.c;
+  $('#o-teto').textContent='Referência: se a jornada diária não aumentar, cada pessoa trabalha 1 dia a menos por semana. São '+ta+' dias de trabalho a menos por semana no Turno A e '+tc+' no Turno C, o equivalente a cerca de '+Math.round(ta/5)+' e '+Math.round(tc/5)+' pessoas.';
+}
+function cTodo(){
+  $('#c-todo').innerHTML=TODO.map(function(t,i){return '<label><input type="checkbox" id="todo-'+i+'" data-todo="'+i+'"'+(S.todo[i]?' checked':'')+'><span>'+t+'</span></label>';}).join('');
+  $('#c-campos').innerHTML='<label>Data de início da escala<input type="date" id="cp-inicio" data-cp="inicio" value="'+esc(S.campo.inicio)+'"></label><label>Responsável pela programação<input type="text" id="cp-resp" data-cp="resp" value="'+esc(S.campo.resp)+'"></label><label>Gerente que aprova<input type="text" id="cp-ger" data-cp="ger" value="'+esc(S.campo.ger)+'"></label>';
+}
+function vivos(){rResumo();rSemana();rFuncoes();rCheckV();rVagas();}
+function tudo(){cHorarios();cTab();cTodo();rDia();rCheck();vivos();}
+
+/* ---------- guardar ---------- */
+function aviso(t){$('#salvo').textContent=t;}
+function guarda(){
+  S.ts=Date.now();var local=false;
+  try{localStorage.setItem(CHAVE,JSON.stringify(S));local=true;}catch(e){}
+  aviso('Salvando');clearTimeout(timer);
+  timer=setTimeout(function(){
+    if(!db){aviso(local?'Salvo só neste aparelho':'Não foi possível salvar');return;}
+    Promise.resolve().then(function(){return db.doc('plano/estado').set({json:JSON.stringify(S),ts:S.ts});}).then(function(){aviso('Salvo');},function(){aviso(local?'Salvo só neste aparelho':'Não foi possível salvar');});
+  },900);
+}
+function liga(){
+  try{var l=JSON.parse(localStorage.getItem(CHAVE)||'null');if(valido(l))adota(l);}catch(e){}
+  tudo();aviso('Pronto');
+  if(!window.claude||typeof window.claude.use!=='function')return;
+  window.claude.use('db').then(function(d){
+    if(!d)return;db=d;
+    return d.doc('plano/estado').get().then(function(r){
+      var o=r&&typeof r.data==='function'?r.data():(r&&r.data&&typeof r.data==='object'?r.data:r);
+      if(o&&o.json&&(o.ts||0)>(S.ts||0)){try{var n=JSON.parse(o.json);if(valido(n)){adota(n);tudo();}}catch(e){}}
+      aviso('Salvo');
+    });
+  }).catch(function(){});
+}
+
+/* ---------- ações ---------- */
+document.addEventListener('click',function(e){
+  var b=e.target.closest('button');if(!b)return;
+  if(b.dataset.ir){var s=document.getElementById(b.dataset.ir);if(s)s.scrollIntoView({behavior:'smooth',block:'start'});return;}
+  if(b.dataset.tab){S.tab=b.dataset.tab;cTab();rFuncoes();guarda();return;}
+  if(b.dataset.filt){S.filt=b.dataset.filt;cTab();rFuncoes();guarda();return;}
+  if(b.dataset.scen){S.scen=b.dataset.scen;vivos();guarda();return;}
+  var a=b.dataset.act;if(!a)return;
+  var sh=S.tab,f=S.fn[+b.dataset.i];
+  if(a==='add'){var inp=$('#nova-funcao'),n=inp.value.trim();if(!n)return inp.focus();S.fn.push({n:n.slice(0,40),cat:'out',a:0,b:0,c:0,a1:0,c1:0});inp.value='';}
+  else if(a==='reset'){if(b.dataset.ok){S=padrao();b.textContent='Restaurar números do mapa';b.classList.remove('per');delete b.dataset.ok;tudo();guarda();return;}b.dataset.ok='1';b.classList.add('per');b.textContent='Confirmar: apagar o que foi alterado';return;}
+  else if(a==='vg'){var g=b.dataset.sh||sh;if(f)f['n'+g]=!f['n'+g];}
+  else if(a==='xinc')S.extra[sh]++;
+  else if(a==='xdec'){if(S.extra[sh]>0)S.extra[sh]--;}
+  else if(f&&sh==='b'){if(a==='inc')f.b++;else if(a==='dec'&&f.b>0)f.b--;}
+  else if(f){var t=f[sh]||0,s1=Math.min(f[sh+'1']||0,t),s2=t-s1;
+    if(a==='inc'){f[sh]=t+1;if(s1<=s2)f[sh+'1']=s1+1;}
+    else if(a==='dec'&&t>0){f[sh]=t-1;if(s1>s2)f[sh+'1']=s1-1;}
+    else if(a==='to1'&&s2>0)f[sh+'1']=s1+1;
+    else if(a==='to2'&&s1>0)f[sh+'1']=s1-1;}
+  vivos();guarda();
+});
+document.addEventListener('input',function(e){
+  var i=e.target,d=i.dataset;
+  if(d.t){if(!i.value)return;S.t[d.t]=i.value;rDia();rDur();}
+  else if(d.ck){S.ck[d.ck]=i.value;rCheckV();}
+  else if(d.cp){S.campo[d.cp]=i.value;}
+  else if(d.todo){S.todo[+d.todo]=i.checked;}
+  else return;
+  guarda();
+});
+liga();
+})();
+</script>
+</body>
+</html>

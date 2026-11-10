@@ -11,7 +11,7 @@ Página interativa para programar a mudança da escala 6x1 para 5x2 no CD.
 - Semana dos subturnos: A1 e C1 folgam domingo e segunda; A2 e C2 folgam domingo e terça.
 - Um cartão por função, com um boneco por pessoa, dividido entre os dois subturnos.
 - Checkouts da conferência de miudeza e de nobre em cada dia.
-- Vagas sugeridas para igualar os dois subturnos de cada função, com quatro cenários: balanceado, separação e conferência, mínimo e quadro atual.
+- Vagas sugeridas para igualar os dois subturnos de cada função. Dá para marcar ou desmarcar a vaga função por função e escolher entre quatro cenários: balanceado, separação e conferência, mínimo e quadro atual.
 
 ## Observações
 

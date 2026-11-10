@@ -153,7 +153,7 @@ input[type=time],input[type=number],input[type=text],input[type=date]{border:1.5
 .pri h3{font-size:19px;text-transform:uppercase}
 .vagas{display:flex;flex-wrap:wrap;gap:6px}
 .vg-c{display:inline-flex;align-items:center;gap:6px;border:1.5px dashed var(--neutro);border-radius:8px;padding:4px 9px;font-size:13.5px;font-weight:600;background:#fff}
-.vg-c.on{border-style:solid;border-color:var(--tinta);background:var(--amarelo)}
+.vg-c:disabled{opacity:.55;cursor:default}.alt{align-self:flex-start;display:inline-flex;align-items:center;gap:8px;border:1.5px dashed var(--neutro);background:#fff;border-radius:8px;padding:5px 10px;font-weight:700;font-size:13px;text-align:left}.alt::before{content:'';width:16px;height:16px;flex:none;border:2px solid var(--tinta);border-radius:4px;background:#fff}.alt[aria-pressed=true]{border-style:solid;border-color:var(--tinta);background:var(--amarelo)}.alt[aria-pressed=true]::before{background:var(--tinta);box-shadow:inset 0 0 0 2px var(--amarelo)}.vg-c.on{border-style:solid;border-color:var(--tinta);background:var(--amarelo)}
 .vg-c i{font-style:normal;font-family:var(--display);font-size:17px;font-weight:700}
 
 /* pendências */
@@ -231,7 +231,7 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 
 <section id="vagas">
   <h2>Vagas sugeridas</h2>
-  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. As vagas aparecem como bonecos amarelos nas funções e entram na conta da semana e dos checkouts.</p>
+  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. Você decide função por função: toque na vaga para marcar ou desmarcar. As vagas marcadas aparecem como bonecos amarelos e entram na conta da semana e dos checkouts.</p>
   <div class="cen" id="o-cen"></div>
   <div class="cartao" id="o-vagas" style="display:flex;flex-direction:column;gap:14px"></div>
   <p class="aviso" id="o-teto"></p>
@@ -279,8 +279,9 @@ function plano(sh,lim){
     var t=f[sh]||0,s1=Math.max(0,Math.min(f[sh+'1']||0,t)),s2=t-s1,pr=0,v1=0,v2=0;
     var d=Math.abs(s1-s2);
     if(t>0&&(s1===0||s2===0))pr=1;else if(d>0)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
-    if(pr&&pr<=lim){var n=lim===1?1:d;if(s1<s2)v1=n;else v2=n;}
-    return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2};
+    var sug=pr>0&&pr<=lim,off=!!f['n'+sh],n=sug?(lim===1?1:d):0;
+    if(sug&&!off){if(s1<s2)v1=n;else v2=n;}
+    return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2,sug:sug,off:off,n:n};
   });
 }
 function soma(l,k){return l.reduce(function(s,x){return s+x[k];},0);}
@@ -360,7 +361,8 @@ function rFuncoes(){
         h+='<div class="mv"><button class="rb" data-act="to1" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'1"'+(x.s2?'':' disabled')+'>‹</button><button class="rb" data-act="to2" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'2"'+(x.s1?'':' disabled')+'>›</button></div>';
         h+='<div class="raia r2'+(a2===0?' vazia':'')+'"><div class="rh"><span>'+U+'2</span><span class="num">'+a2+'</span></div><div class="pws">'+pw(x.s2,'p2')+pw(x.v2,'vg')+'</div></div></div>';
         if(al)h+='<span class="pilula">Sem ninguém na '+(a1===0?'terça':'segunda')+'</span>';
-        else if(x.v1+x.v2)h+='<span class="pilula ok">Contratar '+(x.v1+x.v2)+' para igualar '+U+'1 e '+U+'2</span>';else if(x.s1!==x.s2)h+='<span class="pilula des">'+U+'1 e '+U+'2 desiguais</span>';
+        else if(!x.sug&&x.s1!==x.s2)h+='<span class="pilula des">'+U+'1 e '+U+'2 desiguais</span>';
+        if(x.sug)h+='<button class="alt" data-act="vg" data-i="'+i+'" data-sh="'+sh+'" aria-pressed="'+(!x.off)+'">'+(x.off?'Não contratar nesta função':'Contratar '+x.n+' para igualar '+U+'1 e '+U+'2')+'</button>';
       }
       h+='</div>';});
   }
@@ -407,7 +409,7 @@ function rVagas(){
     return '<button data-scen="'+c[0]+'" aria-pressed="'+(S.scen===c[0])+'"><span class="t">'+c[1]+'</span><span class="n">'+n+'</span><span class="e">'+c[2]+'</span></button>';}).join('');
   var P=[[1,'Prioridade 1 · função sem ninguém em um dia'],[2,'Prioridade 2 · separação e conferência desiguais'],[3,'Prioridade 3 · demais funções desiguais']],lim=LIM[S.scen],h='';
   P.forEach(function(p){var l=[];['a','c'].forEach(function(sh){plano(sh,3).forEach(function(x){if(x.pr===p[0])l.push([sh.toUpperCase(),x]);});});
-    h+='<div class="pri"><h3>'+p[1]+' <span class="num">('+l.length+')</span></h3><div class="vagas">'+(l.length?l.map(function(v){return '<span class="vg-c'+(p[0]<=lim?' on':'')+'"><i>'+v[0]+'</i>'+esc(v[1].f.n)+' <span class="num">'+v[1].t+' → '+(v[1].t+v[1].v1+v[1].v2)+'</span></span>';}).join(''):'<span class="sub" style="margin:0">Nenhuma.</span>')+'</div></div>';});
+    h+='<div class="pri"><h3>'+p[1]+' <span class="num">('+l.length+')</span></h3><div class="vagas">'+(l.length?l.map(function(v){var x=v[1],on=p[0]<=lim&&!x.off;return '<button class="vg-c'+(on?' on':'')+'" data-act="vg" data-i="'+x.i+'" data-sh="'+v[0].toLowerCase()+'" aria-pressed="'+on+'"'+(p[0]<=lim?'':' disabled')+'><i>'+v[0]+'</i>'+esc(x.f.n)+' <span class="num">'+x.t+' → '+(x.t+x.n)+'</span></button>';}).join(''):'<span class="sub" style="margin:0">Nenhuma.</span>')+'</div></div>';});
   $('#o-vagas').innerHTML=h;
   var ta=soma(plano('a'),'t')+S.extra.a,tc=soma(plano('c'),'t')+S.extra.c;
   $('#o-teto').textContent='Referência: se a jornada diária não aumentar, cada pessoa trabalha 1 dia a menos por semana. São '+ta+' dias de trabalho a menos por semana no Turno A e '+tc+' no Turno C, o equivalente a cerca de '+Math.round(ta/5)+' e '+Math.round(tc/5)+' pessoas.';
@@ -455,6 +457,7 @@ document.addEventListener('click',function(e){
   var sh=S.tab,f=S.fn[+b.dataset.i];
   if(a==='add'){var inp=$('#nova-funcao'),n=inp.value.trim();if(!n)return inp.focus();S.fn.push({n:n.slice(0,40),cat:'out',a:0,b:0,c:0,a1:0,c1:0});inp.value='';}
   else if(a==='reset'){if(b.dataset.ok){S=padrao();b.textContent='Restaurar números do mapa';b.classList.remove('per');delete b.dataset.ok;tudo();guarda();return;}b.dataset.ok='1';b.classList.add('per');b.textContent='Confirmar: apagar o que foi alterado';return;}
+  else if(a==='vg'){var g=b.dataset.sh||sh;if(f)f['n'+g]=!f['n'+g];}
   else if(a==='xinc')S.extra[sh]++;
   else if(a==='xdec'){if(S.extra[sh]>0)S.extra[sh]--;}
   else if(f&&sh==='b'){if(a==='inc')f.b++;else if(a==='dec'&&f.b>0)f.b--;}

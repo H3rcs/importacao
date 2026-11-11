@@ -6,6 +6,7 @@ Plano de negócio de uma consultoria que leva empresas da escala 6x1 para a 5x2 
 |---|---|
 | `plano.pdf` | Plano pronto para imprimir (A4, 10 páginas) |
 | `plano.html` | Fonte editável do PDF |
+| `app/index.html` | Aplicativo de celular: coleta os dados da empresa e monta a estratégia de transição (abre no navegador, funciona sem servidor) |
 
 ## Conteúdo
 

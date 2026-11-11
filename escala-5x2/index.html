@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Escala 5x2 dos Turnos A e C</title>
+<title>Escala 5x2 dos Turnos A, B e C</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  /* Layout: faixa azul no topo, seções em coluna única, um cartão por função com duas raias (subturno 1 azul, subturno 2 verde). */
   --azul:#111785; --verde:#01973A; --amarelo:#FFEE03; --alerta:#C4281C;
   --tinta:#14183A; --suave:#5B607F; --papel:#F3F4FA; --cartao:#FFFFFF; --linha:#D9DCEC; --neutro:#6A7196;
   --display:'Barlow Condensed','Arial Narrow',Arial,sans-serif;
@@ -35,6 +34,7 @@ header.topo{background:var(--azul);color:#fff;padding:20px 16px 0}
 nav.atalhos{position:sticky;top:0;z-index:5;background:var(--cartao);border-bottom:1px solid var(--linha)}
 nav.atalhos .in{max-width:1080px;margin:0 auto;display:flex;gap:6px;overflow-x:auto;padding:8px 16px}
 nav.atalhos button{flex:none;border:1px solid var(--linha);background:var(--papel);border-radius:99px;padding:6px 12px;font-weight:600;font-size:13.5px}
+nav.atalhos button.btn-pdf{background:var(--azul);color:#fff;border-color:var(--azul)}
 
 main{max-width:1080px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:28px}
 section{display:flex;flex-direction:column;gap:12px;scroll-margin-top:60px}
@@ -75,19 +75,23 @@ input[type=time],input[type=number],input[type=text],input[type=date]{border:1.5
 .aviso{font-size:13px;color:var(--suave);border-left:4px solid var(--amarelo);padding:2px 0 2px 10px}
 
 /* semana */
-.semana{display:grid;grid-template-columns:54px repeat(7,1fr);gap:4px;font-size:12.5px}
+.semana{display:grid;grid-template-columns:68px repeat(7,1fr);gap:4px;font-size:12.5px}
 .semana .d{font-weight:700;text-align:center;color:var(--suave);text-transform:uppercase;font-size:11.5px}
 .semana .r{font-family:var(--display);font-size:20px;font-weight:700;display:flex;align-items:center}
+.semana .r.tot{font-size:14px;color:var(--azul);border-top:1px solid var(--linha);padding-top:4px}
 .cel{border-radius:7px;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1.05}
 .cel .num{font-size:22px}
 .cel small{font-size:10px;font-weight:600;opacity:.9}
 .cel.t1{background:var(--azul)} .cel.t2{background:var(--verde)}
+.cel.tot{background:var(--tinta);color:#fff}
 .cel.f{background:repeating-linear-gradient(135deg,#fff 0 5px,var(--linha) 5px 7px);color:var(--suave);border:1px dashed var(--neutro);font-size:10.5px;text-transform:uppercase}
 
 /* funções */
-.seg{display:inline-flex;border:1.5px solid var(--azul);border-radius:10px;overflow:hidden;align-self:flex-start;flex-wrap:wrap}
-.seg button{border:0;background:#fff;padding:8px 14px;font-weight:700;color:var(--azul)}
-.seg button[aria-pressed=true]{background:var(--azul);color:#fff}
+.bloco-turno{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.titulo-turno{font-size:24px;text-transform:uppercase;color:var(--azul);padding-bottom:4px;border-bottom:2px solid var(--linha)}
+.titulo-turno.b{color:var(--neutro)}
+.titulo-turno.c{color:var(--verde)}
+
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{border:1px solid var(--linha);background:#fff;border-radius:99px;padding:5px 12px;font-size:13.5px;font-weight:600}
 .chips button[aria-pressed=true]{background:var(--tinta);color:#fff;border-color:var(--tinta)}
@@ -165,6 +169,127 @@ input[type=time],input[type=number],input[type=text],input[type=date]{border:1.5
 .campos label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;color:var(--suave)}
 footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:var(--suave);font-size:13px}
 @media (max-width:420px){.topo h1{font-size:34px}.tile .v{font-size:44px}.ck{grid-template-columns:96px 1fr}}
+
+/* equipes por nome */
+.importar{display:flex;flex-direction:column;gap:8px}
+.importar h3{font-size:20px;text-transform:uppercase}
+.importar textarea{width:100%;border:1.5px solid var(--neutro);border-radius:8px;padding:8px;font:inherit;font-size:14px;min-height:96px;resize:vertical;background:#fff}
+.linha-imp{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.linha-imp label{display:flex;flex-direction:column;gap:2px;font-size:12px;font-weight:600;color:var(--suave)}
+select{font:inherit;border:1.5px solid var(--neutro);border-radius:8px;padding:6px 8px;background:#fff;color:inherit}
+#lista-msg{font-weight:700;margin:0}
+#lista-msg:empty{display:none}
+.busca{flex:none;align-self:flex-start;width:100%;max-width:420px;border:1.5px solid var(--neutro);border-radius:99px;padding:8px 14px;background:#fff}
+.tm{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.tm-res{display:flex;flex-wrap:wrap;gap:6px;font-weight:700;font-size:13px}
+.tm-res span{border-radius:99px;padding:3px 10px;background:var(--cartao);border:1px solid var(--linha)}
+.tm-res .s1{background:var(--azul);color:#fff;border-color:var(--azul)}
+.tm-res .s2{background:var(--verde);color:#fff;border-color:var(--verde)}
+.tm-res .su{background:var(--alerta);color:#fff;border-color:var(--alerta)}
+.grupos{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px}
+.gf{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column}
+.gf-h{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-weight:700;padding-bottom:6px;border-bottom:2px solid var(--linha)}
+.gf-h small{font-size:12px;color:var(--suave);font-weight:600;white-space:nowrap}
+.pes{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--linha)}
+.pes:last-child{border-bottom:0}
+.pes .pn{font-weight:600;line-height:1.2;min-width:0;overflow-wrap:anywhere}
+.pes .pn small{display:block;font-weight:500;font-size:11.5px;color:var(--suave)}
+.pes.sem .pn{color:var(--alerta)}
+.pg{display:flex;gap:4px;flex:none;align-items:center}
+.gb{min-width:44px;height:36px;border-radius:8px;border:1.5px solid var(--neutro);background:#fff;font-weight:700;font-family:var(--display);font-size:18px;padding:0 8px}
+.gb.g1[aria-pressed=true]{background:var(--azul);border-color:var(--azul);color:#fff}
+.gb.g2[aria-pressed=true]{background:var(--verde);border-color:var(--verde);color:#fff}
+.rb.x{width:28px;height:28px;font-size:16px;border-color:var(--linha);color:var(--suave)}
+.rol{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.rol.um{grid-template-columns:1fr}
+.eq{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;overflow:hidden}
+.eq-h{padding:8px 10px;color:#fff;font-family:var(--display);font-size:20px;text-transform:uppercase;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.eq-h small{font-family:var(--corpo);font-size:12px;text-transform:none;font-weight:600}
+.eq.e1 .eq-h{background:var(--azul)} .eq.e2 .eq-h{background:var(--verde)} .eq.eb .eq-h{background:var(--neutro)} .eq.eu .eq-h{background:var(--alerta)}
+.eq table{width:100%;border-collapse:collapse;font-size:13px}
+.eq th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--suave);padding:5px 8px;border-bottom:1.5px solid var(--linha)}
+.eq td{padding:4px 8px;border-bottom:1px solid var(--linha);vertical-align:top}
+.eq td.fu{font-weight:700;width:38%}
+.eq td.co{width:16%;color:var(--suave);font-variant-numeric:tabular-nums}
+.eq tr:last-child td{border-bottom:0}
+@media (max-width:640px){.rol{grid-template-columns:1fr}}
+
+/* Estilos de impressão e exportação para PDF */
+@media print{
+  @page { margin: 10mm; } 
+  
+  body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
+  
+  /* Oculta apenas navegação, formulário de adição de funções, footer, filtros gerais e pendências */
+  nav.atalhos, .novo, footer, .chips, button.bt, .aviso, #pendencias { display: none !important; }
+  
+  /* Converte contêineres principais para block */
+  main, section, .bloco-turno { display: block !important; }
+  
+  /* Permite que as seções se dividam de página normalmente */
+  section { margin-bottom: 24px !important; page-break-inside: auto !important; break-inside: auto !important; }
+  .bloco-turno { margin-bottom: 16px !important; page-break-inside: auto !important; break-inside: auto !important; }
+  main { padding: 0 !important; }
+  
+  /* MANTÉM OS BOTÕES DE + E -, AS SETINHAS DE TRANSFERÊNCIA E O BOTÃO DE CONTRATAÇÃO VISÍVEIS NO PDF */
+  .passo .rb, .mv .rb {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: 1px solid var(--neutro) !important;
+    background: #fff !important;
+    color: var(--tinta) !important;
+    opacity: 1 !important;
+  }
+  .mv { 
+    display: flex !important; 
+    flex-direction: column !important; 
+    gap: 4px !important; 
+    justify-content: center !important; 
+  }
+  .alt {
+    display: inline-flex !important;
+    background: var(--amarelo) !important;
+    border: 1.5px solid var(--tinta) !important;
+    color: var(--tinta) !important;
+    font-weight: 700 !important;
+  }
+
+  /* IMPEDE TÍTULOS E DESCRIÇÕES ÓRFÃOS E QUEBRA DE TEXTOS INTRODUTÓRIOS */
+  section > h2, .sub, .titulo-turno, .pri h3 { 
+    page-break-after: avoid !important; 
+    break-after: avoid !important; 
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  
+  /* Ajusta espaçamentos */
+  section > h2 { margin-bottom: 4px !important; }
+  p.sub { margin-bottom: 12px !important; }
+  .cartao.dia { margin-bottom: 16px !important; }
+  
+  /* Evita que cartões e blocos de dados sejam partidos ao meio */
+  .fn, .tile, .area, .faixa, .semana, .cartao, .cen, .pri { 
+    break-inside: avoid !important; 
+    page-break-inside: avoid !important; 
+  }
+  
+  /* Equipes: some o que serve para montar e fica só a lista por equipe */
+  .noprint, .importar, .busca, #o-montar, .gb, .rb.x { display: none !important; }
+  .rol { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; break-inside: auto !important; page-break-inside: auto !important; }
+  .rol.um { grid-template-columns: 1fr !important; }
+  .eq { break-inside: auto !important; page-break-inside: auto !important; border: 1px solid var(--neutro) !important; }
+  .eq table { font-size: 10.5px !important; }
+  .eq td, .eq th { padding: 2px 6px !important; }
+  .eq tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+  .eq thead { display: table-header-group !important; }
+  .eq-h { font-size: 15px !important; padding: 4px 8px !important; }
+
+  /* Transforma campos editáveis em texto fixo visualmente */
+  input[type=number], input[type=text], input[type=date], input[type=time] { 
+    border: none !important; background: transparent !important; padding: 0 !important; font-weight: 700 !important; 
+  }
+}
 </style>
 </head>
 <body>
@@ -182,7 +307,14 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 </header>
 
 <nav class="atalhos" aria-label="Seções"><div class="in">
-  <button data-ir="resumo">Resumo</button><button data-ir="turnos">Horários</button><button data-ir="semana">Semana</button><button data-ir="funcoes">Funções</button><button data-ir="checkouts">Checkouts</button><button data-ir="vagas">Vagas</button><button data-ir="pendencias">Pendências</button>
+  <button data-ir="resumo">Resumo</button>
+  <button data-ir="turnos">Horários</button>
+  <button data-ir="semana">Semana</button>
+  <button data-ir="funcoes">Funções</button>
+  <button data-ir="equipes">Equipes</button>
+  <button data-ir="checkouts">Checkouts</button>
+  <button data-ir="vagas">Vagas</button>
+  <button class="btn-pdf" onclick="window.print()">Imprimir / PDF</button>
 </div></nav>
 
 <main>
@@ -201,7 +333,7 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 
 <section id="semana">
   <h2>Semana</h2>
-  <p class="sub">A1 e C1 folgam domingo e segunda. A2 e C2 folgam domingo e terça. O número é quantas pessoas trabalham no dia.</p>
+  <p class="sub">A1 e C1 folgam domingo e segunda. A2 e C2 folgam domingo e terça. O Turno B trabalha de segunda a sexta. O número é quantas pessoas trabalham no dia.</p>
   <div class="cartao"><div class="semana" id="o-semana"></div></div>
   <p class="aviso" id="o-semana-nota"></p>
 </section>
@@ -209,18 +341,61 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 <section id="funcoes">
   <h2>Funções por subturno</h2>
   <p class="sub">Cada boneco é uma pessoa. Use + e − para mudar o total da função e as setas para passar uma pessoa de um subturno para o outro.</p>
-  <div class="seg" id="c-tab" role="group" aria-label="Turno"></div>
   <div class="chips" id="c-filt" role="group" aria-label="Filtro"></div>
   <div class="legenda">
     <span><svg class="pw p1"><use href="#p"/></svg> subturno 1 (folga dom e seg)</span>
     <span><svg class="pw p2"><use href="#p"/></svg> subturno 2 (folga dom e ter)</span>
     <span><svg class="pw vg"><use href="#p"/></svg> vaga sugerida</span>
   </div>
-  <div class="lista" id="o-funcoes"></div>
+  
+  <div id="o-funcoes">
+    <div class="bloco-turno" id="turno-a">
+      <h3 class="titulo-turno a">Turno A</h3>
+      <div class="lista" id="o-funcoes-a"></div>
+    </div>
+    <div class="bloco-turno" id="turno-b">
+      <h3 class="titulo-turno b">Turno B</h3>
+      <div class="lista" id="o-funcoes-b"></div>
+    </div>
+    <div class="bloco-turno" id="turno-c">
+      <h3 class="titulo-turno c">Turno C</h3>
+      <div class="lista" id="o-funcoes-c"></div>
+    </div>
+  </div>
+
   <div class="novo">
     <input type="text" id="nova-funcao" placeholder="Nome de uma função que falta" aria-label="Nome de uma função que falta">
     <button class="bt sec" data-act="add">Adicionar função</button>
   </div>
+</section>
+
+<section id="equipes">
+  <h2>Equipes por nome</h2>
+  <p class="sub">Cole a lista de colaboradores e toque em A1 ou A2 (C1 ou C2) para cada pessoa. A partir daí, os números do turno seguem a lista. A lista por equipe sai na impressão.</p>
+  <div class="cartao importar">
+    <h3>Trazer a lista</h3>
+    <textarea id="lista-txt" aria-label="Lista de colaboradores" placeholder="Copie as linhas da planilha e cole aqui, uma pessoa por linha.&#10;Colunas: código, colaborador, equipe (turno) e função.&#10;Exemplo: 1234	MARIA DA SILVA	TA	SEPARADOR NOBRE"></textarea>
+    <div class="linha-imp">
+      <label>Turno, se a lista não disser
+        <select id="lista-sh"><option value="">Ler da própria lista</option><option value="a">Turno A</option><option value="b">Turno B</option><option value="c">Turno C</option></select>
+      </label>
+      <button class="bt" data-act="imp">Importar lista</button>
+      <button class="bt sec" data-act="bkp">Copiar backup dos dados</button>
+    </div>
+    <p id="lista-msg" role="status"></p>
+    <div class="linha-imp">
+      <label>Nome<input type="text" id="p-nome"></label>
+      <label>Turno<select id="p-sh"><option value="a">A</option><option value="b">B</option><option value="c">C</option></select></label>
+      <label>Função<input type="text" id="p-fn" list="dl-fn"></label>
+      <datalist id="dl-fn"></datalist>
+      <button class="bt sec" data-act="padd">Adicionar pessoa</button>
+    </div>
+  </div>
+  <div class="chips" id="c-pf" role="group" aria-label="Filtro de pessoas"></div>
+  <input type="search" class="busca" id="p-busca" data-busca="1" placeholder="Buscar nome ou código" aria-label="Buscar nome ou código">
+  <div id="o-montar"></div>
+  <div id="o-lista"></div>
+  <div class="noprint"><button class="bt sec" id="limpa" data-act="limpa">Apagar a lista de nomes</button></div>
 </section>
 
 <section id="checkouts">
@@ -231,7 +406,7 @@ footer{max-width:1080px;margin:0 auto;padding:8px 16px 40px;display:flex;flex-wr
 
 <section id="vagas">
   <h2>Vagas sugeridas</h2>
-  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. Você decide função por função: toque na vaga para marcar ou desmarcar. As vagas marcadas aparecem como bonecos amarelos e entram na conta da semana e dos checkouts.</p>
+  <p class="sub">Quando um subturno fica com menos gente que o outro, a página sugere contratar para igualar. Você decide função por função: toque na vaga para marcar ou desmarcar. As vagas marcadas aparecem como bonecos amarelos nas funções e entram na conta dos checkouts.</p>
   <div class="cen" id="o-cen"></div>
   <div class="cartao" id="o-vagas" style="display:flex;flex-direction:column;gap:14px"></div>
   <p class="aviso" id="o-teto"></p>
@@ -264,7 +439,7 @@ var MAPA=[
 var CAT={sep:'Separação',conf:'Conferência',sup:'Supervisão',out:'Apoio e movimentação'};
 var TODO=['Confirmar com a gerência os horários novos dos três turnos','Confirmar com o RH a jornada diária e o intervalo na escala 5x2','Conferir as funções da 2ª página do mapa e dividir em subturnos','Informar quantos checkouts existem na miudeza e no nobre','Confirmar se os operadores de empilhadeira trabalham em pares','Escolher o cenário de vagas e abrir as vagas com o RH','Comunicar a cada colaborador o seu subturno e a data de início'];
 var CHAVE='escala5x2-v1';
-function padrao(){return {v:1,fn:MAPA.map(function(r){return {n:r[0],cat:r[1],a:r[2],b:r[3],c:r[4],a1:r[5],c1:r[6]};}),extra:{a:10,b:11,c:5},t:{aE:'06:00',aS:'17:00',bE:'15:00',bS:'00:00',cE:'00:00',cS:'06:00'},ck:{miu:'',nob:''},scen:'comp',m:2,todo:[],campo:{inicio:'',resp:'',ger:''},tab:'a',filt:'todas',ts:0};}
+function padrao(){return {v:1,fn:MAPA.map(function(r){return {n:r[0],cat:r[1],a:r[2],b:r[3],c:r[4],a1:r[5],c1:r[6]};}),extra:{a:10,b:11,c:5},t:{aE:'06:00',aS:'17:00',bE:'15:00',bS:'00:00',cE:'00:00',cS:'06:00'},ck:{miu:'',nob:''},scen:'comp',m:2,todo:[],campo:{inicio:'',resp:'',ger:''},pes:[],lista:{a:false,b:false,c:false},nid:1,pf:'todos',tab:'a',filt:'todas',ts:0};}
 var S=padrao(),db=null,timer=null;
 function $(s){return document.querySelector(s);}
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
@@ -276,16 +451,17 @@ var LIM={atual:0,min:1,rec:2,comp:3};
 function plano(sh,lim){
   if(lim===undefined)lim=LIM[S.scen];
   return S.fn.map(function(f,i){
-    var t=f[sh]||0,s1=Math.max(0,Math.min(f[sh+'1']||0,t)),s2=t-s1,pr=0,v1=0,v2=0;
+    var u=(S.lista&&S.lista[sh])?(f['u'+sh]||0):0;
+    var t=f[sh]||0,s1=Math.max(0,Math.min(f[sh+'1']||0,t)),s2=Math.max(0,t-s1-u),pr=0,v1=0,v2=0;
     var d=Math.abs(s1-s2);
-    if(t>0&&(s1===0||s2===0))pr=1;else if(d>0)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
+    if(u>0)pr=0;else if(t>0&&(s1===0||s2===0))pr=1;else if(d>0)pr=(f.cat==='sep'||f.cat==='conf')?2:3;
     var sug=pr>0&&pr<=lim,off=!!f['n'+sh],n=sug?(lim===1?1:d):0;
     if(sug&&!off){if(s1<s2)v1=n;else v2=n;}
-    return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2,sug:sug,off:off,n:n};
+    return {i:i,f:f,t:t,s1:s1,s2:s2,pr:pr,v1:v1,v2:v2,sug:sug,off:off,n:n,u:u};
   });
 }
 function soma(l,k){return l.reduce(function(s,x){return s+x[k];},0);}
-function descobertas(sh){return plano(sh).filter(function(x){return x.t>0&&(x.s1+x.v1===0||x.s2+x.v2===0);});}
+function descobertas(sh){return plano(sh).filter(function(x){return x.t>0&&!x.u&&(x.s1+x.v1===0||x.s2+x.v2===0);});}
 function nVagas(sh,lim){var l=plano(sh,lim);return soma(l,'v1')+soma(l,'v2');}
 function totalB(){return S.fn.reduce(function(s,f){return s+(f.b||0);},0);}
 function mins(h){var p=String(h||'00:00').split(':');return (+p[0]||0)*60+(+p[1]||0);}
@@ -301,7 +477,7 @@ function rResumo(){
   var va=soma(pa,'v1')+soma(pa,'v2'),vc=soma(pc,'v1')+soma(pc,'v2');
   var h='';
   h+='<div class="tile"><span class="k">Turno A</span><span class="v">'+(soma(pa,'t')+S.extra.a)+'</span><span class="d">A1 '+soma(pa,'s1')+' · A2 '+soma(pa,'s2')+' · demais '+S.extra.a+'</span></div>';
-  h+='<div class="tile b"><span class="k">Turno B</span><span class="v">'+(totalB()+S.extra.b)+'</span><span class="d">sem divisão em subturnos</span></div>';
+  h+='<div class="tile b"><span class="k">Turno B</span><span class="v">'+(totalB()+S.extra.b)+'</span><span class="d">sem divisão · seg a sex</span></div>';
   h+='<div class="tile"><span class="k">Turno C</span><span class="v">'+(soma(pc,'t')+S.extra.c)+'</span><span class="d">C1 '+soma(pc,'s1')+' · C2 '+soma(pc,'s2')+' · demais '+S.extra.c+'</span></div>';
   h+='<div class="tile '+(d?'ruim':'bom')+'"><span class="k">Funções sem ninguém</span><span class="v">'+d+'</span><span class="d">'+(d?'na segunda ou na terça · A '+da+' · C '+dc:'todas cobertas na segunda e na terça')+'</span></div>';
   h+='<div class="tile vaga"><span class="k">Vagas no cenário</span><span class="v">'+(va+vc)+'</span><span class="d">Turno A '+va+' · Turno C '+vc+'</span></div>';
@@ -317,7 +493,7 @@ function rDia(){
   h+='<div class="faixa"><span class="rot">Turno A<small>'+esc(t.aE)+' às '+esc(t.aS)+'</small></span><div class="trilho">'+barras(A,'a','A')+barras(J,'j','')+'</div></div>';
   h+='<div class="faixa"><span class="rot">Turno B<small>'+esc(t.bE)+' às '+esc(t.bS)+'</small></span><div class="trilho">'+barras(B,'b','B')+barras(J,'j','')+'</div></div>';
   h+='<div class="horas"><span></span><div><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>00h</span></div></div>';
-  h+='<div class="junto"><span class="num">'+(j?hm(j):'0 h')+'</span><span>'+(j?'com os turnos A e B juntos no CD':'Os turnos A e B não se encontram nesses horários')+'</span></div>';
+  h+='<div class="junto"><span class="num">'+(j?hm(j):'0 h')+'</span><span>'+(j?'com os turnos A e B juntos no CD (seg a sex)':'Os turnos A e B não se encontram nesses horários')+'</span></div>';
   $('#o-dia').innerHTML=h;
 }
 function cHorarios(){
@@ -329,50 +505,96 @@ function cHorarios(){
 function rDur(){['a','b','c'].forEach(function(k){var e=$('#dur-'+k);if(e)e.textContent=hm(dur(trechos(S.t[k+'E'],S.t[k+'S'])))+' no CD';});}
 function rSemana(){
   var pa=plano('a'),pc=plano('c'),dias=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
-  var L=[['A1',1,soma(pa,'s1')+soma(pa,'v1')],['A2',2,soma(pa,'s2')+soma(pa,'v2')],['C1',1,soma(pc,'s1')+soma(pc,'v1')],['C2',2,soma(pc,'s2')+soma(pc,'v2')]];
+  var sA1=soma(pa,'s1'), sA2=soma(pa,'s2');
+  var sC1=soma(pc,'s1'), sC2=soma(pc,'s2');
+  var totBVal=totalB()+(S.extra.b||0);
+  
+  var extA1=Math.ceil((S.extra.a||0)/2), extA2=Math.floor((S.extra.a||0)/2);
+  var extC1=Math.ceil((S.extra.c||0)/2), extC2=Math.floor((S.extra.c||0)/2);
+
+  var a1=sA1+extA1, a2=sA2+extA2;
+  var c1=sC1+extC1, c2=sC2+extC2;
+
+  var L=[
+    ['A1',1,a1],
+    ['A2',2,a2],
+    ['Total A',0,0],
+    ['B',3,totBVal],
+    ['C1',1,c1],
+    ['C2',2,c2],
+    ['Total C',0,0]
+  ];
   var h='<span></span>'+dias.map(function(d){return '<span class="d">'+d+'</span>';}).join('');
   L.forEach(function(l){
-    h+='<span class="r">'+l[0]+'</span>';
-    for(var d=0;d<7;d++){var folga=d===6||(l[1]===1&&d===0)||(l[1]===2&&d===1);
-      h+=folga?'<div class="cel f">folga</div>':'<div class="cel t'+l[1]+'"><span class="num">'+l[2]+'</span></div>';}
+    var isTot=l[0].indexOf('Total')===0;
+    var isB=l[0]==='B';
+    h+='<span class="r'+(isTot?' tot':'')+'">'+l[0]+'</span>';
+    var isA=l[0].indexOf('A')!==-1;
+    var sub1=isA?a1:c1;
+    var sub2=isA?a2:c2;
+    for(var d=0;d<7;d++){
+      if(isTot){
+        var totDia=d===6?0:(d===0?sub2:(d===1?sub1:sub1+sub2));
+        h+=d===6?'<div class="cel f">folga</div>':'<div class="cel tot"><span class="num">'+totDia+'</span></div>';
+      }else if(isB){
+        var folgaB=d===5||d===6;
+        h+=folgaB?'<div class="cel f">folga</div>':'<div class="cel t1" style="background:var(--neutro)"><span class="num">'+totBVal+'</span></div>';
+      }else{
+        var folga=d===6||(l[1]===1&&d===0)||(l[1]===2&&d===1);
+        h+=folga?'<div class="cel f">folga</div>':'<div class="cel t'+l[1]+'"><span class="num">'+l[2]+'</span></div>';
+      }
+    }
   });
   $('#o-semana').innerHTML=h;
-  var ta=L[0][2]+L[1][2],tc=L[2][2]+L[3][2];
-  $('#o-semana-nota').textContent='Turno A: '+L[1][2]+' pessoas na segunda, '+L[0][2]+' na terça e '+ta+' de quarta a sábado. Turno C: '+L[3][2]+' na segunda, '+L[2][2]+' na terça e '+tc+' de quarta a sábado. Fora desta conta: '+S.extra.a+' pessoas do A e '+S.extra.c+' do C nas demais funções.';
+  var ta=a1+a2,tc=c1+c2;
+  $('#o-semana-nota').textContent='Turno A: '+a2+' pessoas na segunda (só A2), '+a1+' na terça (só A1) e '+ta+' de quarta a sábado (A1 e A2 juntos). Turno B: '+totBVal+' pessoas de segunda a sexta (folga sábado e domingo). Turno C: '+c2+' na segunda (só C2), '+c1+' na terça (só C1) e '+tc+' de quarta a sábado (C1 e C2 juntos).';
 }
 function cTab(){
-  $('#c-tab').innerHTML=[['a','Turno A'],['c','Turno C'],['b','Turno B']].map(function(x){return '<button data-tab="'+x[0]+'" aria-pressed="'+(S.tab===x[0])+'">'+x[1]+'</button>';}).join('');
   $('#c-filt').innerHTML=[['todas','Todas'],['desc','Sem ninguém em um dia'],['sep','Separação'],['conf','Conferência'],['sup','Supervisão']].map(function(x){return '<button data-filt="'+x[0]+'" aria-pressed="'+(S.filt===x[0])+'">'+x[1]+'</button>';}).join('');
 }
-function rFuncoes(){
-  var sh=S.tab,h='',U=sh.toUpperCase();
+function renderTurno(sh){
+  var h='',U=sh.toUpperCase(),L=!!(S.lista&&S.lista[sh]);
+  function passo(i,n,t){
+    if(L)return '<span class="passo"><b>'+t+'</b></span>';
+    return '<span class="passo"><button class="rb" data-act="dec" data-i="'+i+'" data-sh="'+sh+'" aria-label="Tirar uma pessoa de '+esc(n)+'"'+(t?'':' disabled')+'>−</button><b>'+t+'</b><button class="rb" data-act="inc" data-i="'+i+'" data-sh="'+sh+'" aria-label="Pôr uma pessoa em '+esc(n)+'">+</button></span>';
+  }
+  function demais(){
+    if(L||S.filt!=='todas')return '';
+    return '<div class="fn"><div class="fh"><span class="nm">Demais funções<span class="tag">2ª página do mapa · sem divisão</span></span><span class="passo"><button class="rb" data-act="xdec" data-sh="'+sh+'" aria-label="Tirar uma pessoa das demais funções"'+(S.extra[sh]?'':' disabled')+'>−</button><b>'+S.extra[sh]+'</b><button class="rb" data-act="xinc" data-sh="'+sh+'" aria-label="Pôr uma pessoa nas demais funções">+</button></span></div><div class="raia rb0"><div class="rh"><span>Centrais, motorista, vigia e outras</span></div><div class="pws">'+pw(S.extra[sh],'pb')+'</div></div></div>';
+  }
   if(sh==='b'){
     S.fn.forEach(function(f,i){var t=f.b||0;
-      if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;if(S.filt==='desc')return;
-      h+='<div class="fn'+(t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span><span class="passo"><button class="rb" data-act="dec" data-i="'+i+'" aria-label="Tirar uma pessoa de '+esc(f.n)+'"'+(t?'':' disabled')+'>−</button><b>'+t+'</b><button class="rb" data-act="inc" data-i="'+i+'" aria-label="Pôr uma pessoa em '+esc(f.n)+'">+</button></span></div>';
+      if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;if(S.filt==='desc')return;if(L&&!t)return;
+      h+='<div class="fn'+(t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span>'+passo(i,f.n,t)+'</div>';
       if(t)h+='<div class="raia rb0"><div class="rh"><span>Turno B</span></div><div class="pws">'+pw(t,'pb')+'</div></div>';
       h+='</div>';});
+    h+=demais();
   }else{
-    plano(sh).forEach(function(x){var f=x.f,i=x.i,a1=x.s1+x.v1,a2=x.s2+x.v2,al=x.t>0&&(a1===0||a2===0);
-      if(S.filt==='desc'&&!al)return;if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;
-      h+='<div class="fn'+(al?' al':'')+(x.t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span><span class="passo"><button class="rb" data-act="dec" data-i="'+i+'" aria-label="Tirar uma pessoa de '+esc(f.n)+'"'+(x.t?'':' disabled')+'>−</button><b>'+x.t+'</b><button class="rb" data-act="inc" data-i="'+i+'" aria-label="Pôr uma pessoa em '+esc(f.n)+'">+</button></span></div>';
+    plano(sh).forEach(function(x){var f=x.f,i=x.i,a1=x.s1+x.v1,a2=x.s2+x.v2,al=x.t>0&&!x.u&&(a1===0||a2===0);
+      if(S.filt==='desc'&&!al)return;if(S.filt!=='todas'&&S.filt!=='desc'&&f.cat!==S.filt)return;if(L&&!x.t)return;
+      h+='<div class="fn'+(al?' al':'')+(x.t?'':' zero')+'"><div class="fh"><span class="nm">'+esc(f.n)+'<span class="tag">'+CAT[f.cat]+'</span></span>'+passo(i,f.n,x.t)+'</div>';
       if(x.t){
-        h+='<div class="raias"><div class="raia r1'+(a1===0?' vazia':'')+'"><div class="rh"><span>'+U+'1</span><span class="num">'+a1+'</span></div><div class="pws">'+pw(x.s1,'p1')+pw(x.v1,'vg')+'</div></div>';
-        h+='<div class="mv"><button class="rb" data-act="to1" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'1"'+(x.s2?'':' disabled')+'>‹</button><button class="rb" data-act="to2" data-i="'+i+'" aria-label="Passar uma pessoa para '+U+'2"'+(x.s1?'':' disabled')+'>›</button></div>';
-        h+='<div class="raia r2'+(a2===0?' vazia':'')+'"><div class="rh"><span>'+U+'2</span><span class="num">'+a2+'</span></div><div class="pws">'+pw(x.s2,'p2')+pw(x.v2,'vg')+'</div></div></div>';
-        if(al)h+='<span class="pilula">Sem ninguém na '+(a1===0?'terça':'segunda')+'</span>';
+        h+='<div class="raias"><div class="raia r1'+(a1===0?' vazia':'')+'"><div class="rh"><span>'+U+'1</span><span class="num">'+x.s1+'</span></div><div class="pws">'+pw(x.s1,'p1')+pw(x.v1,'vg')+'</div></div>';
+        h+=L?'<div class="mv"></div>':'<div class="mv"><button class="rb" data-act="to1" data-i="'+i+'" data-sh="'+sh+'" aria-label="Passar uma pessoa para '+U+'1"'+(x.s2?'':' disabled')+'>‹</button><button class="rb" data-act="to2" data-i="'+i+'" data-sh="'+sh+'" aria-label="Passar uma pessoa para '+U+'2"'+(x.s1?'':' disabled')+'>›</button></div>';
+        h+='<div class="raia r2'+(a2===0?' vazia':'')+'"><div class="rh"><span>'+U+'2</span><span class="num">'+x.s2+'</span></div><div class="pws">'+pw(x.s2,'p2')+pw(x.v2,'vg')+'</div></div></div>';
+        if(x.u)h+='<span class="pilula des">'+x.u+' sem equipe definida</span>';
+        else if(al)h+='<span class="pilula">Sem ninguém na '+(a1===0?'terça':'segunda')+'</span>';
         else if(!x.sug&&x.s1!==x.s2)h+='<span class="pilula des">'+U+'1 e '+U+'2 desiguais</span>';
         if(x.sug)h+='<button class="alt" data-act="vg" data-i="'+i+'" data-sh="'+sh+'" aria-pressed="'+(!x.off)+'">'+(x.off?'Não contratar nesta função':'Contratar '+x.n+' para igualar '+U+'1 e '+U+'2')+'</button>';
       }
       h+='</div>';});
-  }
-  if(S.filt==='todas'){
-    h+='<div class="fn"><div class="fh"><span class="nm">Demais funções<span class="tag">2ª página do mapa · sem divisão</span></span><span class="passo"><button class="rb" data-act="xdec" aria-label="Tirar uma pessoa das demais funções"'+(S.extra[sh]?'':' disabled')+'>−</button><b>'+S.extra[sh]+'</b><button class="rb" data-act="xinc" aria-label="Pôr uma pessoa nas demais funções">+</button></span></div><div class="raia rb0"><div class="rh"><span>Centrais, motorista, vigia e outras</span></div><div class="pws">'+pw(S.extra[sh],'pb')+'</div></div></div>';
+    h+=demais();
   }
   if(!h)h='<p class="sub" style="margin:0">Nenhuma função neste filtro.</p>';
-  $('#o-funcoes').innerHTML=h;
+  return h;
 }
-function conf(nome){for(var i=0;i<S.fn.length;i++)if(S.fn[i].n===nome)return i;return -1;}
+function rFuncoes(){
+  var ea=$('#o-funcoes-a'), eb=$('#o-funcoes-b'), ec=$('#o-funcoes-c');
+  if(ea)ea.innerHTML=renderTurno('a');
+  if(eb)eb.innerHTML=renderTurno('b');
+  if(ec)ec.innerHTML=renderTurno('c');
+}
+function confs(tipo){var re=tipo==='miu'?/MIUD/:/NOBRE/,r=[];S.fn.forEach(function(f,i){var k=nz(f.n);if(/^CONF/.test(k)&&re.test(k))r.push(i);});return r;}
 function linhaCk(rot,n,ck,b){
   var h='<span class="lb">'+rot+'</span><div class="slots">';
   if(ck>0){for(var i=0;i<ck;i++)h+='<span class="sl'+(i<n?' on':'')+'"></span>';
@@ -381,24 +603,20 @@ function linhaCk(rot,n,ck,b){
   return h+'</div>';
 }
 function rCheck(){
-  var pa=plano('a'),pc=plano('c'),h='';
-  [['miu','Miudeza','Conf. miudeza II'],['nob','Nobre','Conf. nobre']].forEach(function(a){
-    var i=conf(a[2]),ck=parseInt(S.ck[a[0]],10)||0;
-    var A=i<0?{s1:0,s2:0,v1:0,v2:0}:pa[i],C=i<0?{s1:0,s2:0,v1:0,v2:0}:pc[i],B=i<0?0:(S.fn[i].b||0);
-    var a1=A.s1+A.v1,a2=A.s2+A.v2,c1=C.s1+C.v1,c2=C.s2+C.v2;
+  var h='';
+  [['miu','Miudeza'],['nob','Nobre']].forEach(function(a){
     h+='<div class="cartao area"><h3>'+a[1]+'</h3><label class="qt">Checkouts existentes <input type="number" min="0" max="60" inputmode="numeric" id="ck-'+a[0]+'" data-ck="'+a[0]+'" value="'+esc(S.ck[a[0]])+'" placeholder="?"></label><div class="ck" id="ckv-'+a[0]+'"></div></div>';
   });
   $('#o-check').innerHTML=h;rCheckV();
 }
 function rCheckV(){
   var pa=plano('a'),pc=plano('c');
-  [['miu','Conf. miudeza II'],['nob','Conf. nobre']].forEach(function(a){
-    var i=conf(a[1]),ck=parseInt(S.ck[a[0]],10)||0,z={s1:0,s2:0,v1:0,v2:0};
-    var A=i<0?z:pa[i],C=i<0?z:pc[i],B=i<0?0:(S.fn[i].b||0);
-    var a1=A.s1+A.v1,a2=A.s2+A.v2,c1=C.s1+C.v1,c2=C.s2+C.v2,h='';
+  [['miu'],['nob']].forEach(function(a){
+    var ck=parseInt(S.ck[a[0]],10)||0,a1=0,a2=0,c1=0,c2=0,B=0,h='';
+    confs(a[0]).forEach(function(i){a1+=pa[i].s1+pa[i].v1;a2+=pa[i].s2+pa[i].v2;c1+=pc[i].s1+pc[i].v1;c2+=pc[i].s2+pc[i].v2;B+=S.fn[i].b||0;});
     h+='<span class="gt">Turno A sozinho</span>'+linhaCk('Segunda (só A2)',a2,ck)+linhaCk('Terça (só A1)',a1,ck)+linhaCk('Quarta a sábado',a1+a2,ck);
-    h+='<span class="gt">Turnos A e B juntos</span>'+linhaCk('Segunda (A2 + B)',a2+B,ck)+linhaCk('Terça (A1 + B)',a1+B,ck)+linhaCk('Quarta a sábado',a1+a2+B,ck);
-    h+='<span class="gt">Turno B sozinho</span>'+linhaCk('Todos os dias',B,ck,1);
+    h+='<span class="gt">Turnos A e B juntos</span>'+linhaCk('Segunda (A2 + B)',a2+B,ck)+linhaCk('Terça (A1 + B)',a1+B,ck)+linhaCk('Quarta a sexta (A1 + A2 + B)',a1+a2+B,ck)+linhaCk('Sábado (só Turno A)',a1+a2,ck);
+    h+='<span class="gt">Turno B sozinho</span>'+linhaCk('Segunda a sexta',B,ck,1);
     h+='<span class="gt">Turno C</span>'+linhaCk('Segunda (só C2)',c2,ck)+linhaCk('Terça (só C1)',c1,ck)+linhaCk('Quarta a sábado',c1+c2,ck);
     var e=$('#ckv-'+a[0]);if(e)e.innerHTML=h;
   });
@@ -418,8 +636,90 @@ function cTodo(){
   $('#c-todo').innerHTML=TODO.map(function(t,i){return '<label><input type="checkbox" id="todo-'+i+'" data-todo="'+i+'"'+(S.todo[i]?' checked':'')+'><span>'+t+'</span></label>';}).join('');
   $('#c-campos').innerHTML='<label>Data de início da escala<input type="date" id="cp-inicio" data-cp="inicio" value="'+esc(S.campo.inicio)+'"></label><label>Responsável pela programação<input type="text" id="cp-resp" data-cp="resp" value="'+esc(S.campo.resp)+'"></label><label>Gerente que aprova<input type="text" id="cp-ger" data-cp="ger" value="'+esc(S.campo.ger)+'"></label>';
 }
-function vivos(){rResumo();rSemana();rFuncoes();rCheckV();rVagas();}
-function tudo(){cHorarios();cTab();cTodo();rDia();rCheck();vivos();}
+/* ---------- equipes por nome ---------- */
+var busca='';
+function nz(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
+function catDe(n){var k=nz(n);return /^SEP/.test(k)?'sep':/^CONF/.test(k)?'conf':/^SUP/.test(k)?'sup':'out';}
+function fnIdx(nome){var k=nz(nome);for(var i=0;i<S.fn.length;i++)if(nz(S.fn[i].n)===k)return i;S.fn.push({n:fnBonita(nome),cat:catDe(nome),a:0,b:0,c:0,a1:0,c1:0});return S.fn.length-1;}
+function fnBonita(s){s=String(s||'').trim().replace(/\s+/g,' ').slice(0,40);if(s!==s.toUpperCase())return s;s=s.toLowerCase();return (s.charAt(0).toUpperCase()+s.slice(1)).replace(/(^|\s)(i{1,3}|iv|v)(?=\s|$)/g,function(m,a,b){return a+b.toUpperCase();});}
+function bonito(s){s=String(s||'').trim().replace(/\s+/g,' ');if(s!==s.toUpperCase())return s;return s.toLowerCase().replace(/(^|\s)(\S)/g,function(m,a,b){return a+b.toUpperCase();}).replace(/\s(De|Da|Do|Das|Dos|E)(?=\s)/g,function(m){return m.toLowerCase();});}
+function sincroniza(){
+  ['a','b','c'].forEach(function(sh){
+    if(!S.lista[sh])return;
+    S.fn.forEach(function(f){f[sh]=0;if(sh!=='b'){f[sh+'1']=0;f['u'+sh]=0;}});
+    S.pes.forEach(function(p){if(p.sh!==sh)return;var f=S.fn[p.fi];if(!f)return;f[sh]++;if(sh!=='b'){if(p.g===1)f[sh+'1']++;else if(p.g!==2)f['u'+sh]++;}});
+    S.extra[sh]=0;
+  });
+}
+function importa(txt,shSel){
+  var add=0,pul=0,dup=0,novos={};
+  txt.split(/\r?\n/).forEach(function(l){
+    if(!l.trim())return;
+    var c=l.split(/\t|;/).map(function(x){return x.trim();});
+    if(c.length<2)c=l.trim().split(/\s{2,}/).map(function(x){return x.trim();});
+    var cod='',nome='',eq='',fu='';
+    if(c.length>=4){cod=c[0];nome=c[1];eq=c[2];fu=c[3];}
+    else if(c.length===3){if(/^\d+$/.test(c[0])){cod=c[0];nome=c[1];fu=c[2];}else{nome=c[0];eq=c[1];fu=c[2];}}
+    else if(c.length===2){nome=c[0];fu=c[1];}
+    else{pul++;return;}
+    var kn=nz(nome);
+    if(!kn||!nz(fu)||kn==='COLABORADOR'||kn==='NOME'||nz(fu)==='FUNCAO'){pul++;return;}
+    var m=nz(eq).replace(/TURNO|EQUIPE|TURMA/g,'').replace(/ /g,'').match(/([ABC])([12])?$/);
+    var sh=m?m[1].toLowerCase():shSel,g=(m&&m[2]&&sh!=='b')?+m[2]:0;
+    if(!sh){pul++;return;}
+    if(S.pes.some(function(p){return p.sh===sh&&nz(p.n)===kn;})){dup++;return;}
+    S.pes.push({id:S.nid++,n:bonito(nome),cod:cod,sh:sh,fi:fnIdx(fu),g:g});
+    S.lista[sh]=true;novos[sh.toUpperCase()]=1;add++;
+  });
+  var t=add+' pessoa'+(add===1?'':'s')+' importada'+(add===1?'':'s')+'.';
+  if(dup)t+=' '+dup+' já estava'+(dup===1?'':'m')+' na lista.';
+  if(pul)t+=' '+pul+' linha'+(pul===1?'':'s')+' ignorada'+(pul===1?'':'s')+' (cabeçalho, sem função ou sem turno).';
+  var k=Object.keys(novos).sort();if(k.length)t+=(k.length===1?' Os números do Turno '+k[0]:' Os números dos turnos '+k.slice(0,-1).join(', ')+' e '+k[k.length-1])+' agora seguem a lista.';
+  return t;
+}
+function rEquipes(){
+  var dl=$('#dl-fn');if(dl)dl.innerHTML=S.fn.map(function(f){return '<option value="'+esc(f.n)+'">';}).join('');
+  var sem=S.pes.filter(function(p){return p.sh!=='b'&&!p.g;}).length;
+  $('#c-pf').innerHTML=S.pes.length?[['todos','Todos ('+S.pes.length+')'],['sem','Sem equipe ('+sem+')']].map(function(x){return '<button data-pf="'+x[0]+'" aria-pressed="'+((S.pf||'todos')===x[0])+'">'+x[1]+'</button>';}).join(''):'';
+  $('#p-busca').style.display=S.pes.length?'':'none';
+  $('#limpa').style.display=S.pes.length?'':'none';
+  var kb=nz(busca),hm='',hl='';
+  [['a','Turno A'],['c','Turno C'],['b','Turno B']].forEach(function(T){
+    var sh=T[0],U=sh.toUpperCase(),todos=S.pes.filter(function(p){return p.sh===sh;});
+    if(!todos.length)return;
+    todos.sort(function(x,y){return x.fi-y.fi||x.n.localeCompare(y.n);});
+    var n1=todos.filter(function(p){return p.g===1;}).length,n2=todos.filter(function(p){return p.g===2;}).length,nu=todos.length-n1-n2;
+    /* montar */
+    hm+='<div class="tm"><h3 class="titulo-turno '+sh+'">'+T[1]+'</h3><div class="tm-res"><span>'+todos.length+' pessoas</span>'+(sh==='b'?'':'<span class="s1">'+U+'1: '+n1+'</span><span class="s2">'+U+'2: '+n2+'</span>'+(nu?'<span class="su">sem equipe: '+nu+'</span>':''))+'</div><div class="grupos">';
+    var vis=todos.filter(function(p){if(S.pf==='sem'&&(sh==='b'||p.g))return false;if(kb&&nz(p.n+' '+p.cod).indexOf(kb)<0)return false;return true;});
+    var fi=-1,aberto=false;
+    vis.forEach(function(p){
+      if(p.fi!==fi){if(aberto)hm+='</div>';fi=p.fi;aberto=true;
+        var gr=todos.filter(function(q){return q.fi===fi;}),g1=gr.filter(function(q){return q.g===1;}).length,g2=gr.filter(function(q){return q.g===2;}).length;
+        hm+='<div class="gf"><div class="gf-h"><span>'+esc(S.fn[fi]?S.fn[fi].n:'Sem função')+'</span><small>'+(sh==='b'?gr.length+' no turno':U+'1: '+g1+' · '+U+'2: '+g2+(gr.length-g1-g2?' · sem: '+(gr.length-g1-g2):''))+'</small></div>';}
+      hm+='<div class="pes'+(sh!=='b'&&!p.g?' sem':'')+'"><span class="pn">'+esc(p.n)+(p.cod?'<small>'+esc(p.cod)+'</small>':'')+'</span><span class="pg">'+(sh==='b'?'':'<button class="gb g1" data-act="g" data-p="'+p.id+'" data-g="1" aria-pressed="'+(p.g===1)+'" aria-label="'+esc(p.n)+' na equipe '+U+'1">'+U+'1</button><button class="gb g2" data-act="g" data-p="'+p.id+'" data-g="2" aria-pressed="'+(p.g===2)+'" aria-label="'+esc(p.n)+' na equipe '+U+'2">'+U+'2</button>')+'<button class="rb x" data-act="pdel" data-p="'+p.id+'" aria-label="Tirar '+esc(p.n)+' da lista">×</button></span></div>';
+    });
+    if(aberto)hm+='</div>';
+    if(!vis.length)hm+='<p class="sub" style="margin:0">Ninguém neste filtro.</p>';
+    hm+='</div></div>';
+    /* lista por equipe */
+    function tab(cls,tit,sub,l){
+      var h='<div class="eq '+cls+'"><div class="eq-h"><span>'+tit+' · '+l.length+'</span><small>'+sub+'</small></div><table><thead><tr><th>Função</th><th>Cód.</th><th>Colaborador</th></tr></thead><tbody>',ant=-1;
+      l.forEach(function(p){h+='<tr><td class="fu">'+(p.fi!==ant?esc(S.fn[p.fi]?S.fn[p.fi].n:''):'')+'</td><td class="co">'+esc(p.cod||'')+'</td><td>'+esc(p.n)+'</td></tr>';ant=p.fi;});
+      return h+'</tbody></table></div>';
+    }
+    hl+='<h3 class="titulo-turno '+sh+'">Lista do '+T[1]+'</h3>';
+    if(sh==='b')hl+='<div class="rol um">'+tab('eb','Turno B','folga sábado e domingo',todos)+'</div>';
+    else{
+      hl+='<div class="rol">'+tab('e1',U+'1','folga domingo e segunda',todos.filter(function(p){return p.g===1;}))+tab('e2',U+'2','folga domingo e terça',todos.filter(function(p){return p.g===2;}))+'</div>';
+      if(nu)hl+='<div class="rol um">'+tab('eu','Sem equipe no '+T[1],'falta definir',todos.filter(function(p){return !p.g;}))+'</div>';
+    }
+  });
+  $('#o-montar').innerHTML=hm;
+  $('#o-lista').innerHTML=hl||'<p class="sub noprint" style="margin:0">Nenhum nome ainda. Cole a lista acima e toque em Importar lista.</p>';
+}
+function vivos(){rResumo();rSemana();rFuncoes();rCheckV();rVagas();rEquipes();}
+function tudo(){sincroniza();cHorarios();cTab();cTodo();rDia();rCheck();vivos();}
 
 /* ---------- guardar ---------- */
 function aviso(t){$('#salvo').textContent=t;}
@@ -450,13 +750,28 @@ function liga(){
 document.addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b)return;
   if(b.dataset.ir){var s=document.getElementById(b.dataset.ir);if(s)s.scrollIntoView({behavior:'smooth',block:'start'});return;}
-  if(b.dataset.tab){S.tab=b.dataset.tab;cTab();rFuncoes();guarda();return;}
   if(b.dataset.filt){S.filt=b.dataset.filt;cTab();rFuncoes();guarda();return;}
   if(b.dataset.scen){S.scen=b.dataset.scen;vivos();guarda();return;}
+  if(b.dataset.pf){S.pf=b.dataset.pf;rEquipes();guarda();return;}
   var a=b.dataset.act;if(!a)return;
-  var sh=S.tab,f=S.fn[+b.dataset.i];
+  if(a==='imp'){var ta=$('#lista-txt'),tx=ta.value,msg=$('#lista-msg');
+    if(!tx.trim()){msg.textContent='Cole a lista no campo acima antes de importar.';ta.focus();return;}
+    if(tx.trim().charAt(0)==='{'){try{var o=JSON.parse(tx);if(valido(o)){adota(o);ta.value='';tudo();msg.textContent='Backup restaurado.';guarda();return;}}catch(e2){}msg.textContent='Esse texto não é um backup válido.';return;}
+    msg.textContent=importa(tx,$('#lista-sh').value);ta.value='';sincroniza();vivos();guarda();return;}
+  if(a==='bkp'){var js=JSON.stringify(S),ms=$('#lista-msg'),cai=function(){$('#lista-txt').value=js;$('#lista-txt').select();ms.textContent='Copie o texto do campo acima e guarde. Para restaurar, cole aqui e toque em Importar lista.';};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(js).then(function(){ms.textContent='Backup copiado. Cole em um arquivo de texto para guardar. Para restaurar, cole aqui e toque em Importar lista.';},cai);else cai();return;}
+  if(a==='padd'){var pn=$('#p-nome'),pf=$('#p-fn'),ps=$('#p-sh').value;
+    if(!pn.value.trim())return pn.focus();if(!pf.value.trim())return pf.focus();
+    S.pes.push({id:S.nid++,n:bonito(pn.value),cod:'',sh:ps,fi:fnIdx(pf.value),g:0});S.lista[ps]=true;pn.value='';sincroniza();vivos();guarda();pn.focus();return;}
+  if(a==='g'||a==='pdel'){var id=+b.dataset.p,k=-1;S.pes.forEach(function(p,j){if(p.id===id)k=j;});if(k<0)return;
+    if(a==='pdel'){var shp=S.pes[k].sh;S.pes.splice(k,1);if(!S.pes.some(function(p){return p.sh===shp;})){sincroniza();S.lista[shp]=false;}}
+    else{var gg=+b.dataset.g;S.pes[k].g=S.pes[k].g===gg?0:gg;}
+    sincroniza();vivos();guarda();return;}
+  if(a==='limpa'){if(!b.dataset.ok){b.dataset.ok='1';b.classList.add('per');b.textContent='Confirmar: apagar todos os nomes';return;}
+    delete b.dataset.ok;b.classList.remove('per');b.textContent='Apagar a lista de nomes';S.pes=[];S.lista={a:false,b:false,c:false};$('#lista-msg').textContent='Lista apagada. Os números ficaram como estavam.';vivos();guarda();return;}
+  var sh=b.dataset.sh||S.tab,f=S.fn[+b.dataset.i];
   if(a==='add'){var inp=$('#nova-funcao'),n=inp.value.trim();if(!n)return inp.focus();S.fn.push({n:n.slice(0,40),cat:'out',a:0,b:0,c:0,a1:0,c1:0});inp.value='';}
-  else if(a==='reset'){if(b.dataset.ok){S=padrao();b.textContent='Restaurar números do mapa';b.classList.remove('per');delete b.dataset.ok;tudo();guarda();return;}b.dataset.ok='1';b.classList.add('per');b.textContent='Confirmar: apagar o que foi alterado';return;}
+  else if(a==='reset'){if(b.dataset.ok){var nm=S.pes.map(function(p){return S.fn[p.fi]?S.fn[p.fi].n:'';}),kp=S.pes,kl=S.lista,ki=S.nid,kf=S.pf;S=padrao();S.pes=kp;S.lista=kl;S.nid=ki;S.pf=kf;S.pes.forEach(function(p,j){p.fi=fnIdx(nm[j]);});b.textContent='Restaurar números do mapa';b.classList.remove('per');delete b.dataset.ok;tudo();guarda();return;}b.dataset.ok='1';b.classList.add('per');b.textContent='Confirmar: apagar o que foi alterado';return;}
   else if(a==='vg'){var g=b.dataset.sh||sh;if(f)f['n'+g]=!f['n'+g];}
   else if(a==='xinc')S.extra[sh]++;
   else if(a==='xdec'){if(S.extra[sh]>0)S.extra[sh]--;}
@@ -474,6 +789,7 @@ document.addEventListener('input',function(e){
   else if(d.ck){S.ck[d.ck]=i.value;rCheckV();}
   else if(d.cp){S.campo[d.cp]=i.value;}
   else if(d.todo){S.todo[+d.todo]=i.checked;}
+  else if(d.busca){busca=i.value;rEquipes();return;}
   else return;
   guarda();
 });

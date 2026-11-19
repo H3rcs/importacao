@@ -2425,7 +2425,8 @@ function agoraTextoDados_() { return Utilities.formatDate(new Date(), fuso(), 'y
 /* ------------------------------------------------------------------ */
 
 /* Gatilho: relê a competencia aberta em cada filial com Assiduidade ligada. */
-function atualizarCompetenciaAberta() {
+function atualizarCompetenciaAberta(e) {
+  if (typeof gatilhoDeVerdade_ === 'function') gatilhoDeVerdade_(e);   // ver GATILHO DE VERDADE, no Codigo.gs
   const r = emCadaFilial_('assiduidade', atualizarCompetenciaAbertaDaFilial_);
   if (r.length === 1) return r[0];
   const junto = { ok: true, feitas: [], erros: [], vazias: [] };

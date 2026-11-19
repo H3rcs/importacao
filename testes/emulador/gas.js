@@ -811,7 +811,14 @@ function novaExecucao(mundo, pasta, execucao, opcoes) {
   instalarRelogio(ctx, mundo);
   mundo.DataDoScript = vm.runInContext('Date', ctx);
   ctx.HtmlService = htmlService(pasta, ctx, opcoes);
-  ctx.ContentService = { createTextOutput: (t) => ({ getContent: () => t, setMimeType() { return this; } }), MimeType: { JSON: 'JSON', TEXT: 'TEXT' } };
+  ctx.ContentService = {
+    createTextOutput: (t) => {
+      const saida = { _texto: true, _mime: 'TEXT', getContent: () => String(t === undefined ? '' : t),
+        setMimeType(m) { saida._mime = m; return saida; }, getMimeType: () => saida._mime };
+      return saida;
+    },
+    MimeType: { JSON: 'JSON', TEXT: 'TEXT', CSV: 'CSV', JAVASCRIPT: 'JAVASCRIPT' }
+  };
   arquivosGs(pasta, opcoes.ordem).forEach((f) => {
     const codigo = fs.readFileSync(path.join(pasta, f), 'utf8');
     new vm.Script(codigo, { filename: f }).runInContext(ctx);

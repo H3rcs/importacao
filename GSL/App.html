@@ -13,6 +13,128 @@
  * confere isso antes de publicar.
  */
 
+/*
+ * GSL LOCAL — a pasta compartilhada da Bartofil, sem programa instalado.
+ *
+ * O ferramentas/montar-local.js monta a pasta GSL-Local (GSL.html e os
+ * modulos .js e .css) com ESTES mesmos arquivos. Aberta da pasta (file://),
+ * a pagina nao tem o google.script.run nem a carga dentro do HTML: aqui ela
+ * ganha um google.script.run do mesmo jeito (withSuccessHandler,
+ * withFailureHandler, a funcao pelo nome) que manda cada chamada por fetch()
+ * ao /exec da implantacao, a API em JSON do doPost (ver API DA VERSAO LOCAL,
+ * no Codigo.gs). O resto da tela nao muda. A carga inicial vem da API
+ * ("inicio"). Sem cookie do Google no caminho, o "canal barrado" nao existe
+ * aqui: CANAL_BARRADO nunca liga e nada navega para o /exec.
+ * O endereco fica no gsl-config.js da pasta (GSL_CONFIG.url).
+ */
+const MODO_LOCAL = !!(typeof GSL_LOCAL !== 'undefined' && GSL_LOCAL) ||
+  (location.protocol === 'file:' && typeof google === 'undefined');
+let URL_ONLINE = '';         // o /exec da versao online (botao "Abrir a versão online")
+function urlDaApi() {
+  const c = (typeof GSL_CONFIG !== 'undefined' && GSL_CONFIG) || {};
+  const u = String(c.url || '').trim();
+  if (!/^https?:/i.test(u) || /COLE_AQUI/i.test(u)) return '';
+  // O endereco com /a/macros/<dominio>/ pede o login da empresa; sem login, vale o /macros/s/ (mesma implantacao).
+  return u.replace(new RegExp('/a/macros/[^/]+/s/'), '/macros/s/');
+}
+/*
+ * Erro de transporte (servidor fora do alcance, endereco errado): a mensagem ja e legivel
+ * (vai assim para qualquer aviso) e o explicarErro completa com o que conferir (RE_SEM_API).
+ */
+const RE_SEM_API = /^(Sem conexão com o servidor do GSL|Falta o endereço do servidor|O endereço do gsl-config\.js respondeu)/;
+function erroDeApi(texto) { const e = new Error(texto); e.semApi = true; return e; }
+function chamarApi(fn, args) {
+  const url = urlDaApi();
+  if (!url) return Promise.reject(erroDeApi('Falta o endereço do servidor no arquivo gsl-config.js da pasta GSL-Local.'));
+  // text/plain: pedido "simples", sem preflight (o Apps Script nao responde OPTIONS). Sem cookie: a sessao e a do GSL.
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, credentials: 'omit',
+    cache: 'no-store', redirect: 'follow', body: JSON.stringify({ api: 1, fn: fn, args: args || [] }) })
+    .catch(() => { throw erroDeApi('Sem conexão com o servidor do GSL.'); })
+    .then((r) => r.text().then((t) => ({ codigo: r.status, texto: t })))
+    .then((x) => {
+      let j = null;
+      try { j = JSON.parse(x.texto); } catch (e) { j = null; }
+      if (!j || typeof j !== 'object' || typeof j.ok !== 'boolean') {
+        throw erroDeApi('O endereço do gsl-config.js respondeu (código ' + x.codigo + '), mas não é a API do GSL ' +
+          '(Codigo.gs de antes da versão local, ou o endereço de outra coisa).');
+      }
+      if (!j.ok) throw new Error(String(j.erro || 'Erro desconhecido.'));
+      return j.valor;
+    });
+}
+/* O google.script.run da pagina local: a mesma cara, outro caminho. */
+function runLocal(o) {
+  return new Proxy({}, { get: function (alvo, nome) {
+    if (nome === 'withSuccessHandler') return (f) => runLocal(Object.assign({}, o, { ok: f }));
+    if (nome === 'withFailureHandler') return (f) => runLocal(Object.assign({}, o, { falha: f }));
+    if (nome === 'withUserObject') return (u) => runLocal(Object.assign({}, o, { u: u }));
+    if (typeof nome !== 'string') return undefined;
+    return function () {
+      chamarApi(nome, Array.prototype.slice.call(arguments)).then(
+        (v) => { if (o.ok) o.ok(v, o.u); },
+        (e) => { if (o.falha) o.falha(e, o.u); else setTimeout(() => { throw e; }); });
+    };
+  } });
+}
+if (MODO_LOCAL) {
+  window.google = { script: {
+    run: runLocal({}),
+    // Como o do Google: so troca os parametros do endereco (o F5 nao reabre o link de e-mail).
+    history: { push: function () {}, setChangeHandler: function () {},
+      replace: function (estado, params) {
+        try {
+          const q = Object.keys(params || {}).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
+          history.replaceState(estado || null, '', location.pathname + (q ? '?' + q : ''));
+        } catch (e) { /* endereco que o navegador nao deixa trocar: fica como esta */ }
+      } },
+    url: { getLocation: function (cb) { cb({ parameter: {}, parameters: {}, hash: '' }); } },
+    host: { close: function () {}, setHeight: function () {}, setWidth: function () {}, editor: { focus: function () {} } }
+  } };
+}
+/*
+ * A carga inicial da pagina local: o que o doGet poria dentro do HTML (entrada,
+ * link de e-mail com ?tela=, endereco online). Falhou a conexao: tenta mais uma
+ * vez e, se nao der, a tela diz o que conferir (internet, implantacao em
+ * "Qualquer pessoa", gsl-config.js) e oferece a versao online.
+ */
+async function cargaLocal() {
+  if (!urlDaApi()) { mostrarSemApi(erroDeApi('Falta o endereço do servidor no arquivo gsl-config.js da pasta GSL-Local.')); return null; }
+  const q = new URLSearchParams(location.search), pedido = {};
+  ['tela', 'filial', 'acao', 'p', 'aba'].forEach((k) => { if (q.get(k)) pedido[k] = q.get(k); });
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    try {
+      const carga = await chamarJSON('inicio', pedido);
+      URL_ONLINE = (carga && carga.urlApp) || '';
+      if (carga) carga.urlApp = '';     // a pagina local nunca vai sozinha para a online (Tentar de novo = recarregar a pasta)
+      CARGA_INICIAL = carga;
+      return carga || { ok: false, erro: 'O servidor não respondeu.' };
+    } catch (e) {
+      if (tentativa === 0 && falhaPassageira(e)) { await esperar(1500); continue; }
+      mostrarSemApi(e);
+      return null;
+    }
+  }
+  return null;
+}
+function mostrarSemApi(e) {
+  mostrarFalha(e);
+  botaoVersaoOnline();
+}
+function botaoVersaoOnline() {
+  const caixa = el('falha'), url = URL_ONLINE || urlDaApi();
+  if (!caixa || !url || el('falha-online')) return;
+  const b = document.createElement('button');
+  b.id = 'falha-online'; b.type = 'button'; b.className = 'botao secundario';
+  b.textContent = 'Abrir a versão online';
+  b.onclick = function () { window.open(url, '_blank'); };
+  caixa.appendChild(b);
+}
+function explicarSemApi(m) {
+  return m + ' Confira: 1) a internet deste computador; 2) no Apps Script, em Implantar › Gerenciar implantações, ' +
+    'a implantação com "Quem pode acessar: Qualquer pessoa" (com "Qualquer pessoa em Bartofil" o Google pede login e a pasta ' +
+    'não conecta); 3) o endereço /exec no arquivo gsl-config.js da pasta GSL-Local. Enquanto isso, use a versão online.';
+}
+
 let SESSAO = null, paginaAtual = 'inicio', paramsAtual = {}, DADOS = null, TEMA = 'claro';
 let paginaAnterior = null;   // qual tela ja estava desenhada — ver pintar()
 
@@ -109,7 +231,10 @@ const ctx = () => ({ t: TOKEN, f: FILIAL });
  */
 const CHAVE_CANAL = 'gsl_canal_barrado', CHAVE_SONDA = 'gsl_sonda';
 const CANAL_LEMBRA_MS = 12 * 3600 * 1000;
-function lembrarCanalBarrado() { CANAL_BARRADO = true; gravarLocal(CHAVE_CANAL, String(Date.now())); }
+function lembrarCanalBarrado() {
+  if (MODO_LOCAL) return;          // pagina local: sem google.script.run, nao ha canal para barrar
+  CANAL_BARRADO = true; gravarLocal(CHAVE_CANAL, String(Date.now()));
+}
 function esquecerCanalBarrado() { CANAL_BARRADO = false; try { localStorage.removeItem(CHAVE_CANAL); } catch (e) {} }
 function canalBarradoLembrado() {
   const t = Number(lerLocal(CHAVE_CANAL) || 0);
@@ -141,6 +266,7 @@ const chamar = (f, ...a) => new Promise((ok, erro) => {
  */
 let SONDA = '', SONDA_INDO = null, SONDA_BARROU_EM = 0;
 function sondarCanal() {
+  if (MODO_LOCAL) { SONDA = 'ok'; return Promise.resolve(true); }
   if (SONDA_INDO) return SONDA_INDO;
   if (typeof google === 'undefined' || !google.script || !google.script.run) return Promise.resolve(false);
   SONDA = 'indo';
@@ -360,9 +486,12 @@ async function iniciar() {
     aplicarTema(lerLocal(CHAVE_TEMA) || 'claro');
     medirFluidez();
     vigiarVisibilidade();
-    const inicio = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true };
-    URL_APP = inicio.urlApp || '';
-    if (inicio.viaPost || canalBarradoLembrado()) CANAL_BARRADO = true;   // esta pagina ja veio pela reserva, ou o navegador ja sabe
+    // Pagina local (pasta GSL-Local): a carga vem da API, nao de dentro do HTML.
+    const inicio = MODO_LOCAL ? await cargaLocal()
+      : ((typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) ? CARGA_INICIAL : { ok: true });
+    if (!inicio) return;                 // a tela de "sem conexao com o servidor" ja esta na frente
+    URL_APP = MODO_LOCAL ? '' : (inicio.urlApp || '');
+    if (!MODO_LOCAL && (inicio.viaPost || canalBarradoLembrado())) CANAL_BARRADO = true;   // esta pagina ja veio pela reserva, ou o navegador ja sabe
     // A gravacao que esta aba mandou pela pagina (ver navegarPelaPagina): esta pagina e a resposta.
     ACAO_ENVIADA = Date.now() - Number(lerSs(CHAVE_ACAO) || 0) < 5 * 60000;
     gravarSs(CHAVE_ACAO, '');
@@ -386,6 +515,11 @@ async function iniciar() {
     if (!inicio.ok) return mostrarFalha(inicio.erro);
 
     if (inicio.entrada === 'INSTALAR' || inicio.instalado === false) {
+      if (MODO_LOCAL) {
+        mostrarFalha('O GSL ainda não foi instalado. A instalação é feita uma vez, pela versão online (o endereço do Apps Script); ' +
+          'depois disso a pasta GSL-Local funciona.');
+        return botaoVersaoOnline();
+      }
       soMostrar('instalacao');
       el('instalacao-conta').textContent = inicio.conta
         ? 'Você (' + inicio.conta + ') será cadastrado como administrador.'
@@ -902,7 +1036,13 @@ function escolherFilial(codigo) {
     if (r && r.ok && r.entrada === 'APP') return montarSessao(r);
     if (r && r.entrada && r.entrada !== 'APP') return mostrarSemAcesso(r);
     mostrarFalha((r && r.erro) || 'Não consegui abrir a filial.');
-  }).catch(() => { if (respondeu) return; respondeu = true; clearTimeout(reserva); irParaFilial(codigo); });
+  }).catch((e) => {
+    if (respondeu) return;
+    respondeu = true; clearTimeout(reserva);
+    // Pagina local: nao ha reserva por pagina — volta aos cartoes e diz o que houve.
+    if (MODO_LOCAL) { mostrarEscolhaFilial(FILIAIS_DISPONIVEIS); avisar(explicarErro(e), true); return; }
+    irParaFilial(codigo);
+  });
   return false;
 }
 
@@ -1024,7 +1164,9 @@ function carimboDoEstilo() { return carimboCss('--gsl-estilo'); }
 function conferirVersao(r) {
   const app = (r && r.app) || {};
   const faltam = [].concat(app.foraDaVersao || []);
-  if (app.build !== BUILD_APP) faltam.unshift('Codigo.gs (ou App.html)');
+  // Pagina local de outra versao: o servidor foi atualizado e a pasta GSL-Local nao (ou o contrario).
+  const pastaVelha = MODO_LOCAL && app.build !== BUILD_APP;
+  if (app.build !== BUILD_APP && !pastaVelha) faltam.unshift('Codigo.gs (ou App.html)');
   // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
   if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.10.21') faltam.push('Paineis.html');
   if (carimboCss('--gsl-paineis-estilo') !== '2026.10.21') faltam.push('PaineisEstilo.html');
@@ -1032,7 +1174,7 @@ function conferirVersao(r) {
   if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar') || !el('lateral-alternar') || !el('entrar-p')) faltam.push('Index.html');
   if (carimboDoEstilo() !== '2026.10.19') faltam.push('Estilo.html');
   let faixa = el('aviso-versao');
-  if (!faltam.length) { if (faixa) faixa.remove(); return; }
+  if (!faltam.length && !pastaVelha) { if (faixa) faixa.remove(); return; }
   if (!faixa) {
     faixa = document.createElement('div');
     faixa.id = 'aviso-versao';
@@ -1041,7 +1183,12 @@ function conferirVersao(r) {
     if (pagina && pagina.parentNode) pagina.parentNode.insertBefore(faixa, pagina);
     else document.body.prepend(faixa);
   }
-  faixa.innerHTML = `<b>Atualização incompleta do GSL.</b> Estes arquivos não estão na mesma versão das telas:
+  const local = pastaVelha ? `A pasta GSL-Local deste computador é da versão ${esc(BUILD_APP)} e o servidor está na
+    ${esc(app.build || '(desconhecida)')}. ${r.admin
+      ? 'Monte a pasta GSL-Local desta versão e copie por cima da pasta compartilhada (guarde o gsl-config.js).'
+      : 'Avise o administrador: a pasta GSL-Local precisa ser trocada pela nova.'} ` : '';
+  if (!faltam.length) { faixa.innerHTML = `<b>Atualização incompleta do GSL.</b> ${local}`; return; }
+  faixa.innerHTML = `<b>Atualização incompleta do GSL.</b> ${local}Estes arquivos não estão na mesma versão das telas:
     ${faltam.map(esc).join(', ')}. ${r.admin
       ? 'Cole esses arquivos no Apps Script e crie uma <b>Nova versão</b> da implantação (Implantar › Gerenciar implantações).'
       : 'Algumas funções podem dar erro — avise o administrador do sistema.'}`;
@@ -1108,7 +1255,7 @@ function canalBarradoDeVez(e) {
 /* Rede que caiu um instante, servidor que nao respondeu: tenta de novo, nao marca a maquina. */
 function falhaPassageira(e) {
   const m = String((e && e.message) || e || '');
-  return !canalBarradoDeVez(e) && /NetworkError|Falha na conex|HTTP (0|5\d\d)\b|Failed to fetch|timeout|tempo esgotado/i.test(m);
+  return !canalBarradoDeVez(e) && /NetworkError|Falha na conex|HTTP (0|5\d\d)\b|Failed to fetch|timeout|tempo esgotado|Sem conexão com o servidor do GSL/i.test(m);
 }
 
 /* Bilhete de uso unico que o servidor pos nesta pagina (ver doPost). */
@@ -1123,7 +1270,7 @@ function bilheteDaPagina() {
  * canal cair no meio do turno) nao sair com um bilhete vencido.
  */
 function renovarBilheteSeVelho() {
-  if (CANAL_BARRADO || Date.now() - BILHETE_DESDE < 4 * 3600 * 1000) return;
+  if (MODO_LOCAL || CANAL_BARRADO || Date.now() - BILHETE_DESDE < 4 * 3600 * 1000) return;   // a pagina local nao usa a reserva por POST
   if (typeof google === 'undefined' || !google.script) return;
   BILHETE_DESDE = Date.now();
   chamar('renovarBilhete', ctx()).then((b) => {
@@ -1271,6 +1418,7 @@ async function instalarSistema() {
  */
 function explicarErro(t) {
   const m = String((t && t.message) || t || '');
+  if (MODO_LOCAL && RE_SEM_API.test(m)) return explicarSemApi(m);       // pagina local sem o servidor (ver chamarApi)
   if (/PERMISSION_DENIED|reading from storage/i.test(m)) {
     return 'O Google recusou a conversa com o servidor porque há mais de uma conta Google aberta neste ' +
            'navegador. Use uma janela só com a conta @bartofil.com.br (ou uma janela anônima). ' +
@@ -3461,14 +3609,14 @@ async function fichaColaborador(matricula, de, ate) {
     abrirJanela('', montarFicha(f), '<button class="botao" onclick="fecharJanela()">Fechar</button>');
     const t = el('janela-titulo'); if (t) t.textContent = '';
   } catch (e) {
-    // Google barrando a chamada (HTTP 403): a ficha vem pela navegacao de pagina.
-    if (canalBloqueado(e)) {
+    // Google barrando a chamada (HTTP 403): a ficha vem pela navegacao de pagina (a pagina local nao tem reserva).
+    if (canalBloqueado(e) && !MODO_LOCAL) {
       CANAL_BARRADO = true;
       abrirJanela('Ficha do colaborador', `<p style="margin-top:0;line-height:1.7">Este computador bloqueia a conversa direta com o Google.
         A ficha abre recarregando a página.</p>`, `<button class="botao" onclick="fichaPelaPagina()">Abrir a ficha</button>`);
       return;
     }
-    avisar(e.message || e, true);
+    avisar(MODO_LOCAL ? explicarErro(e) : (e.message || e), true);
   }
 }
 function fichaPelaPagina() {

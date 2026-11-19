@@ -61,7 +61,8 @@ function removerGatilhos() {
 }
 
 /** Roda de madrugada, em cada filial com o Calendario ligado. */
-function rotinaDiaria() {
+function rotinaDiaria(e) {
+  if (typeof gatilhoDeVerdade_ === 'function') gatilhoDeVerdade_(e);   // ver GATILHO DE VERDADE, no Codigo.gs
   emCadaFilial_('calendario', rotinaDiariaDaFilial_);
   // Esvazia o que sobrou do LOG em lote, para o balde nunca dormir cheio.
   try { descarregarLog(); } catch (e) {}
@@ -80,7 +81,8 @@ function rotinaDiariaDaFilial_() {
   try { briefingGerente(); } catch (e) {}
 }
 
-function rotinaMensal() {
+function rotinaMensal(e) {
+  if (typeof gatilhoDeVerdade_ === 'function') gatilhoDeVerdade_(e);   // ver GATILHO DE VERDADE, no Codigo.gs
   try { gerarMesSeNecessario(); } catch (e) {}
 }
 

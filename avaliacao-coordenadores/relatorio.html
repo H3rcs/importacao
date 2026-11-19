@@ -330,7 +330,7 @@ function load(k){ try{ return localStorage.getItem(k); }catch(e){ return null; }
 
 /* ================= leitura do CSV ================= */
 function parseCSV(text){
-  text = text.replace(/^﻿/, '');
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const prim = text.split(/\r?\n/)[0] || '';
   const delim = (prim.split(';').length > prim.split(',').length) ? ';' : ',';
   const rows = []; let row = [], f = '', q = false;
@@ -594,7 +594,7 @@ function lerArquivo(file){
   const fr = new FileReader();
   fr.onload = () => {
     let txt = new TextDecoder('utf-8').decode(fr.result);
-    if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(fr.result);
+    if (txt.includes(String.fromCharCode(0xFFFD))) txt = new TextDecoder('windows-1252').decode(fr.result);
     usarCSV(txt, false);
   };
   fr.readAsArrayBuffer(file);

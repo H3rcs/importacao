@@ -45,6 +45,10 @@
 const BUILD_PERMISSOES = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const MODULOS = [
+  /* Situacao de Carga (25/11): o relatorio de expedicao virando indicadores, equipe e equipamentos ao vivo — Carga.gs e Carga.html. */
+  { id: 'carga',        nome: 'Situação de Carga',
+    frase: 'Cargas em processo, separação e conferência por depósito, com a equipe e os equipamentos ao vivo.',
+    acao: 'Abrir situação', icone: 'carga', cor: 'azul' },
   { id: 'calendario',   nome: 'Calendário',
     frase: 'Atividades do mês, entregas, validações e o andamento por turno.',
     acao: 'Abrir calendário', icone: 'calendario', cor: 'azul' },
@@ -93,6 +97,7 @@ const TELAS = [
   { id: 'quadro',      nome: 'Quadro do CD', cor: 'amarelo', modulo: 'quadro',      funcao: 'dadosQuadro' },
   { id: 'estoque',     nome: 'Estoque de TI', cor: 'azul',   modulo: 'estoque',     funcao: 'dadosEstoque' },
   { id: 'aprendiz',    nome: 'Portal RH Aprendiz', cor: 'azul', modulo: 'aprendiz',  funcao: 'dadosAprendiz' },
+  { id: 'carga',       nome: 'Situação de Carga', cor: 'azul', modulo: 'carga',     funcao: 'dadosCarga' },
   { id: 'config',      nome: 'Configuração', cor: 'branco',  modulo: 'config',      funcao: 'dadosConfig' },
   { id: 'acessos',     nome: 'Pessoas e acessos', cor: 'branco', modulo: 'config',  funcao: 'dadosPessoas' },
   { id: 'filiais',     nome: 'Filiais e painéis', cor: 'branco', modulo: 'config',  funcao: 'dadosFiliais' },

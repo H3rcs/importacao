@@ -7,7 +7,7 @@
  *
  * Monta a pagina a partir dos MESMOS arquivos que o Apps Script serve
  * (Index.html e os include: Estilo, PaineisEstilo, Marca, App, Paineis,
- * Aprendiz), resolvendo os scriptlets como o servidor:
+ * Aprendiz, Carga, CargaEstilo), resolvendo os scriptlets como o servidor:
  *   <?!= include('X'); ?>  -> o conteudo de X.html (o <style> vai para o
  *                             gsl.css, cada <script> para o gsl-x.js, na
  *                             mesma ordem da pagina)
@@ -18,6 +18,8 @@
  *   GSL.html          a pagina (abrir no Chrome)
  *   gsl.css           Estilo + PaineisEstilo + Marca (logos embutidas) + Aprendiz
  *   gsl-app.js, gsl-paineis.js, gsl-aprendiz.js   os modulos
+ *   vendor/pdfjs-<versao>/  o leitor de PDF (pdf.js) da Situacao de Carga — os mesmos arquivos que a
+ *                     versao online busca na cdnjs, copiados de ferramentas/vendor (Apache 2.0)
  *   gsl-config.js     o endereco /exec da implantacao (o administrador edita;
  *                     uma montagem nova NAO apaga o que ja esta na pasta de saida,
  *                     a nao ser com --url)
@@ -108,6 +110,7 @@ function montar(opcoes) {
         // Como o include() do servidor: so os opcionais podem faltar (a faixa de versao avisa).
         if (nome === 'Aprendiz') { avisos.push('Aprendiz.html nao existe: montado sem o Jovem Aprendiz.'); return ''; }
         if (nome === 'PlanoEstilo') { avisos.push('PlanoEstilo.html nao existe: montado sem o visual novo do Plano de Acao.'); return ''; }
+        if (nome === 'Carga' || nome === 'CargaEstilo') { avisos.push(nome + '.html nao existe: montado sem a Situacao de Carga.'); return ''; }
         throw new Error('Falta o arquivo ' + nome + '.html na pasta ' + o.fonte);
       }
       let saida = '';
@@ -155,6 +158,7 @@ function montar(opcoes) {
   const config = path.join(o.saida, 'gsl-config.js');
   if (o.url || !fs.existsSync(config)) escrever('gsl-config.js', textoConfig(o.url));
   escrever('LEIA-ME-LOCAL.md', leiaMe(c, local));
+  copiarVendor(o.saida);
 
   const r = { saida: o.saida, build: c.buildApp, arquivos: fs.readdirSync(o.saida).sort(), avisos };
   if (!o.silencioso) {
@@ -166,6 +170,21 @@ function montar(opcoes) {
     }
   }
   return r;
+}
+
+/*
+ * O pdf.js da Situacao de Carga (o leitor do PDF roda no navegador). A versao vem do Carga.html
+ * (CG_PDFJS_VERSAO) e os arquivos de ferramentas/vendor/pdfjs-<versao>: os mesmos que a cdnjs serve.
+ */
+function copiarVendor(saida) {
+  const versao = ((fs.existsSync(path.join(RAIZ, 'GSL', 'Carga.html')) ? fs.readFileSync(path.join(RAIZ, 'GSL', 'Carga.html'), 'utf8') : '')
+    .match(/const CG_PDFJS_VERSAO = '([^']+)'/) || [])[1];
+  if (!versao) return;
+  const origem = path.join(RAIZ, 'ferramentas', 'vendor', 'pdfjs-' + versao);
+  if (!fs.existsSync(origem)) throw new Error('Falta ferramentas/vendor/pdfjs-' + versao + ' (o leitor de PDF da Situacao de Carga).');
+  const destino = path.join(saida, 'vendor', 'pdfjs-' + versao);
+  fs.mkdirSync(destino, { recursive: true });
+  fs.readdirSync(origem).forEach((f) => fs.copyFileSync(path.join(origem, f), path.join(destino, f)));
 }
 
 function textoConfig(url) {
@@ -197,8 +216,9 @@ Esta pasta é o GSL que abre direto do servidor de arquivos da Bartofil, sem ins
 | Arquivo | O que é |
 |---|---|
 | \`GSL.html\` | A página. É ela que cada pessoa abre no Chrome. |
-| \`gsl-app.js\`, \`gsl-paineis.js\`, \`gsl-aprendiz.js\` | Os módulos das telas. |
+| \`gsl-app.js\`, \`gsl-paineis.js\`, \`gsl-aprendiz.js\`, \`gsl-carga.js\` | Os módulos das telas. |
 | \`gsl.css\` | A aparência (com as logos da Bartofil). |
+| \`vendor/\` | O leitor de PDF da Situação de Carga (pdf.js). |
 | \`gsl-config.js\` | O endereço do servidor. **O único arquivo que você edita.** |
 | \`LEIA-ME-LOCAL.md\` | Este guia. |
 

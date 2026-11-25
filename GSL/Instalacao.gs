@@ -170,6 +170,22 @@ const ESQUEMA = {
                 'OBSERVACAO', 'CONFIRMADA_EM', 'CONFIRMADA_POR'],
 
   /*
+   * SITUACAO DE CARGA (8.14 — Carga.gs).
+   * CARGA_SNAPSHOTS: um envio do relatorio "Situacao de Expedicao das Cargas em Processo". EMITIDO_EM e a
+   * hora do relatorio (aaaa-mm-ddThh:mm:ss); CARGAS e a lista em JSON (envio grande continua em CARGAS_2 e
+   * CARGAS_3; os envios antigos vao para o Drive: DRIVE:<id>); RESUMO, os numeros por deposito, a equipe
+   * alocada na hora e o que foi feito desde o envio anterior (o ritmo sai dai). ASSINATURA recusa o mesmo
+   * relatorio duas vezes.
+   * CARGA_EQUIPE: uma linha viva por pessoa (PESSOA = a chave do Quadro do CD): onde ela esta agora.
+   * PAPEL: SEPARADOR · CONFERENTE; ANDAR: 0 (terreo) a 4, so no flowrack do Nobre.
+   * CARGA_EQUIPAMENTOS: paleteiras e carrinhos de cada deposito. ESTADO: LIVRE · USO · MANUTENCAO.
+   */
+  CARGA_SNAPSHOTS: ['EMITIDO_EM', 'ENVIADO_EM', 'ENVIADO_POR', 'ENVIADO_NOME', 'ARQUIVO', 'PAGINAS', 'TOTAL_CARGAS',
+                    'NAO_LIDAS', 'ASSINATURA', 'DEPOSITOS', 'RESUMO', 'CARGAS', 'CARGAS_2', 'CARGAS_3'],
+  CARGA_EQUIPE:    ['PESSOA', 'NOME', 'FUNCAO', 'EQUIPE', 'DEPOSITO', 'PAPEL', 'ANDAR', 'DESDE'],
+  CARGA_EQUIPAMENTOS: ['DEPOSITO', 'TIPO', 'NUMERO', 'ESTADO', 'OBSERVACAO'],
+
+  /*
    * CONVERSA — uma linha por mensagem.
    * CONTEXTO diz onde ela vive: 'ATIVIDADE' (a caixa dentro da atividade)
    * ou 'DIRETO' (conversa de duas pessoas). ALVO e o ID da atividade ou a
@@ -265,6 +281,7 @@ function instalar(emailAdmin) {
   garantirFilialPrincipalGravada_();
   semearZonasLimpeza();
   semearNobreaks();
+  semearEquipamentosCarga_();
   inserirVarios('PARAMETROS', PARAMETROS_NOVOS.filter(function (p) {
     return p[0].indexOf('APRESENTACAO_') !== 0;   // estas ja vem em semearParametros
   }).map(function (p) { return { CHAVE: p[0], VALOR: p[2] || '', DESCRICAO: p[1] }; }), 'sistema');
@@ -322,7 +339,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.13';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) (a proxima e 8.14: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.14';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) (a proxima e 8.15: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -381,6 +398,9 @@ function garantirEsquema() {
   if (principal && versaoAntes < numeroDaVersao_('8.1') && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
   // 8.9: o Jovem Aprendiz entra ligado na principal (uma vez; depois vale o que o administrador escolher).
   if (principal && versaoAntes < numeroDaVersao_('8.9') && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
+  // 8.14: a Situacao de Carga entra ligada na principal, e cada filial ganha as paleteiras e os carrinhos padrao.
+  if (principal && versaoAntes < numeroDaVersao_('8.14') && adicionarPaineisNovosNaPrincipal_(['carga'])) mexeu = true;
+  if (versaoAntes < numeroDaVersao_('8.14') && typeof semearEquipamentosCarga_ === 'function' && semearEquipamentosCarga_()) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
@@ -504,7 +524,11 @@ const PARAMETROS_NOVOS = [
   ['APRENDIZ_PLANILHA', 'Link da planilha do Jovem Aprendiz — Imersão Corporativa (abas "Respostas ao formulário 1" e "Cronograma")'],
   ['NOBREAK_TENSAO_TOLERANCIA', 'Tolerancia da tensao em relacao a nominal, em % (acima disso a leitura fica em alerta)', '10'],
   ['NOBREAK_CARGA_ALERTA', 'Carga de saida (%) a partir da qual o nobreak fica em alerta', '80'],
-  ['NOBREAK_LEITURAS_DIA', 'Quantas leituras por dia cada nobreak deve ter', '3']
+  ['NOBREAK_LEITURAS_DIA', 'Quantas leituras por dia cada nobreak deve ter', '3'],
+  // Situacao de Carga (8.14): limites do "Equilibrio entre depositos", em pontos percentuais, e o peso das cargas de 24 horas
+  ['CARGA_EQUILIBRIO_PP', 'Situação de Carga: diferença máxima (pontos percentuais) entre o depósito mais adiantado e o mais atrasado para ficar "Equilibrado"', '10'],
+  ['CARGA_ATENCAO_PP', 'Situação de Carga: até quantos pontos percentuais de diferença é "Atenção" (acima disso, "Desequilibrado")', '20'],
+  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada tarefa de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2']
 ];
 
 /* Quais tabelas moram neste banco: o mestre tem todas; o de filial, so as de dados. */
@@ -662,13 +686,13 @@ function perfisPadrao() {
     { PERFIL: 'ADMIN', DESCRICAO: 'Administrador do sistema', ESCOPO: 'TODOS', niveis: todas },
     { PERFIL: 'GERENTE', DESCRICAO: 'Gerência — valida as entregas', ESCOPO: 'TODOS',
       niveis: { inicio: E, calendario: E, acoes: E, assiduidade: E, apresentacao: E, nobreaks: E, limpeza: E,
-                quadro: E, estoque: E, aprendiz: E, config: E, acessos: E, relatos: E, filiais: V } },
+                quadro: E, estoque: E, aprendiz: E, config: E, acessos: E, relatos: E, filiais: V, carga: E } },
     { PERFIL: 'COORDENADOR', DESCRICAO: 'Coordenação de turno — entrega', ESCOPO: 'TURNO',
-      niveis: { inicio: E, calendario: E, acoes: E, nobreaks: E } },
+      niveis: { inicio: E, calendario: E, acoes: E, nobreaks: E, carga: E } },
     /* Supervisor de limpeza (4.2.2): cuida da Limpeza CD — acoes, compras e consumo. */
     { PERFIL: 'SUPERVISOR', DESCRICAO: 'Supervisão de limpeza', ESCOPO: 'TODOS', niveis: { limpeza: E } },
     { PERFIL: 'CONSULTA', DESCRICAO: 'Somente leitura', ESCOPO: 'TODOS',
-      niveis: { inicio: V, calendario: V, acoes: V, nobreaks: V, limpeza: V, quadro: V } },
+      niveis: { inicio: V, calendario: V, acoes: V, nobreaks: V, limpeza: V, quadro: V, carga: V } },
     { PERFIL: 'PENDENTE', DESCRICAO: 'Aguardando liberação', ESCOPO: 'PROPRIAS', niveis: {} }
   ];
 }

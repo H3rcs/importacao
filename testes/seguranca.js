@@ -104,7 +104,13 @@ const bloqueadas = [
   ['acaoSalvarUsuario', FALSO, { email: ATACANTE, nome: 'x', perfil: 'ADMIN', ajustes: { acessos: 'EDITAR' } }],
   ['acaoRestaurarPerfis', FALSO], ['migrarParaTresFaixas_'], ['permissoesDe', 'ADMIN'], ['permissoesDaPessoa', 'ADMIN', {}],
   ['nivelNaTela', FALSO, 'estoque'], ['exigirAcao_', FALSO, 'x', { tela: 'estoque' }], ['dadosPessoas', FALSO], ['listarPessoas'],
-  ['linhaCruaDoNivel_', 'ADMIN'], ['marcaDoMenu', FALSO]
+  ['linhaCruaDoNivel_', 'ADMIN'], ['marcaDoMenu', FALSO],
+  // 25/11: Situacao de Carga — a tela (nomes do Quadro), os envios, a equipe, os equipamentos e a geracao
+  ['dadosCarga', FALSO, {}], ['acaoGeracaoCarga', FALSO],
+  ['acaoEnviarSituacaoCarga', FALSO, { emitidoEm: '2026-11-25T08:00:00', depositos: [{ id: 'GRANDEZA' }], cargas: [{ nro: '762480', d: { GRANDEZA: ['X', 'X'] } }] }],
+  ['acaoExcluirSituacaoCarga', FALSO, { id: 'x' }], ['acaoMoverPessoaCarga', FALSO, { pessoa: { k: 'C123', nome: 'x' }, destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } }],
+  ['acaoLimparAlocacaoCarga', FALSO, {}], ['acaoEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', numero: 1, estado: 'MANUTENCAO' }],
+  ['acaoQuantidadeEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', quantidade: 0 }], ['semearEquipamentosCarga_'], ['cgCargasDe_', { CARGAS: 'DRIVE:x' }]
 ];
 const emailsAntesDosAtaques = m.emails.length;
 bloqueadas.forEach(([fn, ...a]) => {

@@ -242,7 +242,7 @@ async function rodar() {
       const html = fs.readFileSync(path.join(dir, 'GSL.html'), 'utf8');
       afirmar(!/<\?/.test(html) && /var CARGA_INICIAL = null;/.test(html), 'scriptlets resolvidos');
       const srcs = [...html.matchAll(/<script src="([^"?]+)/g)].map((x) => x[1]);
-      afirmar(srcs.join(',') === 'gsl-config.js,gsl-app.js,gsl-paineis.js,gsl-aprendiz.js', 'ordem dos modulos: ' + srcs.join(','));
+      afirmar(srcs.join(',') === 'gsl-config.js,gsl-app.js,gsl-paineis.js,gsl-aprendiz.js,gsl-carga.js,gsl-carga-2.js', 'ordem dos modulos: ' + srcs.join(','));
       afirmar(html.indexOf('gsl-config.js') < html.indexOf('gsl-app.js') && /<link rel="stylesheet" href="gsl\.css\?v=/.test(html), 'config antes do app, css no head');
       const local = JSON.parse((html.match(/var GSL_LOCAL = (\{[^<]+\});/) || [])[1] || 'null');
       const buildApp = (fs.readFileSync(path.join(PASTA, 'App.html'), 'utf8').match(/const BUILD_APP = '([^']+)'/) || [])[1];

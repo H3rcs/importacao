@@ -416,6 +416,61 @@ function desdeMarca(aba) {
     runs: r.filter((x) => x.tipo === 'run').map((x) => x.fn) };
 }
 
+/*
+ * SITUACAO DE CARGA (25/11). O pdf.js da versao online vem da cdnjs: aqui a cdnjs responde com os
+ * MESMOS arquivos da pasta ferramentas/vendor (o teste nao depende da internet). O PDF real do
+ * gerente fica em testes/fixtures. As fotos das telas vao para GSL_FOTOS (se definido).
+ */
+const PDF_REAL = path.join(__dirname, 'fixtures', 'situacao-carga-real.pdf');
+const VENDOR_PDFJS = path.join(__dirname, '..', 'ferramentas', 'vendor', 'pdfjs-3.11.174');
+async function cdnjsLocal(contexto) {
+  await contexto.route(/^https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/pdf\.js\/3\.11\.174\/(pdf(\.worker)?\.min\.js)$/, (rota) => {
+    const nome = /(pdf(\.worker)?\.min\.js)$/.exec(rota.request().url())[1];
+    rota.fulfill({ status: 200, contentType: 'application/javascript', headers: { 'Access-Control-Allow-Origin': '*' },
+      body: require('fs').readFileSync(path.join(VENDOR_PDFJS, nome)) });
+  });
+}
+function quadroDeTeste(s) {
+  const { abas } = require('./dados-quadro.js')(s.mundo.DataDoScript, new Date());
+  const pl = s.mundo.novaPlanilha('BI Quadro CD Feira');
+  const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+  Object.keys(abas).forEach((nome, i) => {
+    const a = i === 0 ? pl.abas[0] : new Aba(pl, nome, 1000, 26);
+    if (i === 0) a.nome = nome; else pl.abas.push(a);
+    abas[nome].forEach((linha, l) => { if (linha) a.dados[l] = linha.slice(); });
+  });
+  return 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit';
+}
+async function foto(aba, nome, maxAltura) {
+  const dir = process.env.GSL_FOTOS;
+  if (!dir) return;
+  require('fs').mkdirSync(dir, { recursive: true });
+  // A pagina rola dentro da moldura: a foto aumenta a janela ate caber tudo e depois volta.
+  const vp = aba.page.viewportSize();
+  const f = await frame(aba);
+  const altura = await f.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+  await aba.page.setViewportSize({ width: vp.width, height: Math.min(maxAltura || 9000, Math.max(vp.height, altura)) });
+  await aba.page.waitForTimeout(250);
+  await aba.page.screenshot({ path: path.join(dir, nome + '.png') });
+  await aba.page.setViewportSize(vp);
+}
+async function esperarCarga(f) {
+  await f.waitForSelector('#cg', { timeout: 20000 });
+}
+/* Envia um PDF pela janela "Enviar situação de carga" e espera a tela voltar com ele. */
+async function enviarPdfPelaTela(f, arquivo, cargasEsperadas) {
+  await f.click('.cg-btn-primario');
+  await f.waitForSelector('#cg-arquivo', { state: 'attached', timeout: 10000 });
+  await f.setInputFiles('#cg-arquivo', arquivo);
+  await f.waitForSelector('.cg-previa-ok', { timeout: 30000 });
+  const previa = (await f.textContent('.cg-previa-ok')).replace(/\s+/g, ' ');
+  afirmar(new RegExp(cargasEsperadas + ' cargas lidas').test(previa), 'previa: ' + previa);
+  await f.waitForFunction(() => !document.getElementById('cg-salvar').disabled, null, { timeout: 5000 });
+  await f.click('#cg-salvar');
+  await f.waitForFunction((n) => { const t = document.querySelector('.cg-hero-titulo'); return t && t.textContent.indexOf(n + ' cargas') !== -1; }, cargasEsperadas, { timeout: 30000 });
+  return previa;
+}
+
 /* PAINEIS NO MENU (19/10): os cartoes como a pessoa ve — "nobreaks[oculto]" quando tem a etiqueta. */
 function cartoesDoMenu(f) {
   return f.evaluate(() => [...document.querySelectorAll('.grade-modulos .holocard[data-modulo]')]
@@ -3422,7 +3477,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     const dono = criarPin(s, DONO, DONO, '4321');
     criarPin(s, GERAL, COORD, '1234');
-    ['calendario', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'].forEach((p) =>
+    ['calendario', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz', 'carga'].forEach((p) =>
       afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'alterarPainel', { codigo: 'FSA', painel: p, estado: 'DESATIVADO' }).ok, p + ' desativado'));
     const vazio = (fr) => fr.evaluate(() => document.querySelector('.grade-modulos .vazio').innerText.replace(/\s+/g, ' ').trim());
     const aba = await abrirAba(s, DONO);
@@ -3462,7 +3517,7 @@ async function rodar() {
       }
       const r = await f.evaluate(() => ({ erro: document.querySelectorAll('#pagina .erro-caixa').length,
         lateral: [...document.querySelectorAll('#menu .item-menu')].map((b) => b.dataset.pagina).join(',') }));
-      afirmar(await cartoesDoMenu(f) === 'calendario' && !r.erro && !/nobreaks/.test(r.lateral), rotulo + ': ' + await cartoesDoMenu(f) + ' ' + JSON.stringify(r));
+      afirmar(await cartoesDoMenu(f) === 'carga,calendario' && !r.erro && !/nobreaks/.test(r.lateral), rotulo + ': ' + await cartoesDoMenu(f) + ' ' + JSON.stringify(r));
       await f.evaluate(() => { document.getElementById('recado').textContent = ''; });
     };
     const voltarAoMenu = async (cartao) => {      // a bolinha vencida (mais de 2 min): voltar ao menu rele o menu
@@ -3532,7 +3587,7 @@ async function rodar() {
     pelaPorta('definirAjustePessoa', { id: idDe(COORD), tela: 'nobreaks', nivel: 'OCULTO' });
     await f.evaluate(() => agir('semanaNobreak', {}).catch(() => {}));
     await f.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Seu acesso (COORDENADOR) não inclui a tela "Nobreaks".', null, { timeout: 15000 });
-    afirmar(await cartoesDoMenu(f) === 'calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
+    afirmar(await cartoesDoMenu(f) === 'carga,calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
     // o gerente na Configuracao; o administrador poe a Configuracao em Oculto no nivel GERENTE
     const ger = await abrirAba(s, GERENTE);
     await entrar(ger, GERENTE, '5555');
@@ -4951,6 +5006,193 @@ async function rodar() {
     const faixa = (await f.textContent('#aviso-versao')).replace(/\s+/g, ' ');
     afirmar(/Atualização incompleta/.test(faixa) && /pasta GSL-Local/.test(faixa) && /2026\.09\.30/.test(faixa) && /2026\.10\.21|servidor está na/.test(faixa) &&
       !/Codigo\.gs/.test(faixa), 'faixa: ' + faixa);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await fecharLocal(aba); await s.fechar();
+  });
+
+  /*
+   * SITUACAO DE CARGA (25/11) — o PDF real do gerente pela tela (pdf.js da "cdnjs"), a previa, o
+   * envio, o quadro de cargas (24 h em amarelo, gargalo, "-" apagado), o Painel do CD com o
+   * equilibrio, a Supervisao e um deposito; o segundo envio igual e recusado na previa.
+   */
+  await cenario('situacao de carga: envia o PDF real pela tela; quadro de cargas, painel, supervisao e deposito', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFonteQuadro', { link: quadroDeTeste(s) });
+    const contexto = await navegador.newContext({ viewport: { width: 1440, height: 1000 } });
+    await contexto.clock.install({ time: new Date('2026-11-25T18:00:00-03:00') });
+    await cdnjsLocal(contexto);
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    const cartao = await f.evaluate(() => (SESSAO.modulos || []).map((m) => m.id).join());
+    afirmar(/carga/.test(cartao), 'modulo no menu: ' + cartao);
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    afirmar(/Nenhuma situação de carga enviada ainda/.test(await f.textContent('.cg-hero')), 'tela vazia');
+    const previa = await enviarPdfPelaTela(f, PDF_REAL, 47);
+    afirmar(/2 páginas · emitida em 25\/11\/2026 08:48:58 · 1 carga de 24 horas/.test(previa), 'previa: ' + previa);
+    // quadro de cargas (aba Cargas, a primeira)
+    const linhas = await f.evaluate(() => Array.from(document.querySelectorAll('#cg-linhas .cg-tr')).map((r) => ({ n: r.dataset.carga, h24: r.classList.contains('h24'),
+      gargalo: (r.querySelector('.cg-td-dep.gargalo') || {}).dataset ? r.querySelector('.cg-td-dep.gargalo').dataset.dep : '', sem: r.querySelectorAll('.cg-td-dep.sem').length })));
+    afirmar(linhas.length === 47 && linhas[0].n === '763304' && linhas[0].h24 && linhas.filter((l) => l.h24).length === 1, 'linhas: ' + JSON.stringify(linhas.slice(0, 2)));
+    const l763042 = linhas.find((l) => l.n === '763042');
+    afirmar(l763042 && l763042.gargalo && l763042.sem === 0, '763042 com gargalo e sem "-": ' + JSON.stringify(l763042));
+    afirmar(linhas.find((l) => l.n === '762882').sem === 5, 'carga agrupada: 5 depositos apagados');
+    await f.click('.cg-chip:has-text("24 horas")');
+    afirmar(await f.evaluate(() => document.querySelectorAll('#cg-linhas .cg-tr').length) === 1, 'filtro 24 h');
+    await f.click('.cg-chip:has-text("24 horas")');
+    await f.fill('#cg-busca', 'EUCLIDES');
+    await f.waitForFunction(() => document.querySelectorAll('#cg-linhas .cg-tr').length === 1, null, { timeout: 5000 });
+    await f.fill('#cg-busca', '');
+    await f.waitForFunction(() => document.querySelectorAll('#cg-linhas .cg-tr').length === 47, null, { timeout: 5000 });
+    await foto(aba, 'carga-desktop-cargas');
+    // painel do CD: cartoes, equilibrio do CD e o pool de paleteiras
+    await f.click('.cg-aba[data-aba="geral"]');
+    const cartoes = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-dep-cartao .cg-dep-nome')).map((x) => x.textContent).join('|'));
+    afirmar(cartoes === 'Grandeza|Miudeza|Blocado|Pesáveis|Nobre|Nobre Grandeza', 'cartoes: ' + cartoes);
+    const eq = (await f.textContent('.cg-equilibrio')).replace(/\s+/g, ' ');
+    afirmar(/Equilíbrio entre depósitos · CD/.test(eq) && /(Equilibrado|Atenção|Desequilibrado)/.test(eq) && /mais atrasado/.test(eq), 'equilibrio: ' + eq.slice(0, 200));
+    afirmar(await f.evaluate(() => document.querySelectorAll('.cg-pal-pool .cg-equip').length) === 12, '12 paleteiras desenhadas');
+    await foto(aba, 'carga-desktop-painel');
+    // supervisao: as quatro colunas e o pool
+    await f.click('.cg-aba[data-aba="supervisao"]');
+    const cols = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-sup-col h3')).map((x) => x.textContent).join('|'));
+    afirmar(cols === 'Grandeza|Nobre Grandeza|Pesáveis|Blocado', 'colunas: ' + cols);
+    await foto(aba, 'carga-desktop-supervisao');
+    // deposito Nobre: andares do flowrack
+    await f.click('.cg-aba[data-aba="NOBRE"]');
+    const andares = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-equipe-dep .cg-zona .cg-zona-cab span')).map((x) => x.textContent).join('|'));
+    afirmar(andares === '4º andar|3º andar|2º andar|1º andar|Térreo|Conferentes', 'andares: ' + andares);
+    await foto(aba, 'carga-desktop-nobre');
+    // o mesmo PDF de novo: a previa ja diz que nao e mais novo e o Salvar fica desligado
+    await f.click('.cg-btn-primario');
+    await f.setInputFiles('#cg-arquivo', PDF_REAL);
+    await f.waitForSelector('#cg-velha:not(.oculto)', { timeout: 30000 });
+    afirmar(await f.evaluate(() => document.getElementById('cg-salvar').disabled), 'salvar desligado');
+    await f.evaluate(() => fecharJanela());
+    // TV (1920) e celular (390), claro e escuro
+    await aba.page.setViewportSize({ width: 1920, height: 1080 });
+    await f.click('.cg-aba[data-aba="geral"]');
+    await f.evaluate(() => cgModoTv());
+    await aba.page.waitForTimeout(300);
+    afirmar(await f.evaluate(() => getComputedStyle(document.querySelector('.lateral')).display) === 'none', 'modo TV sem a barra');
+    await foto(aba, 'carga-tv-painel');
+    await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
+    await foto(aba, 'carga-tv-painel-escuro');
+    await f.evaluate(() => { cgModoTv(); aplicarTema('claro'); });
+    await aba.page.setViewportSize({ width: 390, height: 844 });
+    await f.click('.cg-aba[data-aba="cargas"]');
+    await f.evaluate(() => window.scrollTo(0, 0));
+    await aba.page.waitForTimeout(300);
+    const vaza = await f.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    afirmar(vaza <= 1, 'celular sem rolagem lateral: ' + vaza);
+    await foto(aba, 'carga-celular-cargas', 2400);
+    await f.click('.cg-aba[data-aba="supervisao"]');
+    await f.evaluate(() => window.scrollTo(0, 0));
+    await foto(aba, 'carga-celular-supervisao', 2400);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await contexto.close(); await s.fechar();
+  });
+
+  /*
+   * AO VIVO: duas pessoas com a tela aberta. Uma arrasta um funcionario (do Quadro do CD) para a
+   * separacao da Grandeza; a outra ve na proxima pergunta da geracao. A outra move pelo toque (janela
+   * "Onde ... fica?") alguem para o 3º andar do flowrack; uma paleteira vai para a Pesaveis.
+   */
+  await cenario('situacao de carga: ao vivo — arrastar uma pessoa num navegador aparece no outro; toque para mover; paleteira do pool', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFonteQuadro', { link: quadroDeTeste(s) });
+    const abrirCarga = async (conta, email, pin, primeira) => {
+      const contexto = await navegador.newContext({ viewport: { width: 1440, height: 1000 } });
+      await cdnjsLocal(contexto);
+      const aba = await abrirAba(s, conta, { contexto });
+      await entrar(aba, email, pin, primeira);
+      await esperarTela(aba, ['aplicacao']);
+      const f = await frame(aba);
+      await f.evaluate(() => { CG.aba = 'equipe'; abrir('carga'); });
+      await esperarCarga(f);
+      await f.evaluate(() => { CG_VIVO.intervalo = 1200; });
+      return { aba, f, contexto };
+    };
+    const A = await abrirCarga(DONO, DONO, '4321');
+    const B = await abrirCarga(GERENTE, GERENTE, '5555', true);
+    const zonaG = '.cg-quadro-dep .cg-zona[data-dep="GRANDEZA"][data-papel="SEPARADOR"]';
+    await A.f.waitForSelector('.cg-pool .cg-boneco', { timeout: 10000 }).catch(async () => { throw new Error('pool vazio: ' + (await A.f.evaluate(() => (document.getElementById('cg-corpo') || document.body).innerText.slice(0, 400)))); });
+    const k = await A.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
+    await A.f.dragAndDrop('.cg-pool .cg-boneco[data-k="' + k + '"]', zonaG);
+    await A.f.waitForSelector(zonaG + ' .cg-boneco[data-k="' + k + '"]', { timeout: 5000 });
+    await B.f.waitForSelector(zonaG + ' .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
+    afirmar(!(await B.f.$('.cg-pool .cg-boneco[data-k="' + k + '"]')), 'saiu dos disponiveis no outro navegador');
+    // B move pelo toque para o 3o andar do Nobre
+    const k2 = await B.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
+    await B.f.click('.cg-pool .cg-boneco[data-k="' + k2 + '"]');
+    await B.f.waitForSelector('.cg-mover', { timeout: 5000 });
+    await B.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Nobre")) .cg-opcao:has-text("3º andar")');
+    const zonaN3 = '.cg-quadro-dep .cg-zona[data-dep="NOBRE"][data-andar="3"]';
+    await B.f.waitForSelector(zonaN3 + ' .cg-boneco[data-k="' + k2 + '"]', { timeout: 5000 });
+    await A.f.waitForSelector(zonaN3 + ' .cg-boneco[data-k="' + k2 + '"]', { timeout: 15000 });
+    // A: a mesma pessoa nao fica em dois lugares (move a primeira para conferente da Blocado)
+    await A.f.click(zonaG + ' .cg-boneco[data-k="' + k + '"]');
+    await A.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Blocado")) .cg-opcao:has-text("Conferente")');
+    await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="BLOCADO"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
+    afirmar(!(await B.f.$(zonaG + ' .cg-boneco[data-k="' + k + '"]')), 'nao ficou na Grandeza');
+    await foto(A.aba, 'carga-desktop-equipe');
+    // paleteira: A leva a 1 do pool para a Pesaveis (Painel do CD); B ve na Supervisao
+    await A.f.click('.cg-aba[data-aba="geral"]');
+    await A.f.click('.cg-pal-pool .cg-equip[data-numero="1"]');
+    await A.f.click('.cg-mover-dep .cg-opcao:has-text("Pesáveis")');
+    await A.f.waitForSelector('.cg-pal-pool .cg-equip.est-uso[data-numero="1"]', { timeout: 5000 });
+    await B.f.click('.cg-aba[data-aba="supervisao"]');
+    await B.f.waitForSelector('.cg-sup-col[data-dep="PESAVEIS"] .cg-equip.est-uso[data-numero="1"]', { timeout: 15000 });
+    // arrastar a paleteira da Pesaveis para a Grandeza, na supervisao (B)
+    await B.f.dragAndDrop('.cg-sup-col[data-dep="PESAVEIS"] .cg-equip[data-numero="1"]', '.cg-sup-col[data-dep="GRANDEZA"] .cg-pal-zona');
+    await B.f.waitForSelector('.cg-sup-col[data-dep="GRANDEZA"] .cg-equip[data-numero="1"]', { timeout: 5000 });
+    const servidor = JSON.parse(s.chamar(DONO, 'carregarTela', { t: (await A.f.evaluate(() => TOKEN)), f: 'FSA' }, 'carga', {}).valor).dados;
+    const p1 = servidor.equipamentos.find((e) => e.tipo === 'PALETEIRA' && e.numero === 1);
+    afirmar(p1.estado === 'USO' && p1.dep === 'GRANDEZA', 'paleteira no servidor: ' + JSON.stringify(p1));
+    afirmar(servidor.equipe.length === 2 && servidor.equipe.filter((p) => p.k === k).length === 1, 'equipe no servidor: ' + JSON.stringify(servidor.equipe));
+    await foto(B.aba, 'carga-desktop-supervisao-ao-vivo');
+    const medidas = await A.f.evaluate(() => CG_VIVO.medidas.slice());
+    console.log('        geracao pelo navegador (emulador): ' + medidas.length + ' perguntas, mediana ' + medidas.sort((a, b) => a - b)[Math.floor(medidas.length / 2)] + ' ms');
+    afirmar(!A.aba.erros.length && !B.aba.erros.length, 'erros: ' + A.aba.erros.concat(B.aba.erros).join(' | '));
+    await A.contexto.close(); await B.contexto.close(); await s.fechar();
+  });
+
+  /* Quem so ve (CONSULTA): a tela abre, sem o botao de envio, sem arrastar e sem mudar paleteira. */
+  await cenario('situacao de carga: quem so ve nao envia, nao arrasta e nao muda paleteira', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Consulta');
+    const aba = await abrirAba(s, CONSULTA);
+    await entrar(aba, CONSULTA, '7777', true);
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'geral'; abrir('carga'); });
+    await esperarCarga(f);
+    const x = await f.evaluate(() => ({ envio: !!document.querySelector('.cg-btn-primario'), arrasta: document.querySelectorAll('[draggable="true"]').length,
+      pal: Array.from(document.querySelectorAll('.cg-equip')).every((b) => b.disabled) }));
+    afirmar(!x.envio && !x.arrasta && x.pal, 'so ver: ' + JSON.stringify(x));
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  /* GSL-Local: o pdf.js vem da pasta vendor (file://) e o envio vai pela API. */
+  await cenario('local: situacao de carga pela pasta GSL-Local — o pdf.js da pasta vendor le o PDF real e o envio vai pela API', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const aba = await abrirLocal(s);
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou');
+    const f = await frame(aba);
+    afirmar(require('fs').existsSync(path.join(aba.pasta, 'vendor', 'pdfjs-3.11.174', 'pdf.min.js')), 'pdf.js na pasta');
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    await enviarPdfPelaTela(f, PDF_REAL, 47);
+    const fonte = await f.evaluate(() => Array.from(document.scripts).map((x) => x.src).filter((x) => /pdf\.min\.js/.test(x)).join());
+    afirmar(/^file:.*vendor\/pdfjs-3\.11\.174\/pdf\.min\.js$/.test(fonte), 'pdf.js da pasta: ' + fonte);
+    await semReserva(aba);
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await fecharLocal(aba); await s.fechar();
   });

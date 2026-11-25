@@ -103,7 +103,7 @@ caso('o catalogo ACOES: toda acao diz a tela (que existe) ou e livre de proposit
   afirmar(Object.keys(ACOES).every((n) => !('capacidade' in ACOES[n]) && !('modulo' in ACOES[n])), 'sobrou capacidade/modulo no catalogo');
   // cada menu com gravacao tem pelo menos uma acao; Central e Apresentacao so leem
   const comGravacao = ids.filter((t) => Object.keys(ACOES).some((n) => [].concat(ACOES[n].tela || []).indexOf(t) !== -1 && !ACOES[n].leitura));
-  afirmar(comGravacao.join() === 'calendario,acoes,assiduidade,nobreaks,limpeza,quadro,estoque,aprendiz,config,acessos,filiais,relatos', 'menus com gravacao: ' + comGravacao.join());
+  afirmar(comGravacao.join() === 'calendario,acoes,assiduidade,nobreaks,limpeza,quadro,estoque,aprendiz,carga,config,acessos,filiais,relatos', 'menus com gravacao: ' + comGravacao.join());
   // uma acao inventada sem tela e recusada pela porta (nao vira brecha)
   const c = ctx(new Mundo({ dono: DONO }));
   afirmar(/não diz de qual tela/.test(erroDe(() => c.exigirAcao_({ perfil: 'ADMIN', permissoes: { niveis: {} } }, 'nova', { funcao: 'x' }))), 'acao sem tela recusada');
@@ -115,9 +115,9 @@ caso('instalacao nova: a matriz padrao (ADMIN tudo Ver e editar; GERENTE a opera
   const lista = (p, f) => TELAS.filter((t) => n(p)[t.id] === f).map((t) => t.id).join();
   afirmar(lista('ADMIN', 'EDITAR') === TELAS.map((t) => t.id).join(), 'ADMIN: ' + JSON.stringify(n('ADMIN')));
   afirmar(lista('GERENTE', 'VER') === 'filiais' && !lista('GERENTE', 'OCULTO'), 'GERENTE: ' + JSON.stringify(n('GERENTE')));
-  afirmar(lista('COORDENADOR', 'EDITAR') === 'inicio,calendario,acoes,nobreaks' && !lista('COORDENADOR', 'VER'), 'COORDENADOR: ' + JSON.stringify(n('COORDENADOR')));
+  afirmar(lista('COORDENADOR', 'EDITAR') === 'inicio,calendario,acoes,nobreaks,carga' && !lista('COORDENADOR', 'VER'), 'COORDENADOR: ' + JSON.stringify(n('COORDENADOR')));
   afirmar(lista('SUPERVISOR', 'EDITAR') === 'limpeza' && !lista('SUPERVISOR', 'VER'), 'SUPERVISOR');
-  afirmar(lista('CONSULTA', 'VER') === 'inicio,calendario,acoes,nobreaks,limpeza,quadro' && !lista('CONSULTA', 'EDITAR'), 'CONSULTA: ' + JSON.stringify(n('CONSULTA')));
+  afirmar(lista('CONSULTA', 'VER') === 'inicio,calendario,acoes,nobreaks,limpeza,quadro,carga' && !lista('CONSULTA', 'EDITAR'), 'CONSULTA: ' + JSON.stringify(n('CONSULTA')));
   afirmar(c.permissoesDe('COORDENADOR').escopo === 'TURNO', 'escopo do coordenador');
   const cab = m.planilhas.get(c.prop('ID_BANCO')).abas.find((a) => a.nome === 'PERFIS').dados[0];
   afirmar(!cab.some((x) => /^PODE_/.test(x)), 'banco novo sem as colunas PODE_: ' + cab.join());
@@ -389,7 +389,8 @@ function bancoAntigo(versao) {
   const m = mundo(); let c = ctx(m);
   const banco = m.planilhas.get(c.prop('ID_BANCO'));
   const aba = banco.abas.find((a) => a.nome === 'PERFIS');
-  const cab = aba.dados[0].slice();
+  // TELA_CARGA nasce na 8.14: o banco antigo nao tem a coluna (ela chega vazia e ganha o padrao de cada nivel)
+  const cab = aba.dados[0].filter((x) => x !== 'TELA_CARGA');
   CAPS.forEach((k) => cab.push('PODE_' + k));
   const linhas = [cab];
   Object.keys(ANTIGOS).forEach((perfil, i) => {
@@ -397,7 +398,7 @@ function bancoAntigo(versao) {
     const pos = (k) => cab.indexOf(k);
     l[pos('ID')] = 'PER-ANT-' + i; l[pos('PERFIL')] = perfil; l[pos('ESCOPO')] = perfil === 'COORDENADOR' ? 'TURNO' : 'TODOS';
     l[pos('DESCRICAO')] = 'nivel ' + perfil; l[pos('EXCLUIDO')] = '';
-    TELAS.forEach((t) => { l[pos('TELA_' + t.id.toUpperCase())] = ANTIGOS[perfil].telas.indexOf(t.id) !== -1 ? 'SIM' : 'NAO'; });
+    TELAS.filter((t) => t.id !== 'carga').forEach((t) => { l[pos('TELA_' + t.id.toUpperCase())] = ANTIGOS[perfil].telas.indexOf(t.id) !== -1 ? 'SIM' : 'NAO'; });
     CAPS.forEach((k) => { l[pos('PODE_' + k)] = ANTIGOS[perfil].podes.indexOf(k) !== -1 ? 'SIM' : 'NAO'; });
     linhas.push(l);
   });
@@ -424,16 +425,16 @@ caso('migracao de um banco 8.11: SIM/NAO + PODE_ viram as tres faixas (capacidad
   afirmar(ctx(m).permissoesDe('AUDITOR').niveis.estoque === 'EDITAR', 'leitura do modelo antigo antes da migracao');
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const c = ctx(m);
-  afirmar(c.prop('VERSAO_ESQUEMA') === '8.13', 'versao: ' + c.prop('VERSAO_ESQUEMA'));
+  afirmar(c.prop('VERSAO_ESQUEMA') === '8.14', 'versao: ' + c.prop('VERSAO_ESQUEMA'));
   const cel = (perfil) => { const l = c.listar('PERFIS').find((x) => x.PERFIL === perfil); const o = {}; TELAS.forEach((t) => { o[t.id] = l['TELA_' + t.id.toUpperCase()]; }); return o; };
   const esperado = {
-    ADMIN:       'inicio:E calendario:E acoes:E assiduidade:E apresentacao:E nobreaks:E limpeza:E quadro:E estoque:E aprendiz:E config:E acessos:E filiais:E relatos:E',
-    GERENTE:     'inicio:E calendario:E acoes:E assiduidade:E apresentacao:E nobreaks:E limpeza:E quadro:E estoque:V aprendiz:E config:E acessos:E filiais:O relatos:E',
-    COORDENADOR: 'inicio:E calendario:E acoes:E assiduidade:O apresentacao:O nobreaks:E limpeza:O quadro:O estoque:O aprendiz:O config:O acessos:O filiais:O relatos:O',
-    SUPERVISOR:  'inicio:O calendario:O acoes:O assiduidade:O apresentacao:O nobreaks:O limpeza:E quadro:O estoque:O aprendiz:O config:O acessos:O filiais:O relatos:O',
-    CONSULTA:    'inicio:V calendario:V acoes:V assiduidade:O apresentacao:O nobreaks:V limpeza:V quadro:V estoque:O aprendiz:O config:O acessos:O filiais:O relatos:O',
-    PENDENTE:    'inicio:O calendario:O acoes:O assiduidade:O apresentacao:O nobreaks:O limpeza:O quadro:O estoque:O aprendiz:O config:O acessos:O filiais:O relatos:O',
-    AUDITOR:     'inicio:O calendario:O acoes:O assiduidade:V apresentacao:O nobreaks:O limpeza:O quadro:O estoque:E aprendiz:O config:O acessos:O filiais:O relatos:O'
+    ADMIN:       'inicio:E calendario:E acoes:E assiduidade:E apresentacao:E nobreaks:E limpeza:E quadro:E estoque:E aprendiz:E carga:E config:E acessos:E filiais:E relatos:E',
+    GERENTE:     'inicio:E calendario:E acoes:E assiduidade:E apresentacao:E nobreaks:E limpeza:E quadro:E estoque:V aprendiz:E carga:E config:E acessos:E filiais:O relatos:E',
+    COORDENADOR: 'inicio:E calendario:E acoes:E assiduidade:O apresentacao:O nobreaks:E limpeza:O quadro:O estoque:O aprendiz:O carga:E config:O acessos:O filiais:O relatos:O',
+    SUPERVISOR:  'inicio:O calendario:O acoes:O assiduidade:O apresentacao:O nobreaks:O limpeza:E quadro:O estoque:O aprendiz:O carga:O config:O acessos:O filiais:O relatos:O',
+    CONSULTA:    'inicio:V calendario:V acoes:V assiduidade:O apresentacao:O nobreaks:V limpeza:V quadro:V estoque:O aprendiz:O carga:V config:O acessos:O filiais:O relatos:O',
+    PENDENTE:    'inicio:O calendario:O acoes:O assiduidade:O apresentacao:O nobreaks:O limpeza:O quadro:O estoque:O aprendiz:O carga:O config:O acessos:O filiais:O relatos:O',
+    AUDITOR:     'inicio:O calendario:O acoes:O assiduidade:V apresentacao:O nobreaks:O limpeza:O quadro:O estoque:E aprendiz:O carga:O config:O acessos:O filiais:O relatos:O'
   };
   Object.keys(esperado).forEach((p) => {
     const o = cel(p);
@@ -451,7 +452,7 @@ caso('migracao de um banco 8.11: SIM/NAO + PODE_ viram as tres faixas (capacidad
   // o que cada um passa a ver bate com o que via
   const maria = entrar(m, COORD, '1234');
   const tm = sessaoDe(m, maria).telas.map((t) => t.id + ':' + t.nivel.charAt(0)).join(' ');
-  afirmar(tm === 'inicio:E calendario:E acoes:E quadro:V estoque:E', 'coordenadora: ' + tm);
+  afirmar(tm === 'inicio:E calendario:E acoes:E quadro:V estoque:E carga:E', 'coordenadora (a Situacao de Carga chega com o padrao do nivel): ' + tm);
   afirmar(sessaoDe(m, adm).telas.length === TELAS.length, 'o ADMIN ve tudo, como via');
   // roda uma vez so: voltar a marca da versao nao converte de novo (nada mais e SIM/NAO)
   const antes = JSON.stringify(c.listar('PERFIS')) + JSON.stringify(c.listar('ACESSOS').map((x) => x.AJUSTES));
@@ -465,7 +466,7 @@ caso('migracao a partir da 8.9 e da 8.10 tambem converte na primeira entrada', (
     const m = bancoAntigo(v);
     entrar(m, DONO, '4321');
     const c = ctx(m);
-    afirmar(c.prop('VERSAO_ESQUEMA') === '8.13', v + ': versao ' + c.prop('VERSAO_ESQUEMA'));
+    afirmar(c.prop('VERSAO_ESQUEMA') === '8.14', v + ': versao ' + c.prop('VERSAO_ESQUEMA'));
     afirmar(c.listar('PERFIS').every((l) => TELAS.every((t) => ['OCULTO', 'VER', 'EDITAR'].indexOf(l['TELA_' + t.id.toUpperCase()]) !== -1)), v + ': tudo em faixas');
   });
 });

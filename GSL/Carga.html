@@ -1,0 +1,1566 @@
+<script>
+/*
+ * SITUACAO DE CARGA — LEITOR DO PDF (so funcoes puras: os testes rodam este
+ * bloco fora do navegador, em testes/carga.js).
+ *
+ * O relatorio "SITUACAO DE EXPEDICAO DAS CARGAS EM PROCESSO" (Stimulsoft)
+ * vira uma tabela a partir da POSICAO de cada texto na pagina (pdf.js):
+ *   1. a linha com SEP e CONF repetidos e o sub-cabecalho: cada par SEP/CONF
+ *      e um deposito, e o centro de cada palavra e o centro da coluna;
+ *   2. o nome do deposito e o texto logo acima do par (GRANDEZA, MIUDEZA,
+ *      BLOCADO, PESAVEIS, NOBRE, NOBRE GRANDEZA — e um deposito novo, se
+ *      o relatorio ganhar um);
+ *   3. NRO, NOME CARGA, VEICULO e BOX: o centro de cada cabecalho; cada texto
+ *      vai para a coluna do cabecalho mais perto (o relatorio centraliza);
+ *   4. cada linha de dados comeca num numero de carga (a coluna mais a
+ *      esquerda); todo texto vai para a linha do numero mais perto na
+ *      vertical — o nome quebrado em duas linhas continua na carga dele;
+ *   5. a carga de 24 horas: o "*" depois do numero ou a faixa amarela da
+ *      linha (as duas marcas, quando existem);
+ *   6. a data e hora de emissao: o primeiro dd/mm/aaaa hh:mm(:ss) acima do
+ *      cabecalho.
+ * Cada pagina tem o cabecalho de novo; as paginas sao lidas em sequencia.
+ *
+ * REGRA DO HTMLSERVICE: nada de barra-barra nem barra-asterisco em texto,
+ * template ou regex (ver App.html). Use \/ dentro das regex.
+ */
+const CG_PDFJS_VERSAO = '3.11.174';
+const CG_DEPS_PADRAO = ['GRANDEZA', 'MIUDEZA', 'BLOCADO', 'PESAVEIS', 'NOBRE', 'NOBRE_GRANDEZA'];
+const CG_DEPS_NOMES = { GRANDEZA: 'Grandeza', MIUDEZA: 'Miudeza', BLOCADO: 'Blocado', PESAVEIS: 'Pesáveis', NOBRE: 'Nobre', NOBRE_GRANDEZA: 'Nobre Grandeza' };
+
+function cgNorm(t) {
+  return String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+}
+function cgIdDeposito(v) {
+  const t = cgNorm(v).replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!t) return '';
+  if (/NOBRE/.test(t) && /GRAND/.test(t)) return 'NOBRE_GRANDEZA';
+  if (/NOBRE/.test(t)) return 'NOBRE';
+  if (/GRAND/.test(t)) return 'GRANDEZA';
+  if (/MIUD/.test(t)) return 'MIUDEZA';
+  if (/BLOC/.test(t)) return 'BLOCADO';
+  if (/PESAV|PESAD/.test(t)) return 'PESAVEIS';
+  return t.replace(/ /g, '_').slice(0, 24);
+}
+/* Celula: 'X' · '-' · 'a/b' · '' (nao lida) */
+function cgCelulaTexto(v) {
+  const t = String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+  if (t === 'X' || t === '✓') return 'X';
+  if (t === '-' || t === '–' || t === '—') return '-';
+  const m = /^(\d{1,5})\/(\d{1,5})$/.exec(t);
+  if (m && +m[2] > 0 && +m[1] <= +m[2]) return (+m[1]) + '/' + (+m[2]);
+  return '';
+}
+function cgMediana(lista) {
+  const v = lista.filter((x) => isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return 0;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+/* Data e hora do texto: "25/11/2026 08:05:37" -> "2026-11-25T08:05:37" */
+function cgDataHoraDoTexto(t) {
+  const m = /(\d{2})\/(\d{2})\/(\d{4})\s*[-,]?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(t || ''));
+  if (!m) return '';
+  const z = (n) => String(n).padStart(2, '0');
+  const d = +m[1], me = +m[2], a = +m[3], h = +m[4], mi = +m[5], s = +(m[6] || 0);
+  if (me < 1 || me > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return '';
+  return a + '-' + z(me) + '-' + z(d) + 'T' + z(h) + ':' + z(mi) + ':' + z(s);
+}
+
+/*
+ * Os textos de uma pagina com x, y (de cima para baixo: y e a linha de base),
+ * largura e altura. Item com espacos dentro e quebrado em palavras (posicao
+ * proporcional ao numero de letras) so quando atravessa colunas — ver cgPalavras.
+ */
+function cgPalavras(it) {
+  const s = String(it.s);
+  const saida = [];
+  const re = /\S+/g;
+  let m;
+  const porLetra = s.length ? it.w / s.length : 0;
+  while ((m = re.exec(s))) saida.push({ s: m[0], x: it.x + m.index * porLetra, w: m[0].length * porLetra, y: it.y, h: it.h });
+  return saida;
+}
+const cgCentro = (it) => it.x + it.w / 2;
+
+/*
+ * LER UMA SITUACAO. paginas = [{ largura, altura, itens: [{ s, x, y, w, h }], faixas: [{ y0, y1 }] }]
+ * (faixas: os retangulos amarelos da largura da tabela, em y de cima para baixo).
+ * Devolve { titulo, emitidoEm, depositos: [{ id, nome }], cargas: [...], problemas: [...], avisos: [...], paginas }.
+ */
+function cgLerSituacao(paginas) {
+  const saida = { titulo: '', emitidoEm: '', depositos: [], cargas: [], problemas: [], avisos: [], paginas: paginas.length, reconhecido: false };
+  let modelo = null;                       // as colunas da pagina anterior (pagina sem cabecalho usa as dela)
+  const vistas = {};
+  paginas.forEach((pg, ip) => {
+    const nPag = ip + 1;
+    const itens = (pg.itens || []).filter((it) => it && String(it.s || '').trim() && isFinite(it.x) && isFinite(it.y))
+      .map((it) => ({ s: String(it.s).replace(/\s+/g, ' ').trim(), x: +it.x, y: +it.y, w: Math.max(0, +it.w || 0), h: Math.max(1, +it.h || 8) }));
+    if (!itens.length) return;
+    const lh = cgMediana(itens.map((it) => it.h)) || 8;
+    const linhas = cgLinhas(itens, lh);
+    linhas.forEach((l) => {
+      const t = cgNorm(l.texto);
+      if (!saida.titulo && /SITUAC/.test(t) && /(EXPEDIC|CARGA)/.test(t)) { saida.titulo = l.texto; saida.reconhecido = true; }
+    });
+
+    // 1. o sub-cabecalho SEP/CONF
+    const sub = cgSubcabecalho(itens, lh);
+    let m = null;
+    if (sub) m = cgModeloDaPagina(itens, sub, lh, nPag, saida);
+    if (!m && modelo) { m = modelo; saida.avisos.push('Página ' + nPag + ': sem o cabeçalho SEP/CONF; usei as colunas da página anterior.'); }
+    if (!m) { saida.problemas.push({ pagina: nPag, texto: '', motivo: 'Não achei o cabeçalho com SEP e CONF nesta página.' }); return; }
+    modelo = m;
+    if (!saida.depositos.length) saida.depositos = m.depositos.map((d) => ({ id: d.id, nome: d.nome }));
+    else if (saida.depositos.map((d) => d.id).join() !== m.depositos.map((d) => d.id).join()) {
+      saida.avisos.push('Página ' + nPag + ': os depósitos estão em outra ordem; li pela ordem desta página.');
+    }
+
+    // 2. emissao: o primeiro dd/mm/aaaa hh:mm acima do cabecalho
+    if (!saida.emitidoEm) {
+      const acima = linhas.filter((l) => !sub || l.y < sub.y - lh * 0.5);
+      for (const l of acima.concat(linhas)) { const d = cgDataHoraDoTexto(l.texto); if (d) { saida.emitidoEm = d; break; } }
+    }
+
+    // 3. as linhas de dados
+    const topoDados = (sub ? sub.y : m.ySub) + lh * 0.6;
+    const corpo = itens.filter((it) => it.y > topoDados && !cgRodape(it.s));
+    const candidatos = corpo.filter((it) => cgCentro(it) < m.L && /^\*?\d{4,10}\*?$/.test(it.s.replace(/\s+/g, '')));
+    if (!candidatos.length) return;
+    const xMin = Math.min.apply(null, candidatos.map((it) => it.x));
+    const ancoras = candidatos.filter((it) => it.x <= xMin + lh * 3).sort((a, b) => a.y - b.y);
+    const passo = ancoras.length > 1 ? cgMediana(ancoras.slice(1).map((a, i) => a.y - ancoras[i].y)) : lh * 1.8;
+    const folga = Math.max(lh * 0.9, passo * 0.72);
+    const linhasDados = ancoras.map((a) => ({ ancora: a, itens: [] }));
+    corpo.forEach((it) => {
+      const yc = it.y - it.h * 0.35;
+      let melhor = null, dist = Infinity;
+      linhasDados.forEach((r) => { const d = Math.abs((r.ancora.y - r.ancora.h * 0.35) - yc); if (d < dist) { dist = d; melhor = r; } });
+      if (melhor && dist <= folga) melhor.itens.push(it);
+    });
+    linhasDados.forEach((r) => {
+      const c = cgMontarLinha(r, m, pg, lh, nPag, saida);
+      if (!c) return;
+      if (vistas[c.nro]) { saida.avisos.push('Carga ' + c.nro + ' aparece duas vezes (página ' + vistas[c.nro] + ' e ' + nPag + '): ficou a primeira.'); return; }
+      vistas[c.nro] = nPag;
+      saida.cargas.push(c);
+    });
+  });
+  if (!saida.reconhecido && saida.cargas.length) saida.avisos.push('Não achei o título "Situação de Expedição das Cargas em Processo". Confira se o PDF é o relatório certo.');
+  if (!saida.emitidoEm) saida.avisos.push('Não achei a data e a hora de emissão no PDF. Informe abaixo.');
+  return saida;
+}
+
+/* As linhas de texto da pagina (para o titulo e a data): itens com a mesma linha de base. */
+function cgLinhas(itens, lh) {
+  const ord = itens.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+  const linhas = [];
+  ord.forEach((it) => {
+    const l = linhas.length ? linhas[linhas.length - 1] : null;
+    if (l && Math.abs(it.y - l.y) <= lh * 0.4) l.itens.push(it);
+    else linhas.push({ y: it.y, itens: [it] });
+  });
+  linhas.forEach((l) => { l.texto = l.itens.sort((a, b) => a.x - b.x).map((i) => i.s).join(' '); });
+  return linhas;
+}
+function cgRodape(s) {
+  const t = cgNorm(s);
+  return /CARGAS\s*24\s*H/.test(t) || /^PAGINA\s*\d/.test(t) || /^PAG\.?\s*\d+\s*(DE|\/)\s*\d+$/.test(t);
+}
+
+/* A linha do sub-cabecalho: a que tem mais SEP e CONF (pelo menos dois de cada). */
+function cgSubcabecalho(itens, lh) {
+  const pal = [];
+  itens.forEach((it) => cgPalavras(it).forEach((p) => {
+    const t = cgNorm(p.s).replace(/[^A-Z]/g, '');
+    if (/^SEP(ARACAO|ARADO)?$/.test(t)) pal.push(Object.assign(p, { tipo: 'SEP' }));
+    else if (/^CONF(ERENCIA|ERIDO)?$/.test(t)) pal.push(Object.assign(p, { tipo: 'CONF' }));
+  }));
+  const grupos = [];
+  pal.sort((a, b) => a.y - b.y).forEach((p) => {
+    const g = grupos.length ? grupos[grupos.length - 1] : null;
+    if (g && Math.abs(p.y - g.y) <= lh * 0.5) g.pal.push(p); else grupos.push({ y: p.y, pal: [p] });
+  });
+  const bons = grupos.filter((g) => g.pal.filter((p) => p.tipo === 'SEP').length >= 2 && g.pal.filter((p) => p.tipo === 'CONF').length >= 2);
+  if (!bons.length) return null;
+  bons.sort((a, b) => b.pal.length - a.pal.length);
+  return bons[0];
+}
+
+/* Colunas da pagina a partir do sub-cabecalho: os pares SEP/CONF, os nomes dos depositos e os cabecalhos da esquerda. */
+function cgModeloDaPagina(itens, sub, lh, nPag, saida) {
+  const pal = sub.pal.slice().sort((a, b) => a.x - b.x);
+  const colunas = [];
+  for (let i = 0; i < pal.length; i++) {
+    if (pal[i].tipo === 'SEP' && pal[i + 1] && pal[i + 1].tipo === 'CONF') {
+      colunas.push({ sep: cgCentro(pal[i]), conf: cgCentro(pal[i + 1]) });
+      i++;
+    }
+  }
+  if (!colunas.length) return null;
+  const centros = [];
+  colunas.forEach((c) => centros.push(c.sep, c.conf));
+  const passo = cgMediana(centros.slice(1).map((x, i) => x - centros[i])) || lh * 4;
+  const L = centros[0] - passo * 0.6, R = centros[centros.length - 1] + passo * 0.6;
+
+  // nomes dos depositos: o texto logo acima de cada par
+  const faixaTopo = sub.y - lh * 4, faixaBase = sub.y - lh * 0.5;
+  const acima = itens.filter((it) => it.y >= faixaTopo && it.y <= faixaBase);
+  const nomes = colunas.map(() => []);
+  acima.forEach((it) => {
+    const cx = cgCentro(it);
+    if (cx < L || cx > R) return;
+    let k = 0, d = Infinity;
+    colunas.forEach((c, i) => { const dd = Math.abs((c.sep + c.conf) / 2 - cx); if (dd < d) { d = dd; k = i; } });
+    nomes[k].push(it);
+  });
+  const usados = {};
+  const depositos = colunas.map((c, i) => {
+    const texto = nomes[i].sort((a, b) => a.y - b.y || a.x - b.x).map((x) => x.s).join(' ');
+    let id = cgIdDeposito(texto);
+    if (!id || usados[id]) {
+      id = CG_DEPS_PADRAO.filter((x) => !usados[x])[0] || ('DEPOSITO_' + (i + 1));
+      saida.avisos.push('Página ' + nPag + ': não li o nome do ' + (i + 1) + 'º depósito' + (texto ? ' ("' + texto + '")' : '') + '; usei ' + (CG_DEPS_NOMES[id] || id) + '.');
+    }
+    usados[id] = true;
+    return { id: id, nome: CG_DEPS_NOMES[id] || texto || id, sep: c.sep, conf: c.conf };
+  });
+
+  // cabecalhos da esquerda (na linha dos nomes ou na do SEP/CONF)
+  const esquerda = itens.filter((it) => it.y >= faixaTopo && it.y <= sub.y + lh * 0.6 && cgCentro(it) < L);
+  const achar = (re) => esquerda.filter((it) => re.test(cgNorm(it.s)))[0];
+  const cab = {
+    nro: achar(/^(NRO|NR|N[O°º]|NUM|NUMERO|CARGA)\.?$/),
+    nome: achar(/^NOME/),
+    veiculo: achar(/^VEIC/),
+    box: achar(/^BOX/)
+  };
+  const esq = ['nro', 'nome', 'veiculo', 'box'].filter((k) => cab[k]).map((k) => ({ k: k, cx: cgCentro(cab[k]) })).sort((a, b) => a.cx - b.cx);
+  return { depositos: depositos, passo: passo, L: L, R: R, ySub: sub.y, esq: esq };
+}
+
+/* Uma linha de dados: as colunas da esquerda, a marca de 24 horas e as celulas de cada deposito. */
+function cgMontarLinha(r, m, pg, lh, nPag, saida) {
+  const doLado = { nro: [], nome: [], veiculo: [], box: [] };
+  const celulas = m.depositos.map(() => [[], []]);
+  const bruto = [];
+  let estrela = false, foraDeColuna = [];
+  r.itens.slice().sort((a, b) => a.x - b.x).forEach((it) => bruto.push(it.s));
+  r.itens.forEach((it) => {
+    const cx = cgCentro(it);
+    if (cx < m.L) {
+      let s = it.s;
+      if (/^\*+$/.test(s)) { estrela = true; return; }
+      if (/^\*\s*/.test(s) || /\s*\*$/.test(s)) { estrela = true; s = s.replace(/^\*\s*/, '').replace(/\s*\*$/, ''); }
+      if (it === r.ancora) { doLado.nro.push({ s: s, x: it.x, y: it.y }); return; }
+      // A coluna com mais sobreposicao (cada coluna vai do meio entre o seu cabecalho e o vizinho); texto que
+      // passa da celula (nome comprido) fica na coluna onde esta a maior parte dele.
+      let col = 'nome';
+      if (m.esq.length) {
+        let melhor = -Infinity;
+        m.esq.forEach((c, i) => {
+          const ini = i ? (m.esq[i - 1].cx + c.cx) / 2 : -Infinity;
+          const fim = i < m.esq.length - 1 ? (c.cx + m.esq[i + 1].cx) / 2 : m.L;
+          const sob = it.w > 0 ? Math.min(fim, it.x + it.w) - Math.max(ini, it.x) : (cx >= ini && cx < fim ? 1 : -Math.min(Math.abs(cx - ini), Math.abs(cx - fim)));
+          if (sob > melhor) { melhor = sob; col = c.k; }
+        });
+      }
+      if (col === 'nro') col = 'nome';         // so a ancora e o numero da carga
+      doLado[col].push({ s: s, x: it.x, y: it.y });
+      return;
+    }
+    cgPalavras(it).forEach((p) => {
+      const pcx = cgCentro(p);
+      let k = -1, lado = 0, d = Infinity;
+      m.depositos.forEach((dep, i) => {
+        [dep.sep, dep.conf].forEach((x, j) => { const dd = Math.abs(x - pcx); if (dd < d) { d = dd; k = i; lado = j; } });
+      });
+      if (k < 0 || d > m.passo * 0.75) { foraDeColuna.push(p.s); return; }
+      celulas[k][lado].push(p);
+    });
+  });
+  const juntar = (lista) => {
+    const ord = lista.sort((a, b) => (Math.abs(a.y - b.y) > lh * 0.5 ? a.y - b.y : a.x - b.x));
+    let t = '';
+    ord.forEach((p) => {
+      if (!t) { t = p.s; return; }
+      // sem espaco: quebra depois de / ou - (e no meio de um numero, que nunca tem espaco: 7627 | 19)
+      t += (/[\/-]$/.test(t) || /^[\/-]/.test(p.s) || (/\d$/.test(t) && /^\d/.test(p.s))) ? p.s : ' ' + p.s;
+    });
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  const nro = juntar(doLado.nro).replace(/\D+/g, '');
+  const yLinha = r.ancora.y - r.ancora.h * 0.35;
+  const amarelo = (pg.faixas || []).some((f) => yLinha >= f.y0 - 1 && yLinha <= f.y1 + 1);
+  const c = {
+    nro: nro, nome: juntar(doLado.nome), veiculo: juntar(doLado.veiculo), box: juntar(doLado.box).replace(/\s+/g, ''),
+    h24: estrela || amarelo, estrela: estrela, amarelo: amarelo, d: {}, pagina: nPag, bruto: bruto.join(' ')
+  };
+  const ruins = [];
+  let lidas = 0;
+  m.depositos.forEach((dep, i) => {
+    const par = celulas[i].map((lista, j) => {
+      const txt = lista.sort((a, b) => a.x - b.x).map((p) => p.s).join('');
+      const v = cgCelulaTexto(txt);
+      if (v) lidas++;
+      else ruins.push((CG_DEPS_NOMES[dep.id] || dep.nome) + ' ' + (j ? 'CONF' : 'SEP') + (txt ? ' ("' + txt + '")' : ' vazia'));
+      return v;
+    });
+    c.d[dep.id] = par;
+  });
+  if (!/^\d{3,10}$/.test(nro)) { saida.problemas.push({ pagina: nPag, nro: '', texto: c.bruto, motivo: 'número da carga ilegível' }); return null; }
+  if (!lidas) { saida.problemas.push({ pagina: nPag, nro: nro, texto: c.bruto, motivo: 'nenhuma célula de depósito lida' }); return null; }
+  if (ruins.length) saida.problemas.push({ pagina: nPag, nro: nro, texto: c.bruto, motivo: 'célula sem leitura: ' + ruins.join(', '), parcial: true });
+  if (foraDeColuna.length) saida.avisos.push('Carga ' + nro + ': texto fora das colunas (' + foraDeColuna.join(' ') + ').');
+  if (c.box && !/^\d{1,4}$/.test(c.box)) saida.avisos.push('Carga ' + nro + ': box "' + c.box + '" não é um número.');
+  return c;
+}
+
+/*
+ * TEXTO COLADO (quando o PDF nao abre): cada linha que comeca no numero da carga;
+ * as 12 ultimas palavras sao as celulas (X, - ou a/b), antes delas o BOX e o veiculo.
+ */
+const CG_VEICULOS = /(?:^|\s)((?:BI-?TRUCK|TRUCK|TOCO|MEDIO|MÉDIO|VUC|CARRETA|LEVE|VAN|FIORINO|UTILITARIO|3\/4|TRUCADO|SEMI-?LEVE)(?:\s*-\s*DEP|\s+\d{3,4})?)$/i;
+function cgLerTexto(texto) {
+  const saida = { titulo: '', emitidoEm: cgDataHoraDoTexto(texto), depositos: CG_DEPS_PADRAO.map((id) => ({ id: id, nome: CG_DEPS_NOMES[id] })),
+    cargas: [], problemas: [], avisos: [], paginas: 0, reconhecido: /SITUA/i.test(texto) };
+  const n = CG_DEPS_PADRAO.length * 2;
+  const vistas = {};
+  String(texto || '').split(/\r?\n/).forEach((linha) => {
+    const m = /^\s*(\d{4,10})\s*(\*?)\s+(.*)$/.exec(linha);
+    if (!m) return;
+    const pal = m[3].trim().split(/\s+/);
+    const cel = [];
+    while (pal.length && cel.length < n && /^(X|x|-|–|\d+\/\d+)$/.test(pal[pal.length - 1])) cel.unshift(pal.pop());
+    if (cel.length !== n) { saida.problemas.push({ pagina: 0, nro: m[1], texto: linha.trim(), motivo: 'esperava ' + n + ' células e li ' + cel.length }); return; }
+    let estrela = !!m[2];
+    let resto = pal.join(' ');
+    if (/^\*\s*/.test(resto)) { estrela = true; resto = resto.replace(/^\*\s*/, ''); }
+    let box = '';
+    const mb = /\s(\d{1,3})$/.exec(' ' + resto);
+    if (mb) { box = mb[1]; resto = resto.slice(0, resto.length - mb[0].length + 1).trim(); }
+    let veiculo = '';
+    const mv = CG_VEICULOS.exec(resto);
+    if (mv) { veiculo = mv[1].trim(); resto = resto.slice(0, mv.index).trim(); }
+    if (vistas[m[1]]) return;
+    vistas[m[1]] = true;
+    const c = { nro: m[1], nome: resto, veiculo: veiculo, box: box, h24: estrela, estrela: estrela, amarelo: false, d: {}, pagina: 0, bruto: linha.trim() };
+    CG_DEPS_PADRAO.forEach((id, i) => { c.d[id] = [cgCelulaTexto(cel[i * 2]), cgCelulaTexto(cel[i * 2 + 1])]; });
+    saida.cargas.push(c);
+  });
+  if (!saida.emitidoEm) saida.avisos.push('Não achei a data e a hora de emissão no texto. Informe abaixo.');
+  return saida;
+}
+
+/*
+ * PDF -> paginas (para o cgLerSituacao). doc: o documento aberto pelo pdf.js; lib: o pdfjsLib
+ * (no navegador e nos testes, no Node). As faixas amarelas saem dos retangulos pintados de amarelo
+ * com mais da metade da largura da pagina (a linha inteira da carga de 24 horas).
+ */
+async function cgPaginasDoPdf(doc, lib, aoLer) {
+  const paginas = [];
+  const total = Math.min(doc.numPages, 60);
+  for (let p = 1; p <= total; p++) {
+    if (aoLer) aoLer(p, total);
+    const pg = await doc.getPage(p);
+    const vp = pg.getViewport({ scale: 1 });
+    const tc = await pg.getTextContent({ disableCombineTextItems: true });
+    const itens = [];
+    tc.items.forEach((it) => {
+      if (!it || !it.str || !String(it.str).trim()) return;
+      const t = lib.Util.transform(vp.transform, it.transform);
+      const h = Math.hypot(t[2], t[3]) || it.height || 8;
+      itens.push({ s: it.str, x: t[4], y: t[5], w: it.width * (vp.scale || 1), h: h });
+    });
+    let faixas = [];
+    try { faixas = cgFaixasAmarelas(await pg.getOperatorList(), lib, vp); } catch (e) { faixas = []; }
+    paginas.push({ largura: vp.width, altura: vp.height, itens: itens, faixas: faixas });
+  }
+  return paginas;
+}
+function cgFaixasAmarelas(ops, lib, vp) {
+  const OPS = lib.OPS;
+  const faixas = [];
+  let cor = null;
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const pilha = [];
+  const amarelo = (c) => {
+    if (!c) return false;
+    let r, g, b;
+    if (typeof c === 'string') { const h = c.replace('#', ''); r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16); }
+    else { r = c[0]; g = c[1]; b = c[2]; if (r <= 1 && g <= 1 && b <= 1) { r *= 255; g *= 255; b *= 255; } }
+    return r >= 200 && g >= 180 && b <= 130;
+  };
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const f = ops.fnArray[i], a = ops.argsArray[i];
+    if (f === OPS.save) pilha.push(ctm.slice());
+    else if (f === OPS.restore) ctm = pilha.pop() || [1, 0, 0, 1, 0, 0];
+    else if (f === OPS.transform) ctm = lib.Util.transform(ctm, a);
+    else if (f === OPS.setFillRGBColor) cor = a && a.length === 1 ? a[0] : a;
+    else if (f === OPS.setFillGray) cor = null;
+    else if (f === OPS.constructPath && amarelo(cor)) {
+      const sub = a[0] || [], coords = a[1] || [];
+      let k = 0;
+      sub.forEach((op) => {
+        if (op === OPS.rectangle) {
+          const x = coords[k], y = coords[k + 1], w = coords[k + 2], h = coords[k + 3];
+          k += 4;
+          const m = lib.Util.transform(vp.transform, ctm);
+          const p1 = lib.Util.applyTransform([x, y], m), p2 = lib.Util.applyTransform([x + w, y + h], m);
+          // A linha pintada pode vir num retangulo so (Stimulsoft) ou num por celula (navegador): junta pela altura.
+          const y0 = Math.min(p1[1], p2[1]), y1 = Math.max(p1[1], p2[1]), larg = Math.abs(p2[0] - p1[0]);
+          const f = faixas.filter((x) => Math.abs(x.y0 - y0) < 1.5 && Math.abs(x.y1 - y1) < 1.5)[0];
+          if (f) f.largura += larg; else faixas.push({ y0: y0, y1: y1, largura: larg });
+        } else if (op === OPS.moveTo || op === OPS.lineTo) k += 2;
+        else if (op === OPS.curveTo) k += 6;
+        else if (op === OPS.curveTo2 || op === OPS.curveTo3) k += 4;
+      });
+    }
+  }
+  return faixas.filter((f) => f.largura >= vp.width * 0.5);
+}
+</script>
+<script>
+/*
+ * SITUACAO DE CARGA — A TELA.
+ *
+ * Abas: Visao geral (um cartao por deposito, o equilibrio entre depositos, prioridades, cargas
+ * paradas, a tabela de cargas com filtros e a linha do tempo dos envios), Supervisao (Grandeza ·
+ * Nobre Grandeza · Pesaveis · Blocado lado a lado, com o pool de paleteiras que os quatro dividem),
+ * uma aba por deposito, Equipe (o quadro de alocacao inteiro) e Historico.
+ *
+ * AO VIVO: enquanto a tela esta aberta e visivel, a cada ~12 s ela pergunta a geracao
+ * (acaoGeracaoCarga, tres numeros) e so busca a tela de novo quando alguem mexeu. Sem ninguem mexer
+ * no computador por 45 min a pergunta para (a sessao acaba como sempre) — menos no Modo TV.
+ * Mover pessoa e mudar paleteira sao OTIMISTAS: a tela muda na hora e volta se o servidor recusar.
+ */
+const BUILD_CARGA_TELA = '2026.11.25';
+const CG = {
+  aba: lerLocal('gsl_carga_aba') || 'cargas', filtro: 'todas', fDep: '', fBox: '', fVeic: '', fGargalo: '', ordem: 'prioridade', busca: '',
+  turno: lerLocal('gsl_carga_turno') || '', funcao: '', buscaPessoa: '',
+  dados: null, g: '', timer: 0, pendentes: 0, arrastando: null,
+  tv: false, tvGiro: 0, leitura: null, observador: null, desenhadoEm: 0
+};
+const CG_GRUPO = ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'];
+const CG_CURTO = { GRANDEZA: 'GRA', MIUDEZA: 'MIU', BLOCADO: 'BLO', PESAVEIS: 'PES', NOBRE: 'NOB', NOBRE_GRANDEZA: 'NGR' };
+const CG_ESTADO_NOME = { LIVRE: 'Livre', USO: 'Em uso', MANUTENCAO: 'Em manutenção' };
+
+/* ---------------- ICONES (SVG desenhados aqui) ---------------- */
+const CG_SVG = {
+  paleteira: '<svg class="cg-ico-paleteira" viewBox="0 0 64 42" aria-hidden="true">' +
+    '<path d="M8.5 4.5h9" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" fill="none"/>' +
+    '<path d="M13 5.5l6.4 19" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>' +
+    '<rect x="15" y="21.5" width="11" height="10" rx="2.6" fill="currentColor"/>' +
+    '<path d="M23 29.2h35.5a2.6 2.6 0 0 1 0 5.2H23z" fill="currentColor"/>' +
+    '<circle cx="20.5" cy="35.4" r="4.6" fill="currentColor"/><circle cx="20.5" cy="35.4" r="1.7" class="cg-ico-furo"/>' +
+    '<circle cx="54.5" cy="37.2" r="2.6" fill="currentColor"/></svg>',
+  carrinho: '<svg class="cg-ico-carrinho" viewBox="0 0 48 44" aria-hidden="true">' +
+    '<path d="M3.5 6.5h6M6.5 6.5v26" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>' +
+    '<rect x="10" y="9.5" width="32" height="23" rx="3" stroke="currentColor" stroke-width="2.8" fill="none"/>' +
+    '<path d="M10 17.5h32M10 25h32M21 9.5v23M31 9.5v23" stroke="currentColor" stroke-width="1.6" opacity=".55"/>' +
+    '<circle cx="15" cy="37.5" r="3.8" fill="currentColor"/><circle cx="37" cy="37.5" r="3.8" fill="currentColor"/></svg>',
+  pessoa: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="9.5" r="6"/><path d="M4.5 30c0-7.2 5.1-11.6 11.5-11.6S27.5 22.8 27.5 30z"/></svg>',
+  chave: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L22 13.6l-2.4 2.4-2.3-2.3-7.9 7.9a2 2 0 0 1-2.8-2.8l7.9-7.9-2.3-2.3 2.4-2.4z" fill="currentColor"/></svg>',
+  pdf: '<svg viewBox="0 0 40 48" aria-hidden="true"><path d="M6 2h20l12 12v30a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="currentColor" opacity=".12"/><path d="M6 2h20l12 12v30a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M26 2v12h12" fill="none" stroke="currentColor" stroke-width="2.4"/><text x="20" y="36" text-anchor="middle" font-size="10" font-weight="700" fill="currentColor" font-family="Poppins,Inter,sans-serif">PDF</text></svg>',
+  caminhao: '<svg viewBox="0 0 48 32" aria-hidden="true"><path d="M2 6a2 2 0 0 1 2-2h24a2 2 0 0 1 2 2v18H2z" fill="currentColor" opacity=".9"/><path d="M30 10h8.5l6.5 7.5V24H30z" fill="currentColor" opacity=".7"/><circle cx="11" cy="25.5" r="4.2" fill="currentColor"/><circle cx="37" cy="25.5" r="4.2" fill="currentColor"/></svg>',
+  tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  enviar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  balanca: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 21h14M4 7h16M7 7l-3 7a3 3 0 0 0 6 0zM17 7l-3 7a3 3 0 0 0 6 0z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+};
+
+/* ---------------- FORMATOS ---------------- */
+const cgN = (n) => Number(n || 0).toLocaleString('pt-BR');
+const cgPct = (p) => (p == null ? '—' : Math.round(p) + '%');
+function cgMinDe(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(iso || ''));
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) / 60000 : 0;
+}
+function cgMinAgora() { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) / 60000; }
+function cgHora(iso) { const m = /T(\d{2}):(\d{2})/.exec(String(iso || '')); return m ? m[1] + ':' + m[2] : ''; }
+function cgDataBr(iso, comSeg) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(iso || ''));
+  return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] + (comSeg && m[6] ? ':' + m[6] : '') : String(iso || '');
+}
+function cgDiaHora(iso) {
+  const hoje = new Date();
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
+  if (!m) return '';
+  const mesmoDia = +m[1] === hoje.getFullYear() && +m[2] === hoje.getMonth() + 1 && +m[3] === hoje.getDate();
+  return (mesmoDia ? 'hoje' : 'em ' + m[3] + '/' + m[2]) + ' às ' + m[4] + ':' + m[5];
+}
+function cgDuracao(min) {
+  if (min == null || !isFinite(min)) return '—';
+  min = Math.max(0, Math.round(min));
+  if (min < 1) return 'menos de 1 min';
+  if (min < 60) return min + ' min';
+  if (min >= 48 * 60) return Math.round(min / 1440) + ' dias';
+  const h = Math.floor(min / 60), r = min % 60;
+  return h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '');
+}
+function cgIdade() { const s = CG.dados && CG.dados.snapshot; return s ? Math.max(0, cgMinAgora() - cgMinDe(s.emitido)) : null; }
+function cgHoraMais(iso, min) {
+  if (min == null || !isFinite(min)) return '';
+  const d = new Date((cgMinDe(iso) + min) * 60000);
+  return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+}
+function cgTitulo(t) { return String(t || '').toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()); }
+function cgNomeCurto(nome) {
+  const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (p.length < 2) return cgTitulo(p[0] || '');
+  const ult = p.slice(1).filter((x) => !/^(DA|DE|DO|DAS|DOS|E)$/i.test(x)).pop();
+  return cgTitulo(p[0]) + (ult ? ' ' + ult.charAt(0).toUpperCase() + '.' : '');
+}
+function cgTurnoCurto(eq) { const m = /^(\d)/.exec(String(eq || '')); return m ? m[1] + 'T' : (/ADM/i.test(eq) ? 'ADM' : ''); }
+function cgHoraAgora() { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function cgIdadeTexto(min) { return min == null ? '' : (min < 1 ? 'agora' : 'há ' + cgDuracao(min)); }
+
+/* ---------------- CELULAS E CARGAS (no cliente) ---------------- */
+function cgPartesCli(c) {
+  if (c === 'X') return { x: true, a: 0, b: 0 };
+  if (c === '-') return { nada: true, a: 0, b: 0 };
+  const m = /^(\d+)\/(\d+)$/.exec(c || '');
+  if (m) return { a: +m[1], b: +m[2], completa: +m[1] >= +m[2] };
+  return { vazia: true, a: 0, b: 0 };
+}
+const cgOkCli = (c) => { const p = cgPartesCli(c); return !!(p.x || p.completa || p.nada || p.vazia); };
+/*
+ * Estado de uma carga (no CD inteiro ou num deposito). So contam os depositos que TEM trabalho na carga:
+ * a celula "-" nao entra (nem como pendente, nem como pronta). % da carga = media do andamento das
+ * celulas (SEP e CONF) desses depositos: X vale 1, a/b vale a/b. Pronta = todas X (ou a = b).
+ * Gargalo: o deposito mais atrasado entre os que ainda nao terminaram.
+ */
+function cgEstadoCarga(c, idDep) {
+  const deps = idDep ? [idDep] : Object.keys(c.s || {});
+  let n = 0, soma = 0, pronta = true, algo = false, gargalo = '', gargaloPct = 101;
+  deps.forEach((d) => {
+    let nd = 0, sd = 0, ok = true;
+    ((c.s && c.s[d]) || ['', '']).forEach((v) => {
+      const p = cgPartesCli(v);
+      if (p.nada || p.vazia) return;
+      nd++;
+      if (p.x) { sd += 1; algo = true; return; }
+      sd += p.a / p.b;
+      if (p.a > 0) algo = true;
+      if (!p.completa) ok = false;
+    });
+    if (!nd) return;
+    n += nd; soma += sd;
+    if (!ok) { pronta = false; const pd = sd / nd * 100; if (pd < gargaloPct) { gargaloPct = pd; gargalo = d; } }
+  });
+  if (!n) return { estado: 'sem', pct: 100, gargalo: '', gargaloPct: null };
+  return { estado: pronta ? 'pronta' : (algo ? 'andamento' : 'naoIniciada'), pct: soma / n * 100, gargalo: gargalo, gargaloPct: gargalo ? gargaloPct : null };
+}
+function cgParadaMin(c, idDep) {
+  const ult = cgMinDe(CG.dados.snapshot.emitido);
+  if (idDep) return c.um && c.um[idDep] ? Math.max(0, ult - c.um[idDep]) : 0;
+  const ms = Object.keys(c.um || {}).filter((d) => c.s[d] && (!cgOkCli(c.s[d][0]) || !cgOkCli(c.s[d][1]))).map((d) => c.um[d]);
+  return ms.length ? Math.max(0, ult - Math.max.apply(null, ms)) : 0;
+}
+
+/* ---------------- EQUIPE E EQUIPAMENTOS ---------------- */
+function cgLugarDe(k) { return (CG.dados.equipe || []).find((p) => p.k === k) || null; }
+function cgPessoa(k) {
+  const a = cgLugarDe(k), q = (CG.dados.pessoas || []).find((p) => p.k === k);
+  return Object.assign({}, a || {}, q || {}, { k: k });
+}
+function cgContagem() {
+  const c = {};
+  (CG.dados.depositos || []).forEach((d) => { c[d.id] = { sep: 0, conf: 0, andares: [0, 0, 0, 0, 0] }; });
+  (CG.dados.equipe || []).forEach((p) => {
+    const x = c[p.dep]; if (!x) return;
+    if (p.papel === 'CONFERENTE') x.conf++; else { x.sep++; if (p.andar >= 0 && p.andar < 5) x.andares[p.andar]++; }
+  });
+  return c;
+}
+const cgPaleteiras = () => (CG.dados.equipamentos || []).filter((e) => e.tipo === 'PALETEIRA');
+const cgCarrinhos = () => (CG.dados.equipamentos || []).filter((e) => e.tipo === 'CARRINHO');
+function cgDepInfo(id) { return (CG.dados.depositos || []).find((x) => x.id === id) || { id: id, nome: cgNomeDep(id) }; }
+function cgNomeDep(id) {
+  const lista = (CG.dados.depositos || []).concat((CG.dados.snapshot && CG.dados.snapshot.depositos) || []);
+  const d = lista.find((x) => x.id === id);
+  return d ? d.nome : (CG_DEPS_NOMES[id] || id);
+}
+
+/* ---------------- INDICADORES DE UM DEPOSITO ---------------- */
+function cgIndDep(id) {
+  const d = CG.dados, s = d.snapshot;
+  const r = (s && s.resumo && s.resumo.dep && s.resumo.dep[id]) || null;
+  const ind = (d.indicadores && d.indicadores.porDep && d.indicadores.porDep[id]) || {};
+  const eq = cgContagem()[id] || { sep: 0, conf: 0, andares: [] };
+  const info = cgDepInfo(id);
+  const out = { id: id, r: r, ind: ind, eq: eq, info: info };
+  if (info.equip === 'PALETEIRA') {
+    out.equip = cgPaleteiras().filter((e) => e.estado === 'USO' && e.dep === id);
+    out.livres = cgPaleteiras().filter((e) => e.estado === 'LIVRE').length;
+  } else if (info.equip === 'CARRINHO') {
+    out.equip = cgCarrinhos();
+    out.livres = out.equip.filter((e) => e.estado === 'LIVRE').length;
+  } else { out.equip = []; out.livres = 0; }
+  if (!r) { out.status = { k: 'vazio', t: 'Sem situação' }; return out; }
+  out.pend = r.cargas - r.concluidas;
+  // Com a equipe de agora: o ritmo por pessoa medido nas ultimas horas vezes quem esta alocado agora
+  const rs = ind.porPessoaSep && eq.sep ? ind.porPessoaSep * eq.sep : null;
+  const rc = ind.porPessoaConf && eq.conf ? ind.porPessoaConf * eq.conf : null;
+  const eS = r.restSep <= 0 ? 0 : (rs ? r.restSep / rs * 60 : null), eC = r.restConf <= 0 ? 0 : (rc ? r.restConf / rc * 60 : null);
+  out.etaEquipe = eS == null || eC == null ? null : Math.max(eS, eC);
+  out.porSeparador = eq.sep ? r.restSep / eq.sep : null;
+  const eqb = d.indicadores && d.indicadores.equilibrio;
+  out.pctPond = eqb && eqb.porDep[id] ? eqb.porDep[id].pct : null;
+  if (!r.cargas) out.status = { k: 'vazio', t: 'Sem cargas' };
+  else if (!out.pend) out.status = { k: 'ok', t: 'Concluído' };
+  else if (ind.maisParadaMin >= 90 && !ind.ritmoSep && !ind.ritmoConf && ind.horasRitmo) out.status = { k: 'alerta', t: 'Parado' };
+  else if (r.h24Pend) out.status = { k: 'atencao', t: r.h24Pend + (r.h24Pend === 1 ? ' carga 24 h' : ' cargas 24 h') };
+  else out.status = { k: 'andamento', t: 'Em andamento' };
+  return out;
+}
+
+/* ---------------- PINTAR ---------------- */
+function pintarCarga(r) {
+  CG.dados = r.dados || {};
+  CG.g = CG.dados.g || '';
+  const abas = ['cargas', 'geral', 'supervisao', 'equipe', 'historico'].concat((CG.dados.depositos || []).map((d) => d.id));
+  if (abas.indexOf(CG.aba) === -1) CG.aba = 'cargas';
+  document.documentElement.classList.add('cg-ativo');
+  cgVigiarSaida();
+  cgLigarRelogio();
+  const s = CG.dados.snapshot;
+  el('subtitulo-pagina').textContent = s ? 'Relatório emitido ' + cgDiaHora(s.emitido) + ' · ' + (CG.dados.filial || '') : (CG.dados.filial || '');
+  el('acoes-topo').innerHTML = '';
+  cgDesenhar();
+  CG.desenhadoEm = Date.now();
+}
+
+function cgDesenhar() {
+  const pagina = el('pagina');
+  if (!pagina || !CG.dados) return;
+  // A busca que esta sendo digitada nao perde o foco quando a tela redesenha (ao vivo)
+  const foco = document.activeElement && document.activeElement.id && pagina.contains(document.activeElement) ? document.activeElement : null;
+  const sel = foco && typeof foco.selectionStart === 'number' ? [foco.selectionStart, foco.selectionEnd] : null;
+  const rolagem = window.scrollY;
+  const d = CG.dados;
+  const abas = [['cargas', 'Cargas'], ['geral', 'Painel do CD'], ['supervisao', 'Supervisão G · NG · P · B']]
+    .concat((d.depositos || []).map((x) => [x.id, x.nome])).concat([['equipe', 'Equipe'], ['historico', 'Histórico']]);
+  pagina.innerHTML = `<div class="cg${CG.tv ? ' cg-modo-tv' : ''}" id="cg">
+    ${cgHeroHtml()}
+    ${cgFaixaIdadeHtml()}
+    <nav class="cg-abas" role="tablist" aria-label="Situação de carga">
+      ${abas.map(([id, nome]) => {
+        const dep = (d.depositos || []).some((x) => x.id === id) ? cgIndDep(id) : null;
+        const ponto = dep && dep.r ? `<i class="cg-ponto st-${dep.status.k}" aria-hidden="true"></i>` : '';
+        return `<button type="button" role="tab" class="cg-aba${CG.aba === id ? ' ativa' : ''}${id === 'supervisao' ? ' grupo' : ''}" aria-selected="${CG.aba === id}" data-aba="${esc(id)}" onclick="cgIrAba(${jsArg(id)})">${ponto}${esc(nome)}</button>`;
+      }).join('')}
+    </nav>
+    <div class="cg-corpo" id="cg-corpo">${cgCorpoHtml()}</div>
+  </div>`;
+  if (foco) { const f = el(foco.id); if (f) { f.focus(); if (sel) { try { f.setSelectionRange(sel[0], sel[1]); } catch (e) {} } } }
+  if (CG.desenhadoEm) window.scrollTo(0, rolagem);
+}
+function cgIrAba(id) {
+  CG.aba = id; gravarLocal('gsl_carga_aba', id); cgDesenhar();
+  const a = document.querySelector('.cg-aba.ativa'); if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+function cgCorpoHtml() {
+  if (CG.aba === 'equipe') return cgEquipeHtml();
+  if (CG.aba === 'historico') return cgHistoricoHtml();
+  if (CG.aba === 'supervisao') return cgSupervisaoHtml();
+  if (CG.aba === 'cargas') return CG.dados.snapshot ? cgTabelaHtml() + cgCargasTravadasHtml() : cgSemSnapshotHtml();
+  if (CG.aba !== 'geral') return cgDepositoHtml(CG.aba);
+  return cgGeralHtml();
+}
+
+/* ---------------- CABECALHO ---------------- */
+function cgHeroHtml() {
+  const d = CG.dados, s = d.snapshot, pode = d.podeEditar;
+  const botoes = `<div class="cg-hero-acoes">
+      ${pode ? `<button type="button" class="cg-btn cg-btn-primario" onclick="cgAbrirEnvio()">${CG_SVG.enviar}<span>Enviar situação (PDF)</span></button>` : ''}
+      <button type="button" class="cg-btn cg-btn-vidro" onclick="cgModoTv()" title="Tela cheia para a TV do CD">${CG_SVG.tv}<span>${CG.tv ? 'Sair do modo TV' : 'Modo TV'}</span></button>
+    </div>`;
+  if (!s) {
+    return `<section class="cg-hero cg-hero-vazio">
+      <div class="cg-hero-topo">
+        <div><div class="cg-sobre">Situação de carga · ${esc(d.filial || '')}</div>
+          <h2 class="cg-hero-titulo">Nenhuma situação de carga enviada ainda</h2>
+          <p class="cg-hero-sub">${pode ? 'Envie o PDF "Situação de Expedição das Cargas em Processo": o GSL lê as cargas, os depósitos e o andamento de cada um.' : 'Assim que alguém enviar o PDF da situação de carga, os indicadores aparecem aqui.'}</p></div>
+        ${botoes}
+      </div>
+      ${pode ? `<button type="button" class="cg-soltar-grande" onclick="cgAbrirEnvio()" ondragover="cgSobre(event)" ondragleave="cgSaiu(event)" ondrop="cgSoltouNaTela(event)">
+        <span class="cg-soltar-ico">${CG_SVG.pdf}</span><b>Arraste o PDF aqui</b><span>ou clique para escolher o arquivo</span></button>` : ''}
+    </section>`;
+  }
+  const res = s.resumo || {};
+  let sf = 0, st = 0, cf = 0, ct = 0, rs = 0, rc = 0, eta = 0, etaOk = true;
+  Object.keys(res.dep || {}).forEach((k) => {
+    const x = res.dep[k]; sf += x.sepFeitas; st += x.sepTotal; cf += x.confFeitas; ct += x.confTotal; rs += x.restSep; rc += x.restConf;
+    const i = d.indicadores && d.indicadores.porDep[k];
+    if (i) { if (i.etaMin == null && (x.restSep || x.restConf)) etaOk = false; else eta = Math.max(eta, i.etaMin || 0); }
+  });
+  const pSep = st ? sf / st * 100 : 100, pConf = ct ? cf / ct * 100 : 100;
+  const idade = cgIdade();
+  const eqb = d.indicadores && d.indicadores.equilibrio && d.indicadores.equilibrio.cd;
+  const kpi = (rot, val, extra, cls) => `<div class="cg-kpi ${cls || ''}"><span class="cg-kpi-rot">${rot}</span><span class="cg-kpi-val">${val}</span>${extra ? `<span class="cg-kpi-extra">${extra}</span>` : ''}</div>`;
+  const barra = (p, cls) => `<span class="cg-kpi-barra"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p)).toFixed(1)}%"></i></span>`;
+  return `<section class="cg-hero">
+    <div class="cg-hero-topo">
+      <div>
+        <div class="cg-sobre">Situação de carga · ${esc(d.filial || '')}${CG.tv ? ` · <span class="cg-relogio" id="cg-relogio">${cgHoraAgora()}</span>` : ''}</div>
+        <h2 class="cg-hero-titulo"><span class="cg-num">${cgN(res.total)}</span> ${res.total === 1 ? 'carga' : 'cargas'} em processo</h2>
+        <p class="cg-hero-sub">Emitida em ${esc(cgDataBr(s.emitido, true))} · enviada por ${esc(s.por || '—')} ${esc(cgDiaHora(s.enviado))}
+          <span class="cg-fresco ${idade > 60 ? 'velho' : 'novo'}" id="cg-fresco">${cgIdadeTexto(idade)}</span></p>
+      </div>
+      ${botoes}
+    </div>
+    <div class="cg-kpis">
+      ${kpi('Prontas para expedir', `<span class="cg-num">${cgN(res.prontas)}</span><small>de ${cgN(res.total)}</small>`, barra(res.total ? res.prontas / res.total * 100 : 0, 'verde'))}
+      ${kpi('24 horas pendentes', `<span class="cg-num">${cgN(res.h24Pend)}</span>`, res.h24 ? 'de ' + res.h24 + (res.h24 === 1 ? ' carga 24 h' : ' cargas 24 h') : 'nenhuma carga 24 h', res.h24Pend ? 'amarelo' : '')}
+      ${kpi('Separação', `<span class="cg-num">${cgPct(pSep)}</span>`, barra(pSep, 'azul') + `<span>${cgN(rs)} tarefas faltam</span>`)}
+      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'cor-conf') + `<span>${cgN(rc)} tarefas faltam</span>`)}
+      ${kpi('Equilíbrio', `<span class="cg-num">${eqb && eqb.spread != null ? cgN(eqb.spread) + '<small>pp</small>' : '—'}</span>`,
+        eqb && eqb.texto ? `<span class="cg-eq-pilula eq-${eqb.status}">${esc(eqb.texto)}</span>` : '', 'equilibrio')}
+      ${kpi('Previsão para zerar', `<span class="cg-num">${!rs && !rc ? 'Pronto' : (etaOk ? cgDuracao(eta) : '—')}</span>`,
+        !rs && !rc ? 'nada pendente' : (etaOk ? 'às ' + cgHoraMais(s.emitido, eta) + ', no ritmo atual' : 'o ritmo aparece a partir do 2º envio'))}
+    </div>
+  </section>`;
+}
+function cgFaixaIdadeHtml() {
+  const idade = cgIdade();
+  if (idade == null || idade <= 60) return '';
+  return `<div class="cg-faixa" role="status"><span class="cg-faixa-ico" aria-hidden="true">⏱</span>
+    <span>A situação de carga tem <b>${cgDuracao(idade)}</b>. Os indicadores ficam melhores com o PDF mais recente.</span>
+    ${CG.dados.podeEditar ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgAbrirEnvio()">Enviar PDF novo</button>' : ''}</div>`;
+}
+
+/* ---------------- EQUILIBRIO ENTRE DEPOSITOS ---------------- */
+function cgEquilibrioHtml(qual, titulo) {
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio;
+  if (!eqb) return '';
+  const g = eqb[qual];
+  if (!g || !g.deps || g.deps.length < 2) {
+    return `<section class="cg-cartao cg-equilibrio"><header class="cg-cartao-cab"><h3>${CG_SVG.balanca}${esc(titulo)}</h3><span class="cg-eq-pilula eq-sem">Só um depósito com trabalho</span></header></section>`;
+  }
+  const lim = eqb.limites;
+  const linhas = g.deps.slice().sort((a, b) => eqb.porDep[a].pct - eqb.porDep[b].pct).map((id) => {
+    const x = eqb.porDep[id], dv = g.desvios[id];
+    const tag = id === g.atrasado ? '<span class="cg-eq-tag atras">mais atrasado</span>' : (id === g.adiantado ? '<span class="cg-eq-tag frente">mais adiantado</span>' : '');
+    return `<div class="cg-eq-linha${id === g.atrasado ? ' atras' : ''}${id === g.adiantado ? ' frente' : ''}">
+      <span class="cg-eq-nome">${esc(cgNomeDep(id))}${tag}</span>
+      <span class="cg-eq-trilho"><i style="width:${Math.max(0, Math.min(100, x.pct)).toFixed(1)}%"></i><b class="cg-eq-media" style="left:${g.media.toFixed(1)}%" title="média ${cgPct(g.media)}"></b></span>
+      <span class="cg-eq-pct cg-num">${cgPct(x.pct)}</span>
+      <span class="cg-eq-desvio cg-num ${dv < 0 ? 'neg' : 'pos'}">${dv > 0 ? '+' : ''}${cgN(dv)} pp</span>
+      <span class="cg-eq-gente">${x.sep} sep · ${x.conf} conf · ${cgN(x.restante)} tarefas</span>
+    </div>`;
+  }).join('');
+  const sug = g.sugestao;
+  return `<section class="cg-cartao cg-equilibrio eq-${g.status}" aria-label="${esc(titulo)}">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.balanca}${esc(titulo)}</h3>
+      <span class="cg-eq-resumo"><span class="cg-eq-pilula eq-${g.status}">${esc(g.texto)}</span><b class="cg-num">${cgN(g.spread)} pp</b><small>entre o mais adiantado e o mais atrasado · média ${cgPct(g.media)}</small></span></header>
+    <div class="cg-eq-linhas">${linhas}</div>
+    ${sug ? `<div class="cg-eq-sugestao"><span aria-hidden="true">➜</span><b>${esc(sug.texto)}</b>
+      <span>para ${esc(cgNomeDep(sug.para))} andar junto com os outros.</span>
+      ${CG.dados.podeEditar ? `<button type="button" class="cg-link" onclick="cgIrAba(${jsArg(qual === 'supervisao' && CG_GRUPO.indexOf(sug.para) !== -1 ? 'supervisao' : 'equipe')})">Rebalancear</button>` : ''}</div>` : ''}
+    <p class="cg-nota">% concluído = tarefas de separação e conferência feitas ÷ total (cada tarefa de carga de 24 horas vale ${cgN(lim.peso24h)}×). Equilibrado até ${cgN(lim.equilibrado)} pp · atenção até ${cgN(lim.atencao)} pp — os limites ficam em Configuração › Outros parâmetros.</p>
+  </section>`;
+}
+function cgCargasTravadasHtml(ids) {
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio;
+  if (!eqb) return '';
+  const lista = (eqb.cargas || []).filter((c) => !ids || c.atrasados.some((a) => ids.indexOf(a.dep) !== -1) || c.prontos.some((p) => ids.indexOf(p) !== -1));
+  return `<section class="cg-cartao">
+    <header class="cg-cartao-cab"><h3>Cargas travadas por um depósito</h3><span class="cg-selo ${lista.length ? 'alerta' : 'ok'}">${lista.length ? lista.length + (lista.length === 1 ? ' carga' : ' cargas') : 'nenhuma'}</span></header>
+    ${lista.length ? `<ul class="cg-lista">${lista.slice(0, 8).map((c) => `<li class="cg-item">
+      <span class="cg-item-nro">${esc(c.n)}${c.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+      <span class="cg-item-nome">${esc(c.nm || '—')}<small>pronta em ${esc(c.prontos.map(cgNomeDep).join(', '))}</small></span>
+      <span class="cg-item-trava">${c.atrasados.map((a) => `<span class="cg-trava">${esc(cgNomeDep(a.dep))} <b class="cg-num">${cgPct(a.pct)}</b></span>`).join('')}</span></li>`).join('')}</ul>` :
+      '<p class="cg-vazio-txt">Nenhuma carga com um depósito pronto e outro com metade ou menos.</p>'}
+  </section>`;
+}
+
+/* ---------------- VISAO GERAL ---------------- */
+function cgGeralHtml() {
+  const d = CG.dados, s = d.snapshot;
+  if (!s) return cgSemSnapshotHtml();
+  const deps = s.depositos || d.depositos;
+  const h24 = (s.cargas || []).filter((c) => c.h && cgEstadoCarga(c).estado !== 'pronta');
+  const paradas = [];
+  deps.forEach((x) => { const i = d.indicadores && d.indicadores.porDep[x.id]; ((i && i.paradas) || []).forEach((p) => paradas.push(Object.assign({ dep: x.id }, p))); });
+  paradas.sort((a, b) => b.parada - a.parada);
+  const topParadas = paradas.filter((p) => p.parada >= 30).slice(0, 6);
+  return `
+    <div class="cg-grade-dep">${deps.map((x) => cgCartaoDepHtml(x.id)).join('')}</div>
+    <div class="cg-duas largo">
+      ${cgEquilibrioHtml('cd', 'Equilíbrio entre depósitos · CD')}
+      ${cgPoolPaleteirasHtml('geral')}
+    </div>
+    <div class="cg-duas">
+      <section class="cg-cartao">
+        <header class="cg-cartao-cab"><h3>Prioridade 24 horas</h3><span class="cg-selo ${h24.length ? 'amarelo' : 'ok'}">${h24.length ? h24.length + ' pendente' + (h24.length === 1 ? '' : 's') : 'em dia'}</span></header>
+        ${h24.length ? `<ul class="cg-lista">${h24.slice(0, 8).map(cgItemCargaHtml).join('')}</ul>` : '<p class="cg-vazio-txt">Nenhuma carga de 24 horas por terminar.</p>'}
+      </section>
+      ${cgCargasTravadasHtml()}
+    </div>
+    <section class="cg-cartao">
+      <header class="cg-cartao-cab"><h3>Paradas há mais tempo</h3><span class="cg-selo ${topParadas.length ? 'alerta' : 'ok'}">${topParadas.length ? 'sem mudar entre envios' : 'tudo andando'}</span></header>
+      ${topParadas.length ? `<ul class="cg-lista colunas">${topParadas.map((p) => `<li class="cg-item">
+        <span class="cg-item-nro">${esc(p.n)}${p.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(p.nm || '—')}<small>${esc(cgNomeDep(p.dep))} · ${cgCelHtml(p.s[0], 'sep')} ${cgCelHtml(p.s[1], 'conf')}</small></span>
+        <span class="cg-item-tempo alerta">${cgDuracao(p.parada)}</span></li>`).join('')}</ul>` :
+        `<p class="cg-vazio-txt">${(d.indicadores && d.indicadores.envios > 1) ? 'Nenhuma carga parada há 30 min ou mais.' : 'Aparece a partir do segundo envio: o GSL compara um PDF com o anterior.'}</p>`}
+    </section>
+    ${cgLinhaTempoHtml()}`;
+}
+function cgSemSnapshotHtml() {
+  return `<div class="cg-vazio">
+    <div class="cg-vazio-ico">${CG_SVG.caminhao}</div>
+    <h3>A situação de carga ainda não chegou</h3>
+    <p>Enquanto isso, a equipe e os equipamentos já funcionam: aloque as pessoas na aba <b>Equipe</b> ou em cada depósito.</p>
+  </div>${cgPoolPaleteirasHtml('geral')}`;
+}
+function cgCartaoDepHtml(id) {
+  const i = cgIndDep(id), r = i.r;
+  if (!r) return '';
+  const nome = cgNomeDep(id);
+  const barra = (rot, p, cls) => `<div class="cg-mini-barra"><span>${rot}</span><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(p)}</b></div>`;
+  const equip = i.info.equip === 'PALETEIRA' ? `<span class="cg-equip-mini" title="Paleteiras em uso aqui · livres no pool">${CG_SVG.paleteira}<b class="cg-num">${i.equip.length}</b><small>+${i.livres} livres</small></span>`
+    : (i.info.equip === 'CARRINHO' ? `<span class="cg-equip-mini" title="Carrinhos livres">${CG_SVG.carrinho}<b class="cg-num">${i.livres}</b><small>/${i.equip.length}</small></span>` : '');
+  return `<button type="button" class="cg-dep-cartao st-${i.status.k}" onclick="cgIrAba(${jsArg(id)})" aria-label="${esc(nome)}: ${esc(i.status.t)}">
+    <div class="cg-dep-topo"><span class="cg-dep-nome">${esc(nome)}</span><span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span></div>
+    <div class="cg-dep-numeros">
+      <div><b class="cg-num">${cgN(i.pend)}</b><span>por terminar</span></div>
+      <div><b class="cg-num">${cgN(r.concluidas)}</b><span>prontas</span></div>
+      <div><b class="cg-num">${cgN(r.restSep + r.restConf)}</b><span>tarefas</span></div>
+    </div>
+    ${barra('Sep.', i.ind.pctSep, 'azul')}
+    ${barra('Conf.', i.ind.pctConf, 'cor-conf')}
+    <div class="cg-dep-rodape">
+      <span class="cg-equipe-mini" title="Separadores e conferentes alocados">${CG_SVG.pessoa}<b class="cg-num">${i.eq.sep}</b>&nbsp;sep · <b class="cg-num">${i.eq.conf}</b>&nbsp;conf</span>
+      ${equip}
+      <span class="cg-eta" title="Previsão para zerar no ritmo atual">${i.pend ? (i.ind.etaMin == null ? 'sem ritmo' : '⏱ ' + cgDuracao(i.ind.etaMin)) : '✓ pronto'}</span>
+    </div>
+  </button>`;
+}
+function cgCelHtml(v, lado) {
+  const p = cgPartesCli(v);
+  if (p.x) return `<span class="cg-cel ok ${lado}" title="pronto">✓</span>`;
+  if (p.nada) return `<span class="cg-cel nada ${lado}" title="nada neste depósito">–</span>`;
+  if (p.vazia) return `<span class="cg-cel vazia ${lado}" title="não lida">?</span>`;
+  return `<span class="cg-cel frac ${lado}${p.completa ? ' ok' : ''}" title="${p.a} de ${p.b} tarefas"><span class="cg-num">${p.a}/${p.b}</span><i style="width:${(p.b ? p.a / p.b * 100 : 0).toFixed(0)}%"></i></span>`;
+}
+function cgItemCargaHtml(c) {
+  const e = cgEstadoCarga(c);
+  const faltam = Object.keys(c.s || {}).filter((dd) => !cgOkCli(c.s[dd][0]) || !cgOkCli(c.s[dd][1])).map(cgNomeDep);
+  return `<li class="cg-item"><span class="cg-item-nro">${esc(c.n)} <i class="cg-24">24 h</i></span>
+    <span class="cg-item-nome">${esc(c.nm || '—')}<small>${c.v ? esc(c.v) + ' · ' : ''}${c.bx ? 'box ' + esc(c.bx) + ' · ' : ''}falta ${esc(faltam.join(', ') || '—')}</small></span>
+    <span class="cg-item-tempo"><span class="cg-anel" style="--p:${e.pct.toFixed(0)}"><b>${Math.round(e.pct)}%</b></span></span></li>`;
+}
+
+/* ---------------- TABELA DE CARGAS ---------------- */
+const CG_ORDENS = [['prioridade', 'Prioridade: 24 h e gargalo'], ['menor', 'Menor % primeiro'], ['maior', 'Maior % primeiro'], ['numero', 'Número da carga']];
+const CG_FILTROS = [['todas', 'Todas'], ['h24', '24 horas'], ['naoIniciada', 'Não iniciadas'], ['andamento', 'Em andamento'], ['quase', 'Quase prontas'], ['pronta', 'Prontas'], ['parada', 'Paradas']];
+function cgCargasFiltradas(idDep) {
+  const s = CG.dados.snapshot, dep = idDep || CG.fDep, q = cgNorm(CG.busca);
+  return (s.cargas || []).filter((c) => {
+    const e = cgEstadoCarga(c, dep || null);
+    if (dep && e.estado === 'sem') return false;
+    if (CG.fBox && String(c.bx) !== CG.fBox) return false;
+    if (CG.fVeic && (c.v || '(sem veículo)') !== CG.fVeic) return false;
+    if (q && cgNorm(c.n + ' ' + c.nm + ' ' + c.v).indexOf(q) === -1) return false;
+    switch (CG.filtro) {
+      case 'h24': return !!c.h;
+      case 'naoIniciada': return e.estado === 'naoIniciada';
+      case 'andamento': return e.estado === 'andamento';
+      case 'quase': return e.estado === 'andamento' && e.pct >= 80;
+      case 'pronta': return e.estado === 'pronta';
+      case 'parada': return e.estado !== 'pronta' && cgParadaMin(c, dep || null) >= 60;
+      default: return true;
+    }
+  }).filter((c) => !CG.fGargalo || cgEstadoCarga(c).gargalo === CG.fGargalo).map((c) => ({ c: c, e: cgEstadoCarga(c, dep || null) })).sort((x, y) => {
+    const a = x.c, b = y.c, pa = x.e.estado === 'pronta', pb = y.e.estado === 'pronta';
+    if (CG.ordem === 'numero') return String(a.n).localeCompare(String(b.n));
+    if (CG.ordem === 'menor') return (pa - pb) || (x.e.pct - y.e.pct) || String(a.n).localeCompare(String(b.n));
+    if (CG.ordem === 'maior') return (pa - pb) || (y.e.pct - x.e.pct) || String(a.n).localeCompare(String(b.n));
+    return (b.h - a.h) || (pa - pb) || ((x.e.gargaloPct == null ? 101 : x.e.gargaloPct) - (y.e.gargaloPct == null ? 101 : y.e.gargaloPct)) || String(a.n).localeCompare(String(b.n));
+  }).map((x) => x.c);
+}
+function cgTabelaHtml(idDep) {
+  const s = CG.dados.snapshot, deps = s.depositos || [];
+  const lista = cgCargasFiltradas(idDep);
+  const boxes = Array.from(new Set((s.cargas || []).map((c) => String(c.bx || '')).filter(Boolean))).sort((a, b) => +a - +b);
+  const veics = Array.from(new Set((s.cargas || []).map((c) => c.v || '(sem veículo)'))).sort();
+  const opc = (l, atual, todos, pre) => `<option value="">${todos}</option>` + l.map((v) => `<option value="${esc(v)}"${v === atual ? ' selected' : ''}>${esc((pre || '') + v)}</option>`).join('');
+  const depsCols = idDep ? deps.filter((x) => x.id === idDep) : deps;
+  return `<section class="cg-cartao cg-tabela-cartao">
+    <header class="cg-cartao-cab"><h3>Cargas${idDep ? ' com ' + esc(cgNomeDep(idDep)) : ''}</h3><span class="cg-conta" id="cg-conta">${lista.length} de ${(s.cargas || []).length}</span></header>
+    <div class="cg-filtros">
+      <div class="cg-chips" role="group" aria-label="Filtro">${CG_FILTROS.map(([k, t]) => `<button type="button" class="cg-chip${CG.filtro === k ? ' ativo' : ''}" onclick="cgFiltrar('filtro', ${jsArg(k)})">${t}</button>`).join('')}</div>
+      <div class="cg-filtros-linha">
+        <label class="cg-busca"><span class="sr">Buscar carga</span><input id="cg-busca" type="search" placeholder="Buscar nº ou nome da carga" value="${esc(CG.busca)}" oninput="cgBuscar(this.value)" autocomplete="off"></label>
+        ${idDep ? '' : `<select id="cg-f-dep" aria-label="Depósito" onchange="cgFiltrar('fDep', this.value)"><option value="">Todos os depósitos</option>${deps.map((x) => `<option value="${esc(x.id)}"${CG.fDep === x.id ? ' selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>`}
+        <select id="cg-f-box" aria-label="Box" onchange="cgFiltrar('fBox', this.value)">${opc(boxes, CG.fBox, 'Todos os boxes', 'Box ')}</select>
+        <select id="cg-f-veic" aria-label="Veículo" onchange="cgFiltrar('fVeic', this.value)">${opc(veics, CG.fVeic, 'Todos os veículos')}</select>
+        ${idDep ? '' : `<select id="cg-f-gargalo" aria-label="Gargalo" onchange="cgFiltrar('fGargalo', this.value)"><option value="">Gargalo em qualquer depósito</option>${deps.map((x) => `<option value="${esc(x.id)}"${CG.fGargalo === x.id ? ' selected' : ''}>Gargalo: ${esc(x.nome)}</option>`).join('')}</select>`}
+        <select id="cg-ordem" aria-label="Ordem" onchange="cgFiltrar('ordem', this.value)">${CG_ORDENS.map(([k, t]) => `<option value="${k}"${CG.ordem === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="cg-tabela${idDep ? ' um-dep' : ''}" role="table" aria-label="Cargas" style="--cols:${depsCols.length}">
+      <div class="cg-tr cg-th" role="row"><span role="columnheader">Carga</span>${depsCols.map((x) => `<span role="columnheader" class="cg-th-dep" title="${esc(x.nome)}">${esc(idDep ? 'Separação · Conferência' : x.nome)}</span>`).join('')}<span role="columnheader">Progresso</span></div>
+      <div id="cg-linhas">${cgLinhasHtml(lista, depsCols, idDep)}</div>
+    </div>
+  </section>`;
+}
+function cgLinhasHtml(lista, depsCols, idDep) {
+  if (!lista.length) return '<p class="cg-vazio-txt">Nenhuma carga neste filtro.</p>';
+  return lista.slice(0, 400).map((c) => {
+    const e = cgEstadoCarga(c, idDep || null);
+    const parada = e.estado !== 'pronta' ? cgParadaMin(c, idDep || null) : 0;
+    return `<div class="cg-tr${c.h ? ' h24' : ''} est-${e.estado}" role="row" data-carga="${esc(c.n)}">
+      <span class="cg-td-carga" role="cell"><span class="cg-td-linha1"><b class="cg-num">${esc(c.n)}</b>${c.h ? '<i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-td-nome">${esc(c.nm || '—')}</span>
+        <small>${esc(c.v || 'sem veículo')}${c.bx ? ' · box <b>' + esc(c.bx) + '</b>' : ''}${!idDep && e.gargalo ? ` · <span class="cg-gargalo-txt">gargalo: ${esc(cgNomeDep(e.gargalo))}</span>` : ''}${parada >= 60 ? ` · <span class="cg-parada">parada há ${cgDuracao(parada)}</span>` : ''}</small></span>
+      ${depsCols.map((x) => { const par = (c.s && c.s[x.id]) || ['', '']; const g = !idDep && e.gargalo === x.id; return `<span class="cg-td-dep${par[0] === '-' && par[1] === '-' ? ' sem' : ''}${g ? ' gargalo' : ''}" role="cell" data-dep="${esc(CG_CURTO[x.id] || x.nome)}"${g ? ' title="Gargalo desta carga"' : ''}>${par[0] === '-' && par[1] === '-' ? '<span class="cg-cel nada" title="nada deste depósito nesta carga">–</span>' : cgCelHtml(par[0], 'sep') + cgCelHtml(par[1], 'conf')}</span>`; }).join('')}
+      <span class="cg-td-prog" role="cell"><span class="cg-trilho"><i class="${e.estado === 'pronta' ? 'verde' : 'azul'}" style="width:${e.pct.toFixed(1)}%"></i></span><b class="cg-num">${Math.round(e.pct)}%</b></span>
+    </div>`;
+  }).join('') + (lista.length > 400 ? `<p class="cg-vazio-txt">Mostrando 400 de ${lista.length}. Use a busca ou os filtros.</p>` : '');
+}
+function cgFiltrar(campo, valor) { CG[campo] = campo === 'filtro' && CG.filtro === valor ? 'todas' : valor; cgDesenhar(); }
+let CG_BUSCA_T = 0;
+function cgBuscar(v) {
+  CG.busca = v;
+  clearTimeout(CG_BUSCA_T);
+  CG_BUSCA_T = setTimeout(() => {
+    const s = CG.dados.snapshot; if (!s) return;
+    const idDep = (CG.dados.depositos || []).some((x) => x.id === CG.aba) ? CG.aba : '';
+    const depsCols = idDep ? s.depositos.filter((x) => x.id === idDep) : s.depositos;
+    const lista = cgCargasFiltradas(idDep);
+    const alvo = el('cg-linhas'); if (alvo) alvo.innerHTML = cgLinhasHtml(lista, depsCols, idDep);
+    const conta = el('cg-conta'); if (conta) conta.textContent = lista.length + ' de ' + (s.cargas || []).length;
+  }, 120);
+}
+
+/* ---------------- LINHA DO TEMPO ---------------- */
+function cgLinhaTempoHtml(completo) {
+  const h = (CG.dados.historico || []).slice().reverse();
+  if (!h.length) return '';
+  const W = 640, H = 150, pad = 30;
+  const t0 = cgMinDe(h[0].emitido), t1 = cgMinDe(h[h.length - 1].emitido);
+  const x = (iso) => (t1 === t0 ? W / 2 : pad + (cgMinDe(iso) - t0) / (t1 - t0) * (W - pad * 2));
+  const y = (p) => H - 22 - (Math.max(0, Math.min(100, p)) / 100) * (H - 40);
+  const linha = (campo) => h.map((s, i) => (i ? 'L' : 'M') + x(s.emitido).toFixed(1) + ' ' + y(s[campo]).toFixed(1)).join(' ');
+  const grade = [0, 50, 100].map((p) => `<line x1="${pad}" x2="${W - pad}" y1="${y(p)}" y2="${y(p)}" class="cg-grade-linha"/><text x="${pad - 6}" y="${y(p) + 3}" class="cg-grade-txt" text-anchor="end">${p}%</text>`).join('');
+  const pontos = h.map((s) => `<circle cx="${x(s.emitido).toFixed(1)}" cy="${y(s.pctSep).toFixed(1)}" r="3.6" class="cg-ponto-sep"><title>${esc(cgDataBr(s.emitido))} · separação ${cgPct(s.pctSep)}</title></circle><circle cx="${x(s.emitido).toFixed(1)}" cy="${y(s.pctConf).toFixed(1)}" r="3.6" class="cg-ponto-conf"><title>${esc(cgDataBr(s.emitido))} · conferência ${cgPct(s.pctConf)}</title></circle>`).join('');
+  const rot = h.length > 1 ? `<text x="${pad}" y="${H - 4}" class="cg-grade-txt">${esc(cgHora(h[0].emitido))}</text><text x="${W - pad}" y="${H - 4}" class="cg-grade-txt" text-anchor="end">${esc(cgHora(h[h.length - 1].emitido))}</text>` : '';
+  return `<section class="cg-cartao">
+    <header class="cg-cartao-cab"><h3>Linha do tempo dos envios</h3><span class="cg-legenda"><i class="sep"></i>Separação <i class="conf"></i>Conferência</span></header>
+    ${h.length > 1 ? `<svg class="cg-grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento da separação e da conferência a cada envio">${grade}
+      <path d="${linha('pctSep')}" class="cg-linha-sep"/><path d="${linha('pctConf')}" class="cg-linha-conf"/>${pontos}${rot}</svg>` : '<p class="cg-vazio-txt">O gráfico começa no segundo envio: cada PDF novo vira um ponto da linha.</p>'}
+    <ol class="cg-envios">${h.slice().reverse().slice(0, completo ? 60 : 5).map((s, i) => `<li><span class="cg-envio-hora cg-num">${esc(cgDiaHora(s.emitido))}</span>
+      <span>${cgN(s.total)} cargas · ${cgN(s.prontas)} prontas${s.h24Pend ? ' · <b class="cg-24t">' + s.h24Pend + ' de 24 h</b>' : ''}</span>
+      <span class="cg-envio-pct">sep. <b>${cgPct(s.pctSep)}</b> · conf. <b>${cgPct(s.pctConf)}</b></span>
+      <span class="cg-envio-por">${esc(s.por)}${i === 0 && completo && CG.dados.podeEditar ? ` <button type="button" class="cg-link perigo" onclick="cgDesfazerEnvio(${jsArg(s.id)})">Desfazer este envio</button>` : ''}</span></li>`).join('')}</ol>
+  </section>`;
+}
+function cgHistoricoHtml() { return CG.dados.snapshot ? cgLinhaTempoHtml(true) : cgSemSnapshotHtml(); }
+function cgDesfazerEnvio(id) {
+  abrirJanela('Desfazer o último envio', '<p>A situação de carga mais recente sai do GSL e a anterior volta a valer. Use quando o PDF enviado estava errado.</p>',
+    `<button class="botao secundario" onclick="fecharJanela()">Voltar</button><button class="botao" onclick="agir('excluirSituacaoCarga', { id: ${esc(JSON.stringify(String(id)))} })">Desfazer envio</button>`);
+}
+
+/* ---------------- SUPERVISAO (Grandeza · Nobre Grandeza · Pesaveis · Blocado) ---------------- */
+function cgSupervisaoHtml() {
+  const d = CG.dados;
+  const ids = CG_GRUPO.filter((id) => (d.depositos || []).some((x) => x.id === id));
+  return `${d.snapshot ? cgEquilibrioHtml('supervisao', 'Equilíbrio da supervisão · Grandeza · Nobre Grandeza · Pesáveis · Blocado') : ''}
+    ${cgPoolPaleteirasHtml('supervisao')}
+    <div class="cg-sup">
+      <div class="cg-sup-colunas">${ids.map((id) => cgColunaSupHtml(id)).join('')}</div>
+      <aside class="cg-sup-lado">${cgPoolHtml()}</aside>
+    </div>
+    ${d.snapshot ? cgCargasTravadasHtml(ids) : ''}`;
+}
+function cgColunaSupHtml(id) {
+  const i = cgIndDep(id), r = i.r;
+  const dep = cgDepInfo(id);
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio && CG.dados.indicadores.equilibrio.supervisao;
+  const marca = eqb && eqb.atrasado === id ? '<span class="cg-eq-tag atras">mais atrasado</span>' : (eqb && eqb.adiantado === id && eqb.status !== 'equilibrado' ? '<span class="cg-eq-tag frente">mais adiantado</span>' : '');
+  return `<section class="cg-cartao cg-sup-col${eqb && eqb.atrasado === id && eqb.status !== 'equilibrado' ? ' atras' : ''}" data-dep="${esc(id)}">
+    <header class="cg-sup-cab"><h3>${esc(dep.nome)}</h3>${r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
+    ${marca}
+    ${r ? `<div class="cg-sup-pct"><b class="cg-num">${cgPct(i.pctPond)}</b><span>concluído</span></div>
+      <div class="cg-mini-barra"><span>Sep.</span><span class="cg-trilho"><i class="azul" style="width:${(i.ind.pctSep || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctSep)}</b></div>
+      <div class="cg-mini-barra"><span>Conf.</span><span class="cg-trilho"><i class="cor-conf" style="width:${(i.ind.pctConf || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctConf)}</b></div>
+      <dl class="cg-sup-dl"><div><dt>Faltam</dt><dd class="cg-num">${cgN(r.restSep + r.restConf)}</dd></div><div><dt>Cargas</dt><dd class="cg-num">${cgN(i.pend)}</dd></div>
+        <div><dt>Previsão</dt><dd class="cg-num">${i.pend ? (i.ind.etaMin == null ? '—' : cgDuracao(i.ind.etaMin)) : 'Pronto'}</dd></div></dl>` : '<p class="cg-vazio-txt">Sem situação de carga.</p>'}
+    <div class="cg-zonas">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
+    ${cgZonaPaleteirasHtml(id)}
+  </section>`;
+}
+
+/* ---------------- UM DEPOSITO ---------------- */
+function cgDepositoHtml(id) {
+  const d = CG.dados, dep = cgDepInfo(id), i = cgIndDep(id), r = i.r, ind = i.ind, s = d.snapshot;
+  const num = (v, rot, cls) => `<div class="cg-num-bloco ${cls || ''}"><b class="cg-num">${v}</b><span>${rot}</span></div>`;
+  const anel = (p, rot, cls) => `<div class="cg-anel-grande ${cls}" style="--p:${Math.max(0, Math.min(100, p || 0)).toFixed(0)}"><div><b class="cg-num">${cgPct(p)}</b><span>${rot}</span></div></div>`;
+  const indicadores = r ? `<section class="cg-cartao cg-dep-painel">
+      <header class="cg-cartao-cab"><h3>${esc(dep.nome)}${dep.grupo ? ' <small class="cg-grupo-tag">supervisão G · NG · P · B</small>' : ''}</h3><span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span></header>
+      <div class="cg-dep-grade">
+        <div class="cg-aneis">${anel(ind.pctSep, 'separado', 'azul')}${anel(ind.pctConf, 'conferido', 'cor-conf')}</div>
+        <div class="cg-nums">
+          ${num(cgN(r.cargas), 'cargas com ' + esc(dep.nome))}${num(cgN(r.concluidas), 'prontas', 'verde')}
+          ${num(cgN(r.emSep), 'em separação')}${num(cgN(r.emConf), 'em conferência')}
+          ${num(cgN(r.naoIniciadas), 'não iniciadas')}${num(cgN(r.h24Pend), '24 h pendentes', r.h24Pend ? 'amarelo' : '')}
+        </div>
+        <div class="cg-ritmo">
+          <div class="cg-ritmo-linha"><span>Faltam</span><b class="cg-num">${cgN(r.restSep)}</b><small>tarefas de separação</small><b class="cg-num">${cgN(r.restConf)}</b><small>de conferência</small></div>
+          <div class="cg-ritmo-linha"><span>Ritmo</span>${ind.ritmoSep == null ? '<small>aparece a partir do 2º envio</small>' :
+            `<b class="cg-num">${cgN(ind.ritmoSep)}</b><small>sep./h</small><b class="cg-num">${cgN(ind.ritmoConf)}</b><small>conf./h</small>${ind.cargasHora != null ? `<b class="cg-num">${cgN(ind.cargasHora)}</b><small>cargas/h</small>` : ''}`}</div>
+          <div class="cg-ritmo-linha cg-realce"><span>Previsão</span><b class="cg-num">${i.pend ? (ind.etaMin == null ? '—' : cgDuracao(ind.etaMin)) : 'Pronto'}</b><small>${i.pend && ind.etaMin != null ? 'no ritmo atual · às ' + cgHoraMais(s.emitido, ind.etaMin) : (i.pend ? 'sem ritmo medido' : 'nada pendente')}</small></div>
+          ${i.pend ? `<div class="cg-ritmo-linha"><span>Com a equipe</span><b class="cg-num">${i.etaEquipe == null ? '—' : cgDuracao(i.etaEquipe)}</b><small>${i.etaEquipe == null ? (ind.porPessoaSep ? 'aloque separadores e conferentes' : 'ritmo por pessoa ainda não medido') : `com ${i.eq.sep} sep. e ${i.eq.conf} conf. agora (${cgN(ind.porPessoaSep)} tarefas/h por separador)`}</small></div>` : ''}
+        </div>
+      </div>
+    </section>` : '';
+  const paradas = ind.paradas || [];
+  return `<div class="cg-dep-layout">
+    <div class="cg-dep-principal">
+      ${indicadores}
+      ${cgEquipeDepHtml(dep)}
+      ${dep.equip === 'PALETEIRA' ? cgPaleteirasDepHtml(id) : (dep.equip === 'CARRINHO' ? cgCarrinhosHtml() : '')}
+      ${r && paradas.length && d.indicadores && d.indicadores.envios > 1 ? `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Por terminar — a mais parada primeiro</h3></header><ul class="cg-lista">${paradas.slice(0, 8).map((p) => `<li class="cg-item">
+        <span class="cg-item-nro">${esc(p.n)}${p.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(p.nm || '—')}<small>${cgCelHtml(p.s[0], 'sep')} ${cgCelHtml(p.s[1], 'conf')} · na fila há ${cgDuracao(p.fila)}</small></span>
+        <span class="cg-item-tempo ${p.parada >= 60 ? 'alerta' : ''}">${p.parada ? 'parada ' + cgDuracao(p.parada) : 'mudou agora'}</span></li>`).join('')}</ul></section>` : ''}
+      ${s ? cgTabelaHtml(id) : ''}
+    </div>
+    <aside class="cg-dep-lado">${cgPoolHtml()}</aside>
+  </div>`;
+}
+
+/* ---------------- ZONAS E BONECOS ---------------- */
+function cgZonas(dep) {
+  const z = [];
+  if (dep.andares) for (let a = dep.andares - 1; a >= 0; a--) z.push({ dep: dep.id, papel: 'SEPARADOR', andar: a, nome: (CG.dados.andares || [])[a] || ('Andar ' + a) });
+  else z.push({ dep: dep.id, papel: 'SEPARADOR', andar: -1, nome: 'Separadores' });
+  z.push({ dep: dep.id, papel: 'CONFERENTE', andar: -1, nome: 'Conferentes' });
+  return z;
+}
+function cgNaZona(z) {
+  return (CG.dados.equipe || []).filter((p) => p.dep === z.dep && p.papel === z.papel && (z.andar < 0 || p.andar === z.andar))
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+}
+function cgBonecoHtml(p, lugar) {
+  const pode = CG.dados.podeEditar;
+  const papel = lugar ? (lugar.papel === 'CONFERENTE' ? 'conf' : 'sep') : 'livre';
+  const tt = [cgTitulo(p.nome), p.funcao ? cgTitulo(p.funcao) : '', p.equipe].filter(Boolean).join(' · ');
+  return `<div class="cg-boneco ${papel}" ${pode ? `draggable="true" ondragstart="cgArrastar(event, 'pessoa', ${jsArg(p.k)})" ondragend="cgSoltouFim()"` : ''}
+      data-k="${esc(p.k)}" title="${esc(tt)}" ${pode ? `role="button" tabindex="0" onclick="cgMenuPessoa(${jsArg(p.k)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cgMenuPessoa(${jsArg(p.k)})}"` : ''}>
+    <span class="cg-boneco-fig">${CG_SVG.pessoa}${cgTurnoCurto(p.equipe) ? `<i>${esc(cgTurnoCurto(p.equipe))}</i>` : ''}</span>
+    <span class="cg-boneco-nome">${esc(cgNomeCurto(p.nome))}</span>
+  </div>`;
+}
+function cgZonaHtml(z, compacta) {
+  const gente = cgNaZona(z), pode = CG.dados.podeEditar;
+  return `<div class="cg-zona ${z.papel === 'CONFERENTE' ? 'conf' : 'sep'}${z.andar >= 0 ? ' andar' : ''}${compacta ? ' compacta' : ''}" data-dep="${esc(z.dep)}" data-papel="${esc(z.papel)}" data-andar="${z.andar}"
+      ${pode ? `ondragover="cgSobreZona(event, 'pessoa')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPessoa(event, ${jsArg(z.dep)}, ${jsArg(z.papel)}, ${z.andar})"` : ''}>
+    <div class="cg-zona-cab"><span>${esc(z.nome)}</span><b class="cg-num">${gente.length}</b></div>
+    <div class="cg-zona-gente">${gente.map((p) => cgBonecoHtml(p, p)).join('') || `<span class="cg-zona-vazia">${pode ? 'Arraste alguém para cá' : 'Ninguém alocado'}</span>`}</div>
+  </div>`;
+}
+function cgEquipeDepHtml(dep) {
+  const i = cgIndDep(dep.id);
+  return `<section class="cg-cartao cg-equipe-dep">
+    <header class="cg-cartao-cab"><h3>Equipe ${dep.andares ? 'do flowrack — pessoas por andar' : 'agora'}</h3>
+      <span class="cg-selo neutro">${i.eq.sep} separador${i.eq.sep === 1 ? '' : 'es'} · ${i.eq.conf} conferente${i.eq.conf === 1 ? '' : 's'}</span></header>
+    <div class="cg-zonas${dep.andares ? ' predio' : ' lado'}">${cgZonas(dep).map((z) => cgZonaHtml(z)).join('')}</div>
+    ${i.r && i.r.restSep && i.eq.sep ? `<p class="cg-nota">${cgN(Math.round(i.porSeparador))} tarefas de separação por separador alocado.</p>` : ''}
+  </section>`;
+}
+
+/* ---------------- DISPONIVEIS (o Quadro do CD) ---------------- */
+function cgDisponiveis() {
+  const alocados = {};
+  (CG.dados.equipe || []).forEach((p) => { alocados[p.k] = true; });
+  const q = cgNorm(CG.buscaPessoa);
+  return (CG.dados.pessoas || []).filter((p) => !alocados[p.k] && p.situacao === 'ATIVO' &&
+    (!CG.turno || p.equipe === CG.turno) && (!CG.funcao || p.funcao === CG.funcao) && (!q || cgNorm(p.nome).indexOf(q) !== -1))
+    .sort((a, b) => cgPesoFuncao(a.funcao) - cgPesoFuncao(b.funcao) || String(a.nome).localeCompare(String(b.nome)));
+}
+function cgPesoFuncao(f) { const t = cgNorm(f); return /SEPARAD/.test(t) ? 0 : /CONFER/.test(t) ? 1 : /PALETEIR|EMPILHAD|AUXILIAR|REPOSIT|ARMAZEN/.test(t) ? 2 : 3; }
+function cgPoolHtml() {
+  const d = CG.dados, pessoas = d.pessoas || [];
+  const turnos = Array.from(new Set(pessoas.map((p) => p.equipe).filter(Boolean))).sort();
+  const contaFun = {};
+  pessoas.forEach((p) => { if (p.funcao) contaFun[p.funcao] = (contaFun[p.funcao] || 0) + 1; });
+  const funcoes = Object.keys(contaFun).sort((a, b) => cgPesoFuncao(a) - cgPesoFuncao(b) || contaFun[b] - contaFun[a]);
+  const lista = cgDisponiveis(), pode = d.podeEditar;
+  return `<section class="cg-cartao cg-pool${pode ? ' editavel' : ''}" ${pode ? `ondragover="cgSobreZona(event, 'pessoa')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPessoa(event, '', '', -1)"` : ''}>
+    <header class="cg-cartao-cab"><h3>Disponíveis</h3><span class="cg-selo neutro cg-pool-conta">${lista.length}</span></header>
+    ${d.avisoQuadro ? `<p class="cg-aviso">${esc(d.avisoQuadro)}</p>` : ''}
+    <div class="cg-chips pequenos" role="group" aria-label="Turno">
+      <button type="button" class="cg-chip${!CG.turno ? ' ativo' : ''}" onclick="cgFiltroPessoa('turno', '')">Todos</button>
+      ${turnos.map((t) => `<button type="button" class="cg-chip${CG.turno === t ? ' ativo' : ''}" onclick="cgFiltroPessoa('turno', ${jsArg(t)})">${esc(t)}</button>`).join('')}
+    </div>
+    <div class="cg-pool-filtros">
+      <label class="cg-busca"><span class="sr">Buscar pessoa</span><input id="cg-busca-pessoa" type="search" placeholder="Buscar pelo nome" value="${esc(CG.buscaPessoa)}" oninput="cgBuscarPessoa(this.value)" autocomplete="off"></label>
+      <select aria-label="Função" onchange="cgFiltroPessoa('funcao', this.value)"><option value="">Todas as funções</option>${funcoes.map((f) => `<option value="${esc(f)}"${CG.funcao === f ? ' selected' : ''}>${esc(cgTitulo(f))} (${contaFun[f]})</option>`).join('')}</select>
+    </div>
+    <div class="cg-pool-gente">${cgPoolGenteHtml(lista)}</div>
+    ${pode ? '<p class="cg-nota">Arraste para um depósito ou toque na pessoa para escolher onde ela fica.</p>' : ''}
+  </section>`;
+}
+function cgPoolGenteHtml(lista) {
+  if (!lista.length) return `<p class="cg-vazio-txt">${(CG.dados.pessoas || []).length ? 'Ninguém disponível neste filtro.' : 'Sem a lista do Quadro do CD.'}</p>`;
+  return lista.map((p) => cgBonecoHtml(p, null)).join('');
+}
+function cgFiltroPessoa(campo, v) { CG[campo] = v; if (campo === 'turno') gravarLocal('gsl_carga_turno', v); cgDesenhar(); }
+let CG_BUSCA_P = 0;
+function cgBuscarPessoa(v) {
+  CG.buscaPessoa = v;
+  clearTimeout(CG_BUSCA_P);
+  CG_BUSCA_P = setTimeout(() => {
+    const lista = cgDisponiveis();
+    document.querySelectorAll('.cg-pool-gente').forEach((x) => { x.innerHTML = cgPoolGenteHtml(lista); });
+    document.querySelectorAll('.cg-pool-conta').forEach((x) => { x.textContent = lista.length; });
+  }, 120);
+}
+
+/* ---------------- QUADRO DA EQUIPE ---------------- */
+function cgEquipeHtml() {
+  const d = CG.dados, total = (d.equipe || []).length;
+  const turnos = Array.from(new Set((d.equipe || []).map((p) => p.equipe).filter(Boolean))).sort();
+  return `<div class="cg-quadro">
+    <aside class="cg-quadro-lado">${cgPoolHtml()}</aside>
+    <div class="cg-quadro-principal">
+      <div class="cg-quadro-topo"><span><b class="cg-num">${total}</b> ${total === 1 ? 'pessoa alocada' : 'pessoas alocadas'}${turnos.length ? ' · ' + turnos.map(esc).join(', ') : ''}</span>
+        ${d.podeEditar && total ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgLimparAlocacao()">Limpar alocação do turno</button>' : ''}</div>
+      <div class="cg-quadro-deps">${(d.depositos || []).map((dep) => {
+        const i = cgIndDep(dep.id);
+        return `<section class="cg-cartao cg-quadro-dep">
+          <header class="cg-cartao-cab"><h3>${esc(dep.nome)}</h3>${i.r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
+          ${i.r ? `<p class="cg-quadro-carga">${cgN(i.r.restSep)} tarefas de separação · ${cgN(i.r.restConf)} de conferência</p>` : ''}
+          <div class="cg-zonas${dep.andares ? ' predio' : ''}">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
+        </section>`;
+      }).join('')}</div>
+    </div>
+  </div>`;
+}
+function cgLimparAlocacao() {
+  const eq = CG.dados.equipe || [];
+  const turnos = Array.from(new Set(eq.map((p) => p.equipe).filter(Boolean))).sort();
+  abrirJanela('Limpar alocação', `<p>As pessoas voltam para <b>Disponíveis</b> (troca de turno). Escolha de quem:</p>
+    <div class="cg-opcoes">${turnos.map((t) => `<button type="button" class="cg-opcao" onclick="agir('limparAlocacaoCarga', { equipe: ${esc(JSON.stringify(t))} })">Só o ${esc(t)} <small>${eq.filter((p) => p.equipe === t).length} pessoas</small></button>`).join('')}
+    <button type="button" class="cg-opcao" onclick="agir('limparAlocacaoCarga', {})">Todo mundo <small>${eq.length} pessoas</small></button></div>`,
+    '<button class="botao secundario" onclick="fecharJanela()">Voltar</button>');
+}
+
+/* ---------------- ARRASTAR (pessoa ou paleteira) ---------------- */
+function cgArrastar(ev, tipo, chave) {
+  CG.arrastando = { tipo: tipo, chave: String(chave) };
+  try { ev.dataTransfer.setData('text/plain', 'gsl-' + tipo + ':' + chave); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+  document.documentElement.classList.add('cg-arrastando', 'cg-arrastando-' + tipo);
+}
+function cgSoltouFim() {
+  CG.arrastando = null;
+  document.documentElement.classList.remove('cg-arrastando', 'cg-arrastando-pessoa', 'cg-arrastando-paleteira');
+  document.querySelectorAll('.sobre').forEach((z) => z.classList.remove('sobre'));
+}
+function cgSobreZona(ev, tipo) {
+  if (!CG.arrastando || CG.arrastando.tipo !== tipo) return;
+  ev.preventDefault(); ev.stopPropagation();
+  try { ev.dataTransfer.dropEffect = 'move'; } catch (e) {}
+  ev.currentTarget.classList.add('sobre');
+}
+function cgSaiuZona(ev) { if (!ev.currentTarget.contains(ev.relatedTarget)) ev.currentTarget.classList.remove('sobre'); }
+function cgArrastado(ev, tipo) {
+  let a = CG.arrastando && CG.arrastando.tipo === tipo ? CG.arrastando.chave : '';
+  try { const t = ev.dataTransfer.getData('text/plain'); if (t.indexOf('gsl-' + tipo + ':') === 0) a = t.slice(tipo.length + 5); } catch (e) {}
+  return a;
+}
+function cgSoltouPessoa(ev, dep, papel, andar) {
+  const k = cgArrastado(ev, 'pessoa');
+  if (!k) return;
+  ev.preventDefault(); ev.stopPropagation();
+  cgSoltouFim();
+  cgMover(k, dep ? { dep: dep, papel: papel, andar: andar } : null);
+}
+function cgMenuPessoa(k) {
+  if (!CG.dados.podeEditar) return;
+  const p = cgPessoa(k), aqui = cgLugarDe(k), deps = CG.dados.depositos || [];
+  const igual = (z) => aqui && aqui.dep === z.dep && aqui.papel === z.papel && (z.andar < 0 || aqui.andar === z.andar);
+  abrirJanela('Onde ' + cgNomeCurto(p.nome) + ' fica?', `<div class="cg-mover">
+    <p class="cg-mover-quem"><b>${esc(cgTitulo(p.nome))}</b><span>${esc([p.funcao ? cgTitulo(p.funcao) : '', p.equipe].filter(Boolean).join(' · '))}${aqui ? ' · agora em ' + esc(cgNomeDep(aqui.dep)) : ''}</span></p>
+    ${deps.map((dep) => `<div class="cg-mover-dep"><span class="cg-mover-nome">${esc(dep.nome)}</span><div class="cg-mover-zonas">${cgZonas(dep).map((z) =>
+      `<button type="button" class="cg-opcao${igual(z) ? ' atual' : ''}" ${igual(z) ? 'disabled' : ''} onclick="fecharJanela(); cgMover(${jsArg(k)}, { dep: ${jsArg(z.dep)}, papel: ${jsArg(z.papel)}, andar: ${z.andar} })">${esc(z.andar >= 0 ? z.nome : (z.papel === 'CONFERENTE' ? 'Conferente' : 'Separador'))}</button>`).join('')}</div></div>`).join('')}
+    ${aqui ? `<button type="button" class="cg-opcao tirar" onclick="fecharJanela(); cgMover(${jsArg(k)}, null)">Voltar para disponíveis</button>` : ''}
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button>');
+}
+function cgMover(k, destino) {
+  const p = cgPessoa(k), antes = (CG.dados.equipe || []).slice(), atual = cgLugarDe(k);
+  if (destino && atual && atual.dep === destino.dep && atual.papel === destino.papel && (destino.andar < 0 || atual.andar === destino.andar)) return;
+  if (!destino && !atual) return;
+  const params = { pessoa: { k: k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '' },
+    destino: destino ? { dep: destino.dep, papel: destino.papel, andar: destino.andar >= 0 ? destino.andar : '' } : null };
+  cgAoVivo('moverPessoaCarga', params, () => {
+    const lista = (CG.dados.equipe || []).filter((x) => x.k !== k);
+    if (destino) lista.push({ k: k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '', dep: destino.dep, papel: destino.papel, andar: destino.andar >= 0 ? destino.andar : -1 });
+    CG.dados.equipe = lista;
+  }, () => { CG.dados.equipe = antes; }, destino ? cgNomeCurto(p.nome) + ' → ' + cgNomeDep(destino.dep) + (destino.andar >= 0 ? ' (' + (CG.dados.andares || [])[destino.andar] + ')' : '') : cgNomeCurto(p.nome) + ' voltou para disponíveis');
+}
+
+/* ---------------- PALETEIRAS (pool do CD) E CARRINHOS (Miudeza) ---------------- */
+function cgIconeEquipHtml(e, comDep) {
+  const pode = CG.dados.podeEditar, carrinho = e.tipo === 'CARRINHO';
+  const nome = (carrinho ? 'Carrinho ' : 'Paleteira ') + e.numero;
+  const onde = e.estado === 'USO' ? (carrinho ? 'em uso' : 'em uso em ' + cgNomeDep(e.dep)) : (e.estado === 'LIVRE' ? (carrinho ? 'livre' : 'livre no pool') : 'em manutenção');
+  const clique = carrinho ? `cgEquipGirar(${e.numero})` : `cgMenuPaleteira(${e.numero})`;
+  const arrastar = !carrinho && pode ? `draggable="true" ondragstart="cgArrastar(event, 'paleteira', ${e.numero})" ondragend="cgSoltouFim()"` : '';
+  return `<button type="button" class="cg-equip est-${e.estado.toLowerCase()}" ${pode ? `onclick="${clique}"` : 'disabled'} ${arrastar}
+      data-numero="${e.numero}" title="${esc(nome + ': ' + onde + (pode ? ' — toque para mudar' : ''))}" aria-label="${esc(nome + ': ' + onde)}">
+    ${carrinho ? CG_SVG.carrinho : CG_SVG.paleteira}<span class="cg-equip-num cg-num">${e.numero}</span>
+    ${comDep && !carrinho ? `<span class="cg-equip-dep">${e.estado === 'USO' ? esc(CG_CURTO[e.dep] || e.dep) : (e.estado === 'LIVRE' ? 'livre' : 'manut.')}</span>` : ''}
+    ${e.estado === 'MANUTENCAO' ? `<span class="cg-equip-chave">${CG_SVG.chave}</span>` : ''}</button>`;
+}
+/* O pool inteiro: as 12 (ou quantas forem) paleteiras do CD, com o estado e o deposito de cada uma. */
+function cgPoolPaleteirasHtml(onde) {
+  const pal = cgPaleteiras(), pode = CG.dados.podeEditar;
+  const livres = pal.filter((e) => e.estado === 'LIVRE'), manut = pal.filter((e) => e.estado === 'MANUTENCAO');
+  const porDep = CG_GRUPO.map((id) => [id, pal.filter((e) => e.estado === 'USO' && e.dep === id).length]);
+  const zona = (estado, rot, lista) => `<div class="cg-pal-zona z-${estado.toLowerCase()}" ${pode ? `ondragover="cgSobreZona(event, 'paleteira')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPaleteira(event, ${jsArg(estado)}, '')"` : ''}>
+      <div class="cg-zona-cab"><span>${rot}</span><b class="cg-num">${lista.length}</b></div><div class="cg-equips">${lista.map((e) => cgIconeEquipHtml(e, false)).join('') || '<span class="cg-zona-vazia">nenhuma</span>'}</div></div>`;
+  return `<section class="cg-cartao cg-pal-pool" aria-label="Paleteiras do CD">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.paleteira}Paleteiras do CD</h3>
+      <span class="cg-equip-resumo"><b class="cg-num">${livres.length}</b> livres de ${pal.length}${manut.length ? ` · <span class="alerta">${manut.length} em manutenção</span>` : ''}
+      ${pode ? `<span class="cg-qtd" role="group" aria-label="Quantidade de paleteiras no CD"><button type="button" onclick="cgQuantidade('PALETEIRA', -1)" aria-label="Uma paleteira a menos">−</button><b class="cg-num">${pal.length}</b><button type="button" onclick="cgQuantidade('PALETEIRA', 1)" aria-label="Uma paleteira a mais">+</button></span>` : ''}</span></header>
+    ${onde === 'supervisao' ? `<div class="cg-pal-zonas">${zona('LIVRE', 'Livres no pool', livres)}${zona('MANUTENCAO', 'Em manutenção', manut)}</div>
+      <p class="cg-nota">Arraste uma paleteira para a coluna do depósito (ou toque nela) para dizer onde está em uso; de volta ao pool, fica livre.</p>` :
+      `<div class="cg-equips todas">${pal.map((e) => cgIconeEquipHtml(e, true)).join('')}</div>
+      <div class="cg-pal-uso">${porDep.map(([id, n]) => `<span><b class="cg-num">${n}</b> ${esc(cgNomeDep(id))}</span>`).join('')}</div>`}
+  </section>`;
+}
+/* A coluna do deposito na supervisao: as paleteiras em uso nele (soltar aqui = em uso aqui). */
+function cgZonaPaleteirasHtml(id) {
+  const pal = cgPaleteiras().filter((e) => e.estado === 'USO' && e.dep === id), pode = CG.dados.podeEditar;
+  return `<div class="cg-pal-zona z-uso" ${pode ? `ondragover="cgSobreZona(event, 'paleteira')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPaleteira(event, 'USO', ${jsArg(id)})"` : ''}>
+    <div class="cg-zona-cab"><span>Paleteiras em uso</span><b class="cg-num">${pal.length}</b></div>
+    <div class="cg-equips">${pal.map((e) => cgIconeEquipHtml(e, false)).join('') || `<span class="cg-zona-vazia">${pode ? 'Arraste do pool' : 'nenhuma'}</span>`}</div>
+  </div>`;
+}
+/* No deposito: as paleteiras em uso aqui e quantas estao livres no pool (pegar e devolver). */
+function cgPaleteirasDepHtml(id) {
+  const todas = cgPaleteiras(), aqui = todas.filter((e) => e.estado === 'USO' && e.dep === id);
+  const livres = todas.filter((e) => e.estado === 'LIVRE').length, pode = CG.dados.podeEditar;
+  const outros = CG_GRUPO.filter((x) => x !== id).map((x) => [x, todas.filter((e) => e.estado === 'USO' && e.dep === x).length]);
+  return `<section class="cg-cartao cg-equip-cartao">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.paleteira}Paleteiras</h3>
+      <span class="cg-equip-resumo"><b class="cg-num">${aqui.length}</b> em uso aqui · <b class="cg-num">${livres}</b> ${livres === 1 ? 'livre' : 'livres'} no pool do CD</span></header>
+    <div class="cg-pal-zona z-uso" ${pode ? `ondragover="cgSobreZona(event, 'paleteira')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPaleteira(event, 'USO', ${jsArg(id)})"` : ''}>
+      <div class="cg-equips">${aqui.map((e) => cgIconeEquipHtml(e, false)).join('') || '<span class="cg-zona-vazia">Nenhuma paleteira em uso aqui.</span>'}</div>
+    </div>
+    <div class="cg-equip-rodape">
+      <span class="cg-pal-uso">${outros.map(([x, n]) => `<span>${esc(cgNomeDep(x))} <b class="cg-num">${n}</b></span>`).join('')}</span>
+      ${pode ? `<span class="cg-pal-botoes"><button type="button" class="cg-btn cg-btn-claro" ${livres ? '' : 'disabled'} onclick="cgPegarPaleteira(${jsArg(id)})">Pegar uma do pool</button>
+        ${aqui.length ? `<button type="button" class="cg-btn cg-btn-claro" onclick="cgEquipEstado('PALETEIRA', ${aqui[aqui.length - 1].numero}, 'LIVRE', '')">Devolver uma</button>` : ''}</span>` : ''}
+    </div>
+    <p class="cg-nota">Grandeza, Nobre Grandeza, Pesáveis e Blocado dividem o mesmo pool de paleteiras (mesma supervisão).</p>
+  </section>`;
+}
+function cgCarrinhosHtml() {
+  const car = cgCarrinhos(), pode = CG.dados.podeEditar;
+  const n = (est) => car.filter((e) => e.estado === est).length;
+  return `<section class="cg-cartao cg-equip-cartao">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.carrinho}Carrinhos</h3>
+      <span class="cg-equip-resumo"><b class="cg-num">${n('LIVRE')}</b> ${n('LIVRE') === 1 ? 'livre' : 'livres'} · ${n('USO')} em uso${n('MANUTENCAO') ? ` · <span class="alerta">${n('MANUTENCAO')} em manutenção</span>` : ''}</span></header>
+    <div class="cg-equips">${car.map((e) => cgIconeEquipHtml(e, false)).join('') || '<p class="cg-vazio-txt">Nenhum carrinho cadastrado.</p>'}</div>
+    <div class="cg-equip-rodape">
+      <span class="cg-legenda-equip"><i class="livre"></i>Livre <i class="uso"></i>Em uso <i class="manutencao"></i>Manutenção</span>
+      ${pode ? `<span class="cg-qtd" role="group" aria-label="Quantidade de carrinhos"><button type="button" onclick="cgQuantidade('CARRINHO', -1)" aria-label="Um carrinho a menos">−</button><b class="cg-num">${car.length}</b><button type="button" onclick="cgQuantidade('CARRINHO', 1)" aria-label="Um carrinho a mais">+</button></span>` : ''}
+    </div>
+    ${pode ? '<p class="cg-nota">Toque para mudar: livre → em uso → manutenção.</p>' : ''}
+  </section>`;
+}
+function cgMenuPaleteira(numero) {
+  const e = cgPaleteiras().find((x) => x.numero === numero);
+  if (!e || !CG.dados.podeEditar) return;
+  const opc = (rot, estado, dep, atual) => `<button type="button" class="cg-opcao${atual ? ' atual' : ''}" ${atual ? 'disabled' : ''} onclick="fecharJanela(); cgEquipEstado('PALETEIRA', ${numero}, ${jsArg(estado)}, ${jsArg(dep)})">${rot}</button>`;
+  abrirJanela('Paleteira ' + numero, `<div class="cg-mover">
+    <p class="cg-mover-quem"><b>Paleteira ${numero}</b><span>${e.estado === 'USO' ? 'em uso em ' + esc(cgNomeDep(e.dep)) : (e.estado === 'LIVRE' ? 'livre no pool' : 'em manutenção')}</span></p>
+    <div class="cg-mover-dep"><span class="cg-mover-nome">Em uso em</span><div class="cg-mover-zonas">${CG_GRUPO.map((id) => opc(esc(cgNomeDep(id)), 'USO', id, e.estado === 'USO' && e.dep === id)).join('')}</div></div>
+    <div class="cg-mover-dep"><span class="cg-mover-nome">Ou</span><div class="cg-mover-zonas">${opc('Livre no pool', 'LIVRE', '', e.estado === 'LIVRE')}${opc('Em manutenção', 'MANUTENCAO', '', e.estado === 'MANUTENCAO')}</div></div>
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button>');
+}
+function cgSoltouPaleteira(ev, estado, dep) {
+  const n = Number(cgArrastado(ev, 'paleteira'));
+  if (!n) return;
+  ev.preventDefault(); ev.stopPropagation();
+  cgSoltouFim();
+  cgEquipEstado('PALETEIRA', n, estado, dep);
+}
+function cgEquipGirar(numero) {
+  const e = cgCarrinhos().find((x) => x.numero === numero);
+  if (!e) return;
+  cgEquipEstado('CARRINHO', numero, { LIVRE: 'USO', USO: 'MANUTENCAO', MANUTENCAO: 'LIVRE' }[e.estado] || 'LIVRE', '');
+}
+function cgEquipEstado(tipo, numero, estado, dep) {
+  const e = (CG.dados.equipamentos || []).find((x) => x.tipo === tipo && x.numero === numero);
+  if (!e || (e.estado === estado && (estado !== 'USO' || tipo !== 'PALETEIRA' || e.dep === dep))) return;
+  const antes = { estado: e.estado, dep: e.dep };
+  cgAoVivo('equipamentoCarga', { tipo: tipo, numero: numero, estado: estado, dep: dep || '' },
+    () => { e.estado = estado; if (tipo === 'PALETEIRA') e.dep = estado === 'USO' ? dep : ''; },
+    () => { e.estado = antes.estado; e.dep = antes.dep; });
+}
+function cgPegarPaleteira(dep) {
+  const livre = cgPaleteiras().filter((e) => e.estado === 'LIVRE').sort((a, b) => a.numero - b.numero)[0];
+  if (!livre) return avisar('Nenhuma paleteira livre no pool agora.', true);
+  cgEquipEstado('PALETEIRA', livre.numero, 'USO', dep);
+}
+function cgQuantidade(tipo, delta) {
+  const lista = (CG.dados.equipamentos || []).filter((x) => x.tipo === tipo);
+  const atual = lista.length, qtd = Math.max(0, Math.min(60, atual + delta));
+  if (qtd === atual) return;
+  const antes = (CG.dados.equipamentos || []).slice();
+  cgAoVivo('quantidadeEquipamentoCarga', { tipo: tipo, quantidade: qtd }, () => {
+    const outros = CG.dados.equipamentos.filter((x) => x.tipo !== tipo || x.numero <= qtd);
+    for (let n = atual + 1; n <= qtd; n++) outros.push({ id: '', tipo: tipo, numero: n, estado: 'LIVRE', dep: tipo === 'CARRINHO' ? 'MIUDEZA' : '' });
+    CG.dados.equipamentos = outros;
+  }, () => { CG.dados.equipamentos = antes; });
+}
+
+/*
+ * GRAVACAO AO VIVO: a tela muda na hora (aplicar), o servidor confere e devolve o estado verdadeiro
+ * (equipe ou equipamentos, e a geracao nova). Recusou: volta como estava (desfazer).
+ * Canal barrado (HTTP 403): vai pelo agir, que grava pela pagina.
+ */
+async function cgAoVivo(acao, params, aplicar, desfazer, recado) {
+  if (CANAL_BARRADO) return agir(acao, params, recado);
+  aplicar(); cgDesenhar();
+  CG.pendentes++;
+  try {
+    const r = await executarAcaoSrv(acao, params);
+    if (r && r.ok === false) throw new Error(r.erro || 'Não foi possível gravar.');
+    if (r && r.equipe) CG.dados.equipe = r.equipe;
+    if (r && r.equipamentos) CG.dados.equipamentos = r.equipamentos;
+    if (r && r.g) { CG.g = r.g; CG.dados.g = r.g; CG_VIVO.conhecer(r.g); }
+    esquecerTela('carga');
+    if (paginaAtual === 'carga') cgDesenhar();
+    if (r && r.recado) avisar(r.recado); else if (recado) avisar(recado);
+  } catch (e) {
+    desfazer();
+    if (paginaAtual === 'carga') cgDesenhar();
+    if (!(await painelSaiu(e, 'carga'))) avisar(explicarErro(e), true);
+  } finally { CG.pendentes--; }
+}
+
+/*
+ * ---------------- AO VIVO: O ADAPTADOR ----------------
+ * Toda a pergunta "alguem mexeu?" passa por este objeto, e so por ele: iniciar(g, aoMudar),
+ * parar(), conhecer(g) (a propria tela gravou e ja sabe a geracao nova) e passo() (chamado pelo
+ * relogio da tela). Hoje ele pergunta ao servidor a geracao (acaoGeracaoCarga: tres numeros das
+ * tabelas CARGA_*) e, quando ela muda, chama aoMudar(g). Se um dia o ao vivo for para outro
+ * servico (Firebase, por exemplo), troca-se so este objeto: a tela continua chamando os mesmos
+ * quatro metodos.
+ */
+const CG_VIVO = {
+  g: '', ligado: false, aoMudar: null, ultimo: 0, indo: false, intervalo: 12000, medidas: [],
+  iniciar(g, aoMudar) { this.g = g || ''; this.aoMudar = aoMudar; this.ligado = true; },
+  parar() { this.ligado = false; this.aoMudar = null; },
+  conhecer(g) { if (g) this.g = g; },
+  /* Uma pergunta, se ja deu o intervalo. intervalo = Infinity: nao pergunta (ninguem mexendo no computador). */
+  async passo(intervalo) {
+    if (!this.ligado || this.indo || !isFinite(intervalo) || Date.now() - this.ultimo < intervalo) return;
+    this.ultimo = Date.now(); this.indo = true;
+    try {
+      const t0 = Date.now();
+      const r = await executarAcaoSrv('geracaoCarga', {});
+      this.medidas.push(Date.now() - t0); if (this.medidas.length > 20) this.medidas.shift();
+      if (this.ligado && r && r.g && r.g !== this.g) { const g = r.g; if (this.aoMudar) await this.aoMudar(g); this.g = g; }
+    } catch (e) { /* ao vivo e silencioso: a proxima pergunta tenta de novo */ }
+    finally { this.indo = false; }
+  }
+};
+/* A geracao mudou: busca a tela de novo e redesenha (se ninguem estiver no meio de um arrasto ou de uma janela). */
+async function cgMudouLaFora() {
+  if (paginaAtual !== 'carga') return;
+  const params = paramsAtual || {};
+  const t = await carregarTelaSrv('carga', params);
+  CACHE_TELAS[chaveTela('carga', params)] = { resposta: t, quando: Date.now() };
+  const janelaAberta = el('janela') && !el('janela').classList.contains('oculto');
+  if (paginaAtual === 'carga' && !CG.pendentes && !CG.arrastando && !janelaAberta) pintar('carga', t, true);
+}
+
+/* ---------------- O RELOGIO DA TELA ---------------- */
+function cgLigarRelogio() {
+  if (!CG_VIVO.ligado) CG_VIVO.iniciar(CG.g, cgMudouLaFora); else CG_VIVO.conhecer(CG.g);
+  if (!CG.timer) CG.timer = setInterval(cgTique, 1000);
+}
+function cgDesligar() {
+  if (CG.timer) { clearInterval(CG.timer); CG.timer = 0; }
+  CG_VIVO.parar();
+  document.documentElement.classList.remove('cg-ativo', 'cg-tv', 'cg-arrastando');
+  CG.tv = false; CG.desenhadoEm = 0;
+  if (CG.observador) { CG.observador.disconnect(); CG.observador = null; }
+}
+/* Saiu da tela (outra tela pintou por cima): o fundo calmo e a pergunta ao vivo param na hora. */
+function cgVigiarSaida() {
+  if (CG.observador || typeof MutationObserver === 'undefined' || !el('pagina')) return;
+  CG.observador = new MutationObserver(() => { if (!el('cg') || paginaAtual !== 'carga') cgDesligar(); });
+  CG.observador.observe(el('pagina'), { childList: true });
+}
+let CG_SEG = 0;
+async function cgTique() {
+  if (paginaAtual !== 'carga' || !SESSAO || !el('cg')) { cgDesligar(); return; }
+  if (++CG_SEG % 20 === 0) {
+    const f = el('cg-fresco'), idade = cgIdade();
+    if (f && idade != null) { f.textContent = cgIdadeTexto(idade); f.className = 'cg-fresco ' + (idade > 60 ? 'velho' : 'novo'); }
+    const rl = el('cg-relogio'); if (rl) rl.textContent = cgHoraAgora();
+  }
+  if (CG.tv && CG.tvGiro && Date.now() - CG.tvGiro > 25000 && !document.hidden) cgGirarTv();
+  if (document.hidden || CANAL_BARRADO || CG.pendentes || CG.arrastando) return;
+  const quieto = Date.now() - (typeof ULTIMA_ATIVIDADE === 'number' ? ULTIMA_ATIVIDADE : Date.now());
+  CG_VIVO.passo(CG.tv ? CG_VIVO.intervalo : (quieto > 45 * 60000 ? Infinity : (quieto > 10 * 60000 ? 60000 : CG_VIVO.intervalo)));
+}
+
+/* ---------------- MODO TV ---------------- */
+function cgModoTv() {
+  CG.tv = !CG.tv;
+  document.documentElement.classList.toggle('cg-tv', CG.tv);
+  CG.tvGiro = CG.tv ? Date.now() : 0;
+  if (CG.tv) avisar('Modo TV: a tela passa pela visão geral, pela supervisão e pelos depósitos a cada 25 s. Esc sai.');
+  cgDesenhar();
+}
+function cgGirarTv() {
+  const s = CG.dados.snapshot;
+  const ordem = ['cargas', 'geral', 'supervisao'].concat(((s && s.depositos) || []).filter((d) => { const r = s.resumo.dep[d.id]; return r && r.cargas; }).map((d) => d.id));
+  CG.aba = ordem[(ordem.indexOf(CG.aba) + 1) % ordem.length];
+  CG.tvGiro = Date.now();
+  cgDesenhar();
+}
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && CG.tv && paginaAtual === 'carga') cgModoTv(); });
+
+/* ---------------- ENVIO DO PDF ---------------- */
+function cgSobre(ev) { if (!CG.dados || !CG.dados.podeEditar) return; ev.preventDefault(); ev.currentTarget.classList.add('sobre'); }
+function cgSaiu(ev) { ev.currentTarget.classList.remove('sobre'); }
+function cgSoltouNaTela(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('sobre');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  cgAbrirEnvio();
+  if (f) cgArquivoEscolhido(f);
+}
+function cgAbrirEnvio() {
+  CG.leitura = null;
+  abrirJanela('Enviar situação de carga', `<div class="cg-envio">
+    <label class="cg-soltar" id="cg-soltar" ondragover="cgSobre(event)" ondragleave="cgSaiu(event)" ondrop="cgSoltouNaJanela(event)">
+      <span class="cg-soltar-ico">${CG_SVG.pdf}</span>
+      <b>Arraste o PDF da situação de carga aqui</b>
+      <span>ou <u>escolha o arquivo</u> — "Situação de Expedição das Cargas em Processo"</span>
+      <input id="cg-arquivo" type="file" accept="application/pdf,.pdf" onchange="if(this.files[0]) cgArquivoEscolhido(this.files[0])">
+    </label>
+    <button type="button" class="cg-link" onclick="cgColarTexto()">O PDF não abre? Cole o texto do relatório</button>
+    <div id="cg-previa" class="cg-previa" aria-live="polite"></div>
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" id="cg-salvar" disabled onclick="cgSalvarLeitura()">Salvar situação</button>');
+}
+function cgSoltouNaJanela(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('sobre');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (f) cgArquivoEscolhido(f);
+}
+function cgColarTexto() {
+  const p = el('cg-previa'); if (!p) return;
+  p.innerHTML = `<label class="cg-rotulo" for="cg-texto">Abra o PDF, selecione tudo (Ctrl+A), copie e cole aqui:</label>
+    <textarea id="cg-texto" rows="7" placeholder="762480 TIM-B-XX-... BI-TRUCK 15 X X X X ..."></textarea>
+    <button type="button" class="botao secundario" onclick="cgLerTextoColado()">Ler o texto</button>`;
+}
+function cgLerTextoColado() { const r = cgLerTexto(val('cg-texto')); r.arquivo = 'texto colado'; cgMostrarPrevia(r); }
+
+/* pdf.js: da cdnjs na versao online; da pasta vendor na GSL-Local (o montar-local.js copia os mesmos arquivos). */
+let CG_PDFJS = null;
+function cgBasePdfJs() {
+  return MODO_LOCAL ? 'vendor/pdfjs-' + CG_PDFJS_VERSAO + '/' : 'https:\/\/cdnjs.cloudflare.com\/ajax\/libs\/pdf.js\/' + CG_PDFJS_VERSAO + '\/';
+}
+function cgScript(src) {
+  return new Promise((ok, falha) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => ok();
+    s.onerror = () => falha(new Error('Não consegui carregar o leitor de PDF. Confira a internet ou use "Cole o texto do relatório".'));
+    document.head.appendChild(s);
+  });
+}
+function cgCarregarPdfJs() {
+  if (window.pdfjsLib && window.pdfjsWorker) return Promise.resolve(window.pdfjsLib);
+  if (CG_PDFJS) return CG_PDFJS;
+  const base = cgBasePdfJs();
+  // O "trabalhador" do pdf.js roda nesta mesma pagina (a moldura do Google e o file:// nao abrem Worker de outro endereco): o relatorio tem 1 ou 2 paginas.
+  CG_PDFJS = cgScript(base + 'pdf.worker.min.js').then(() => cgScript(base + 'pdf.min.js')).then(() => {
+    if (!window.pdfjsLib) throw new Error('O leitor de PDF não abriu.');
+    try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; } catch (e) {}
+    return window.pdfjsLib;
+  }).catch((e) => { CG_PDFJS = null; throw e; });
+  return CG_PDFJS;
+}
+async function cgArquivoEscolhido(arquivo) {
+  const p = el('cg-previa');
+  if (!p) return;
+  if (!/\.pdf$/i.test(arquivo.name || '') && arquivo.type !== 'application/pdf') { p.innerHTML = '<p class="cg-erro">Escolha o PDF da situação de carga.</p>'; return; }
+  if (arquivo.size > 20 * 1024 * 1024) { p.innerHTML = '<p class="cg-erro">O arquivo tem mais de 20 MB: não parece a situação de carga.</p>'; return; }
+  p.innerHTML = '<p class="cg-lendo"><span class="cg-gira" aria-hidden="true"></span><span>Lendo o PDF…</span></p>';
+  try {
+    const lib = await cgCarregarPdfJs();
+    const bytes = new Uint8Array(await arquivo.arrayBuffer());
+    const doc = await lib.getDocument({ data: bytes, disableFontFace: true, isEvalSupported: false, verbosity: 0 }).promise;
+    const paginas = await cgPaginasDoPdf(doc, lib, (n, t) => { const x = p.querySelector('.cg-lendo span:last-child'); if (x) x.textContent = 'Lendo a página ' + n + ' de ' + t + '…'; });
+    const r = cgLerSituacao(paginas);
+    r.arquivo = arquivo.name || 'situacao.pdf';
+    cgMostrarPrevia(r);
+  } catch (e) {
+    p.innerHTML = `<p class="cg-erro">Não consegui ler este PDF: ${esc((e && e.message) || e)}</p>`;
+  }
+}
+function cgMostrarPrevia(r) {
+  CG.leitura = r;
+  const p = el('cg-previa'); if (!p) return;
+  const s = CG.dados && CG.dados.snapshot;
+  const ruins = r.problemas.filter((x) => !x.parcial), parciais = r.problemas.filter((x) => x.parcial);
+  const h24 = r.cargas.filter((c) => c.h24);
+  const porDep = r.depositos.map((dep) => {
+    const com = r.cargas.filter((c) => { const v = c.d[dep.id] || ['', '']; return !(v[0] === '-' && v[1] === '-') && (v[0] || v[1]); });
+    const prontas = com.filter((c) => cgOkCli(c.d[dep.id][0]) && cgOkCli(c.d[dep.id][1]));
+    return `<div class="cg-previa-dep"><b>${esc(CG_DEPS_NOMES[dep.id] || dep.nome)}</b><span class="cg-num">${com.length}</span><small>${prontas.length} prontas</small></div>`;
+  }).join('');
+  const emitido = r.emitidoEm;
+  p.innerHTML = `
+    ${r.cargas.length ? `<div class="cg-previa-ok"><span class="cg-previa-check" aria-hidden="true">✓</span><div><b>${r.cargas.length} ${r.cargas.length === 1 ? 'carga lida' : 'cargas lidas'}</b>
+      <span>${r.paginas ? r.paginas + (r.paginas === 1 ? ' página' : ' páginas') + ' · ' : ''}${emitido ? 'emitida em ' + esc(cgDataBr(emitido, true)) : 'sem a data de emissão'}${h24.length ? ' · ' + h24.length + (h24.length === 1 ? ' carga de 24 horas' : ' cargas de 24 horas') : ''}</span></div></div>
+      <div class="cg-previa-deps">${porDep}</div>` : '<p class="cg-erro">Nenhuma carga lida. Confira se o PDF é a "Situação de Expedição das Cargas em Processo".</p>'}
+    <label class="cg-rotulo" for="cg-emitido">Emitida em</label>
+    <input id="cg-emitido" type="datetime-local" step="1" value="${esc((emitido || '').slice(0, 19))}" onchange="cgConferirEmissao()" oninput="cgConferirEmissao()">
+    <p id="cg-velha" class="cg-erro oculto"></p>
+    ${ruins.length ? `<details class="cg-problemas" open><summary>${ruins.length} ${ruins.length === 1 ? 'linha não foi lida' : 'linhas não foram lidas'}</summary><ul>${ruins.slice(0, 30).map((x) => `<li><b>${esc(x.nro || 'pág. ' + x.pagina)}</b> ${esc(x.motivo)}<code>${esc(x.texto)}</code></li>`).join('')}</ul></details>` : ''}
+    ${parciais.length ? `<details class="cg-problemas"><summary>${parciais.length} ${parciais.length === 1 ? 'carga com célula sem leitura' : 'cargas com célula sem leitura'}</summary><ul>${parciais.slice(0, 30).map((x) => `<li><b>${esc(x.nro)}</b> ${esc(x.motivo)}</li>`).join('')}</ul></details>` : ''}
+    ${r.avisos.length ? `<ul class="cg-avisos">${r.avisos.slice(0, 8).map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+    ${r.cargas.length ? `<details class="cg-amostra"><summary>Conferir as cargas lidas</summary><div class="cg-amostra-lista">${r.cargas.slice(0, 300).map((c) => `<div><b>${esc(c.nro)}</b>${c.h24 ? ' <i class="cg-24">24 h</i>' : ''} ${esc(c.nome)} <small>${esc(c.veiculo)}${c.box ? ' · box ' + esc(c.box) : ''}</small><span>${r.depositos.map((dep) => esc((c.d[dep.id] || []).join(' '))).join(' | ')}</span></div>`).join('')}</div></details>` : ''}`;
+  cgConferirEmissao();
+}
+function cgEmitidoDaJanela() {
+  let v = val('cg-emitido');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) v += ':00';
+  return v;
+}
+function cgConferirEmissao() {
+  const r = CG.leitura, b = el('cg-salvar');
+  if (!r || !b) return;
+  const v = cgEmitidoDaJanela(), s = CG.dados && CG.dados.snapshot;
+  const velha = !!(s && v && cgMinDe(v) <= cgMinDe(s.emitido));
+  const aviso = el('cg-velha');
+  if (aviso) {
+    aviso.classList.toggle('oculto', !velha);
+    aviso.textContent = velha ? 'Esta situação é de ' + cgDataBr(v) + ', igual ou mais velha que a que está no GSL (' + cgDataBr(s.emitido) + '). Envie um PDF mais novo.' : '';
+  }
+  b.disabled = !r.cargas.length || !v || velha;
+}
+function cgSalvarLeitura() {
+  const r = CG.leitura;
+  if (!r) return;
+  agir('enviarSituacaoCarga', {
+    emitidoEm: cgEmitidoDaJanela(), arquivo: r.arquivo || '', paginas: r.paginas || 0,
+    depositos: r.depositos.map((d) => ({ id: d.id, nome: d.nome })),
+    naoLidas: r.problemas.filter((x) => !x.parcial).length,
+    cargas: r.cargas.map((c) => ({ nro: c.nro, nome: c.nome, veiculo: c.veiculo, box: c.box, h24: !!c.h24, d: c.d }))
+  }, 'Situação de carga salva').catch(() => {});
+}
+</script>

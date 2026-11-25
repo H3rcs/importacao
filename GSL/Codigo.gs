@@ -675,7 +675,7 @@ function include(nome) {
     throw e;
   }
 }
-const INCLUDES_OPCIONAIS = ['Aprendiz', 'PlanoEstilo'];   // PlanoEstilo (8.13): sem ele o plano abre sem o visual novo
+const INCLUDES_OPCIONAIS = ['Aprendiz', 'PlanoEstilo', 'Carga', 'CargaEstilo'];   // PlanoEstilo (8.13): sem ele o plano abre sem o visual novo; Carga (8.14): sem ela, o modulo nao aparece
 
 /**
  * CATALOGO DE ACOES — a unica porta de gravacao (e das leituras sob demanda).
@@ -853,6 +853,15 @@ const ACOES = {
   confirmarFerias:     { tela: 'quadro', funcao: 'acaoConfirmarFerias' },
   cancelarProgramacaoFerias: { tela: 'quadro', funcao: 'acaoCancelarProgramacaoFerias' },
   atualizarQuadro:     { tela: 'quadro', leitura: true, funcao: 'acaoAtualizarQuadro' },
+
+  // situacao de carga (25/11 — Carga.gs). geracaoCarga e a pergunta barata da tela ao vivo (so le tres numeros).
+  geracaoCarga:        { tela: 'carga', leitura: true, funcao: 'acaoGeracaoCarga' },
+  enviarSituacaoCarga: { tela: 'carga', funcao: 'acaoEnviarSituacaoCarga' },
+  excluirSituacaoCarga:{ tela: 'carga', funcao: 'acaoExcluirSituacaoCarga' },
+  moverPessoaCarga:    { tela: 'carga', funcao: 'acaoMoverPessoaCarga' },
+  limparAlocacaoCarga: { tela: 'carga', funcao: 'acaoLimparAlocacaoCarga' },
+  equipamentoCarga:    { tela: 'carga', funcao: 'acaoEquipamentoCarga' },
+  quantidadeEquipamentoCarga: { tela: 'carga', funcao: 'acaoQuantidadeEquipamentoCarga' },
 
   // gerais, da propria pessoa
   // Bolinha do menu (acoes em aberto por modulo): so leitura; so conta o que a pessoa ve (nivelNaTela).

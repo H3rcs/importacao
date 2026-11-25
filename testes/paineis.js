@@ -1121,10 +1121,10 @@ caso('"Editar nome" com o Filiais.gs de antes de 19/10 (colado pela metade): a t
 caso('bolinha (pendencias) traz o menu de agora: quem ja estava dentro ve o painel desligado ao voltar ao menu; mexer no proprio acesso devolve o menu', () => {
   const m = mundo(); const s = entrar(m, DONO, '4321'), maria = entrar(m, COORD, '1234');
   const antes = acao(m, maria, 'pendencias').menu;
-  afirmar(antes.filial === 'FSA' && cartoes(antes) === 'calendario,nobreaks', 'antes: ' + cartoes(antes));
+  afirmar(antes.filial === 'FSA' && cartoes(antes) === 'carga,calendario,nobreaks', 'antes: ' + cartoes(antes));
   acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
   const depois = acao(m, maria, 'pendencias').menu;
-  afirmar(cartoes(depois) === 'calendario' && !depois.telas.some((t) => t.id === 'nobreaks'), 'depois: ' + cartoes(depois));
+  afirmar(cartoes(depois) === 'carga,calendario' && !depois.telas.some((t) => t.id === 'nobreaks'), 'depois: ' + cartoes(depois));
   afirmar(/não está ligado na filial/.test(erroDe(() => tela(m, maria, 'nobreaks'))), 'a tela velha e recusada');
   // o gerente (GERIR_ACESSOS) tira o proprio Estoque: a resposta ja traz o menu sem ele; o de outra pessoa nao
   const g = entrar(m, GERENTE, '5555');
@@ -1876,7 +1876,7 @@ caso('atualizacao 8.11: banco da 8.10 (sem a FERIAS_PROG) ganha a tabela na entr
   m.cache.clear();
   const adm = entrar(m, DONO, '4321');                        // a entrada roda a migracao
   const aba = banco.abas.find((x) => x.nome === 'FERIAS_PROG');
-  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.13', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.14', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
   afirmar(acao(m, adm, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)).recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).', 'grava depois da migracao');
   afirmar(tela(m, adm, 'quadro').programacoes.length === 1 && s, 'a tela le');
   // Instalacao.gs de antes (colado pela metade): sem a FERIAS_PROG no esquema
@@ -2422,7 +2422,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.13', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.14', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);
@@ -3046,7 +3046,7 @@ caso('atualizacao 8.13: banco da 8.12 — as acoes que ja existiam viram parecer
   const quem = {};
   const pessoas = { adm, maria, sup, ger: entrar(m, GERENTE, '5555'), pedro: entrar(m, PEDRO, '3333'), carla: entrar(m, CONSULTA, '7777') };
   // a entrada (acima) rodou a migracao
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.13', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.14', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const linhas = ctx(m).listar('ACOES');
   afirmar(linhas.length === 2 && linhas.every((l) => l.PARECER === 'TRATAR' && !l.AUTOR && !l.DESTINATARIO), 'PARECER gravado: ' + linhas.map((l) => l.PARECER).join());
   Object.keys(pessoas).forEach((k) => {

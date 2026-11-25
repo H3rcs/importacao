@@ -29,7 +29,8 @@ const PAINEIS = [
   { id: 'limpeza',      nome: 'Limpeza CD',        frase: 'Ações das vistorias e custo dos produtos.' },
   { id: 'quadro',       nome: 'Quadro do CD',      frase: 'Efetivo por função e turno, admissões e desligamentos.' },
   { id: 'estoque',      nome: 'Estoque de TI',     frase: 'Itens de informática: entradas, saídas, saldo e inventário.' },
-  { id: 'aprendiz',     nome: 'Jovem Aprendiz',    frase: 'Avaliações da imersão corporativa e cronograma de rotação.' }
+  { id: 'aprendiz',     nome: 'Jovem Aprendiz',    frase: 'Avaliações da imersão corporativa e cronograma de rotação.' },
+  { id: 'carga',        nome: 'Situação de Carga', frase: 'Cargas em processo por depósito, equipe e equipamentos ao vivo.' }
 ];
 
 const PAINEL_ATIVO = 'ATIVO';
@@ -620,4 +621,6 @@ function semearFilialNova_(copia, quem) {
   usar('DE_PARA', semearDePara);
   usar('LP_ZONAS', semearZonasLimpeza);
   usar('LP_EST_ITENS', null);
+  // Situacao de Carga (25/11): as paleteiras e os carrinhos padrao (cada filial ajusta os seus).
+  if (typeof semearEquipamentosCarga_ === 'function') semearEquipamentosCarga_();
 }

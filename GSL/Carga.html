@@ -253,10 +253,17 @@ function cgMontarLinha(r, m, pg, lh, nPag, saida) {
       if (/^\*+$/.test(s)) { estrela = true; return; }
       if (/^\*\s*/.test(s) || /\s*\*$/.test(s)) { estrela = true; s = s.replace(/^\*\s*/, '').replace(/\s*\*$/, ''); }
       if (it === r.ancora) { doLado.nro.push({ s: s, x: it.x, y: it.y }); return; }
+      // A coluna com mais sobreposicao (cada coluna vai do meio entre o seu cabecalho e o vizinho); texto que
+      // passa da celula (nome comprido) fica na coluna onde esta a maior parte dele.
       let col = 'nome';
       if (m.esq.length) {
-        let d = Infinity;
-        m.esq.forEach((c) => { const dd = Math.abs(c.cx - cx); if (dd < d) { d = dd; col = c.k; } });
+        let melhor = -Infinity;
+        m.esq.forEach((c, i) => {
+          const ini = i ? (m.esq[i - 1].cx + c.cx) / 2 : -Infinity;
+          const fim = i < m.esq.length - 1 ? (c.cx + m.esq[i + 1].cx) / 2 : m.L;
+          const sob = it.w > 0 ? Math.min(fim, it.x + it.w) - Math.max(ini, it.x) : (cx >= ini && cx < fim ? 1 : -Math.min(Math.abs(cx - ini), Math.abs(cx - fim)));
+          if (sob > melhor) { melhor = sob; col = c.k; }
+        });
       }
       if (col === 'nro') col = 'nome';         // so a ancora e o numero da carga
       doLado[col].push({ s: s, x: it.x, y: it.y });
@@ -277,7 +284,8 @@ function cgMontarLinha(r, m, pg, lh, nPag, saida) {
     let t = '';
     ord.forEach((p) => {
       if (!t) { t = p.s; return; }
-      t += (/[\/-]$/.test(t) || /^[\/-]/.test(p.s)) ? p.s : ' ' + p.s;
+      // sem espaco: quebra depois de / ou - (e no meio de um numero, que nunca tem espaco: 7627 | 19)
+      t += (/[\/-]$/.test(t) || /^[\/-]/.test(p.s) || (/\d$/.test(t) && /^\d/.test(p.s))) ? p.s : ' ' + p.s;
     });
     return t.replace(/\s+/g, ' ').trim();
   };
@@ -399,14 +407,17 @@ function cgFaixasAmarelas(ops, lib, vp) {
           k += 4;
           const m = lib.Util.transform(vp.transform, ctm);
           const p1 = lib.Util.applyTransform([x, y], m), p2 = lib.Util.applyTransform([x + w, y + h], m);
-          if (Math.abs(p2[0] - p1[0]) >= vp.width * 0.5) faixas.push({ y0: Math.min(p1[1], p2[1]), y1: Math.max(p1[1], p2[1]) });
+          // A linha pintada pode vir num retangulo so (Stimulsoft) ou num por celula (navegador): junta pela altura.
+          const y0 = Math.min(p1[1], p2[1]), y1 = Math.max(p1[1], p2[1]), larg = Math.abs(p2[0] - p1[0]);
+          const f = faixas.filter((x) => Math.abs(x.y0 - y0) < 1.5 && Math.abs(x.y1 - y1) < 1.5)[0];
+          if (f) f.largura += larg; else faixas.push({ y0: y0, y1: y1, largura: larg });
         } else if (op === OPS.moveTo || op === OPS.lineTo) k += 2;
         else if (op === OPS.curveTo) k += 6;
         else if (op === OPS.curveTo2 || op === OPS.curveTo3) k += 4;
       });
     }
   }
-  return faixas;
+  return faixas.filter((f) => f.largura >= vp.width * 0.5);
 }
 </script>
 <script>

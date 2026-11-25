@@ -215,7 +215,7 @@ Esta pasta é o GSL que abre direto do servidor de arquivos da Bartofil, sem ins
 | Arquivo | O que é |
 |---|---|
 | \`GSL.html\` | A página. É ela que cada pessoa abre no Chrome. |
-| \`gsl-app.js\`, \`gsl-paineis.js\`, \`gsl-aprendiz.js\` | Os módulos das telas. |
+| \`gsl-app.js\`, \`gsl-paineis.js\`, \`gsl-aprendiz.js\`, \`gsl-carga.js\` | Os módulos das telas. |
 | \`gsl.css\` | A aparência (com as logos da Bartofil). |
 | \`vendor/\` | O leitor de PDF da Situação de Carga (pdf.js). |
 | \`gsl-config.js\` | O endereço do servidor. **O único arquivo que você edita.** |

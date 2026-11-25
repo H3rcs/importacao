@@ -1876,7 +1876,7 @@ caso('atualizacao 8.11: banco da 8.10 (sem a FERIAS_PROG) ganha a tabela na entr
   m.cache.clear();
   const adm = entrar(m, DONO, '4321');                        // a entrada roda a migracao
   const aba = banco.abas.find((x) => x.nome === 'FERIAS_PROG');
-  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.12', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.13', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
   afirmar(acao(m, adm, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)).recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).', 'grava depois da migracao');
   afirmar(tela(m, adm, 'quadro').programacoes.length === 1 && s, 'a tela le');
   // Instalacao.gs de antes (colado pela metade): sem a FERIAS_PROG no esquema
@@ -2422,7 +2422,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.12', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.13', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);
@@ -2913,6 +2913,179 @@ caso('jovem aprendiz: a atualizacao (8.9) liga o painel na principal e libera o 
   const coo = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'COORDENADOR');
   afirmar(ger.TELA_APRENDIZ === 'EDITAR' && coo.TELA_APRENDIZ === 'OCULTO', 'gerente sim (Ver e editar), coordenador nao (Oculto): ' + ger.TELA_APRENDIZ + ' / ' + coo.TELA_APRENDIZ);
   afirmar(c.listar('PARAMETROS').some((p) => p.CHAVE === 'APRENDIZ_PLANILHA'), 'parametro criado');
+});
+
+/* ------------------------------------------------------------------ */
+/* SITUACOES E PARECER DO GERENTE (8.13)                               */
+/* ------------------------------------------------------------------ */
+
+const listaDe = (m, s, tela) => (tela === 'limpeza' ? tela_(m, s, 'limpeza').plano : tela_(m, s, 'acoes', { situacao: 'TODAS' })).lista;
+function tela_(m, s, id, p) { return tela(m, s, id, p); }
+
+caso('situacao (8.13): Maria registra para o gerente — o autor e o destinatario veem (o admin nao); o gerente recebe o e-mail; sem parecer nao conta em aberto, nao conclui; Tratar vira acao com responsaveis e prazo; outro momento e nada a fazer; historico do parecer', () => {
+  const { m, adm } = mundoComMencoes();
+  const maria = entrar(m, COORD, '1234'), ger = entrar(m, GERENTE, '5555'), pedro = entrar(m, PEDRO, '3333');
+  const r = acao(m, maria, 'salvarSituacao', { titulo: 'Lixeira quebrada', prioridade: 'ALTA', destinatario: GERENTE,
+    descricao: '<div><b>Lixeira</b> do refeitório quebrada.</div>', relatorio: 'Auditoria nov', fotos: [Object.assign(foto(1), { legenda: 'Frente do refeitório' })] });
+  afirmar(/Situação registrada\. 1 foto\(s\) anexada\(s\)\. João Lima foi avisado/.test(r.recado), 'recado: ' + r.recado);
+  const email = m.emails.filter((e) => e.to === GERENTE && /Situação para o seu parecer: Lixeira quebrada/.test(e.subject)).pop();
+  afirmar(email && /tela=acoes/.test(email.htmlBody) && /acao=/.test(email.htmlBody) && /Lixeira do refeitório quebrada/.test(email.htmlBody) && !/<b>Lixeira/.test(email.htmlBody), 'e-mail ao gerente (texto, sem HTML cru)');
+  const vM = listaDe(m, maria).find((a) => a.id === r.id), vG = listaDe(m, ger).find((a) => a.id === r.id);
+  afirmar(vM && vG && !listaDe(m, adm).some((a) => a.id === r.id) && !listaDe(m, pedro).some((a) => a.id === r.id), 'autor e destinatario veem; admin e Pedro nao');
+  afirmar(vM.parecer === '' && vM.situacao === 'AGUARDANDO_PARECER' && vM.status === 'Aguardando parecer' && vM.prioridade === 'ALTA' &&
+    vM.autorEmail === COORD && vM.destinatarioEmail === GERENTE && vM.relatorio === 'Auditoria nov' && vM.fotos[0].legenda === 'Frente do refeitório', 'situacao: ' + JSON.stringify(vM).slice(0, 400));
+  const cg = tela(m, ger, 'acoes').contagens;
+  afirmar(cg.abertas === 0 && cg.parecer === 1 && acao(m, ger, 'pendencias').pendencias.calendario.parecer === 1, 'nao conta em aberto; espera o parecer do gerente: ' + JSON.stringify(cg));
+  afirmar(/ainda não virou ação/.test(erroDe(() => acao(m, ger, 'concluirAcao', { id: r.id }))), 'sem parecer nao conclui');
+  afirmar(/ainda não virou ação/.test(erroDe(() => acao(m, ger, 'salvarAcao', { id: r.id, acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }))), 'salvarAcao nao edita situacao');
+  // so o destinatario da o parecer
+  afirmar(/Só João Lima, o gerente destinatário/.test(erroDe(() => acao(m, maria, 'parecerSituacao', { id: r.id, parecer: 'NADA' }))), 'a autora nao da o parecer');
+  afirmar(/Descreva como/.test(erroDe(() => acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'TRATAR', responsaveisEmails: [COORD], prazo: '2026-12-01' }))), 'Tratar exige o como');
+  afirmar(/responsável/.test(erroDe(() => acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'TRATAR', tratativa: '<div>Trocar</div>', prazo: '2026-12-01' }))), 'Tratar exige responsavel');
+  afirmar(/prazo/.test(erroDe(() => acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'TRATAR', tratativa: '<div>Trocar</div>', responsaveisEmails: [PEDRO] }))), 'Tratar exige prazo');
+  // outro momento, depois nada a fazer, depois tratar
+  acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'DEPOIS', reverEm: '2027-01-15', observacao: 'Depois do inventário' });
+  let a = listaDe(m, maria).find((x) => x.id === r.id);
+  afirmar(a.parecer === 'DEPOIS' && a.situacao === 'POSTERGADA' && a.reverEm === '2027-01-15' && a.parecerObs === 'Depois do inventário' && a.parecerPor === GERENTE, 'outro momento: ' + JSON.stringify(a).slice(0, 300));
+  afirmar(m.emails.some((e) => e.to === COORD && /Parecer na sua situação: Lixeira quebrada — Outro momento/.test(e.subject)), 'a autora fica sabendo do parecer');
+  acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'NADA' });
+  afirmar(listaDe(m, maria).find((x) => x.id === r.id).status === 'Nada a fazer', 'nada a fazer');
+  const t = acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'TRATAR', tratativa: '<div>Comprar <b>lixeira</b> nova</div>', responsaveisEmails: [PEDRO], prazo: '2026-12-20', turno: 'B' });
+  afirmar(/virou ação — responsável avisado/.test(t.recado), 'recado: ' + t.recado);
+  a = listaDe(m, pedro).find((x) => x.id === r.id);
+  afirmar(a && a.parecer === 'TRATAR' && a.situacao === 'PENDENTE' && a.responsaveisEmails.join() === PEDRO && a.prazoISO === '2026-12-20' &&
+    a.tratativa === '<div>Comprar <b>lixeira</b> nova</div>' && a.turno === 'B', 'virou acao do Pedro: ' + JSON.stringify(a).slice(0, 400));
+  afirmar(m.emails.some((e) => e.to === PEDRO && /Nova ação: Lixeira quebrada/.test(e.subject) && /Como será tratado/.test(e.htmlBody)), 'Pedro recebe a acao');
+  afirmar(tela(m, pedro, 'acoes').contagens.abertas === 1, 'conta em aberto para o responsavel');
+  // a acao segue o caminho de sempre: comentario com andamento e conclusao com foto
+  acao(m, pedro, 'comentarAcao', { id: r.id, texto: 'Pedido de compra feito', situacao: 'Aguardando', depende: 'compras' });
+  acao(m, pedro, 'concluirAcao', { id: r.id, observacao: 'Trocada', fotos: [foto(2)] });
+  a = listaDe(m, maria).find((x) => x.id === r.id);
+  afirmar(a.situacao === 'CONCLUIDA' && a.comentarios.filter((c) => c.tipo === 'PARECER').length === 3 &&
+    a.comentarios.filter((c) => c.tipo === 'PARECER' && !c.automatico).length === 1, 'historico: ' + a.comentarios.map((c) => c.tipo + ':' + c.texto + ':' + c.automatico).join(' | '));
+  afirmar(/reabra antes/.test(erroDe(() => acao(m, ger, 'parecerSituacao', { id: r.id, parecer: 'NADA' }))), 'concluida nao muda de parecer');
+});
+
+caso('situacao (8.13): permissoes na matriz de 3 faixas — com "Ver" no plano nao registra, nao da parecer nem edita (a tela vem so leitura); o destinatario precisa de "Ver e editar"; editar e trocar o destinatario (encaminhar) so sem parecer; Limpeza pela porta dela', () => {
+  const { m, adm } = mundoComMencoes();
+  const maria = entrar(m, COORD, '1234'), ger = entrar(m, GERENTE, '5555'), carla = entrar(m, CONSULTA, '7777');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, carla, 'salvarSituacao', { titulo: 'X', destinatario: GERENTE }))), 'CONSULTA (Ver) nao registra');
+  afirmar(/precisa de “Ver e editar”/.test(erroDe(() => acao(m, maria, 'salvarSituacao', { titulo: 'X', destinatario: CONSULTA }))), 'destinatario so com Ver e editar');
+  afirmar(/Escolha o gerente/.test(erroDe(() => acao(m, maria, 'salvarSituacao', { titulo: 'X' }))), 'destinatario obrigatorio');
+  afirmar(/Sem acesso/.test(erroDe(() => acao(m, maria, 'salvarSituacao', { titulo: 'X', destinatario: 'ninguem@bartofil.com.br' }))), 'destinatario fora do plano');
+  const id = acao(m, maria, 'salvarSituacao', { titulo: 'Piso solto', destinatario: GERENTE }).id;
+  // o gerente passa a Ver: nao da mais o parecer (a porta recusa) e a tela vem so leitura
+  const regG = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === GERENTE);
+  acao(m, adm, 'definirAjustePessoa', { id: regG.ID, tela: 'acoes', nivel: 'VER' });
+  const gerVer = entrar(m, GERENTE, '5555');
+  afirmar(tela(m, gerVer, 'acoes').permissoes.editar === false, 'tela so leitura');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, gerVer, 'parecerSituacao', { id, parecer: 'NADA' }))), 'com Ver nao da parecer');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, gerVer, 'salvarSituacao', { id, titulo: 'Y' }))), 'com Ver nao edita');
+  acao(m, adm, 'definirAjustePessoa', { id: regG.ID, tela: 'acoes', nivel: 'EDITAR' });
+  // encaminhar: a autora troca o destinatario (sem parecer) e o novo e avisado
+  acao(m, adm, 'salvarUsuario', { email: 'gerente2@bartofil.com.br', nome: 'Rui Gerente', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+  acao(m, maria, 'salvarSituacao', { id, titulo: 'Piso solto na doca 2', destinatario: 'gerente2@bartofil.com.br' });
+  afirmar(m.emails.some((e) => e.to === 'gerente2@bartofil.com.br' && /Situação para o seu parecer: Piso solto na doca 2/.test(e.subject)), 'o novo destinatario e avisado');
+  afirmar(!listaDe(m, entrar(m, GERENTE, '5555')).some((a) => a.id === id), 'o destinatario de antes deixa de ver');
+  const rui = entrar(m, 'gerente2@bartofil.com.br', '8888');
+  acao(m, rui, 'parecerSituacao', { id, parecer: 'DEPOIS' });
+  acao(m, maria, 'salvarSituacao', { id, titulo: 'Piso solto (doca 2)', destinatario: GERENTE });
+  afirmar(ctx(m).obter('ACOES', id).DESTINATARIO === 'gerente2@bartofil.com.br', 'com parecer o destinatario nao muda');
+  // Limpeza: a criticidade acompanha a prioridade; a porta do calendario nao ve a situacao da limpeza
+  const sup = entrar(m, SUP, '2222');
+  const idL = acao(m, sup, 'salvarSituacaoLimpeza', { titulo: 'Ralo entupido', prioridade: 'NORMAL', destinatario: DONO, zona: 'Z7', local: 'Banheiro' }).id;
+  const l = tela(m, adm, 'limpeza').plano.lista.find((a) => a.id === idL);
+  afirmar(l && l.prioridade === 'NORMAL' && l.criticidade === 'Baixa' && l.zona === 'Z7' && l.plano === 'LIMPEZA', 'limpeza: ' + JSON.stringify(l).slice(0, 300));
+  afirmar(/não encontrada/.test(erroDe(() => acao(m, adm, 'parecerSituacao', { id: idL, parecer: 'NADA' }))), 'pela porta do calendario a situacao da limpeza nao existe');
+  acao(m, adm, 'parecerSituacaoLimpeza', { id: idL, parecer: 'TRATAR', tratativa: '<div>Desentupir</div>', responsaveisEmails: [SUP], prazo: '2026-12-01' });
+  afirmar(tela(m, sup, 'limpeza').plano.contagens.abertas === 1, 'virou acao da limpeza');
+});
+
+caso('situacao (8.13): o texto rico e limpo no servidor — script, img onerror, link javascript:, style e atributos saem; o texto fica; o que vem da planilha passa de novo pelo filtro; legendas de fotos editadas e de fotos novas', () => {
+  const { m } = mundoComMencoes();
+  const maria = entrar(m, COORD, '1234');
+  const sujo = '<div onclick="x()">Oi <b style="color:red" onmouseover="y()">forte</b><script>alert(1)</script>' +
+    '<img src=x onerror=alert(2)><a href="javascript:alert(3)">link</a><iframe src="//mal"></iframe>' +
+    '<span style="background:yellow">marca</span><mark class="m">ok</mark><scr<script>ipt>alert(4)</script>' +
+    '<ul><li>um</li></ul><style>body{}</style>&lt;b&gt; e &amp; fim</div>';
+  const id = acao(m, maria, 'salvarSituacao', { titulo: 'Teste', destinatario: GERENTE, descricao: sujo,
+    fotos: [Object.assign(foto(1), { legenda: '  Legenda   um  ' }), foto(2)] }).id;
+  const gravado = ctx(m).obter('ACOES', id).DESCRICAO;
+  afirmar(!/script|onerror|onclick|onmouseover|javascript|iframe|<img|<a |style|class=|<span/i.test(gravado), 'sobrou coisa perigosa: ' + gravado);
+  afirmar(/^<div>/.test(gravado) && /<b>forte<\/b>/.test(gravado) && /link/.test(gravado) && /<mark>ok<\/mark>/.test(gravado) &&
+    /<ul><li>um<\/li><\/ul>/.test(gravado) && /&lt;b&gt; e &amp; fim/.test(gravado), 'o que formata fica: ' + gravado);
+  // texto rico vazio vira vazio
+  const id2 = acao(m, maria, 'salvarSituacao', { titulo: 'Vazia', destinatario: GERENTE, descricao: '<div><br></div><p> </p>' }).id;
+  afirmar(ctx(m).obter('ACOES', id2).DESCRICAO === '', 'vazio: ' + ctx(m).obter('ACOES', id2).DESCRICAO);
+  // mexido direto na planilha: a tela recebe limpo
+  const c = ctx(m);
+  c.atualizar('ACOES', id2, { DESCRICAO: '<div>a<img src=x onerror=alert(1)></div>', TRATATIVA: '<b onclick=1>t</b>' }, 'planilha');
+  const a2 = listaDe(m, maria).find((a) => a.id === id2);
+  afirmar(a2.descricao === '<div>a</div>' && a2.tratativa === '<b>t</b>', 'da planilha: ' + a2.descricao + ' / ' + a2.tratativa);
+  // legendas: a da foto nova, a editada, e a da foto removida some
+  let a = listaDe(m, maria).find((x) => x.id === id);
+  afirmar(a.fotos.length === 2 && a.fotos[0].legenda === 'Legenda   um' && a.fotos[1].legenda === '', 'legenda gravada: ' + JSON.stringify(a.fotos));
+  acao(m, maria, 'salvarSituacao', { id, titulo: 'Teste', descricao: a.descricao, legendas: { [a.fotos[1].id]: 'Segunda foto' }, fotos: [Object.assign(foto(3), { legenda: 'Terceira' })] });
+  a = listaDe(m, maria).find((x) => x.id === id);
+  afirmar(a.fotos.length === 3 && a.fotos[1].legenda === 'Segunda foto' && a.fotos[2].legenda === 'Terceira' && a.fotos[0].legenda === 'Legenda   um', 'legendas depois de editar: ' + JSON.stringify(a.fotos.map((f) => f.legenda)));
+});
+
+caso('atualizacao 8.13: banco da 8.12 — as acoes que ja existiam viram parecer "Tratar" com os mesmos responsaveis, prazo e historico; cada uma continua visivel para as MESMAS pessoas (e so para elas); a acao sem responsavel continua com a gestao; com o Instalacao.gs de antes, situacao e parecer sao recusados', () => {
+  const { m, adm } = mundoComMencoes();
+  const maria = entrar(m, COORD, '1234'), sup = entrar(m, SUP, '2222');
+  const idA = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', descricao: 'Trocar as lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
+  const idB = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Ralo', prazo: '2026-12-01', turno: 'A', responsavel: 'Equipe', criticidade: 'Alta', zona: 'Z2' }).id;
+  acao(m, maria, 'comentarAcao', { id: idA, texto: 'Comprando', mencoes: [PEDRO] });
+  // volta o banco para a 8.12: sem as colunas novas
+  const c = ctx(m), banco = m.planilhas.get(c.prop('ID_BANCO'));
+  const novas = ['PRIORIDADE', 'PARECER', 'PARECER_EM', 'PARECER_POR', 'PARECER_OBS', 'REVER_EM', 'TRATATIVA', 'AUTOR', 'DESTINATARIO', 'LEGENDAS', 'RELATORIO'];
+  const aba = banco.abas.find((x) => x.nome === 'ACOES');
+  novas.forEach((col) => { const i = aba.dados[0].indexOf(col); if (i !== -1) aba.dados.forEach((l) => l.splice(i, 1)); });
+  c.PropertiesService.getScriptProperties().setProperty('VERSAO_ESQUEMA', '8.12');
+  m.cache.clear();
+  const quem = {};
+  const pessoas = { adm, maria, sup, ger: entrar(m, GERENTE, '5555'), pedro: entrar(m, PEDRO, '3333'), carla: entrar(m, CONSULTA, '7777') };
+  // a entrada (acima) rodou a migracao
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.13', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  const linhas = ctx(m).listar('ACOES');
+  afirmar(linhas.length === 2 && linhas.every((l) => l.PARECER === 'TRATAR' && !l.AUTOR && !l.DESTINATARIO), 'PARECER gravado: ' + linhas.map((l) => l.PARECER).join());
+  Object.keys(pessoas).forEach((k) => {
+    quem[k] = [].concat(k === 'sup' ? [] : listaDe(m, pessoas[k]).map((a) => a.id), k === 'sup' || k === 'adm' ? tela(m, pessoas[k], 'limpeza').plano.lista.map((a) => a.id) : []).sort().join();
+  });
+  afirmar(quem.maria === idA && quem.pedro === idA && quem.adm === idB && quem.sup === idB && quem.ger === '' && quem.carla === '', 'quem ve: ' + JSON.stringify(quem));
+  const a = listaDe(m, maria).find((x) => x.id === idA);
+  afirmar(a.parecer === 'TRATAR' && a.situacao === 'PENDENTE' && a.prazoISO === '2026-12-01' && a.tratativaNaDescricao && a.descricao === 'Trocar as lâmpadas' &&
+    a.comentarios.length === 1 && tela(m, maria, 'acoes').contagens.abertas === 1, 'acao antiga: ' + JSON.stringify(a).slice(0, 300));
+  const b = tela(m, adm, 'limpeza').plano.lista.find((x) => x.id === idB);
+  afirmar(b.prioridade === 'ALTA' && b.criticidade === 'Alta', 'criticidade vira prioridade: ' + b.prioridade);
+});
+
+caso('Instalacao.gs de antes (8.12, colado pela metade): registrar situacao e dar parecer sao recusados antes de gravar ou subir foto; a acao direta, comentar e concluir continuam, e a lista mostra as acoes como "Tratar"', () => {
+  const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
+  let velho;
+  try { velho = execSync('git show b8ed9dc:GSL/Instalacao.gs', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+  catch (e) { console.log('        (sem o historico do git: caso pulado)'); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-inst-812-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.writeFileSync(path.join(tmp, 'Instalacao.gs'), velho);
+    const m = new Mundo({ dono: DONO });
+    const run = (fn, ...a) => chamarPeloNavegador(m, tmp, { contaGoogle: DONO }, fn, a, OP);
+    afirmar(run('instalar', DONO).ok, 'instalou com o Instalacao.gs de antes');
+    const e = JSON.parse(run('entrar', DONO, '4321', '4321', '', '').valor);
+    const ag = (nome, p) => { const r = run('executarAcao', { t: e.token, f: e.filial.codigo }, nome, p); return r.ok ? JSON.parse(r.valor) : { ok: false, erro: r.erro.message }; };
+    ag('salvarUsuario', { email: GERENTE, nome: 'João Lima', perfil: 'GERENTE', turno: '', filiais: '*', papel: 'Gerente' });
+    const d0 = m.arquivos.size;
+    const r = ag('salvarSituacao', { titulo: 'X', destinatario: GERENTE, fotos: [foto(1)] });
+    afirmar(r.ok === false && /^Atualização incompleta do GSL: para registrar situações/.test(r.erro) && m.arquivos.size === d0, 'recusa: ' + JSON.stringify(r));
+    const id = ag('salvarAcao', { acao: 'Iluminação', descricao: 'Trocar', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+    afirmar(id && ag('parecerSituacao', { id, parecer: 'NADA' }).ok === false, 'parecer recusado');
+    afirmar(ag('comentarAcao', { id, texto: 'ok', situacao: 'Aguardando' }).recado === 'Comentário registrado.', 'comentar continua');
+    afirmar(ag('concluirAcao', { id }).recado === 'Ação concluída.', 'concluir continua');
+    const t = JSON.parse(run('carregarTela', { t: e.token, f: e.filial.codigo }, 'acoes', {}).valor);
+    const lista = t.dados.lista;
+    afirmar(lista.length === 1 && lista[0].parecer === 'TRATAR' && lista[0].situacao === 'CONCLUIDA' && t.dados.modelo.situacoes === false, 'lista: ' + JSON.stringify(lista).slice(0, 200));
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 const falhas = resultados.filter((x) => !x).length;

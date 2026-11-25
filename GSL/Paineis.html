@@ -1213,13 +1213,15 @@ function nbFormImportar() {
    só o que é da limpeza: as abas, a Gestão, as zonas e a importação.
    ===================================================================== */
 let ABA_LP = 'gestao';                 // gestao | plano | estoque | movimentos | inventario
-const LP_PLANO_FILTRO = { situacao: 'ABERTAS', turno: '', busca: '', zona: '', crit: '' };
+// 8.13: o mesmo filtro do plano do Calendario (parecer, situacao, prioridade, turno, zona, busca e ordem).
+const LP_PLANO_FILTRO = { parecer: '', situacao: 'ABERTAS', turno: '', busca: '', zona: '', crit: '', prio: '', ordem: 'urgentes' };
 const PLANO_LP = {
   id: 'LIMPEZA',
   dados: () => (DADOS && DADOS.plano) || {},
   acoes: { salvar: 'salvarAcaoLimpeza', concluir: 'concluirAcaoLimpeza', comentar: 'comentarAcaoLimpeza',
            reabrir: 'reabrirAcaoLimpeza', cancelar: 'cancelarAcaoLimpeza', excluir: 'excluirAcaoLimpeza',
-           foto: 'fotoAcaoLimpeza', removerFoto: 'removerFotoAcaoLimpeza' },
+           foto: 'fotoAcaoLimpeza', removerFoto: 'removerFotoAcaoLimpeza',
+           situacao: 'salvarSituacaoLimpeza', parecer: 'parecerSituacaoLimpeza' },
   // A tela da limpeza traz todas as ações que a pessoa enxerga: o filtro e feito aqui.
   local: LP_PLANO_FILTRO,
   filtrar: (m) => { Object.assign(LP_PLANO_FILTRO, m); pintarAbaLP(DADOS); },
@@ -1252,7 +1254,9 @@ function trocarAbaLP(aba) {
 /* Os botões do topo acompanham a aba: no plano, ação nova; no estoque, entrada e saída. */
 function lpBotoesTopo(d) {
   const g = d.permissoes.gerir, e = d.estoque.permissoes;
-  const novaAcao = g ? '<button class="botao" onclick="formAcao()">+ Nova ação</button>' : '';
+  // 8.13: os botoes do plano (Relatorio, acao direta e a situacao nova); App.html de antes: so a acao.
+  const novaAcao = typeof paBotoesTopo === 'function' ? paBotoesTopo(d.plano || {})
+    : (g ? '<button class="botao" onclick="formAcao()">+ Nova ação</button>' : '');
   let html;
   if (ABA_LP === 'gestao') html = (g ? '<button class="botao secundario" onclick="lpFormImportar()">Importar planilha antiga</button>' : '') + novaAcao;
   else if (ABA_LP === 'plano') html = (g ? '<button class="botao secundario" onclick="lpFormZonas()">Zonas</button>' : '') + novaAcao;
@@ -1267,7 +1271,12 @@ function pintarAbaLP(d) {
   EST = EST_LP; PLANO = PLANO_LP;
   lpBotoesTopo(d);
   try {
-    if (ABA_LP === 'plano') { alvo.innerHTML = planoHtml(d.plano); if (typeof abrirAcaoDoLink === 'function') abrirAcaoDoLink(); return; }
+    if (ABA_LP === 'plano') {
+      alvo.innerHTML = planoHtml(d.plano);
+      if (typeof paDepoisDePintar === 'function') paDepoisDePintar();
+      if (typeof abrirAcaoDoLink === 'function') abrirAcaoDoLink();
+      return;
+    }
     if (ABA_LP === 'gestao') { alvo.innerHTML = lpGestao(d); return; }
     if (!d.estoque.itens.length && ABA_LP !== 'movimentos') { alvo.innerHTML = lpEstoqueVazio(d); return; }
     if (ABA_LP === 'estoque') alvo.innerHTML = estItens(d.estoque);
@@ -1302,10 +1311,12 @@ function lpGestao(d) {
     .sort((a, b) => (a.saldo - a.minimo) - (b.saldo - b.minimo));
   const mes = d.hoje.slice(0, 7);
   const saidasMes = es.movimentos.filter((m) => m.tipo === 'SAIDA' && !m.estornado && (m.data || '').slice(0, 7) === mes);
-  const altas = abertas.filter((a) => a.criticidade === 'Alta').length;
+  // A criticidade virou a prioridade do plano (8.13): Alta, Media, Normal (= a Baixa de antes).
+  const prioDe = (a) => a.prioridade || ({ Alta: 'ALTA', 'Média': 'MEDIA', Baixa: 'NORMAL' })[a.criticidade] || '';
+  const altas = abertas.filter((a) => prioDe(a) === 'ALTA').length;
   return `
     <div class="grade grade-kpi" style="margin-bottom:16px">
-      ${pnKpi(c.abertas, 'Ações em aberto', 'azul', altas + ' de criticidade alta' + noPlano(g && g.abertas))}
+      ${pnKpi(c.abertas, 'Ações em aberto', 'azul', altas + ' de prioridade alta' + noPlano(g && g.abertas))}
       ${pnKpi(c.atrasadas, 'Ações atrasadas', c.atrasadas ? 'vermelho' : 'verde', c.minhas + ' sob sua responsabilidade' + noPlano(g && g.atrasadas))}
       ${pnKpi(repor.length, 'Produtos para repor', repor.length ? 'vermelho' : 'verde',
         ativos.filter((i) => i.situacao === 'ZERADO').length + ' zerado(s)')}
@@ -1319,7 +1330,7 @@ function lpGestao(d) {
         ${vencem.length ? `<table><tbody>${vencem.map((a) => `<tr class="${a.status === 'Atrasada' ? 'lp-atrasada' : ''}">
           <td style="white-space:nowrap"><strong>${esc(a.prazo || '—')}</strong><div class="lp-sub">${planoPrazoTexto(a)}</div></td>
           <td><strong>${esc(a.acao)}</strong> ${typeof seloComentarios === 'function' && typeof podeComentarAcao === 'function' ? seloComentarios(a, podeComentarAcao(a, pl.permissoes)) : ''}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
-          <td>${a.criticidade ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+          <td>${prioDe(a) ? `<span class="pa-prio ${prioDe(a)}">${({ ALTA: 'Alta', MEDIA: 'Média', NORMAL: 'Normal' })[prioDe(a)]}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
           : g && g.abertas ? `<div class="vazio">Nenhuma ação em aberto em que você esteja citado (o plano tem ${g.abertas}).</div>`
           : '<div class="vazio">Nenhuma ação em aberto. 👍</div>'}
         <p class="dica">Só as ações em que você está citado: como responsável ou marcado num comentário.</p>

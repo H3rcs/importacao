@@ -107,6 +107,7 @@ function montar(opcoes) {
       if (!existe(nome + '.html')) {
         // Como o include() do servidor: so os opcionais podem faltar (a faixa de versao avisa).
         if (nome === 'Aprendiz') { avisos.push('Aprendiz.html nao existe: montado sem o Jovem Aprendiz.'); return ''; }
+        if (nome === 'PlanoEstilo') { avisos.push('PlanoEstilo.html nao existe: montado sem o visual novo do Plano de Acao.'); return ''; }
         throw new Error('Falta o arquivo ' + nome + '.html na pasta ' + o.fonte);
       }
       let saida = '';

@@ -131,11 +131,23 @@ const ESQUEMA = {
    * ANEXOS: lista JSON das fotos da acao (no Drive, em Anexos/ACOES/<ID>/).
    * MARCADOS (8.10): e-mails de quem foi marcado num comentario e nao e
    * responsavel — ve e responde esta acao.
+   * SITUACOES E PARECER (8.13) — o modelo do "Relatorio de Ocorrencias e
+   * Acoes" do gerente. Cada linha e uma SITUACAO: quem registrou (AUTOR), o
+   * gerente que decide (DESTINATARIO), PRIORIDADE (ALTA/MEDIA/NORMAL),
+   * DESCRICAO em texto rico (HTML ja limpo no servidor; texto simples nas
+   * linhas antigas) e o PARECER: TRATAR (virou acao: TRATATIVA = "como sera
+   * tratado", responsaveis e prazo), DEPOIS (outro momento; REVER_EM),
+   * NADA (nada a fazer) ou vazio (sem definicao). PARECER_EM/POR/OBS: quando,
+   * quem e o comentario do parecer. LEGENDAS: {idDaFoto: legenda} das fotos
+   * da propria acao. RELATORIO: o levantamento a que a situacao pertence
+   * (texto livre, opcional). Linha de antes da 8.13 (sem AUTOR e sem
+   * DESTINATARIO) e uma acao: PARECER = TRATAR (migrarPareceres_).
    */
   ACOES:      ['ACAO', 'DESCRICAO', 'RESPONSAVEL', 'RESPONSAVEL_EMAIL', 'TURNO',
                'ORIGEM', 'PRAZO', 'SITUACAO', 'CONCLUIDO_EM', 'CONCLUIDO_POR', 'OBSERVACAO',
                'ANDAMENTO', 'DEPENDE', 'PLANO', 'ZONA', 'LOCAL', 'CRITICIDADE', 'ABERTA_EM', 'ANEXOS',
-               'MARCADOS'],
+               'MARCADOS', 'PRIORIDADE', 'PARECER', 'PARECER_EM', 'PARECER_POR', 'PARECER_OBS', 'REVER_EM',
+               'TRATATIVA', 'AUTOR', 'DESTINATARIO', 'LEGENDAS', 'RELATORIO'],
   /*
    * HISTORICO DE COMENTARIOS das acoes (4.2.2) — dos dois planos (ORIGEM
    * ACOES; LP_ACOES nos que vieram da tabela antiga da limpeza). Cada
@@ -310,7 +322,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.12';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) (a proxima e 8.13: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.13';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) (a proxima e 8.14: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -445,10 +457,39 @@ function garantirEsquema() {
    * administrador marcou para o nivel ADMIN nao e mais sobrescrito aqui.
    */
   if (principal && migrarParaTresFaixas_()) mexeu = true;
+
+  /*
+   * 7 · situacoes e parecer (8.13): toda acao que ja existia vira uma
+   * situacao com o parecer "Tratar / Incluir acao", com os responsaveis, o
+   * prazo e o historico que tinha — ninguem passa a ver nem deixa de ver
+   * nada (AUTOR e DESTINATARIO ficam vazios). Roda em todo banco (cada filial
+   * tem a sua ACOES) e pode rodar de novo: so mexe na linha antiga sem PARECER.
+   */
+  try {
+    if (migrarPareceres_()) mexeu = true;
+  } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'ACOES', 'PARECER', String(e)); }
   if (mexeu) limparCache();
   if (!migracaoPendente) PropertiesService.getScriptProperties().setProperty(chaveVersao, VERSAO_ESQUEMA);
   esquecerProps();
   return mexeu;
+}
+
+/*
+ * A acao de antes da 8.13 ganha PARECER = TRATAR (uma escrita so, em lote).
+ * Linha antiga = sem PARECER, sem AUTOR e sem DESTINATARIO. A leitura ja
+ * trata essa linha como acao (parecerDe_, Acoes.gs) — a gravacao deixa o
+ * banco dizendo o mesmo que a tela. Devolve quantas mudaram.
+ */
+function migrarPareceres_() {
+  if (colunasDe('ACOES').indexOf('PARECER') === -1) return 0;
+  let lidas;
+  try { lidas = listar('ACOES'); } catch (e) { return 0; }
+  const mudancas = lidas.filter(function (r) {
+    return !String(r.PARECER || '').trim() && !String(r.AUTOR || '').trim() && !String(r.DESTINATARIO || '').trim();
+  }).map(function (r) { return { id: r.ID, campos: { PARECER: 'TRATAR' } }; });
+  if (!mudancas.length) return 0;
+  atualizarVarios('ACOES', mudancas, 'migracao');
+  return mudancas.length;
 }
 
 /*

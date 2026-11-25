@@ -3306,7 +3306,7 @@ async function rodar() {
     const s = await subir(); instalarComPessoas(s);
     const dono = criarPin(s, DONO, DONO, '4321');
     criarPin(s, GERAL, COORD, '1234');
-    ['calendario', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'].forEach((p) =>
+    ['calendario', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz', 'carga'].forEach((p) =>
       afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'alterarPainel', { codigo: 'FSA', painel: p, estado: 'DESATIVADO' }).ok, p + ' desativado'));
     const vazio = (fr) => fr.evaluate(() => document.querySelector('.grade-modulos .vazio').innerText.replace(/\s+/g, ' ').trim());
     const aba = await abrirAba(s, DONO);
@@ -3346,7 +3346,7 @@ async function rodar() {
       }
       const r = await f.evaluate(() => ({ erro: document.querySelectorAll('#pagina .erro-caixa').length,
         lateral: [...document.querySelectorAll('#menu .item-menu')].map((b) => b.dataset.pagina).join(',') }));
-      afirmar(await cartoesDoMenu(f) === 'calendario' && !r.erro && !/nobreaks/.test(r.lateral), rotulo + ': ' + await cartoesDoMenu(f) + ' ' + JSON.stringify(r));
+      afirmar(await cartoesDoMenu(f) === 'carga,calendario' && !r.erro && !/nobreaks/.test(r.lateral), rotulo + ': ' + await cartoesDoMenu(f) + ' ' + JSON.stringify(r));
       await f.evaluate(() => { document.getElementById('recado').textContent = ''; });
     };
     const voltarAoMenu = async (cartao) => {      // a bolinha vencida (mais de 2 min): voltar ao menu rele o menu
@@ -3416,7 +3416,7 @@ async function rodar() {
     pelaPorta('definirModuloPessoa', { id: idDe(COORD), modulo: 'nobreaks', modo: 'NAO' });
     await f.evaluate(() => agir('semanaNobreak', {}).catch(() => {}));
     await f.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Este painel não está mais liberado para você nesta filial.', null, { timeout: 15000 });
-    afirmar(await cartoesDoMenu(f) === 'calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
+    afirmar(await cartoesDoMenu(f) === 'carga,calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
     // o gerente na Configuracao; o administrador tira o PROGRAMAR do nivel GERENTE
     const ger = await abrirAba(s, GERENTE);
     await entrar(ger, GERENTE, '5555');

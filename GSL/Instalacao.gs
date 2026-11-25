@@ -563,7 +563,7 @@ const PARAMETROS_NOVOS = [
   // Situacao de Carga (8.14): limites do "Equilibrio entre depositos", em pontos percentuais, e o peso das cargas de 24 horas
   ['CARGA_EQUILIBRIO_PP', 'Situação de Carga: diferença máxima (pontos percentuais) entre o depósito mais adiantado e o mais atrasado para ficar "Equilibrado"', '10'],
   ['CARGA_ATENCAO_PP', 'Situação de Carga: até quantos pontos percentuais de diferença é "Atenção" (acima disso, "Desequilibrado")', '20'],
-  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada tarefa de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2'],
+  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada lote de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2'],
   // Situacao de Carga, fase 2 (8.15): horarios dos turnos (5x2), a planilha dos boxes, o numero de boxes,
   // as ruas de cada andar do flowrack e quantas cargas da sequencia devem estar em andamento ao mesmo tempo
   ['CARGA_TURNO_A', 'Situação de Carga: horário do Turno A (1º turno), como 06:50-16:14', '06:50-16:14'],

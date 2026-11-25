@@ -733,8 +733,8 @@ function cgHeroHtml() {
     <div class="cg-kpis">
       ${kpi('Prontas para expedir', `<span class="cg-num">${cgN(res.prontas)}</span><small>de ${cgN(res.total)}</small>`, barra(res.total ? res.prontas / res.total * 100 : 0, 'verde'))}
       ${kpi('24 horas pendentes', `<span class="cg-num">${cgN(res.h24Pend)}</span>`, res.h24 ? 'de ' + res.h24 + (res.h24 === 1 ? ' carga 24 h' : ' cargas 24 h') : 'nenhuma carga 24 h', res.h24Pend ? 'amarelo' : '')}
-      ${kpi('Separação', `<span class="cg-num">${cgPct(pSep)}</span>`, barra(pSep, 'azul') + `<span>${cgN(rs)} tarefas faltam</span>`)}
-      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'cor-conf') + `<span>${cgN(rc)} tarefas faltam</span>`)}
+      ${kpi('Separação', `<span class="cg-num">${cgPct(pSep)}</span>`, barra(pSep, 'azul') + `<span>${cgN(rs)} lotes faltam</span>`)}
+      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'cor-conf') + `<span>${cgN(rc)} lotes faltam</span>`)}
       ${kpi('Equilíbrio', `<span class="cg-num">${eqb && eqb.spread != null ? cgN(eqb.spread) + '<small>pp</small>' : '—'}</span>`,
         eqb && eqb.texto ? `<span class="cg-eq-pilula eq-${eqb.status}">${esc(eqb.texto)}</span>` : '', 'equilibrio')}
       ${kpi('Previsão para zerar', `<span class="cg-num">${!rs && !rc ? 'Pronto' : (etaOk ? cgDuracao(eta) : '—')}</span>`,
@@ -767,7 +767,7 @@ function cgEquilibrioHtml(qual, titulo) {
       <span class="cg-eq-trilho"><i style="width:${Math.max(0, Math.min(100, x.pct)).toFixed(1)}%"></i><b class="cg-eq-media" style="left:${g.media.toFixed(1)}%" title="média ${cgPct(g.media)}"></b></span>
       <span class="cg-eq-pct cg-num">${cgPct(x.pct)}</span>
       <span class="cg-eq-desvio cg-num ${dv < 0 ? 'neg' : 'pos'}">${dv > 0 ? '+' : ''}${cgN(dv)} pp</span>
-      <span class="cg-eq-gente">${x.sep} sep · ${x.conf} conf · ${cgN(x.restante)} tarefas</span>
+      <span class="cg-eq-gente">${x.sep} sep · ${x.conf} conf · ${cgN(x.restante)} lotes</span>
     </div>`;
   }).join('');
   const sug = g.sugestao;
@@ -778,7 +778,7 @@ function cgEquilibrioHtml(qual, titulo) {
     ${sug ? `<div class="cg-eq-sugestao"><span aria-hidden="true">➜</span><b>${esc(sug.texto)}</b>
       <span>para ${esc(cgNomeDep(sug.para))} andar junto com os outros.</span>
       ${CG.dados.podeEditar ? `<button type="button" class="cg-link" onclick="cgIrAba(${jsArg(qual === 'supervisao' && CG_GRUPO.indexOf(sug.para) !== -1 ? 'supervisao' : 'equipe')})">Rebalancear</button>` : ''}</div>` : ''}
-    <p class="cg-nota">% concluído = tarefas de separação e conferência feitas ÷ total (cada tarefa de carga de 24 horas vale ${cgN(lim.peso24h)}×). Equilibrado até ${cgN(lim.equilibrado)} pp · atenção até ${cgN(lim.atencao)} pp — os limites ficam em Configuração › Outros parâmetros.</p>
+    <p class="cg-nota">% concluído = lotes de separação e conferência feitos ÷ total (cada lote de carga de 24 horas vale ${cgN(lim.peso24h)}×). Equilibrado até ${cgN(lim.equilibrado)} pp · atenção até ${cgN(lim.atencao)} pp — os limites ficam em Configuração › Outros parâmetros.</p>
   </section>`;
 }
 function cgCargasTravadasHtml(ids) {
@@ -847,7 +847,7 @@ function cgCartaoDepHtml(id) {
     <div class="cg-dep-numeros">
       <div><b class="cg-num">${cgN(i.pend)}</b><span>por terminar</span></div>
       <div><b class="cg-num">${cgN(r.concluidas)}</b><span>prontas</span></div>
-      <div><b class="cg-num">${cgN(r.restSep + r.restConf)}</b><span>tarefas</span></div>
+      <div><b class="cg-num">${cgN(r.restSep + r.restConf)}</b><span>lotes</span></div>
     </div>
     ${barra('Sep.', i.ind.pctSep, 'azul')}
     ${barra('Conf.', i.ind.pctConf, 'cor-conf')}
@@ -863,7 +863,7 @@ function cgCelHtml(v, lado) {
   if (p.x) return `<span class="cg-cel ok ${lado}" title="pronto">✓</span>`;
   if (p.nada) return `<span class="cg-cel nada ${lado}" title="nada neste depósito">–</span>`;
   if (p.vazia) return `<span class="cg-cel vazia ${lado}" title="não lida">?</span>`;
-  return `<span class="cg-cel frac ${lado}${p.completa ? ' ok' : ''}" title="${p.a} de ${p.b} tarefas"><span class="cg-num">${p.a}/${p.b}</span><i style="width:${(p.b ? p.a / p.b * 100 : 0).toFixed(0)}%"></i></span>`;
+  return `<span class="cg-cel frac ${lado}${p.completa ? ' ok' : ''}" title="${p.a} de ${p.b} lotes"><span class="cg-num">${p.a}/${p.b}</span><i style="width:${(p.b ? p.a / p.b * 100 : 0).toFixed(0)}%"></i></span>`;
 }
 function cgItemCargaHtml(c) {
   const e = cgEstadoCarga(c);
@@ -1029,11 +1029,11 @@ function cgDepositoHtml(id) {
           ${num(cgN(r.naoIniciadas), 'não iniciadas')}${num(cgN(r.h24Pend), '24 h pendentes', r.h24Pend ? 'amarelo' : '')}
         </div>
         <div class="cg-ritmo">
-          <div class="cg-ritmo-linha"><span>Faltam</span><b class="cg-num">${cgN(r.restSep)}</b><small>tarefas de separação</small><b class="cg-num">${cgN(r.restConf)}</b><small>de conferência</small></div>
+          <div class="cg-ritmo-linha"><span>Faltam</span><b class="cg-num">${cgN(r.restSep)}</b><small>lotes de separação</small><b class="cg-num">${cgN(r.restConf)}</b><small>de conferência</small></div>
           <div class="cg-ritmo-linha"><span>Ritmo</span>${ind.ritmoSep == null ? '<small>aparece a partir do 2º envio</small>' :
-            `<b class="cg-num">${cgN(ind.ritmoSep)}</b><small>sep./h</small><b class="cg-num">${cgN(ind.ritmoConf)}</b><small>conf./h</small>${ind.cargasHora != null ? `<b class="cg-num">${cgN(ind.cargasHora)}</b><small>cargas/h</small>` : ''}`}</div>
+            `<b class="cg-num">${cgN(ind.ritmoSep)}</b><small>lotes sep./h</small><b class="cg-num">${cgN(ind.ritmoConf)}</b><small>lotes conf./h</small>${ind.cargasHora != null ? `<b class="cg-num">${cgN(ind.cargasHora)}</b><small>cargas/h</small>` : ''}`}</div>
           <div class="cg-ritmo-linha cg-realce"><span>Previsão</span><b class="cg-num">${i.pend ? (ind.etaMin == null ? '—' : cgDuracao(ind.etaMin)) : 'Pronto'}</b><small>${i.pend && ind.etaMin != null ? 'no ritmo atual · às ' + cgHoraMais(s.emitido, ind.etaMin) : (i.pend ? 'sem ritmo medido' : 'nada pendente')}</small></div>
-          ${i.pend ? `<div class="cg-ritmo-linha"><span>Com a equipe</span><b class="cg-num">${i.etaEquipe == null ? '—' : cgDuracao(i.etaEquipe)}</b><small>${i.etaEquipe == null ? (ind.porPessoaSep ? 'aloque separadores e conferentes' : 'ritmo por pessoa ainda não medido') : `com ${i.eq.sep} sep. e ${i.eq.conf} conf. agora (${cgN(ind.porPessoaSep)} tarefas/h por separador)`}</small></div>` : ''}
+          ${i.pend ? `<div class="cg-ritmo-linha"><span>Com a equipe</span><b class="cg-num">${i.etaEquipe == null ? '—' : cgDuracao(i.etaEquipe)}</b><small>${i.etaEquipe == null ? (ind.porPessoaSep ? 'aloque separadores e conferentes' : 'ritmo por pessoa ainda não medido') : `com ${i.eq.sep} sep. e ${i.eq.conf} conf. agora (${cgN(ind.porPessoaSep)} lotes/h por separador)`}</small></div>` : ''}
         </div>
       </div>
     </section>` : '';
@@ -1095,7 +1095,7 @@ function cgEquipeDepHtml(dep) {
     <header class="cg-cartao-cab"><h3>Equipe ${dep.andares ? 'do flowrack — pessoas por andar' : 'agora'}</h3>
       <span class="cg-selo neutro">${i.eq.sep} separador${i.eq.sep === 1 ? '' : 'es'} · ${i.eq.conf} conferente${i.eq.conf === 1 ? '' : 's'}</span></header>
     <div class="cg-zonas${dep.andares ? ' predio' : ' lado'}">${cgZonas(dep).map((z) => cgZonaHtml(z)).join('')}</div>
-    ${i.r && i.r.restSep && i.eq.sep ? `<p class="cg-nota">${cgN(Math.round(i.porSeparador))} tarefas de separação por separador alocado.</p>` : ''}
+    ${i.r && i.r.restSep && i.eq.sep ? `<p class="cg-nota">${cgN(Math.round(i.porSeparador))} lotes de separação por separador alocado.</p>` : ''}
   </section>`;
 }
 
@@ -1170,7 +1170,7 @@ function cgEquipeHtml() {
         const i = cgIndDep(dep.id);
         return `<section class="cg-cartao cg-quadro-dep">
           <header class="cg-cartao-cab"><h3>${esc(dep.nome)}</h3>${i.r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
-          ${i.r ? `<p class="cg-quadro-carga">${cgN(i.r.restSep)} tarefas de separação · ${cgN(i.r.restConf)} de conferência</p>` : ''}
+          ${i.r ? `<p class="cg-quadro-carga">${cgN(i.r.restSep)} lotes de separação · ${cgN(i.r.restConf)} de conferência</p>` : ''}
           <div class="cg-zonas${dep.andares ? ' predio' : ''}">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
         </section>`;
       }).join('')}</div>
@@ -1539,8 +1539,8 @@ function cgSalvarLeitura() {
     cargas: r.cargas.map((c) => ({ nro: c.nro, nome: c.nome, veiculo: c.veiculo, box: c.box, h24: !!c.h24, d: c.d }))
   }, 'Situação de carga salva').catch(() => {});
 }
-</script>
-<script>
+
+
 /*
  * SITUACAO DE CARGA — FASE 2 (8.15): abas novas (Sequencia, Todos os depositos, Boxes e patio,
  * Turnos), o historico de cada envio, a falta do dia, as paleteiras e os check-outs que acompanham
@@ -1743,14 +1743,14 @@ function cgEquipamentosResumoHtml() {
     <b>${t[0] === 'Paleteira' ? 'Paleteiras' : 'Check-outs'}</b> <span class="cg-num">${x.emUso}/${x.disponiveis}</span> em uso${x.manutencao ? ` · ${x.manutencao} manut.` : ''}${x.falta ? ` · <b class="cg-txt-alerta">faltam ${x.falta}</b>` : ` · ${x.livres} livres`}</span>`; };
   return `<div class="cg-eq-tiras">${um('PALETEIRA')}${um('CHECKOUT')}</div>`;
 }
-</script>
-<script>
+
+
 /* ---------------- SEQUENCIA DAS CARGAS ---------------- */
 const CG_SEQ_FLAG = {
   emCurso: ['Em curso agora', 'curso'], deveria: ['Deveria ter começado', 'atencao'], fora: ['Fora de sequência', 'alerta'],
   pulada: ['Pulada', 'atencao'], prioridade: ['24 h fora do topo', 'amarelo']
 };
-const CG_SEQ_ESTADO = { naoIniciada: 'não iniciada', andamento: 'em andamento', pronta: 'pronta', saiu: 'saiu do relatório', sem: 'sem tarefas' };
+const CG_SEQ_ESTADO = { naoIniciada: 'não iniciada', andamento: 'em andamento', pronta: 'pronta', saiu: 'saiu do relatório', sem: 'sem lotes' };
 function cgSequenciaHtml() {
   const d = CG.dados, q = d.sequencia, pode = d.podeEditar;
   if (!q || !q.itens.length) return `<div class="cg-vazio"><div class="cg-vazio-ico">${CG_SVG.caminhao}</div><h3>A sequência aparece com a situação de carga</h3><p>Assim que o PDF chegar, as cargas entram aqui na ordem do relatório e o supervisor organiza a fila.</p></div>`;
@@ -1905,16 +1905,16 @@ function cgFlowrackHtml(dep) {
   return `<section class="cg-cartao cg-fr">
     <header class="cg-cartao-cab"><h3>Flowrack do Nobre — térreo e quatro andares</h3>
       <span class="cg-selo neutro">${i.eq.sep} separador${i.eq.sep === 1 ? '' : 'es'} · ${i.eq.conf} conferente${i.eq.conf === 1 ? '' : 's'}</span></header>
-    ${i.r ? `<div class="cg-fr-topo"><span>Nobre: <b class="cg-num">${cgPct(i.ind.pctSep)}</b> separado · <b class="cg-num">${cgPct(i.ind.pctConf)}</b> conferido · <b class="cg-num">${cgN(i.r.restSep)}</b> tarefas de separação${i.eq.sep ? ' (' + cgN(Math.round(i.r.restSep / i.eq.sep)) + ' por separador)' : ''}</span>
-      <small>O relatório traz o andamento do Nobre inteiro: o andar de cada tarefa não vem no PDF.</small></div>` : ''}
+    ${i.r ? `<div class="cg-fr-topo"><span>Nobre: <b class="cg-num">${cgPct(i.ind.pctSep)}</b> separado · <b class="cg-num">${cgPct(i.ind.pctConf)}</b> conferido · <b class="cg-num">${cgN(i.r.restSep)}</b> lotes de separação${i.eq.sep ? ' (' + cgN(Math.round(i.r.restSep / i.eq.sep)) + ' por separador)' : ''}</span>
+      <small>O relatório traz o andamento do Nobre inteiro: o andar de cada lote não vem no PDF.</small></div>` : ''}
     <div class="cg-fr-predio">${andares.join('')}
       <div class="cg-fr-chao">${cgZonaHtml({ dep: dep.id, papel: 'CONFERENTE', andar: -1, nome: 'Conferência do flowrack (térreo)' })}</div>
     </div>
     ${pode ? '<p class="cg-nota">Arraste para a rua do andar (ou para "No andar"). As ruas de cada andar ficam em Turnos › Ajustes.</p>' : ''}
   </section>`;
 }
-</script>
-<script>
+
+
 /* ---------------- VEICULOS (desenho lateral, com a marca Bartofil) ---------------- */
 /*
  * Um desenho por tipo, do mesmo jeito: cabine azul Bartofil, bau branco com o nome BARTOFIL e a faixa
@@ -2177,8 +2177,8 @@ function cgImportarBoxes() {
     <input id="cg-imp-link" type="url" placeholder="docs.google.com/spreadsheets/d/..."></div>`,
     `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="agir('importarBoxesCarga', { link: val('cg-imp-link') })">Importar</button>`);
 }
-</script>
-<script>
+
+
 function cgIsoLocalAgora() {
   const d = new Date(), z = (n) => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds());
@@ -2398,7 +2398,7 @@ function cgComparacaoHtml(c) {
     <header class="cg-cartao-cab"><h3>O que andou de ${esc(cgDataBr(c.de))} até ${esc(cgDataBr(c.para))}</h3><span class="cg-selo neutro">${cgDuracao(c.horas * 60)}</span>
       <button type="button" class="cg-link" onclick="CG.comparacao=null;cgDesenhar()">Fechar</button></header>
     <div class="cg-seq-kpis">
-      <div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.sep)}</b><span>tarefas separadas</span></div><div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.conf)}</b><span>conferidas</span></div>
+      <div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.sep)}</b><span>lotes separados</span></div><div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.conf)}</b><span>lotes conferidos</span></div>
       <div class="cg-seq-kpi ok"><b class="cg-num">${t.concluidas}</b><span>cargas ficaram prontas</span></div><div class="cg-seq-kpi"><b class="cg-num">${t.avancaram}</b><span>avançaram</span></div>
       <div class="cg-seq-kpi ${t.paradas ? 'atencao' : ''}"><b class="cg-num">${t.paradas}</b><span>não andaram</span></div><div class="cg-seq-kpi"><b class="cg-num">${t.novas} / ${t.sairam}</b><span>novas / saíram</span></div>
     </div>

@@ -358,8 +358,8 @@ function sondarCanal() { return 'ok'; }
  * isso:
  *   - so as portas que a tela ja chama passam (API_PORTAS); o resto, nem
  *     as funcoes internas, nem instalar, nem nada novo, e recusado;
- *   - cada porta roda com as conferencias de sempre (sessao, filial,
- *     capacidade, modulo — e o bloqueio do PIN na entrada);
+ *   - cada porta roda com as conferencias de sempre (sessao, filial, a
+ *     matriz de acesso em tres faixas — e o bloqueio do PIN na entrada);
  *   - fora a entrada (inicio, entrar, sondarCanal), a API exige o codigo
  *     de uma sessao viva ANTES de chamar a porta. Sem ela, a porta nem
  *     roda: volta o [SESSAO] (ou a resposta de "sem sessao" que a porta

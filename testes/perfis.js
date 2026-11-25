@@ -313,6 +313,37 @@ caso('reserva por POST (canal barrado): a gravacao pela pagina passa pela mesma 
   afirmar(!r.telaEmbutida && /não inclui a tela/.test(r.avisoTela || ''), 'link de e-mail para tela Oculta: ' + JSON.stringify([r.avisoTela]));
 });
 
+caso('API da versao local (POST JSON no doPost): as mesmas portas, a mesma matriz — Oculto nao abre, Ver nao grava, Ver e editar grava; o menu da sessao e o da matriz', () => {
+  const m = mundo(); const adm = entrar(m, DONO, '4321'); const carla = entrar(m, CARLA, '7777');
+  acao(m, adm, 'salvarItemEstoque', { nome: 'Teclado', saldoInicial: '5' });
+  const api = (fn, ...args) => {
+    const c = novaExecucao(m, PASTA, { contaGoogle: '' }, OP);
+    const corpo = JSON.stringify({ api: 1, fn: fn, args: args });
+    const r = JSON.parse(c.doPost({ parameter: {}, parameters: {}, postData: { type: 'text/plain', contents: corpo, length: corpo.length } }).getContent());
+    return r;
+  };
+  const k = { t: carla.t, f: carla.f };
+  const consulta = linhaDoNivel(m, 'CONSULTA');
+  let r = api('carregarTela', k, 'estoque', {});
+  afirmar(!r.ok && /não inclui a tela/.test(r.erro), 'Oculto pela API: ' + JSON.stringify(r).slice(0, 120));
+  acao(m, adm, 'alterarPermissao', { id: consulta.ID, coluna: 'TELA_ESTOQUE', valor: 'VER' });
+  r = api('carregarTela', k, 'estoque', {});
+  const t = JSON.parse(r.valor);
+  afirmar(r.ok && t.pode.nivel === 'VER' && !t.pode.editar, 'Ver pela API: ' + JSON.stringify(t.pode));
+  const codigo = t.dados.itens[0].codigo;
+  r = api('executarAcao', k, 'movimentarEstoque', { tipo: 'SAIDA', item: codigo, quantidade: '1', destino: 'Loja' });
+  afirmar(!r.ok && /só para ver/.test(r.erro), 'gravar com Ver pela API: ' + JSON.stringify(r).slice(0, 120));
+  r = api('executarAcaoETela', k, 'movimentarEstoque', { tipo: 'SAIDA', item: codigo, quantidade: '1', destino: 'Loja' }, 'estoque', {});
+  afirmar(!r.ok && /só para ver/.test(r.erro), 'executarAcaoETela com Ver pela API');
+  acao(m, adm, 'alterarPermissao', { id: consulta.ID, coluna: 'TELA_ESTOQUE', valor: 'EDITAR' });
+  r = api('executarAcao', k, 'movimentarEstoque', { tipo: 'SAIDA', item: codigo, quantidade: '1', destino: 'Loja' });
+  afirmar(r.ok && telaCrua(m, adm, 'estoque').dados.itens[0].saldo === 4, 'Ver e editar pela API grava: ' + JSON.stringify(r).slice(0, 120));
+  const s = JSON.parse(api('retomarSessao', k).valor);
+  afirmar(s.telas.find((x) => x.id === 'estoque').nivel === 'EDITAR', 'o menu da sessao pela API e o da matriz');
+  r = api('alterarPermissao', k, { id: consulta.ID });
+  afirmar(!r.ok && /não liberada na API/.test(r.erro), 'funcao interna nao passa pela API');
+});
+
 caso('anexo das entregas (obterAnexo) e atalhos da Central seguem a matriz do Calendario', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321'); const carla = entrar(m, CARLA, '7777');
   const consulta = linhaDoNivel(m, 'CONSULTA');

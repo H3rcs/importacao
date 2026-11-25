@@ -4839,6 +4839,7 @@ async function rodar() {
     await A.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Blocado")) .cg-opcao:has-text("Conferente")');
     await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="BLOCADO"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
     afirmar(!(await B.f.$(zonaG + ' .cg-boneco[data-k="' + k + '"]')), 'nao ficou na Grandeza');
+    await foto(A.aba, 'carga-desktop-equipe');
     // paleteira: A leva a 1 do pool para a Pesaveis (Painel do CD); B ve na Supervisao
     await A.f.click('.cg-aba[data-aba="geral"]');
     await A.f.click('.cg-pal-pool .cg-equip[data-numero="1"]');

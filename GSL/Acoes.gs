@@ -72,16 +72,21 @@ const ACOES_TURNOS = ['A', 'B', 'C', 'J', 'BC', 'ADM', 'Todos'];
 function hidratarAcao(r) {
   const prazo = paraData(r.PRAZO);
   const prazoISO = prazo ? paraISO(prazo) : '';
-  const situacao = String(r.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
+  const parecer = parecerDe_(r);
+  let situacao = String(r.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
 
   let status = 'Pendente';
   if (situacao === ACOES_SITUACAO.CANCELADA) status = 'Cancelada';
+  // Situacao que ainda nao virou acao (8.13): nao conta como "em aberto", nao atrasa, nao entra no ranking.
+  else if (parecer !== PARECERES.TRATAR) { situacao = SITUACAO_DO_PARECER[parecer]; status = STATUS_DO_PARECER[parecer]; }
   else if (situacao === ACOES_SITUACAO.CONCLUIDA) status = 'Concluída';
   else if (prazoISO && diaNumISO(prazoISO) < hojeNum()) status = 'Atrasada';
 
   // Quantos dias faltam (ou passaram). A tela usa para o "vence em 3 dias".
   let dias = null;
-  if (prazoISO) dias = diaNumISO(prazoISO) - hojeNum();
+  if (prazoISO && parecer === PARECERES.TRATAR) dias = diaNumISO(prazoISO) - hojeNum();
+  const autor = emailsDaAcao_(r.AUTOR)[0] || '', destinatario = emailsDaAcao_(r.DESTINATARIO)[0] || '';
+  const tratativa = htmlGuardado_(r.TRATATIVA);
 
   // Acao conjunta: RESPONSAVEL_EMAIL guarda um ou mais e-mails separados por virgula.
   const responsaveis = emailsDaAcao_(r.RESPONSAVEL_EMAIL);
@@ -113,11 +118,189 @@ function hidratarAcao(r) {
     local: String(r.LOCAL || '').trim(),
     criticidade: String(r.CRITICIDADE || '').trim(),
     abertaEm: isoDe_(r.ABERTA_EM) || isoDoCarimbo_(r.CRIADO_EM),
-    fotos: fotosDaCelula_(r.ANEXOS),
+    fotos: fotosComLegenda_(r.ANEXOS, r.LEGENDAS),
     // Marcados num comentario (19/10): veem e respondem esta acao. Quem virou responsavel depois sai daqui.
-    marcadosEmails: emailsDaAcao_(r.MARCADOS).filter(function (e) { return responsaveis.indexOf(e) === -1; })
+    marcadosEmails: emailsDaAcao_(r.MARCADOS).filter(function (e) { return responsaveis.indexOf(e) === -1; }),
+    // SITUACAO E PARECER (8.13). descricao: texto rico (HTML limpo, comeca com "<") ou o texto simples de antes.
+    prioridade: prioridadeDe_(r),
+    parecer: parecer,
+    parecerEm: String(r.PARECER_EM || '').trim(),
+    parecerPor: String(r.PARECER_POR || '').toLowerCase().trim(),
+    parecerObs: String(r.PARECER_OBS || '').trim(),
+    reverEm: isoDe_(r.REVER_EM),
+    tratativa: tratativa,
+    // Acao de antes da 8.13 (ou criada direto pela tela antiga): o "o que precisa ser feito" esta na DESCRICAO.
+    tratativaNaDescricao: !tratativa && parecer === PARECERES.TRATAR && !autor && !destinatario && !!String(r.DESCRICAO || '').trim(),
+    autorEmail: autor,
+    destinatarioEmail: destinatario,
+    relatorio: String(r.RELATORIO || '').trim()
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* SITUACAO E PARECER DO GERENTE (8.13)                                */
+/*                                                                     */
+/* O modelo do "Relatorio de Ocorrencias e Acoes" que o gerente mandou: */
+/* quem tem "Ver e editar" no plano registra uma SITUACAO (titulo,      */
+/* prioridade, descricao em texto rico, fotos com legenda) para um      */
+/* gerente (DESTINATARIO). O gerente da o PARECER:                     */
+/*   TRATAR  "Tratar / Incluir acao": como sera tratado + responsaveis  */
+/*           + prazo — a situacao vira acao, com tudo o que a acao ja   */
+/*           tinha (situacoes, comentarios, conclusao com foto);        */
+/*   DEPOIS  "Outro momento": postergada (data opcional para rever);    */
+/*   NADA    "Nada a fazer": encerrada;                                 */
+/*   ''      "Sem definicao": esperando o parecer.                      */
+/* QUEM VE continua sendo so quem esta citado — agora tambem o AUTOR    */
+/* (quem registrou acompanha o proprio registro) e o DESTINATARIO.     */
+/* ------------------------------------------------------------------ */
+
+const PARECERES = { TRATAR: 'TRATAR', DEPOIS: 'DEPOIS', NADA: 'NADA' };
+const NOMES_PARECER = { TRATAR: 'Tratar / Incluir ação', DEPOIS: 'Outro momento', NADA: 'Nada a fazer', '': 'Sem definição' };
+const SITUACAO_DO_PARECER = { '': 'AGUARDANDO_PARECER', DEPOIS: 'POSTERGADA', NADA: 'SEM_ACAO' };
+const STATUS_DO_PARECER = { '': 'Aguardando parecer', DEPOIS: 'Outro momento', NADA: 'Nada a fazer' };
+const PRIORIDADES = ['ALTA', 'MEDIA', 'NORMAL'];
+const NOMES_PRIORIDADE = { ALTA: 'Alta', MEDIA: 'Média', NORMAL: 'Normal' };
+// A criticidade da Limpeza (Alta, Média, Baixa) e a prioridade com outro nome: Baixa = Normal.
+const CRITICIDADE_DA_PRIORIDADE = { ALTA: 'Alta', MEDIA: 'Média', NORMAL: 'Baixa' };
+const TEXTO_RICO_MAXIMO = 20000;       // caracteres do HTML limpo (descricao ou "como sera tratado")
+const LEGENDA_MAXIMA = 140;
+const RELATORIO_MAXIMO = 80;
+
+/*
+ * O parecer da linha. Linha sem PARECER, sem AUTOR e sem DESTINATARIO e
+ * acao de antes da 8.13 (ou de uma tela/Instalacao.gs antigos, ou da
+ * importacao da limpeza): e TRATAR — ela ja tinha responsavel e prazo.
+ */
+function parecerDe_(r) {
+  const p = String((r && r.PARECER) || '').toUpperCase().trim();
+  if (PARECERES[p]) return p;
+  return String((r && r.AUTOR) || '').trim() || String((r && r.DESTINATARIO) || '').trim() ? '' : PARECERES.TRATAR;
+}
+
+/* ALTA · MEDIA · NORMAL. Sem PRIORIDADE: a criticidade da limpeza (Baixa = Normal), senao Normal. */
+function prioridadeDe_(r) {
+  const p = normalizarPrioridade_(r && r.PRIORIDADE);
+  if (p) return p;
+  if (planoDe_(r) === 'LIMPEZA' && String((r && r.CRITICIDADE) || '').trim()) {
+    return normalizarPrioridade_(critLimpeza_(r.CRITICIDADE)) || 'NORMAL';
+  }
+  return 'NORMAL';
+}
+function normalizarPrioridade_(v) {
+  const t = String(v == null ? '' : v).toUpperCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (t === 'ALTA' || t === 'URGENTE') return 'ALTA';
+  if (t === 'MEDIA' || t === 'ATENCAO') return 'MEDIA';
+  if (t === 'NORMAL' || t === 'BAIXA') return 'NORMAL';
+  return '';
+}
+
+/*
+ * TEXTO RICO SEGURO. O editor da tela (negrito, italico, sublinhado,
+ * marca-texto e listas) manda HTML; aqui so passa o que formata: b, strong,
+ * i, em, u, mark, br, div, p, ul, ol, li — SEM atributo nenhum (nem style,
+ * nem on..., nem href). script, style, iframe, svg e companhia saem com o
+ * conteudo; qualquer outra etiqueta sai e o texto dela fica (o link vira so
+ * o texto). Todo "<" que nao e uma dessas etiquetas vira &lt;. O resultado
+ * sempre comeca com "<" (vai dentro de um <div>): e assim que a tela sabe
+ * que e HTML — o texto simples das acoes antigas nao comeca com "<".
+ * A tela limpa de novo antes de mostrar (quem mexer direto na planilha
+ * tambem nao injeta nada).
+ */
+const TAGS_RICAS_ = { b: 1, strong: 1, i: 1, em: 1, u: 1, mark: 1, br: 1, div: 1, p: 1, ul: 1, ol: 1, li: 1 };
+const BLOCOS_PERIGOSOS_ = /<(script|style|iframe|object|embed|noscript|template|textarea|select|svg|math|head|title|xmp|frame|frameset|applet|noembed|plaintext)\b[\s\S]*?(<\/\1\s*>|$)/gi;
+function htmlRico_(valor) {
+  let s = String(valor == null ? '' : valor);
+  if (s.length > TEXTO_RICO_MAXIMO * 3) throw new Error('O texto é grande demais (máximo de ' + TEXTO_RICO_MAXIMO + ' caracteres).');
+  s = s.replace(/<!--[\s\S]*?(-->|$)/g, '').replace(BLOCOS_PERIGOSOS_, '');
+  const escapar = function (t) {
+    return t.replace(/&(?!(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{1,30});)/gi, '&amp;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+  let saida = '', pos = 0, m;
+  const re = /<[^<>]*>/g;
+  while ((m = re.exec(s))) {
+    saida += escapar(s.slice(pos, m.index));
+    pos = m.index + m[0].length;
+    const t = /^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)/.exec(m[0]);
+    const nome = t ? t[2].toLowerCase() : '';
+    if (!TAGS_RICAS_[nome]) continue;
+    if (nome === 'br') { if (!t[1]) saida += '<br>'; continue; }
+    saida += '<' + t[1] + nome + '>';
+  }
+  saida += escapar(s.slice(pos));
+  saida = saida.trim();
+  if (!textoDoHtml_('<div>' + saida + '</div>').trim()) return '';
+  if (saida.length > TEXTO_RICO_MAXIMO) throw new Error('O texto é grande demais (máximo de ' + TEXTO_RICO_MAXIMO + ' caracteres).');
+  return '<div>' + saida + '</div>';
+}
+
+/* O que veio da tela: HTML limpo (rico, ou comecando com "<") ou o texto simples de antes, como esta. */
+function campoRico_(valor, rico) {
+  const s = String(valor == null ? '' : valor).trim();
+  if (!s) return '';
+  if (!rico && s.charAt(0) !== '<') return s;
+  return htmlRico_(s);
+}
+
+/* O que vai para a tela: o HTML da planilha passa de novo pelo filtro (alguem pode ter mexido nela a mao). */
+function htmlGuardado_(valor) {
+  const s = String(valor == null ? '' : valor).trim();
+  if (!s) return '';
+  if (s.charAt(0) !== '<') return s;
+  try { return htmlRico_(s); } catch (e) { return ''; }
+}
+
+/* HTML (ou texto simples) -> texto simples: e-mails, busca e o resumo do cartao. */
+function textoDoHtml_(valor) {
+  const s = String(valor == null ? '' : valor);
+  if (s.trim().charAt(0) !== '<') return s.trim();
+  return s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li)>/gi, '\n').replace(/<li>/gi, '• ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, function (x, n) { return String.fromCharCode(Number(n)); })
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/* LEGENDAS: {idDaFoto: "legenda"} — so as fotos que ainda estao na acao. */
+function lerLegendas_(valor) {
+  try {
+    const o = JSON.parse(String(valor || '{}'));
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch (e) { return {}; }
+}
+function fotosComLegenda_(anexos, legendas) {
+  const l = lerLegendas_(legendas);
+  return fotosDaCelula_(anexos).map(function (f) { f.legenda = String(l[f.id] || ''); return f; });
+}
+/*
+ * As legendas que vieram da tela: a de cada foto nova (fotos[i].legenda, na
+ * ordem em que subiram) e as das fotos que ja estavam (legendas: {id: texto}).
+ * mudou: a tela mandou legenda de foto que ja estava (editar).
+ */
+function legendasDoPedido_(params, fotos, gravadas) {
+  const novas = {};
+  [].concat((params && params.fotos) || []).filter(function (f) { return f && f.dados; }).forEach(function (f, i) {
+    const t = limparLegenda_(f.legenda);
+    if (t && gravadas[i]) novas[gravadas[i].id] = t;
+  });
+  const vieram = params && params.legendas && typeof params.legendas === 'object' && !Array.isArray(params.legendas) ? params.legendas : null;
+  const existentes = {};
+  if (vieram) Object.keys(vieram).forEach(function (id) { existentes[String(id)] = limparLegenda_(vieram[id]); });
+  return { novas: novas, existentes: vieram ? existentes : null, mudou: !!vieram };
+}
+/* LEGENDAS depois de salvar: as antigas, as editadas (so de foto que esta na acao) e as das fotos novas. */
+function juntarLegendas_(atual, legendas) {
+  const naAcao = lerAnexos_(atual.ANEXOS).map(function (a) { return a.id; });
+  const base = lerLegendas_(atual.LEGENDAS), saida = {};
+  naAcao.forEach(function (id) {
+    const t = legendas.existentes && Object.prototype.hasOwnProperty.call(legendas.existentes, id) ? legendas.existentes[id] : limparLegenda_(base[id]);
+    if (t) saida[id] = t;
+  });
+  Object.keys(legendas.novas).forEach(function (id) { saida[id] = legendas.novas[id]; });
+  return JSON.stringify(saida);
+}
+function limparLegenda_(t) { return String(t == null ? '' : t).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, LEGENDA_MAXIMA); }
 
 /* 'dd/MM/yyyy HH:mm:ss' -> 'yyyy-MM-dd' ('' se nao der para ler). */
 function isoDoCarimbo_(valor) {
@@ -211,6 +394,8 @@ const AUTOMATICOS_LP_ACOES = [
   { tipos: ['CONCLUSAO'], texto: /^Concluída em \d{2}\/\d{2}\/\d{4}$/ }
 ];
 function ehAutomatico_(origem, tipo, texto) {
+  // O parecer sem observacao (8.13) e registro do sistema: "Parecer: Outro momento."
+  if (tipo === 'PARECER') return Object.keys(NOMES_PARECER).some(function (k) { return texto === textoDoParecer_(k); });
   return TEXTOS_AUTOMATICOS[tipo] === texto || (origem === 'LP_ACOES' &&
     AUTOMATICOS_LP_ACOES.some(function (a) { return a.tipos.indexOf(tipo) !== -1 && a.texto.test(texto); }));
 }
@@ -392,15 +577,20 @@ function comentarAcaoDoPlano_(plano, usuario, params) {
       exigirQuemComenta_(plano, usuario, registro);
       const atual = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
       if (atual === ACOES_SITUACAO.CANCELADA) throw new Error('Esta ação foi cancelada. Atualize a tela.');
-      const cuida = ehResponsavelOuGestor_(plano, usuario, registro);
+      // A situacao que ainda nao virou acao (8.13) so recebe comentario: andamento, "depende de" e concluir sao da acao.
+      const ehAcao = parecerDe_(registro) === PARECERES.TRATAR;
+      const cuida = ehAcao && ehResponsavelOuGestor_(plano, usuario, registro);
       const campos = cuida ? camposDoComentario_(usuario, atual, texto, situacao, depende) : {};
       const concluiu = campos.SITUACAO === ACOES_SITUACAO.CONCLUIDA;
-      // Marcada que ainda nao era responsavel nem marcada passa a ver e a responder a acao.
+      // Marcada que ainda nao era citada (responsavel, marcada, autor ou destinatario) passa a ver e a responder a acao.
       const jaMarcados = emailsDaAcao_(registro.MARCADOS), responsaveis = emailsDaAcao_(registro.RESPONSAVEL_EMAIL);
-      const novas = marcadas.filter(function (p) { return jaMarcados.indexOf(p.email) === -1 && responsaveis.indexOf(p.email) === -1; });
+      const daSituacao = citadosDaSituacao_(registro);
+      const novas = marcadas.filter(function (p) {
+        return jaMarcados.indexOf(p.email) === -1 && responsaveis.indexOf(p.email) === -1 && daSituacao.indexOf(p.email) === -1;
+      });
       if (novas.length) campos.MARCADOS = jaMarcados.concat(novas.map(emailDe)).join(',');
-      // Ja via antes de ser marcada so quem gere o plano, na acao sem responsavel (21/10).
-      const jaVia = function (p) { return p.gere && !responsaveis.length; };
+      // Ja via antes de ser marcada so quem gere o plano, na acao em que ninguem esta citado (21/10).
+      const jaVia = function (p) { return p.gere && !responsaveis.length && !daSituacao.length; };
       // A acao primeiro, o historico depois: se a acao nao gravar, nada fica apontando para fotos jogadas fora.
       if (Object.keys(campos).length) atualizar('ACOES', id, campos, usuario.email);
       const autor = gravarComentario_(usuario, 'ACOES', id, texto, cuida ? situacao : '',
@@ -467,13 +657,29 @@ function acoesNoAlcance(usuario, todas, plano) {
   plano = plano || PLANOS.CALENDARIO;
   const email = String(usuario.email || '').toLowerCase().trim();
   const gere = gereOPlano_(plano, usuario);
-  return todas.filter(function (a) { return vePelaCitacao_(email, gere, a.responsaveisEmails, a.marcadosEmails); });
+  return todas.filter(function (a) {
+    return vePelaCitacao_(email, gere, a.responsaveisEmails, a.marcadosEmails, [a.autorEmail, a.destinatarioEmail].filter(Boolean));
+  });
 }
 
-/* A regra, sobre as listas de e-mails da acao. gere: a pessoa gere o plano (so conta na acao sem responsavel). */
-function vePelaCitacao_(email, gere, responsaveis, marcados) {
+/*
+ * A regra, sobre as listas de e-mails da acao. gere: a pessoa gere o plano
+ * (so conta na acao em que ninguem esta citado). outros (8.13): o AUTOR da
+ * situacao (quem registrou acompanha o proprio registro) e o DESTINATARIO (o
+ * gerente que da o parecer). A situacao nova nasce sem responsavel, mas com
+ * os dois — por isso a excecao da acao sem responsavel nao vale para ela:
+ * so para a linha antiga em que ninguem esta citado.
+ */
+function vePelaCitacao_(email, gere, responsaveis, marcados, outros) {
   if (!email) return false;
-  return responsaveis.indexOf(email) !== -1 || marcados.indexOf(email) !== -1 || (gere && !responsaveis.length);
+  const extras = outros || [];
+  return responsaveis.indexOf(email) !== -1 || marcados.indexOf(email) !== -1 || extras.indexOf(email) !== -1 ||
+    (gere && !responsaveis.length && !extras.length);
+}
+
+/* O autor e o destinatario da linha crua (8.13). */
+function citadosDaSituacao_(registro) {
+  return emailsDaAcao_(registro.AUTOR).slice(0, 1).concat(emailsDaAcao_(registro.DESTINATARIO).slice(0, 1));
 }
 
 /* A mesma regra, para UMA acao (foto pedida pela tela). */
@@ -484,7 +690,7 @@ function podeVerAcao_(plano, usuario, acao) {
 /* A mesma regra, na linha crua da planilha (o que grava confere nela, de novo dentro da trava). */
 function podeVerRegistro_(plano, usuario, registro) {
   return vePelaCitacao_(String(usuario.email || '').toLowerCase().trim(), gereOPlano_(plano, usuario),
-    emailsDaAcao_(registro.RESPONSAVEL_EMAIL), emailsDaAcao_(registro.MARCADOS));
+    emailsDaAcao_(registro.RESPONSAVEL_EMAIL), emailsDaAcao_(registro.MARCADOS), citadosDaSituacao_(registro));
 }
 
 /*
@@ -516,7 +722,8 @@ function rankingAcoesPorTurno(acoes) {
     mapa[t] = { turno: t, total: 0, concluidas: 0, pendentes: 0, atrasadas: 0, canceladas: 0 };
   });
 
-  acoes.forEach(function (a) {
+  // So o que virou acao (8.13): a situacao sem parecer, postergada ou "nada a fazer" nao foi proposta a turno nenhum.
+  acoes.filter(function (a) { return a.parecer === undefined || a.parecer === PARECERES.TRATAR; }).forEach(function (a) {
     const t = a.turno && mapa[a.turno] ? a.turno : 'Todos';
     const linha = mapa[t];
     linha.total++;
@@ -552,7 +759,9 @@ function contagensDoPlano_(minhas, email) {
     abertas: abertas.length,
     atrasadas: abertas.filter(function (a) { return a.status === 'Atrasada'; }).length,
     minhas: abertas.filter(function (a) { return ehDonoDaAcao_(a, email); }).length,
-    concluidas: minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.CONCLUIDA; }).length
+    concluidas: minhas.filter(function (a) { return a.situacao === ACOES_SITUACAO.CONCLUIDA; }).length,
+    // 8.13: as situacoes que esperam o MEU parecer (sou o gerente destinatario) — entram na bolinha.
+    parecer: minhas.filter(function (a) { return a.situacao === SITUACAO_DO_PARECER[''] && a.destinatarioEmail === email; }).length
   };
 }
 
@@ -581,7 +790,8 @@ function pendenciasDoUsuario_(usuario) {
   const chave = 'pend|' + filialAtual().codigo + '|' + email;
   const telas = telasDe(usuario);
   // 'citados' (21/10): a bolinha guardada com a regra de antes (a gestao contava todas) nao volta depois da atualizacao.
-  const marca = ['citados', APP.build, geracaoTabela('ACOES'), paraISO(hoje()), telas.map(function (t) { return t.id; }).join(','),
+  // 'pareceres' (8.13): a de antes nao tinha as situacoes que esperam o parecer.
+  const marca = ['citados', 'pareceres', APP.build, geracaoTabela('ACOES'), paraISO(hoje()), telas.map(function (t) { return t.id; }).join(','),
                  usuario.perfil, usuario.chaveModulos || '', escopoDe(usuario).tipo, usuario.turno || '',
                  usuario.simulado ? 'simulado' : ''].join('|');
   const cache = CacheService.getScriptCache();
@@ -594,7 +804,7 @@ function pendenciasDoUsuario_(usuario) {
     const plano = PLANOS[k];
     if (!telas.some(function (t) { return t.id === plano.tela; })) return;   // nao abre o plano: sem bolinha
     const c = contagensDoPlano_(acoesNoAlcance(usuario, acoesDoPlano_(plano.id), plano), email);
-    saida[plano.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas, minhas: c.minhas };
+    saida[plano.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas, minhas: c.minhas, parecer: c.parecer };
   });
   try { cache.put(chave, JSON.stringify({ marca: marca, pendencias: saida }), VALIDADE_PENDENCIAS); } catch (e) { /* sem cache, segue */ }
   return saida;
@@ -616,7 +826,8 @@ function dadosAcoes(usuario, params) { return dadosPlano_(PLANOS.CALENDARIO, usu
 /* Os dados de um plano — a tela do Calendario e a aba Plano de Acao da Limpeza usam o mesmo. */
 function dadosPlano_(plano, usuario, params) {
   const filtroTurno = String((params && params.turno) || '').toUpperCase().trim();
-  const filtroSituacao = String((params && params.situacao) || 'ABERTAS').toUpperCase().trim();
+  // 8.13: sem filtro pedido, vem TUDO o que a pessoa ve — a tela filtra por parecer e por situacao (com os contadores).
+  const filtroSituacao = String((params && params.situacao) || 'TODAS').toUpperCase().trim();
   const busca = String((params && params.busca) || '').toLowerCase().trim();
 
   // So as acoes em que a pessoa esta citada (21/10), e so delas o historico.
@@ -639,7 +850,8 @@ function dadosPlano_(plano, usuario, params) {
   }
   if (busca) {
     lista = lista.filter(function (a) {
-      return (a.acao + ' ' + a.descricao + ' ' + a.responsavel + ' ' + a.origem + ' ' + a.zona + ' ' + a.local)
+      return (a.acao + ' ' + textoDoHtml_(a.descricao) + ' ' + textoDoHtml_(a.tratativa) + ' ' + a.responsavel + ' ' +
+              a.origem + ' ' + a.zona + ' ' + a.local + ' ' + a.relatorio)
         .toLowerCase().indexOf(busca) !== -1;
     });
   }
@@ -672,6 +884,17 @@ function dadosPlano_(plano, usuario, params) {
     filtro: { turno: filtroTurno, situacao: filtroSituacao, busca: busca },
     plano: plano.id,
     fotos: { porVez: FOTOS_POR_VEZ, porAcao: FOTOS_POR_ACAO },
+    // 8.13: o modelo de situacao e parecer. situacoes: false com o Instalacao.gs de antes (sem as colunas) — a tela so tem a acao direta.
+    modelo: {
+      situacoes: colunasDe('ACOES').indexOf('PARECER') !== -1,
+      prioridades: PRIORIDADES.map(function (p) { return { id: p, nome: NOMES_PRIORIDADE[p] }; }),
+      pareceres: NOMES_PARECER,
+      relatorios: minhas.map(function (a) { return a.relatorio; })
+        .filter(function (r, i, l) { return r && l.indexOf(r) === i; }).sort(),
+      filial: filialAtual().nome,
+      legendaMaxima: LEGENDA_MAXIMA
+    },
+    hoje: paraISO(hoje()),
     permissoes: {
       gerir: gere,
       // "Ver e editar" na tela do plano: sem isto (so "Ver"), nem o responsavel conclui ou comenta — a tela e so leitura.
@@ -712,7 +935,9 @@ function pessoasParaAcao(plano) {
         papel: String(p.PAPEL || '').trim(),
         gere: !!(plano && x.u) && nivelNaMatriz(x.u, plano.tela) === NIVEL_EDITAR,
         edita: !!(plano && x.u) && nivelNaMatriz(x.u, plano.tela) === NIVEL_EDITAR,
-        abre: !plano || !!(x.u && podeVer(x.u, plano.tela))
+        abre: !plano || !!(x.u && podeVer(x.u, plano.tela)),
+        // 8.13: sugestao para "Gerente / destinatario" (a tela poe estes primeiro) — nivel GERENTE ou funcao de gerente.
+        gerente: String(p.PERFIL || '').toUpperCase().trim() === 'GERENTE' || /gerent/i.test(String(p.PAPEL || ''))
       };
     })
     .filter(function (p) { return !!p.email; })
@@ -766,6 +991,11 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
   const nova = !id;
   // Existe, e deste plano e a pessoa a ve? Confere antes de tudo (e antes de subir foto para o Drive).
   const antes = nova ? null : acaoQueVe_(plano, usuario, id);
+  // 8.13: aqui so a ACAO (parecer Tratar). A situacao sem esse parecer se edita em salvarSituacao e vira acao no parecer.
+  if (antes && parecerDe_(antes) !== PARECERES.TRATAR) {
+    throw new Error('Esta situação ainda não virou ação: o gerente dá o parecer “Tratar / Incluir ação”. Atualize a tela.');
+  }
+  const modelo = colunasDe('ACOES').indexOf('PARECER') !== -1;
 
   // Um ou mais responsaveis (acao conjunta) — gente que enxerga o plano.
   // Quem ja era responsavel continua valendo (pode ter perdido o acesso depois).
@@ -795,18 +1025,27 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
 
   const campos = {
     ACAO: titulo,
-    DESCRICAO: String(params.descricao || '').trim(),
+    // rico (8.13): a tela nova manda HTML do editor — limpo aqui. A tela antiga manda texto simples, que fica como esta.
+    DESCRICAO: campoRico_(params.descricao, params.rico),
     RESPONSAVEL: nome,
     RESPONSAVEL_EMAIL: emails.join(','),
     TURNO: turno,
     ORIGEM: String(params.origem || '').trim(),
     PRAZO: paraISO(data)
   };
+  // 8.13: prioridade, "como sera tratado" e o levantamento — so quando a tela os manda (a antiga nao mexe neles).
+  const prioridade = normalizarPrioridade_(params.prioridade) ||
+    (plano.id === 'LIMPEZA' && params.criticidade ? normalizarPrioridade_(critLimpeza_(params.criticidade)) : '');
+  if (modelo) {
+    if (prioridade) campos.PRIORIDADE = prioridade;
+    if (params.tratativa !== undefined) campos.TRATATIVA = campoRico_(params.tratativa, true);
+    if (params.relatorio !== undefined) campos.RELATORIO = String(params.relatorio || '').trim().slice(0, RELATORIO_MAXIMO);
+  }
   // Da limpeza: onde foi encontrado, criticidade e quando a acao foi aberta.
   if (plano.id === 'LIMPEZA') {
     campos.ZONA = String(params.zona || '').toUpperCase().trim();
     campos.LOCAL = String(params.local || '').trim();
-    campos.CRITICIDADE = critLimpeza_(params.criticidade);
+    campos.CRITICIDADE = prioridade ? CRITICIDADE_DA_PRIORIDADE[prioridade] : critLimpeza_(params.criticidade);
     campos.ABERTA_EM = isoDe_(params.abertaEm) ||
       (antes ? isoDe_(antes.ABERTA_EM) || isoDoCarimbo_(antes.CRIADO_EM) : '') || paraISO(hoje());
   }
@@ -815,6 +1054,7 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
   if (nova) id = gerarId('ACOES');
   else if (lerAnexos_(antes.ANEXOS).length + fotos.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
   const gravadas = gravarFotos_(usuario, id, fotos);
+  const legendas = modelo ? legendasDoPedido_(params, fotos, gravadas) : null;
   let marcadosDepois = [];       // quem continua marcado depois de salvar (o recado diz quem ve a acao)
 
   try {
@@ -827,15 +1067,23 @@ function salvarAcaoDoPlano_(plano, usuario, params) {
         campos.CONCLUIDO_POR = '';
         campos.OBSERVACAO = '';
         campos.ANEXOS = gravadas.length ? JSON.stringify(gravadas) : '';
+        // A acao direta (8.13) ja nasce com o parecer de quem a criou: e uma situacao que ja vem tratada.
+        if (modelo) {
+          campos.PARECER = PARECERES.TRATAR; campos.PARECER_EM = agoraTexto(); campos.PARECER_POR = usuario.email;
+          campos.PRIORIDADE = prioridade || 'NORMAL';
+          if (legendas) campos.LEGENDAS = JSON.stringify(legendas.novas);
+        }
         inserir('ACOES', campos, usuario.email);
         return;
       }
       const atual = acaoQueVe_(plano, usuario, id);
+      if (parecerDe_(atual) !== PARECERES.TRATAR) throw new Error('Esta situação ainda não virou ação. Atualize a tela.');
       if (gravadas.length) {
         const lista = lerAnexos_(atual.ANEXOS);
         if (lista.length + gravadas.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
         campos.ANEXOS = JSON.stringify(lista.map(metadadosDoAnexo_).concat(gravadas));
       }
+      if (legendas && (legendas.mudou || gravadas.length)) campos.LEGENDAS = juntarLegendas_(atual, legendas);
       if ('MARCADOS' in atual) {
         const marcados = emailsDaAcao_(atual.MARCADOS), ficam = marcadosQueFicam_(marcados, emails, params.desmarcados);
         if (ficam.length !== marcados.length) campos.MARCADOS = ficam.join(',');
@@ -890,7 +1138,8 @@ function concluirAcaoDoPlano_(plano, usuario, params) {
 
   const antes = acaoDoPlano_(plano, id);
   exigirResponsavelOuGestor_(plano, usuario, antes, naoEDele(antes));
-  const situacaoAntes = String(antes.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
+  exigirAcaoTratada_(antes);
+  const situacaoAntes =String(antes.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
   if (situacaoAntes === ACOES_SITUACAO.CONCLUIDA) return { recado: 'Esta ação já estava concluída.' };
   const gravadas = situacaoAntes === ACOES_SITUACAO.CANCELADA ? [] : gravarFotos_(usuario, id, fotos);
 
@@ -905,8 +1154,9 @@ function concluirAcaoDoPlano_(plano, usuario, params) {
     return comTrava(function () {
       const registro = acaoDoPlano_(plano, id);
       exigirResponsavelOuGestor_(plano, usuario, registro, naoEDele(registro));
+      exigirAcaoTratada_(registro);
 
-      const situacao = String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
+      const situacao =String(registro.SITUACAO || ACOES_SITUACAO.PENDENTE).toUpperCase().trim();
       if (situacao === ACOES_SITUACAO.CANCELADA) {
         throw new Error('Esta ação foi cancelada pela gestão e não pode ser concluída.' +
           (String(registro.OBSERVACAO || '').trim() ? ' Motivo: ' + String(registro.OBSERVACAO).trim() + '.' : '') +
@@ -937,7 +1187,7 @@ function concluirAcaoDoPlano_(plano, usuario, params) {
 function reabrirAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   return comTrava(function () {
-    acaoQueVe_(plano, usuario, id);
+    exigirAcaoTratada_(acaoQueVe_(plano, usuario, id));
     atualizar('ACOES', id, {
       SITUACAO: ACOES_SITUACAO.PENDENTE,
       CONCLUIDO_EM: '', CONCLUIDO_POR: '', ANDAMENTO: 'Em andamento'
@@ -952,7 +1202,7 @@ function cancelarAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   const motivo = String(params.motivo || '').trim();
   return comTrava(function () {
-    acaoQueVe_(plano, usuario, id);
+    exigirAcaoTratada_(acaoQueVe_(plano, usuario, id));
     atualizar('ACOES', id, {
       SITUACAO: ACOES_SITUACAO.CANCELADA,
       OBSERVACAO: motivo, DEPENDE: ''
@@ -965,11 +1215,247 @@ function cancelarAcaoDoPlano_(plano, usuario, params) {
 function excluirAcaoDoPlano_(plano, usuario, params) {
   const id = String(params.id || '').trim();
   return comTrava(function () {
-    acaoQueVe_(plano, usuario, id);
+    const r = acaoQueVe_(plano, usuario, id);
     excluir('ACOES', id, usuario.email);
-    return { recado: 'Ação excluída.' };
+    return { recado: parecerDe_(r) === PARECERES.TRATAR ? 'Ação excluída.' : 'Situação excluída.' };
   });
 }
+
+/* Concluir, reabrir e cancelar sao da ACAO: a situacao precisa do parecer "Tratar" antes (8.13). */
+function exigirAcaoTratada_(registro) {
+  if (parecerDe_(registro) !== PARECERES.TRATAR) {
+    throw new Error('Esta situação ainda não virou ação: falta o parecer “Tratar / Incluir ação” do gerente. Atualize a tela.');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* SITUACAO: REGISTRAR, EDITAR E O PARECER (8.13)                      */
+/* ------------------------------------------------------------------ */
+
+/* Instalacao.gs de antes (sem as colunas da 8.13): nada do modelo novo grava — a frase pede o arquivo. */
+function exigirModeloDeSituacoes_() {
+  if (colunasDe('ACOES').indexOf('PARECER') === -1) {
+    throw new Error('Atualização incompleta do GSL: para registrar situações e dar o parecer, o Instalacao.gs desta versão precisa estar no Apps Script. Avise o administrador do sistema.');
+  }
+}
+
+/* O gerente que vai dar o parecer: alguem que abre o plano com "Ver e editar" nesta filial. */
+function destinatarioDoPedido_(plano, email, jaEra) {
+  const e = emailsDaAcao_(email)[0] || '';
+  if (!e) throw new Error('Escolha o gerente que vai dar o parecer (destinatário).');
+  if (e === jaEra) return e;
+  const p = pessoasParaAcao(plano).filter(function (x) { return x.email === e; })[0];
+  if (!p || !p.abre) throw new Error('Sem acesso ao ' + plano.nome + ' nesta filial: ' + e + '. Escolha alguém da lista.');
+  if (!p.edita) throw new Error('O destinatário dá o parecer: precisa de “Ver e editar” no ' + plano.nome + ' (' + p.nome + ' só tem “Ver”).');
+  return e;
+}
+
+/*
+ * REGISTRAR (ou editar) UMA SITUACAO. Quem tem "Ver e editar" no plano (a
+ * porta confere): titulo, prioridade, descricao em texto rico, fotos com
+ * legenda, o gerente destinatario, turno, origem, levantamento e, na
+ * limpeza, zona, local e "aberta em". Quem registra fica como AUTOR e,
+ * com o destinatario, esta citado: os dois veem a situacao. Nasce sem
+ * parecer. O destinatario recebe um e-mail com o link.
+ * Editar: quem ve a situacao (citado) — a de parecer "Tratar" tambem (os
+ * campos da acao ficam em salvarAcao e no parecer). Trocar o destinatario
+ * (encaminhar) so enquanto nao ha parecer.
+ */
+function salvarSituacaoDoPlano_(plano, usuario, params) {
+  exigirModeloDeSituacoes_();
+  const titulo = String(params.titulo || params.acao || '').trim();
+  if (!titulo) throw new Error('Informe o título da situação.');
+  const turno = String(params.turno || 'Todos').trim();
+  if (ACOES_TURNOS.indexOf(turno) === -1) throw new Error('Turno inválido: ' + turno);
+  const prioridade = normalizarPrioridade_(params.prioridade) || 'NORMAL';
+  let id = String(params.id || '').trim();
+  const nova = !id;
+  const antes = nova ? null : acaoQueVe_(plano, usuario, id);
+  const parecerAntes = antes ? parecerDe_(antes) : '';
+  const destAntes = antes ? emailsDaAcao_(antes.DESTINATARIO)[0] || '' : '';
+  // O destinatario muda so sem parecer; com parecer, fica o que estava (a tela nem mostra o campo).
+  const destinatario = !antes || !parecerAntes ? destinatarioDoPedido_(plano, params.destinatario, destAntes) : destAntes;
+
+  const campos = {
+    ACAO: titulo,
+    DESCRICAO: campoRico_(params.descricao, true),
+    PRIORIDADE: prioridade,
+    TURNO: turno,
+    ORIGEM: String(params.origem || '').trim(),
+    RELATORIO: String(params.relatorio || '').trim().slice(0, RELATORIO_MAXIMO)
+  };
+  if (!antes || !parecerAntes) campos.DESTINATARIO = destinatario;
+  if (plano.id === 'LIMPEZA') {
+    campos.ZONA = String(params.zona || '').toUpperCase().trim();
+    campos.LOCAL = String(params.local || '').trim();
+    campos.CRITICIDADE = CRITICIDADE_DA_PRIORIDADE[prioridade];
+    campos.ABERTA_EM = isoDe_(params.abertaEm) ||
+      (antes ? isoDe_(antes.ABERTA_EM) || isoDoCarimbo_(antes.CRIADO_EM) : '') || paraISO(hoje());
+  }
+
+  const fotos = fotosDoPedido_(params);
+  if (nova) id = gerarId('ACOES');
+  else if (lerAnexos_(antes.ANEXOS).length + fotos.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
+  const gravadas = gravarFotos_(usuario, id, fotos);
+  const legendas = legendasDoPedido_(params, fotos, gravadas);
+
+  try {
+    comTrava(function () {
+      if (nova) {
+        Object.assign(campos, {
+          ID: id, PLANO: plano.id, SITUACAO: ACOES_SITUACAO.PENDENTE, AUTOR: String(usuario.email || '').toLowerCase().trim(),
+          PARECER: '', RESPONSAVEL: '', RESPONSAVEL_EMAIL: '', PRAZO: '', CONCLUIDO_EM: '', CONCLUIDO_POR: '', OBSERVACAO: '',
+          ANEXOS: gravadas.length ? JSON.stringify(gravadas) : '', LEGENDAS: JSON.stringify(legendas.novas)
+        });
+        inserir('ACOES', campos, usuario.email);
+        return;
+      }
+      const atual = acaoQueVe_(plano, usuario, id);
+      if (parecerDe_(atual) !== parecerAntes) throw new Error('O parecer desta situação mudou enquanto a janela estava aberta. Feche e abra de novo.');
+      if (gravadas.length) {
+        const lista = lerAnexos_(atual.ANEXOS);
+        if (lista.length + gravadas.length > FOTOS_POR_ACAO) throw new Error(muitasFotos_());
+        campos.ANEXOS = JSON.stringify(lista.map(metadadosDoAnexo_).concat(gravadas));
+      }
+      campos.LEGENDAS = juntarLegendas_(atual, legendas);
+      atualizar('ACOES', id, campos, usuario.email);
+    });
+  } catch (e) { jogarFotosFora_(gravadas); throw e; }
+
+  // O gerente fica sabendo (situacao nova, ou encaminhada para ele). Falha no e-mail nao desfaz nada, mas aparece.
+  const r = { id: id, recado: (nova ? 'Situação registrada.' : 'Situação atualizada.') +
+    (gravadas.length ? ' ' + gravadas.length + ' foto(s) anexada(s).' : '') };
+  const eu = String(usuario.email || '').toLowerCase().trim();
+  if ((nova || destinatario !== destAntes) && destinatario && destinatario !== eu) {
+    try {
+      avisarSituacao_(plano, Object.assign({ ID: id }, antes || {}, campos), destinatario, autorDoComentario_(usuario));
+      r.recado += ' ' + nomeDoEmail_(pessoasPorEmail_(), destinatario) + ' foi avisado(a) para dar o parecer.';
+    } catch (e) { r.avisoEmail = r.recado + ' Mas o aviso por e-mail não saiu para ' + destinatario + ' (' + (e.message || e) + ').'; }
+  }
+  return r;
+}
+
+/*
+ * O PARECER DO GERENTE. Quem decide: o DESTINATARIO da situacao (o gerente
+ * escolhido por quem registrou). Sem destinatario (a acao direta, a linha
+ * antiga), quem deu o parecer (PARECER_POR) — a linha antiga nao muda de
+ * parecer por aqui. Precisa de "Ver e editar" no plano (a porta confere).
+ *   TRATAR: tratativa ("Como sera tratado", texto rico), um ou mais
+ *           responsaveis com "Ver e editar" e o prazo — vira acao em aberto,
+ *           e os responsaveis recebem o e-mail de sempre;
+ *   DEPOIS: rever em (opcional) e observacao (opcional);
+ *   NADA:   observacao (opcional);
+ *   '':     volta a "Sem definicao".
+ * A acao ja concluida nao muda de parecer (reabra antes). O parecer entra no
+ * historico; com observacao, ela e o texto do registro.
+ */
+function parecerDoPlano_(plano, usuario, params) {
+  exigirModeloDeSituacoes_();
+  const id = String(params.id || '').trim();
+  const parecer = String(params.parecer || '').toUpperCase().trim();
+  if (parecer && !PARECERES[parecer]) throw new Error('Parecer inválido: ' + parecer);
+  const eu = String(usuario.email || '').toLowerCase().trim();
+  const obs = String(params.observacao || '').trim().slice(0, 1000);
+
+  const antes = acaoQueVe_(plano, usuario, id);
+  exigirQuemDaParecer_(antes, eu);
+
+  const campos = { PARECER: parecer, PARECER_EM: parecer ? agoraTexto() : '', PARECER_POR: parecer ? eu : '', PARECER_OBS: obs };
+  let emails = [], nomes = [];
+  if (parecer === PARECERES.TRATAR) {
+    const tratativa = campoRico_(params.tratativa, true);
+    if (!tratativa) throw new Error('Descreva como a situação será tratada.');
+    const data = paraData(params.prazo);
+    if (!data) throw new Error('Informe o prazo.');
+    emails = emailsDaAcao_([].concat(params.responsaveisEmails || []).join(','));
+    if (!emails.length) throw new Error('Escolha pelo menos um responsável.');
+    const pessoas = pessoasParaAcao(plano);
+    const jaEram = emailsDaAcao_(antes.RESPONSAVEL_EMAIL);
+    const fora = emails.filter(function (e) { return jaEram.indexOf(e) === -1 && !pessoas.some(function (p) { return p.email === e; }); });
+    if (fora.length) throw new Error('Sem acesso ao ' + plano.nome + ' nesta filial: ' + fora.join(', ') + '. Escolha alguém da lista.');
+    const soVer = emails.filter(function (e) { return jaEram.indexOf(e) === -1 && pessoas.some(function (p) { return p.email === e && !p.edita; }); });
+    if (soVer.length) {
+      throw new Error('Só pode ser responsável quem tem “Ver e editar” no ' + plano.nome + ': ' +
+        soVer.map(function (e) { return (pessoas.filter(function (p) { return p.email === e; })[0] || {}).nome || e; }).join(', ') + ' só tem “Ver”.');
+    }
+    const conhecidos = pessoasPorEmail_();
+    nomes = emails.map(function (e) {
+      const achado = pessoas.filter(function (p) { return p.email === e; })[0];
+      return achado ? achado.nome : nomeDoEmail_(conhecidos, e);
+    });
+    const turno = String(params.turno || antes.TURNO || 'Todos').trim();
+    if (ACOES_TURNOS.indexOf(turno) === -1) throw new Error('Turno inválido: ' + turno);
+    Object.assign(campos, { TRATATIVA: tratativa, RESPONSAVEL: nomes.join(', '), RESPONSAVEL_EMAIL: emails.join(','),
+                            PRAZO: paraISO(data), TURNO: turno, REVER_EM: '' });
+  } else if (parecer === PARECERES.DEPOIS) {
+    const rever = String(params.reverEm || '').trim();
+    if (rever && !isoDe_(rever)) throw new Error('Data para rever inválida.');
+    campos.REVER_EM = rever ? isoDe_(rever) : '';
+  } else {
+    campos.REVER_EM = '';
+  }
+  // Quem virou responsavel sai dos marcados (como na edicao da acao).
+  if (emails.length && 'MARCADOS' in antes) {
+    const m = emailsDaAcao_(antes.MARCADOS), ficam = m.filter(function (e) { return emails.indexOf(e) === -1; });
+    if (ficam.length !== m.length) campos.MARCADOS = ficam.join(',');
+  }
+
+  const feito = comTrava(function () {
+    const atual = acaoQueVe_(plano, usuario, id);
+    exigirQuemDaParecer_(atual, eu);
+    const situacao = String(atual.SITUACAO || '').toUpperCase().trim();
+    const tratada = parecerDe_(atual) === PARECERES.TRATAR;
+    if (tratada && situacao === ACOES_SITUACAO.CONCLUIDA && parecer !== PARECERES.TRATAR) {
+      throw new Error('Esta ação já foi concluída: reabra antes de mudar o parecer.');
+    }
+    if (situacao === ACOES_SITUACAO.CANCELADA && parecer === PARECERES.TRATAR) campos.SITUACAO = ACOES_SITUACAO.PENDENTE;
+    // Virou acao agora: comeca em aberto, sem conclusao velha.
+    if (parecer === PARECERES.TRATAR && !tratada) Object.assign(campos, { SITUACAO: ACOES_SITUACAO.PENDENTE, CONCLUIDO_EM: '', CONCLUIDO_POR: '', ANDAMENTO: '', DEPENDE: '' });
+    atualizar('ACOES', id, campos, usuario.email);
+    gravarComentario_(usuario, 'ACOES', id, textoDoParecer_(parecer) + (obs ? ' ' + obs : ''), '', '', 'PARECER');
+    return { registro: Object.assign({}, atual, campos), novaAcao: parecer === PARECERES.TRATAR && !tratada,
+             jaEram: emailsDaAcao_(atual.RESPONSAVEL_EMAIL) };
+  });
+
+  // E-mails depois da trava: os responsaveis (a acao e deles agora) e quem registrou a situacao.
+  const falhas = [];
+  if (parecer === PARECERES.TRATAR) {
+    emails.forEach(function (e) {
+      try { avisarAcaoNova(feito.registro, e, feito.novaAcao || feito.jaEram.indexOf(e) === -1, id, plano); }
+      catch (x) { falhas.push(e + ' (' + (x.message || x) + ')'); }
+    });
+  }
+  const autor = emailsDaAcao_(feito.registro.AUTOR)[0] || '';
+  if (autor && autor !== eu && emails.indexOf(autor) === -1) {
+    try { avisarParecer_(plano, feito.registro, autor, autorDoComentario_(usuario)); }
+    catch (x) { falhas.push(autor + ' (' + (x.message || x) + ')'); }
+  }
+  const recados = { TRATAR: 'Parecer registrado: a situação virou ação' + (emails.length ? ' — ' + (emails.length > 1 ? 'responsáveis avisados' : 'responsável avisado') : '') + '.',
+                    DEPOIS: 'Parecer registrado: outro momento.', NADA: 'Parecer registrado: nada a fazer.', '': 'Parecer retirado: a situação volta a “Sem definição”.' };
+  const r = { id: id, recado: recados[parecer] };
+  if (falhas.length) r.avisoEmail = r.recado + ' Mas o aviso por e-mail não saiu para: ' + falhas.join('; ');
+  return r;
+}
+
+/* O texto do parecer no historico ("Parecer: Outro momento."). */
+function textoDoParecer_(parecer) {
+  return parecer ? 'Parecer: ' + NOMES_PARECER[parecer] + '.' : 'Parecer retirado.';
+}
+
+/* Quem pode dar o parecer desta linha: o destinatario; sem destinatario, quem deu o parecer que esta la. */
+function exigirQuemDaParecer_(registro, eu) {
+  const dest = emailsDaAcao_(registro.DESTINATARIO)[0] || '';
+  const deu = String(registro.PARECER_POR || '').toLowerCase().trim();
+  if (dest ? dest === eu : (deu && deu === eu)) return;
+  throw new Error(dest ? 'Só ' + nomeDoEmail_(pessoasPorEmail_(), dest) + ', o gerente destinatário desta situação, dá o parecer.'
+    : 'O parecer desta ação já foi dado e só quem o deu pode mudá-lo.');
+}
+
+/* As portas das situacoes (Codigo.gs: ACOES salvarSituacao, parecerSituacao e as da Limpeza). */
+function acaoSalvarSituacao(usuario, params) { return salvarSituacaoDoPlano_(PLANOS.CALENDARIO, usuario, params); }
+function acaoParecerSituacao(usuario, params) { return parecerDoPlano_(PLANOS.CALENDARIO, usuario, params); }
+function acaoSalvarSituacaoLimpeza(usuario, params) { return salvarSituacaoDoPlano_(PLANOS.LIMPEZA, usuario, params); }
+function acaoParecerSituacaoLimpeza(usuario, params) { return parecerDoPlano_(PLANOS.LIMPEZA, usuario, params); }
 
 /* ------------------------------------------------------------------ */
 /* FOTOS — na acao ou no comentario (4.2.2)                            */
@@ -1305,7 +1791,8 @@ function avisarAcaoNova(campos, email, nova, id, plano) {
     '<p>Você é ' + (emailsDaAcao_(campos.RESPONSAVEL_EMAIL).length > 1 ? 'um dos responsáveis (' + htmlSeguro(campos.RESPONSAVEL) + ')' : 'o responsável') +
     ' por esta ação do ' + (limpeza ? 'plano de ação da Limpeza CD' : 'plano de ação do GSL') + '.</p>' +
     '<p style="font-size:16px"><strong>' + htmlSeguro(campos.ACAO) + '</strong></p>' +
-    (campos.DESCRICAO ? '<p>' + htmlSeguro(campos.DESCRICAO) + '</p>' : '') +
+    (campos.TRATATIVA ? '<p><b>Como será tratado:</b><br>' + textoEmHtml_(campos.TRATATIVA) + '</p>'
+      : campos.DESCRICAO ? '<p>' + textoEmHtml_(campos.DESCRICAO) + '</p>' : '') +
     (limpeza && onde ? '<p>Local: <strong>' + htmlSeguro(onde) + '</strong>' +
       (campos.CRITICIDADE ? ' · criticidade ' + htmlSeguro(campos.CRITICIDADE) : '') + '</p>' : '') +
     '<p>Turno: <strong>' + htmlSeguro(campos.TURNO) + '</strong><br>' +
@@ -1335,7 +1822,7 @@ function avisarMencao_(plano, r, autor, texto, email, passouAVer) {
     ' marcou você num comentário do ' + (limpeza ? 'Plano de Ação da Limpeza CD' : 'Plano de Ação') + ':</p>' +
     caixa('Comentário:', texto, COR_AZUL, '#EEF0FF') +
     '<p style="font-size:16px;margin-top:16px"><strong>' + htmlSeguro(r.ACAO) + '</strong></p>' +
-    (r.DESCRICAO ? '<p>' + htmlSeguro(r.DESCRICAO) + '</p>' : '') +
+    (r.DESCRICAO ? '<p>' + textoEmHtml_(r.DESCRICAO) + '</p>' : '') +
     '<table style="border-collapse:collapse;margin:10px 0;font-size:13px">' +
     linha('Responsável', r.RESPONSAVEL || '—') + linha('Entregar até', formatarData(paraData(r.PRAZO)) || '—') +
     linha('Situação', situacao) + (r.DEPENDE ? linha('Depende de', r.DEPENDE) : '') +
@@ -1344,4 +1831,53 @@ function avisarMencao_(plano, r, autor, texto, email, passouAVer) {
     '<p style="color:#475569">Responda pelo botão abaixo: a resposta fica no histórico da ação.</p>' +
     rodapeLink(plano.tela, r.ID);
   enviar([email], assunto, corpo, null, autor.email ? { replyTo: autor.email } : null);
+}
+
+/* O texto rico (ou simples) no corpo do e-mail: so o texto, escapado, com as quebras de linha. */
+function textoEmHtml_(valor) {
+  return htmlSeguro(textoDoHtml_(valor)).replace(/\n/g, '<br>');
+}
+
+/*
+ * SITUACAO NOVA (8.13): o gerente destinatario recebe a situacao e o botao
+ * que abre o historico dela no GSL (?tela=...&acao=ID), onde da o parecer.
+ * O "Responder" do e-mail vai para quem registrou.
+ */
+function avisarSituacao_(plano, r, email, autor) {
+  const limpeza = plano.id === 'LIMPEZA';
+  const quem = autor.nome || autor.email;
+  const prio = NOMES_PRIORIDADE[normalizarPrioridade_(r.PRIORIDADE) || 'NORMAL'];
+  const fotos = lerAnexos_(r.ANEXOS).length;
+  const onde = [r.ZONA, r.LOCAL].filter(Boolean).join(' · ');
+  const corpo =
+    '<p><b>' + htmlSeguro(quem) + '</b>' + (autor.papel ? ' (' + htmlSeguro(autor.papel) + ')' : '') +
+    ' registrou uma situação no ' + (limpeza ? 'Plano de Ação da Limpeza CD' : 'Plano de Ação') + ' e escolheu você para dar o parecer:</p>' +
+    '<p style="font-size:16px;margin-top:16px"><strong>' + htmlSeguro(r.ACAO) + '</strong></p>' +
+    (r.DESCRICAO ? '<p>' + textoEmHtml_(r.DESCRICAO) + '</p>' : '') +
+    '<table style="border-collapse:collapse;margin:10px 0;font-size:13px">' +
+    linha('Prioridade', prio) + (limpeza && onde ? linha('Local', onde) : '') +
+    (fotos ? linha('Fotos', fotos + (fotos > 1 ? ' fotos' : ' foto')) : '') +
+    (r.RELATORIO ? linha('Levantamento', r.RELATORIO) : '') + '</table>' +
+    '<p style="color:#475569">No GSL, escolha: <b>Tratar / Incluir ação</b> (como será tratado, responsáveis e prazo), ' +
+    '<b>Outro momento</b> ou <b>Nada a fazer</b>.</p>' +
+    rodapeLink(plano.tela, r.ID);
+  enviar([email], 'Situação para o seu parecer: ' + r.ACAO, corpo, null, autor.email ? { replyTo: autor.email } : null);
+}
+
+/* Quem registrou a situacao fica sabendo do parecer (8.13). */
+function avisarParecer_(plano, r, email, gerente) {
+  const parecer = parecerDe_(r);
+  const quem = gerente.nome || gerente.email;
+  const corpo =
+    '<p><b>' + htmlSeguro(quem) + '</b> deu o parecer na situação que você registrou:</p>' +
+    '<p style="font-size:16px;margin-top:16px"><strong>' + htmlSeguro(r.ACAO) + '</strong></p>' +
+    '<p style="font-size:15px"><b>' + htmlSeguro(NOMES_PARECER[parecer]) + '</b></p>' +
+    (parecer === PARECERES.TRATAR ? '<p><b>Como será tratado:</b><br>' + textoEmHtml_(r.TRATATIVA) + '</p>' +
+      '<table style="border-collapse:collapse;margin:10px 0;font-size:13px">' +
+      linha('Responsável', r.RESPONSAVEL || '—') + linha('Prazo', formatarData(paraData(r.PRAZO)) || '—') + '</table>' : '') +
+    (parecer === PARECERES.DEPOIS && r.REVER_EM ? '<p>Rever em ' + htmlSeguro(formatarData(paraData(r.REVER_EM))) + '.</p>' : '') +
+    (r.PARECER_OBS ? '<p style="color:#475569">' + htmlSeguro(r.PARECER_OBS) + '</p>' : '') +
+    rodapeLink(plano.tela, r.ID);
+  enviar([email], 'Parecer na sua situação: ' + r.ACAO + ' — ' + NOMES_PARECER[parecer], corpo, null,
+    gerente.email ? { replyTo: gerente.email } : null);
 }

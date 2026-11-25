@@ -724,6 +724,9 @@ const ACOES = {
   reabrirAcao:         { tela: 'acoes', funcao: 'acaoReabrirAcao' },
   cancelarAcao:        { tela: 'acoes', funcao: 'acaoCancelarAcao' },
   excluirAcao:         { tela: 'acoes', funcao: 'acaoExcluirAcao' },
+  // Situacao e parecer do gerente (8.13): registrar/editar a situacao e dar o parecer (so o destinatario — Acoes.gs).
+  salvarSituacao:      { tela: 'acoes', funcao: 'acaoSalvarSituacao' },
+  parecerSituacao:     { tela: 'acoes', funcao: 'acaoParecerSituacao' },
   // Fotos (4.2.2): ver confere se a pessoa enxerga a acao (so leitura); tirar e gravar.
   fotoAcao:            { tela: 'acoes', leitura: true, funcao: 'acaoFotoAcao' },
   removerFotoAcao:     { tela: 'acoes', funcao: 'acaoRemoverFotoAcao' },
@@ -824,6 +827,8 @@ const ACOES = {
   reabrirAcaoLimpeza:  { tela: 'limpeza', funcao: 'acaoReabrirAcaoLimpeza' },
   cancelarAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoCancelarAcaoLimpeza' },
   excluirAcaoLimpeza:  { tela: 'limpeza', funcao: 'acaoExcluirAcaoLimpeza' },
+  salvarSituacaoLimpeza: { tela: 'limpeza', funcao: 'acaoSalvarSituacaoLimpeza' },
+  parecerSituacaoLimpeza: { tela: 'limpeza', funcao: 'acaoParecerSituacaoLimpeza' },
   fotoAcaoLimpeza:     { tela: 'limpeza', leitura: true, funcao: 'acaoFotoAcaoLimpeza' },
   removerFotoAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoRemoverFotoAcaoLimpeza' },
   salvarItemLimpeza:   { tela: 'limpeza', funcao: 'acaoSalvarItemLimpeza' },

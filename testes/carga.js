@@ -270,8 +270,9 @@ async function rodar() {
         const r = await lerPdf(arq);
         afirmar(!r.cargas.length && r.problemas.some((x) => /SEP e CONF/.test(x.motivo)), JSON.stringify(r).slice(0, 300));
       });
-      // Os PDFs sinteticos ficam em testes/fixtures (o e2e usa o de 2 paginas).
-      fs.copyFileSync(path.join(dir, 'sintetico.pdf'), path.join(__dirname, 'fixtures', 'situacao-carga-sintetica.pdf'));
+      // Um exemplo do PDF sintetico fica em testes/fixtures (so e gravado se ainda nao existe).
+      const exemplo = path.join(__dirname, 'fixtures', 'situacao-carga-sintetica.pdf');
+      if (!fs.existsSync(exemplo) && fs.existsSync(path.join(dir, 'sintetico.pdf'))) fs.copyFileSync(path.join(dir, 'sintetico.pdf'), exemplo);
     } finally {
       await nav.close();
       fs.rmSync(dir, { recursive: true, force: true });

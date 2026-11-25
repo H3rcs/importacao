@@ -22,6 +22,12 @@
  * Toda gravacao passa pelo executarAcao (capacidade GERIR_CARGA, modulo
  * carga) e pelo comTrava; o inserir/atualizar do Banco.gs grava o LOG.
  *
+ * ONDE ESTAO OS DADOS (para trocar o armazenamento do "ao vivo" sem mexer
+ * nas contas): so este arquivo toca nas tabelas CARGA_*. Leitura:
+ * cgSnapshots_ + cgCargasDe_ (envios), cgEquipe_ (alocacao),
+ * cgEquipamentos_ (paleteiras e carrinhos) e cgGeracao_ (o numero que a
+ * tela pergunta). Gravacao: as acao...Carga abaixo, cada uma numa trava.
+ *
  * Celulas do relatorio: "X" = pronto, "-" = o deposito nao tem nada nesta
  * carga, "a/b" = a de b tarefas feitas. A carga marcada com "*" e de 24 horas.
  */

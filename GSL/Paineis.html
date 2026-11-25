@@ -473,8 +473,8 @@ function pintarFiliais(r) {
 
 function cartaoFilial(f, d) {
   const ed = pnPodeEditar('filiais');
-  return `<div class="cartao" style="${f.ativa ? '' : 'opacity:.7'}">
-    <div class="linha-titulo" style="margin-bottom:10px">
+  return `<div class="cartao cartao-filial-cfg" style="${f.ativa ? '' : 'opacity:.7'}">
+    <div class="linha-titulo filial-cab">
       <div>
         <div class="nb-codigo">${esc(f.nome)}</div>
         <div class="pn-mini"><span class="mono">${esc(f.codigo)}</span>${f.cidade ? ' · ' + esc(f.cidade) : ''} ·
@@ -495,7 +495,7 @@ function cartaoFilial(f, d) {
           </select>` : `<span class="pn-chip ${e === 'ATIVO' ? 'ok' : e === 'OCULTO' ? 'atencao' : 'neutro'}">${esc(e ? (PN_ESTADOS[e] || e) : 'Não usar nesta filial')}</span>`}</td></tr>`;
       }).join('')}
     </tbody></table>
-    ${ed ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+    ${ed ? `<div class="cartao-rodape">
       <button class="icone-botao" onclick="formPessoasFilial(${jsArg(f.codigo)})">Quem entra (${f.pessoas})</button>
       <button class="icone-botao" onclick="formFilial(${jsArg(f.codigo)})">Editar nome</button>
       ${f.banco ? `<button class="icone-botao" onclick="window.open(${jsArg(f.banco)},'_blank')">Abrir banco de dados</button>` : ''}

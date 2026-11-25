@@ -1288,7 +1288,8 @@ select.nv-celula.nv-editar { border-left-color: var(--verde-texto); }
 .faixa-andamento.atraso    { border-left-color: var(--alerta);    background: var(--vermelho-tenue); }
 
 /* Tabela GESTAO DE ATIVIDADES: muitas colunas, entao aperta e rola. */
-.tabela-gestao th, .tabela-gestao td { white-space: nowrap; font-size: 12px; }
+.tabela-gestao th, .tabela-gestao td { white-space: nowrap; font-size: 12.5px; }
+.tabela-gestao td { vertical-align: middle; padding-top: 8px; padding-bottom: 8px; }
 .tabela-gestao td.motivo {
   white-space: normal; min-width: 180px; max-width: 280px;
   font-size: 11.5px; color: var(--tinta-media);
@@ -1465,7 +1466,7 @@ select.nv-celula.nv-editar { border-left-color: var(--verde-texto); }
 .linha-status.reprovada  td:first-child::before { background: var(--alerta-forte); }
 .linha-status.cancelada  td:first-child::before { background: #94A3B8; }
 /* leve tom de fundo por status, para reforcar sem poluir */
-.linha-status.atrasada   { background: rgba(198, 40, 40, .06); }
+.linha-status.atrasada   { background: rgba(198, 40, 40, .03); }
 .linha-status.aguardando { background: rgba(217, 119, 6, .05); }
 .linha-status.aprovada   { background: rgba(5, 150, 105, .05); }
 
@@ -1706,6 +1707,7 @@ div.vazio { border: 1px dashed var(--linha-forte); border-radius: 12px; backgrou
   .lateral { width: 100%; flex-direction: row; align-items: center; padding: 12px 14px; gap: 14px; overflow-x: auto; }
   .marca { padding: 0; }
   .marca-espectro { display: none; }
+  .marca-nome { display: none; }
   .menu { flex-direction: row; flex: 1; }
   .item-menu { white-space: nowrap; }
   .rodape-lateral { border-top: 0; padding-top: 0; }
@@ -2108,4 +2110,85 @@ input.travado {
 [data-tema="escuro"] .pagina .botao-texto, [data-tema="escuro"] .janela .botao-texto { color: #9DB4FF; }
 [data-tema="escuro"] .pagina .botao-texto.perigo, [data-tema="escuro"] .janela .botao-texto.perigo { color: #FF8A8A; }
 .cartao-titulo .botao-texto { text-transform: none; letter-spacing: normal; font-family: inherit; }
+
+/* =========================================================
+   TELAS DE CONFIGURACAO (Configuracao, Pessoas e acessos, Filiais e
+   paineis, Relatos de erro) — o padrao de ferramenta interna: cabecalho
+   de secao com a acao a direita, texto de apoio, tabela com cabecalho
+   em faixa e as acoes da linha alinhadas a direita, rodape do cartao
+   com os botoes da secao.
+   ========================================================= */
+.cartao-rodape {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 16px -20px -18px; padding: 12px 20px;
+  border-top: 1px solid var(--linha); background: var(--superficie-2);
+  border-radius: 0 0 var(--raio-grande) var(--raio-grande);
+}
+.cfg-botoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.cartao-titulo.linha-titulo { min-height: 46px; padding-bottom: 10px; }
+.cartao-titulo.linha-titulo > span:first-child { flex: 1 1 auto; }
+.cartao-titulo + .dica { margin-top: 0 !important; }
+
+#pagina[data-tela="config"] .cartao,
+#pagina[data-tela="acessos"] .cartao,
+#pagina[data-tela="filiais"] .cartao,
+#pagina[data-tela="relatos"] .cartao { margin-bottom: 16px; }
+#pagina[data-tela="config"] td:last-child,
+#pagina[data-tela="acessos"] td:last-child { text-align: right; white-space: nowrap; }
+#pagina[data-tela="config"] td:last-child .icone-botao + .icone-botao,
+#pagina[data-tela="acessos"] td:last-child .icone-botao + .icone-botao { margin-left: 4px; }
+#pagina[data-tela="config"] .rot-botoes { justify-content: flex-end; flex-wrap: nowrap; }
+#pagina[data-tela="config"] td { vertical-align: middle; }
+#pagina[data-tela="acessos"] td { vertical-align: middle; }
+#pagina[data-tela="config"] .tabela-chave td:last-child { text-align: left; }
+
+/* Parametro: rotulo, campo e a chave tecnica como etiqueta discreta. */
+.campo .dica.mono {
+  display: inline-block; margin-top: 6px !important; padding: 1px 7px; border-radius: 5px;
+  background: var(--superficie-2); border: 1px solid var(--linha); color: var(--tinta-fraca); font-size: 11px;
+}
+#pagina[data-tela="config"] .grade-dupla { gap: 4px 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+/* Tabela chave-valor (Estado do sistema). */
+.tabela-chave { max-width: 640px; }
+.tabela-chave td { padding: 10px 12px; }
+.tabela-chave td:first-child { width: 220px; color: var(--tinta-media); font-weight: 500; background: var(--superficie-2); border-right: 1px solid var(--linha); }
+.tabela-chave tr:last-child td { border-bottom: 0; }
+.tabela-chave { border: 1px solid var(--linha); border-radius: 10px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+
+/* Pessoas: iniciais + nome + funcao na mesma celula. */
+.pessoa-celula { display: flex; align-items: center; gap: 11px; min-width: 180px; }
+.pessoa-celula strong { display: block; }
+.pessoa-iniciais {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 600 12.5px/1 var(--fonte-titulo); letter-spacing: .02em; color: var(--azul); background: var(--azul-tenue);
+}
+[data-tema="escuro"] .pessoa-iniciais { color: #dfe3ff; }
+#tabela-pessoas td.mono { font-size: 12px; color: var(--tinta-media); }
+
+/* Filiais: o cartao da filial com cabecalho de verdade. */
+.filial-cab { margin: -2px -20px 0; padding: 0 20px 14px; border-bottom: 1px solid var(--linha); }
+.cartao-filial-cfg .nb-codigo { font-size: 17px; font-weight: 600; color: var(--titulo); letter-spacing: -.01em; }
+.cartao-filial-cfg table { margin-top: 0; }
+.cartao-filial-cfg td { vertical-align: middle; }
+.cartao-filial-cfg td:last-child { width: 1%; white-space: nowrap; }
+.cartao-filial-cfg select { min-width: 200px; }
+.cartao-filial-cfg th { background: transparent; }
+
+/* Relatos de erro */
+.relatos-numeros { margin-bottom: 16px; }
+
+/* Celular: tabela solta no cartao rola por dentro dele — a pagina nunca ganha rolagem lateral. */
+@media (max-width: 760px) {
+  .cartao > table, .janela-corpo > table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th { white-space: normal; }
+}
+.pendente-entrega { white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .cartao-rodape { margin: 14px -16px -16px; padding: 12px 16px; }
+  .filial-cab { margin: -2px -16px 0; padding: 0 16px 12px; }
+  .tabela-chave td:first-child { width: auto; }
+}
 </style>

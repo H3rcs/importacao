@@ -3972,7 +3972,7 @@ function cfgRH(d) {
               <button class="icone-botao" onclick="importar(${jsArg(a.id)})">Importar</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="6" class="vazio">Nenhuma competência cadastrada.</td></tr>'}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <div class="cartao-rodape">
         ${ed ? '<button class="botao" onclick="atualizarRH()">↻ Atualizar agora</button>' : ''}
         <button class="botao secundario" onclick="verDiagnosticoRH()">Diagnóstico da base</button>
       </div>
@@ -4001,13 +4001,13 @@ function cfgRH(d) {
               <button class="icone-botao perigo" onclick="agir('excluirDePara',{id:${jsArg(c.id)}},'Código removido')">Remover</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="5" class="vazio">Nenhum código cadastrado.</td></tr>'}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
+         tradução em toda a folha já importada e refaz os painéis.</p>
+      <div class="cartao-rodape">
         <button class="botao secundario" onclick="verCodigosPendentes()">Códigos fora da legenda</button>
         ${ed ? `<button class="botao secundario" onclick="confirmarRestaurarDePara()">Restaurar tabela padrão</button>
         <button class="botao secundario" onclick="confirmarReclassificar()">Reclassificar a base</button>` : ''}
       </div>
-      <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
-         tradução em toda a folha já importada e refaz os painéis.</p>
     </div>
 
     <div class="cartao">
@@ -4148,7 +4148,7 @@ function cfgSistema(d) {
   return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Estado do sistema</div>
-      <table><tbody>
+      <table class="tabela-chave"><tbody>
         <tr><td>Fuso em uso</td><td><strong>${esc(d.fuso.atual)}</strong></td></tr>
         <tr><td>Hora do sistema</td><td><strong>${esc(d.fuso.hora)}</strong></td></tr>
         <tr><td>Rotinas automáticas</td><td>${seloRotinas(d.sistema.rotinas)}</td></tr>
@@ -4160,7 +4160,7 @@ function cfgSistema(d) {
 
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Manutenção</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="cfg-botoes">
         ${ed ? `<button class="botao secundario" onclick="agir('ligarGatilhos',{},'Rotinas automáticas ligadas')">Ligar rotinas automáticas</button>
         <button class="botao secundario" onclick="agir('corrigirFuso',{},'Fuso alinhado')">Corrigir fuso</button>
         <button class="botao secundario" onclick="agir('enviarDigesto',{},'Digesto enviado')">Enviar digesto agora</button>
@@ -4802,12 +4802,12 @@ function blocoPessoas(d) {
          de fora da Bartofil, e quem está aqui entra direto com a conta dele. Para liberar alguém,
          <b>Cadastrar pessoa</b>.</p>
       <div style="overflow-x:auto"><table id="tabela-pessoas">
-        <thead><tr><th>Nome</th><th>Função</th><th>E-mail</th><th>Turno</th>
+        <thead><tr><th>Pessoa</th><th>E-mail</th><th>Turno</th>
           ${variasFiliais ? '<th>Filiais</th>' : ''}<th>Nível</th><th>Situação</th><th>PIN</th><th></th></tr></thead>
         <tbody>${(d.pessoas || []).map((p) => `<tr
             data-busca="${esc((p.nome + ' ' + p.email + ' ' + p.turno + ' ' + p.perfil + ' ' + filiaisDaPessoa(p, d)).toLowerCase())}">
-          <td><strong>${esc(p.nome || '—')}</strong></td>
-          <td>${esc(p.papel || '—')}</td>
+          <td><div class="pessoa-celula"><span class="pessoa-iniciais" aria-hidden="true">${esc(iniciaisDe(p.nome || p.email))}</span>
+            <span><strong>${esc(p.nome || '—')}</strong><span class="lp-sub">${esc(p.papel || '—')}</span></span></div></td>
           <td class="mono">${esc(p.email)}</td>
           <td>${p.turno ? '<strong>' + esc(p.turno) + '</strong>' : '<span class="pendente-entrega">sem turno</span>'}</td>
           ${variasFiliais ? `<td>${esc(filiaisDaPessoa(p, d))}</td>` : ''}
@@ -4822,10 +4822,16 @@ function blocoPessoas(d) {
                 onclick="gerarCodigoAcesso(${jsArg(p.id)}, ${jsArg(p.nome || p.email)}, ${p.temPin ? 'true' : 'false'})">${p.temPin ? 'Zerar PIN' : 'Código de acesso'}</button>` : ''}
               ${p.email === d.eu ? '' :
                 `<button class="icone-botao" onclick="agir('alternarAtivo',{id:${jsArg(p.id)}},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}` : ''}</td>
-        </tr>`).join('') || '<tr><td colspan="9" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
+        </tr>`).join('') || '<tr><td colspan="8" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
       <p class="dica">O <b>turno</b> liga a pessoa às atividades: o coordenador do turno A recebe
          o digesto do A e aparece como responsável nas atividades do A — dentro de cada filial.</p>
     </div>`;
+}
+
+/* As iniciais do nome (o "avatar" da tabela de pessoas): "Maria Souza" -> "MS". */
+function iniciaisDe(nome) {
+  const partes = String(nome || '').replace(/@.*$/, '').split(/[\s.]+/).filter(Boolean);
+  return ((partes[0] || '?')[0] + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase();
 }
 
 function filtrarPessoas() {
@@ -7061,14 +7067,20 @@ async function visorRemover() {
    =================================================== */
 
 function pintarRelatos(r) {
-  el('pagina').innerHTML = `${podeEditar('relatos') ? '' : avisoSoVer('Relatos de erro')}<div class="cartao">${blocoFeedback(r.dados || {})}</div>`;
+  el('pagina').innerHTML = `${podeEditar('relatos') ? '' : avisoSoVer('Relatos de erro')}${blocoFeedback(r.dados || {})}`;
 }
 
 /* --- Relatos de erro da plataforma --- */
 
 function blocoFeedback(d) {
   const lista = d.feedbacks || [];
+  const abertos = lista.filter((f) => f.situacao === 'ABERTO').length;
   return `
+    <div class="grade grade-kpi relatos-numeros">
+      <div class="cartao kpi alerta"><div class="kpi-valor">${abertos}</div><div class="kpi-rotulo">Em aberto</div></div>
+      <div class="cartao kpi verde"><div class="kpi-valor">${lista.length - abertos}</div><div class="kpi-rotulo">Resolvidos</div></div>
+      <div class="cartao kpi"><div class="kpi-valor">${lista.length}</div><div class="kpi-rotulo">Relatos no total</div></div>
+    </div>
     <div class="cartao">
       <div class="cartao-titulo">${lista.length} relato(s)</div>
       <p class="dica" style="margin:-4px 0 12px">Chega pelo botão flutuante do canto da tela.

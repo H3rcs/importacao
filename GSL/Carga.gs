@@ -26,17 +26,32 @@
  * carga, "a/b" = a de b tarefas feitas. A carga marcada com "*" e de 24 horas.
  */
 
-/* Os depositos na ordem do relatorio. equip: o que cada um usa (o Nobre e flowrack: pessoas por andar). */
-/* padrao: quantas paleteiras (ou carrinhos) o deposito comeca tendo — decisao da gerencia em 25/11:
-   12 paleteiras em cada deposito que usa paleteira e 35 carrinhos na Miudeza. Muda na tela (quem edita). */
+/*
+ * Os depositos na ordem do relatorio. equip: o que cada um usa (o Nobre e flowrack: pessoas por andar).
+ * PALETEIRAS (decisao da gerencia em 25/11): UM POOL SO de 12 paleteiras para o CD. Grandeza, Nobre
+ * Grandeza, Pesaveis e Blocado estao sob a mesma supervisao e tiram do mesmo pool: cada paleteira esta
+ * LIVRE (no pool), em USO num desses quatro depositos, ou em MANUTENCAO. CARRINHOS: 35, da Miudeza.
+ * As duas quantidades mudam na tela (quem edita) e ficam gravadas.
+ */
 const CG_DEPOSITOS = [
-  { id: 'GRANDEZA',       nome: 'Grandeza',       equip: 'PALETEIRA', padrao: 12 },
-  { id: 'MIUDEZA',        nome: 'Miudeza',        equip: 'CARRINHO',  padrao: 35 },
-  { id: 'BLOCADO',        nome: 'Blocado',        equip: 'PALETEIRA', padrao: 12 },
-  { id: 'PESAVEIS',       nome: 'Pesáveis',       equip: 'PALETEIRA', padrao: 12 },
-  { id: 'NOBRE',          nome: 'Nobre',          equip: '',          padrao: 0, andares: 5 },
-  { id: 'NOBRE_GRANDEZA', nome: 'Nobre Grandeza', equip: 'PALETEIRA', padrao: 12 }
+  { id: 'GRANDEZA',       nome: 'Grandeza',       equip: 'PALETEIRA', grupo: 'GNPB' },
+  { id: 'MIUDEZA',        nome: 'Miudeza',        equip: 'CARRINHO' },
+  { id: 'BLOCADO',        nome: 'Blocado',        equip: 'PALETEIRA', grupo: 'GNPB' },
+  { id: 'PESAVEIS',       nome: 'Pesáveis',       equip: 'PALETEIRA', grupo: 'GNPB' },
+  { id: 'NOBRE',          nome: 'Nobre',          equip: '',          andares: 5 },
+  { id: 'NOBRE_GRANDEZA', nome: 'Nobre Grandeza', equip: 'PALETEIRA', grupo: 'GNPB' }
 ];
+/* Os quatro depositos de uma supervisao so (a tela "Supervisao" mostra os quatro lado a lado). */
+const CG_GRUPO_SUPERVISAO = ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'];
+const CG_EQUIP_PADRAO = { PALETEIRA: 12, CARRINHO: 35 };
+const CG_EQUIP_DONO = { CARRINHO: 'MIUDEZA' };       // carrinho e sempre da Miudeza; paleteira vai e volta do pool
+/*
+ * EQUILIBRIO ENTRE DEPOSITOS (25/11): os depositos tem que andar juntos — a carga so sai quando
+ * TODOS os depositos dela terminam. Diferenca entre o mais adiantado e o mais atrasado, em pontos
+ * percentuais: ate EQUILIBRADO = Equilibrado; ate ATENCAO = Atencao; acima = Desequilibrado.
+ * Os limites ficam em PARAMETROS (CARGA_EQUILIBRIO_PP e CARGA_ATENCAO_PP), editaveis na Configuracao.
+ */
+const CG_EQUILIBRIO_PADRAO = { equilibrado: 10, atencao: 20, peso24h: 2 };
 const CG_ANDARES = ['Térreo', '1º andar', '2º andar', '3º andar', '4º andar'];
 const CG_PAPEIS = ['SEPARADOR', 'CONFERENTE'];
 const CG_ESTADOS_EQUIP = ['LIVRE', 'USO', 'MANUTENCAO'];
@@ -366,49 +381,56 @@ function cgContagemEquipe_(equipe) {
 /* EQUIPAMENTOS                                                        */
 /* ------------------------------------------------------------------ */
 
-/* Os equipamentos de cada deposito; o deposito que nunca foi ajustado tem a quantidade padrao, todos livres (nada gravado). */
+/*
+ * Os equipamentos: { id, tipo, numero, estado, dep, obs, quando, por }. dep: onde a paleteira esta em
+ * uso ('' = no pool ou na manutencao); carrinho: sempre MIUDEZA. Tipo que nunca foi gravado (banco
+ * antigo sem a semente) aparece com a quantidade padrao, tudo livre — a primeira mudanca grava.
+ */
 function cgEquipamentos_() {
   const linhas = listar('CARGA_EQUIPAMENTOS');
   const saida = [];
-  CG_DEPOSITOS.forEach(function (d) {
-    if (!d.equip) return;
-    const minhas = linhas.filter(function (r) { return String(r.DEPOSITO) === d.id; })
+  Object.keys(CG_EQUIP_PADRAO).forEach(function (tipo) {
+    const minhas = linhas.filter(function (r) { return String(r.TIPO) === tipo; })
       .sort(function (a, b) { return Number(a.NUMERO) - Number(b.NUMERO); });
-    if (minhas.length) {
-      minhas.forEach(function (r) {
-        if (Number(r.NUMERO) < 1) return;        // a linha 0 so guarda que o deposito foi ajustado (quantidade zero)
-        saida.push({ id: r.ID, dep: d.id, tipo: d.equip, numero: Number(r.NUMERO), estado: CG_ESTADOS_EQUIP.indexOf(String(r.ESTADO)) !== -1 ? String(r.ESTADO) : 'LIVRE',
-          obs: String(r.OBSERVACAO || ''), quando: String(r.ATUALIZADO_EM || ''), por: String(r.ATUALIZADO_POR || '') });
-      });
+    if (!minhas.length) {
+      for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) saida.push(cgEquipVirtual_(tipo, i));
       return;
     }
-    for (let i = 1; i <= d.padrao; i++) saida.push({ id: '', dep: d.id, tipo: d.equip, numero: i, estado: 'LIVRE', obs: '', quando: '', por: '' });
+    minhas.forEach(function (r) {
+      if (Number(r.NUMERO) < 1) return;          // a linha 0 so guarda que a quantidade foi para zero
+      const estado = CG_ESTADOS_EQUIP.indexOf(String(r.ESTADO)) !== -1 ? String(r.ESTADO) : 'LIVRE';
+      let dep = String(r.DEPOSITO || '');
+      if (CG_EQUIP_DONO[tipo]) dep = CG_EQUIP_DONO[tipo];
+      else if (estado !== 'USO') dep = '';
+      saida.push({ id: r.ID, tipo: tipo, numero: Number(r.NUMERO), estado: estado, dep: dep,
+        obs: String(r.OBSERVACAO || ''), quando: String(r.ATUALIZADO_EM || ''), por: String(r.ATUALIZADO_POR || '') });
+    });
   });
   return saida;
 }
+function cgEquipVirtual_(tipo, i) {
+  return { id: '', tipo: tipo, numero: i, estado: 'LIVRE', dep: CG_EQUIP_DONO[tipo] || '', obs: '', quando: '', por: '' };
+}
 
 /*
- * SEMENTE (instalacao, migracao 8.12 e filial nova): a quantidade padrao de cada deposito, todos livres.
- * So quando a tabela nunca teve linha nenhuma — o que a gerencia ajustou depois fica.
+ * SEMENTE (instalacao, migracao 8.12 e filial nova): 12 paleteiras no pool e 35 carrinhos na Miudeza,
+ * tudo livre. So quando a tabela nunca teve linha nenhuma — o que a gerencia ajustou depois fica.
  */
 function semearEquipamentosCarga_() {
   if (listar('CARGA_EQUIPAMENTOS', true).length) return false;
   const linhas = [];
-  CG_DEPOSITOS.forEach(function (d) {
-    if (!d.equip) return;
-    for (let i = 1; i <= d.padrao; i++) linhas.push({ DEPOSITO: d.id, TIPO: d.equip, NUMERO: String(i), ESTADO: 'LIVRE' });
+  Object.keys(CG_EQUIP_PADRAO).forEach(function (tipo) {
+    for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) linhas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
   });
   inserirVarios('CARGA_EQUIPAMENTOS', linhas, 'sistema');
   return true;
 }
 
-/* Dentro da trava: grava as linhas do deposito que so existiam no padrao (antes do primeiro ajuste). */
-function cgMaterializar_(d, quem) {
-  const tem = listar('CARGA_EQUIPAMENTOS').some(function (r) { return String(r.DEPOSITO) === d.id; });
-  if (tem) return;
+/* Dentro da trava: grava as linhas do tipo que so existiam no padrao (banco sem a semente). */
+function cgMaterializar_(tipo, quem) {
+  if (listar('CARGA_EQUIPAMENTOS').some(function (r) { return String(r.TIPO) === tipo; })) return;
   const novas = [];
-  for (let i = 1; i <= d.padrao; i++) novas.push({ DEPOSITO: d.id, TIPO: d.equip, NUMERO: String(i), ESTADO: 'LIVRE' });
-  if (!novas.length) novas.push({ DEPOSITO: d.id, TIPO: d.equip, NUMERO: '0', ESTADO: 'LIVRE' });
+  for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
   inserirVarios('CARGA_EQUIPAMENTOS', novas, quem);
   esquecerLeituras();
 }
@@ -474,6 +496,7 @@ function dadosCarga(usuario, params) {
     depositos: depositos, cargas: cargas, resumo: resumo
   };
   base.indicadores = cgIndicadores_(recentes, cargas, depositos, resumo, contagem);
+  base.indicadores.equilibrio = cgEquilibrio_(cargas, depositos, contagem, cgLimitesEquilibrio_());
   return base;
 }
 
@@ -542,6 +565,134 @@ function cgIndicadores_(recentes, cargas, depositos, resumo, contagem) {
     };
   });
   return { porDep: porDep, envios: recentes.length, janelaH: CG_JANELA_RITMO_H };
+}
+
+/* ------------------------------------------------------------------ */
+/* EQUILIBRIO ENTRE DEPOSITOS                                          */
+/* ------------------------------------------------------------------ */
+
+function cgLimitesEquilibrio_() {
+  const n = function (chave, padrao) { const v = Number(String(parametro(chave, '') || '').replace(',', '.')); return v > 0 && v < 100 ? v : padrao; };
+  const eq = n('CARGA_EQUILIBRIO_PP', CG_EQUILIBRIO_PADRAO.equilibrado);
+  return { equilibrado: eq, atencao: Math.max(eq, n('CARGA_ATENCAO_PP', CG_EQUILIBRIO_PADRAO.atencao)), peso24h: n('CARGA_PESO_24H', CG_EQUILIBRIO_PADRAO.peso24h) };
+}
+
+/*
+ * % CONCLUIDO de um deposito, ponderado: (tarefas de SEP + CONF feitas) / (tarefas totais), e cada tarefa
+ * de carga de 24 horas pesa `peso24h` (2 = vale o dobro). A celula X conta o tamanho conhecido da carga
+ * (o maior b ja visto); sem tamanho, a media de tarefas por celula do deposito.
+ */
+function cgPctPonderado_(cargas, idDep, peso24h) {
+  let somaB = 0, nB = 0;
+  cargas.forEach(function (c) { ((c.s && c.s[idDep]) || []).forEach(function (v) { const p = cgPartes_(v); if (p.b) { somaB += p.b; nB++; } }); });
+  const media = nB ? somaB / nB : 1;
+  let feitas = 0, total = 0, rest = 0;
+  cargas.forEach(function (c) {
+    const w = c.h ? peso24h : 1;
+    ((c.s && c.s[idDep]) || []).forEach(function (v) {
+      const p = cgPartes_(v);
+      if (p.nada || p.vazia) return;
+      if (p.x) { const t = (c.tb && c.tb[idDep]) || media; feitas += t * w; total += t * w; return; }
+      feitas += p.a * w; total += p.b * w; rest += p.b - p.a;
+    });
+  });
+  return { pct: total ? feitas / total * 100 : null, restante: rest };
+}
+
+/*
+ * EQUILIBRIO: os depositos tem que andar juntos (a carga so sai quando todos terminam).
+ *   pct por deposito (ponderado), media do grupo, spread = maior - menor (pontos percentuais);
+ *   status: Equilibrado (spread <= equilibrado), Atencao (<= atencao), Desequilibrado (acima);
+ *   atrasado / adiantado: o menor e o maior pct;
+ *   sugestao: mover N pessoas do deposito com menos tarefas por pessoa para o atrasado — N e o que
+ *   deixa as tarefas por pessoa dos dois mais perto (separador se o atrasado tem mais separacao por
+ *   fazer, conferente se tem mais conferencia).
+ * Grupos: o CD inteiro (os seis) e a supervisao Grandeza · Nobre Grandeza · Pesaveis · Blocado.
+ * Cargas desequilibradas: um deposito da carga pronto e outro com 50 pontos ou mais de atraso.
+ */
+function cgEquilibrio_(cargas, depositos, contagem, limites) {
+  const porDep = {};
+  depositos.forEach(function (d) {
+    const r = cgPctPonderado_(cargas, d.id, limites.peso24h);
+    const sepRest = cargas.reduce(function (t, c) { const p = cgPartes_(((c.s || {})[d.id] || [])[0]); return t + (p.b ? p.b - p.a : 0); }, 0);
+    const eq = contagem[d.id] || { sep: 0, conf: 0 };
+    porDep[d.id] = { pct: r.pct == null ? null : Math.round(r.pct * 10) / 10, restante: r.restante, restSep: sepRest, restConf: r.restante - sepRest,
+      sep: eq.sep, conf: eq.conf };
+  });
+  const grupo = function (ids, nome) {
+    const comTrabalho = ids.filter(function (id) { return porDep[id] && porDep[id].pct != null; });
+    const saida = { nome: nome, ids: ids, deps: comTrabalho };
+    if (comTrabalho.length < 2) { saida.status = 'sem'; saida.texto = 'Só um depósito com trabalho'; return saida; }
+    const pcts = comTrabalho.map(function (id) { return porDep[id].pct; });
+    const max = Math.max.apply(null, pcts), min = Math.min.apply(null, pcts);
+    saida.media = Math.round(pcts.reduce(function (a, b) { return a + b; }, 0) / pcts.length * 10) / 10;
+    saida.spread = Math.round((max - min) * 10) / 10;
+    saida.status = saida.spread <= limites.equilibrado ? 'equilibrado' : (saida.spread <= limites.atencao ? 'atencao' : 'desequilibrado');
+    saida.texto = { equilibrado: 'Equilibrado', atencao: 'Atenção', desequilibrado: 'Desequilibrado' }[saida.status];
+    saida.atrasado = comTrabalho.filter(function (id) { return porDep[id].pct === min; })[0];
+    saida.adiantado = comTrabalho.filter(function (id) { return porDep[id].pct === max; })[0];
+    saida.desvios = {};
+    comTrabalho.forEach(function (id) { saida.desvios[id] = Math.round((porDep[id].pct - saida.media) * 10) / 10; });
+    if (saida.status !== 'equilibrado') saida.sugestao = cgSugestao_(porDep, comTrabalho, saida.atrasado);
+    return saida;
+  };
+  const cargasDes = [];
+  cargas.forEach(function (c) {
+    const pcts = [];
+    Object.keys(c.s || {}).forEach(function (id) {
+      let f = 0, t = 0;
+      (c.s[id] || []).forEach(function (v) {
+        const p = cgPartes_(v);
+        if (p.nada || p.vazia) return;
+        if (p.x) { f += 1; t += 1; return; }
+        f += p.a / p.b; t += 1;
+      });
+      if (t) pcts.push({ dep: id, pct: Math.round(f / t * 1000) / 10 });
+    });
+    if (pcts.length < 2) return;
+    const prontos = pcts.filter(function (x) { return x.pct >= 100; });
+    const atrasados = pcts.filter(function (x) { return x.pct <= 50; });
+    if (!prontos.length || !atrasados.length) return;
+    cargasDes.push({ n: c.n, nm: c.nm, h: c.h, prontos: prontos.map(function (x) { return x.dep; }),
+      atrasados: atrasados.sort(function (a, b) { return a.pct - b.pct; }), gap: 100 - atrasados[0].pct });
+  });
+  cargasDes.sort(function (a, b) { return (b.h - a.h) || (b.gap - a.gap) || String(a.n).localeCompare(String(b.n)); });
+  return {
+    limites: limites, porDep: porDep,
+    cd: grupo(depositos.map(function (d) { return d.id; }), 'CD'),
+    supervisao: grupo(CG_GRUPO_SUPERVISAO.filter(function (id) { return depositos.some(function (d) { return d.id === id; }); }), 'Grandeza · Nobre Grandeza · Pesáveis · Blocado'),
+    cargas: cargasDes.slice(0, 30), totalCargas: cargasDes.length
+  };
+}
+
+/* Quem mover para o deposito atrasado: do que tem menos tarefas por pessoa, o N que mais aproxima os dois. */
+function cgSugestao_(porDep, ids, atrasado) {
+  const alvo = porDep[atrasado];
+  const papel = alvo.restSep >= alvo.restConf ? 'SEPARADOR' : 'CONFERENTE';
+  const chave = papel === 'SEPARADOR' ? 'sep' : 'conf';
+  const restKey = papel === 'SEPARADOR' ? 'restSep' : 'restConf';
+  const carga = function (rest, pessoas) { return pessoas > 0 ? rest / pessoas : (rest > 0 ? Infinity : 0); };
+  let melhor = null;
+  ids.forEach(function (id) {
+    if (id === atrasado) return;
+    const d = porDep[id];
+    if (d[chave] < 2 && !(d[chave] >= 1 && d[restKey] === 0)) return;      // nao deixa um deposito com trabalho sem ninguem
+    const maxN = d[restKey] === 0 ? d[chave] : d[chave] - 1;
+    for (let n = 1; n <= maxN; n++) {
+      const depois = Math.abs(carga(alvo[restKey], alvo[chave] + n) - carga(d[restKey], d[chave] - n));
+      const antes = Math.abs(carga(alvo[restKey], alvo[chave]) - carga(d[restKey], d[chave]));
+      if (!(depois < antes)) continue;
+      if (!melhor || depois < melhor.dif) melhor = { de: id, n: n, dif: depois };
+    }
+  });
+  if (!melhor) {
+    if (!alvo[chave] && alvo[restKey] > 0) return { tipo: 'alocar', papel: papel, para: atrasado, n: 1,
+      texto: 'Aloque ' + (papel === 'SEPARADOR' ? 'separadores' : 'conferentes') + ' em ' + cgNomeDep_(atrasado) + ': ' + alvo[restKey] + ' tarefas e ninguém lá.' };
+    return null;
+  }
+  const nomePapel = papel === 'SEPARADOR' ? (melhor.n === 1 ? 'separador' : 'separadores') : (melhor.n === 1 ? 'conferente' : 'conferentes');
+  return { tipo: 'mover', papel: papel, de: melhor.de, para: atrasado, n: melhor.n,
+    texto: 'Mover ' + melhor.n + ' ' + nomePapel + ' de ' + cgNomeDep_(melhor.de) + ' → ' + cgNomeDep_(atrasado) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -696,48 +847,71 @@ function acaoLimparAlocacaoCarga(usuario, params) {
     equipe: cgEquipe_(), g: cgGeracao_() };
 }
 
-/* PALETEIRA OU CARRINHO: estado de um. params: { dep, numero, estado } */
+/*
+ * PALETEIRA OU CARRINHO: o estado de um. params: { tipo, numero, estado, dep }.
+ *   paleteira: LIVRE (volta ao pool) · USO com dep (Grandeza, Nobre Grandeza, Pesaveis ou Blocado) · MANUTENCAO;
+ *              sem numero e com estado USO = "pegar uma do pool" (a livre de numero mais baixo).
+ *   carrinho:  LIVRE · USO · MANUTENCAO (sempre da Miudeza).
+ */
 function acaoEquipamentoCarga(usuario, params) {
   const p = params || {};
-  const d = CG_DEPOSITOS.filter(function (x) { return x.id === String(p.dep) && x.equip; })[0];
-  if (!d) throw new Error('Este depósito não tem paleteiras nem carrinhos.');
+  const tipo = String(p.tipo || '').toUpperCase();
+  if (!CG_EQUIP_PADRAO[tipo]) throw new Error('Equipamento desconhecido.');
   const estado = String(p.estado || '').toUpperCase();
   if (CG_ESTADOS_EQUIP.indexOf(estado) === -1) throw new Error('Estado inválido.');
-  const numero = Number(p.numero);
-  const obs = cgTexto_(p.obs, 120);
+  let dep = CG_EQUIP_DONO[tipo] || '';
+  if (tipo === 'PALETEIRA' && estado === 'USO') {
+    const d = CG_DEPOSITOS.filter(function (x) { return x.id === String(p.dep) && x.equip === 'PALETEIRA'; })[0];
+    if (!d) throw new Error('Escolha onde a paleteira vai ser usada: Grandeza, Nobre Grandeza, Pesáveis ou Blocado.');
+    dep = d.id;
+  }
+  const obs = estado === 'MANUTENCAO' ? cgTexto_(p.obs, 120) : '';
+  const nome = tipo === 'CARRINHO' ? 'Carrinho' : 'Paleteira';
+  let numero = p.numero === '' || p.numero == null ? 0 : Number(p.numero);
   comTrava(function () {
-    cgMaterializar_(d, usuario.email);
-    const linha = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.DEPOSITO) === d.id && Number(r.NUMERO) === numero; })[0];
-    if (!linha || numero < 1) throw new Error((d.equip === 'CARRINHO' ? 'Carrinho ' : 'Paleteira ') + numero + ' não existe em ' + d.nome + '.');
-    atualizar('CARGA_EQUIPAMENTOS', linha.ID, { ESTADO: estado, OBSERVACAO: estado === 'MANUTENCAO' ? obs : '' }, usuario.email);
+    cgMaterializar_(tipo, usuario.email);
+    const todas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.TIPO) === tipo && Number(r.NUMERO) >= 1; });
+    let linha;
+    if (!numero) {
+      linha = todas.filter(function (r) { return String(r.ESTADO || 'LIVRE') === 'LIVRE'; })
+        .sort(function (a, b) { return Number(a.NUMERO) - Number(b.NUMERO); })[0];
+      if (!linha) throw new Error('Nenhuma ' + nome.toLowerCase() + ' livre no pool agora.');
+      numero = Number(linha.NUMERO);
+    } else {
+      linha = todas.filter(function (r) { return Number(r.NUMERO) === numero; })[0];
+      if (!linha) throw new Error(nome + ' ' + numero + ' não existe.');
+    }
+    atualizar('CARGA_EQUIPAMENTOS', linha.ID, { ESTADO: estado, DEPOSITO: dep, OBSERVACAO: obs }, usuario.email);
   });
   esquecerLeituras();
-  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_() };
+  const onde = estado === 'USO' ? (tipo === 'PALETEIRA' ? 'em uso em ' + cgNomeDep_(dep) : 'em uso') : (estado === 'LIVRE' ? (tipo === 'PALETEIRA' ? 'livre no pool' : 'livre') : 'em manutenção');
+  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: nome + ' ' + numero + ': ' + onde + '.' };
 }
+function cgNomeDep_(id) { const d = CG_DEPOSITOS.filter(function (x) { return x.id === id; })[0]; return d ? d.nome : id; }
 
-/* QUANTIDADE de paleteiras (ou carrinhos) de um deposito. params: { dep, quantidade } */
+/* QUANTIDADE de paleteiras (o pool do CD) ou de carrinhos (Miudeza). params: { tipo, quantidade } */
 function acaoQuantidadeEquipamentoCarga(usuario, params) {
   const p = params || {};
-  const d = CG_DEPOSITOS.filter(function (x) { return x.id === String(p.dep) && x.equip; })[0];
-  if (!d) throw new Error('Este depósito não tem paleteiras nem carrinhos.');
+  const tipo = String(p.tipo || '').toUpperCase();
+  if (!CG_EQUIP_PADRAO[tipo]) throw new Error('Equipamento desconhecido.');
   const qtd = Number(p.quantidade);
   if (!(qtd >= 0 && qtd <= CG_MAX_EQUIP && Math.floor(qtd) === qtd)) throw new Error('Quantidade de 0 a ' + CG_MAX_EQUIP + '.');
   comTrava(function () {
-    cgMaterializar_(d, usuario.email);
-    const minhas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.DEPOSITO) === d.id; });
-    const temZero = minhas.filter(function (r) { return Number(r.NUMERO) < 1; });
+    cgMaterializar_(tipo, usuario.email);
+    const minhas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.TIPO) === tipo; });
+    const zero = minhas.filter(function (r) { return Number(r.NUMERO) < 1; });
     const numeradas = minhas.filter(function (r) { return Number(r.NUMERO) >= 1; });
     const existe = {};
     numeradas.forEach(function (r) { existe[Number(r.NUMERO)] = r; });
     const novas = [];
-    for (let i = 1; i <= qtd; i++) if (!existe[i]) novas.push({ DEPOSITO: d.id, TIPO: d.equip, NUMERO: String(i), ESTADO: 'LIVRE' });
-    if (!qtd && !temZero.length) novas.push({ DEPOSITO: d.id, TIPO: d.equip, NUMERO: '0', ESTADO: 'LIVRE' });
-    const sobra = numeradas.filter(function (r) { return Number(r.NUMERO) > qtd; })
-      .concat(qtd ? temZero : []).map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; });
+    for (let i = 1; i <= qtd; i++) if (!existe[i]) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
+    if (!qtd && !zero.length) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: '0', ESTADO: 'LIVRE' });
+    const sobra = numeradas.filter(function (r) { return Number(r.NUMERO) > qtd; }).concat(qtd ? zero : [])
+      .map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; });
     if (sobra.length) atualizarVarios('CARGA_EQUIPAMENTOS', sobra, usuario.email);
     if (novas.length) inserirVarios('CARGA_EQUIPAMENTOS', novas, usuario.email);
   });
   esquecerLeituras();
-  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(),
-    recado: d.nome + ': ' + qtd + ' ' + (d.equip === 'CARRINHO' ? (qtd === 1 ? 'carrinho' : 'carrinhos') : (qtd === 1 ? 'paleteira' : 'paleteiras')) + '.' };
+  const nome = tipo === 'CARRINHO' ? (qtd === 1 ? 'carrinho' : 'carrinhos') + ' na Miudeza' : (qtd === 1 ? 'paleteira' : 'paleteiras') + ' no CD';
+  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: qtd + ' ' + nome + '.' };
 }

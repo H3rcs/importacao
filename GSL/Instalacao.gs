@@ -473,7 +473,11 @@ const PARAMETROS_NOVOS = [
   ['APRENDIZ_PLANILHA', 'Link da planilha do Jovem Aprendiz — Imersão Corporativa (abas "Respostas ao formulário 1" e "Cronograma")'],
   ['NOBREAK_TENSAO_TOLERANCIA', 'Tolerancia da tensao em relacao a nominal, em % (acima disso a leitura fica em alerta)', '10'],
   ['NOBREAK_CARGA_ALERTA', 'Carga de saida (%) a partir da qual o nobreak fica em alerta', '80'],
-  ['NOBREAK_LEITURAS_DIA', 'Quantas leituras por dia cada nobreak deve ter', '3']
+  ['NOBREAK_LEITURAS_DIA', 'Quantas leituras por dia cada nobreak deve ter', '3'],
+  // Situacao de Carga (8.12): limites do "Equilibrio entre depositos", em pontos percentuais, e o peso das cargas de 24 horas
+  ['CARGA_EQUILIBRIO_PP', 'Situação de Carga: diferença máxima (pontos percentuais) entre o depósito mais adiantado e o mais atrasado para ficar "Equilibrado"', '10'],
+  ['CARGA_ATENCAO_PP', 'Situação de Carga: até quantos pontos percentuais de diferença é "Atenção" (acima disso, "Desequilibrado")', '20'],
+  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada tarefa de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2']
 ];
 
 /* Quais tabelas moram neste banco: o mestre tem todas; o de filial, so as de dados. */

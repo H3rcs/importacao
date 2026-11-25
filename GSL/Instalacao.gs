@@ -182,8 +182,25 @@ const ESQUEMA = {
    */
   CARGA_SNAPSHOTS: ['EMITIDO_EM', 'ENVIADO_EM', 'ENVIADO_POR', 'ENVIADO_NOME', 'ARQUIVO', 'PAGINAS', 'TOTAL_CARGAS',
                     'NAO_LIDAS', 'ASSINATURA', 'DEPOSITOS', 'RESUMO', 'CARGAS', 'CARGAS_2', 'CARGAS_3'],
-  CARGA_EQUIPE:    ['PESSOA', 'NOME', 'FUNCAO', 'EQUIPE', 'DEPOSITO', 'PAPEL', 'ANDAR', 'DESDE'],
+  CARGA_EQUIPE:    ['PESSOA', 'NOME', 'FUNCAO', 'EQUIPE', 'DEPOSITO', 'PAPEL', 'ANDAR', 'DESDE', 'RUA'],
   CARGA_EQUIPAMENTOS: ['DEPOSITO', 'TIPO', 'NUMERO', 'ESTADO', 'OBSERVACAO'],
+  /*
+   * SITUACAO DE CARGA, FASE 2 (8.15 — Carga.gs).
+   * CARGA_EQUIPE.RUA: a rua do andar do flowrack (1 a N; vazio = o andar todo).
+   * CARGA_EQUIPAMENTOS ganha o TIPO CHECKOUT (estacoes de conferencia); paleteira e check-out so ficam
+   * LIVRE ou MANUTENCAO: quem "usa" e calculado pelos separadores e conferentes alocados.
+   * CARGA_SEQUENCIA: a ordem em que as cargas serao feitas, uma linha por carga. POSICAO 1, 2, 3...;
+   * NOME e H24 copiados do relatorio (a carga que saiu dele continua com nome); ENTROU_EM: quando entrou
+   * na fila; SAIU_EM: o relatorio em que deixou de aparecer.
+   * CARGA_PRESENCA: falta de hoje. DATA e o dia do turno da pessoa (o 3o turno que comeca as 23h e do
+   * dia em que comecou); STATUS: FALTA; POR_NOME: quem marcou. Desfazer exclui a linha.
+   * CARGA_PASSAGEM: a passagem de turno. RESUMO e o retrato em JSON (cargas abertas, gargalos, alocacao,
+   * manutencao, faltas) que quem sai confirmou; quem entra marca CIENTE.
+   */
+  CARGA_SEQUENCIA: ['CARGA', 'POSICAO', 'NOME', 'H24', 'ENTROU_EM', 'SAIU_EM'],
+  CARGA_PRESENCA:  ['DATA', 'PESSOA', 'NOME', 'EQUIPE', 'STATUS', 'OBSERVACAO', 'POR_NOME'],
+  CARGA_PASSAGEM:  ['DATA', 'TURNO_SAI', 'TURNO_ENTRA', 'RESUMO', 'CONFIRMADO_POR', 'CONFIRMADO_NOME', 'CONFIRMADO_EM',
+                    'CIENTE_POR', 'CIENTE_NOME', 'CIENTE_EM', 'OBSERVACAO'],
 
   /*
    * CONVERSA — uma linha por mensagem.
@@ -339,7 +356,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.14';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) (a proxima e 8.15: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.15';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) · 8.15: Situacao de Carga fase 2 (CARGA_SEQUENCIA, CARGA_PRESENCA, CARGA_PASSAGEM, CARGA_EQUIPE.RUA, check-outs; paleteiras seguem os separadores) (a proxima e 8.16: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -401,6 +418,8 @@ function garantirEsquema() {
   // 8.14: a Situacao de Carga entra ligada na principal, e cada filial ganha as paleteiras e os carrinhos padrao.
   if (principal && versaoAntes < numeroDaVersao_('8.14') && adicionarPaineisNovosNaPrincipal_(['carga'])) mexeu = true;
   if (versaoAntes < numeroDaVersao_('8.14') && typeof semearEquipamentosCarga_ === 'function' && semearEquipamentosCarga_()) mexeu = true;
+  // 8.15: as paleteiras "em uso" passam a seguir os separadores (a linha USO volta a LIVRE) e entram os check-outs.
+  if (versaoAntes < numeroDaVersao_('8.15') && typeof migrarCarga815_ === 'function' && migrarCarga815_()) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
@@ -528,7 +547,16 @@ const PARAMETROS_NOVOS = [
   // Situacao de Carga (8.14): limites do "Equilibrio entre depositos", em pontos percentuais, e o peso das cargas de 24 horas
   ['CARGA_EQUILIBRIO_PP', 'Situação de Carga: diferença máxima (pontos percentuais) entre o depósito mais adiantado e o mais atrasado para ficar "Equilibrado"', '10'],
   ['CARGA_ATENCAO_PP', 'Situação de Carga: até quantos pontos percentuais de diferença é "Atenção" (acima disso, "Desequilibrado")', '20'],
-  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada tarefa de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2']
+  ['CARGA_PESO_24H', 'Situação de Carga: quanto vale cada tarefa de carga de 24 horas no % concluído do depósito (2 = o dobro)', '2'],
+  // Situacao de Carga, fase 2 (8.15): horarios dos turnos (5x2), a planilha dos boxes, o numero de boxes,
+  // as ruas de cada andar do flowrack e quantas cargas da sequencia devem estar em andamento ao mesmo tempo
+  ['CARGA_TURNO_A', 'Situação de Carga: horário do Turno A (1º turno), como 06:50-16:14', '06:50-16:14'],
+  ['CARGA_TURNO_B', 'Situação de Carga: horário do Turno B (2º turno), como 16:04-01:01 (passa da meia-noite)', '16:04-01:01'],
+  ['CARGA_TURNO_C', 'Situação de Carga: horário do Turno C (3º turno), como 23:00-07:00 (passa da meia-noite)', '23:00-07:00'],
+  ['CARGA_PLANILHA_BOXES', 'Situação de Carga: link da planilha de controle dos boxes (abas "Controle" e "Situação dos BOXs") — o GSL só lê, nunca grava'],
+  ['CARGA_BOXES', 'Situação de Carga: quantos boxes (docas) o CD tem', '26'],
+  ['CARGA_FLOWRACK_RUAS', 'Situação de Carga: ruas de cada andar do flowrack do Nobre (um número para todos, ou térreo,1º,2º,3º,4º como 6,6,6,6,6)', '6'],
+  ['CARGA_SEQ_EM_CURSO', 'Situação de Carga: quantas cargas do começo da sequência devem estar em andamento ao mesmo tempo', '5']
 ];
 
 /* Quais tabelas moram neste banco: o mestre tem todas; o de filial, so as de dados. */

@@ -862,6 +862,15 @@ const ACOES = {
   limparAlocacaoCarga: { tela: 'carga', funcao: 'acaoLimparAlocacaoCarga' },
   equipamentoCarga:    { tela: 'carga', funcao: 'acaoEquipamentoCarga' },
   quantidadeEquipamentoCarga: { tela: 'carga', funcao: 'acaoQuantidadeEquipamentoCarga' },
+  // situacao de carga, fase 2 (8.15): historico (abrir um envio e comparar), sequencia, falta do dia,
+  // boxes (a planilha das docas, so lida: ler de novo e leitura), passagem de turno e os ajustes da tela.
+  snapshotCarga:       { tela: 'carga', leitura: true, funcao: 'acaoSnapshotCarga' },
+  boxesCarga:          { tela: 'carga', leitura: true, funcao: 'acaoBoxesCarga' },
+  sequenciaCarga:      { tela: 'carga', funcao: 'acaoSequenciaCarga' },
+  presencaCarga:       { tela: 'carga', funcao: 'acaoPresencaCarga' },
+  passagemCarga:       { tela: 'carga', funcao: 'acaoPassagemCarga' },
+  salvarFonteBoxesCarga: { tela: 'carga', funcao: 'acaoSalvarFonteBoxesCarga' },
+  parametrosCarga:     { tela: 'carga', funcao: 'acaoParametrosCarga' },
 
   // gerais, da propria pessoa
   // Bolinha do menu (acoes em aberto por modulo): so leitura; so conta o que a pessoa ve (nivelNaTela).

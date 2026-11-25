@@ -250,7 +250,8 @@ const TABELAS_CACHEAVEIS = {
   ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
   LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1,
   // Situacao de Carga (25/11): a geracao de cada uma e o que a tela ao vivo pergunta (acaoGeracaoCarga)
-  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1
+  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1,
+  CARGA_SEQUENCIA: 1, CARGA_PRESENCA: 1, CARGA_PASSAGEM: 1   // 8.15
 };
 /*
  * Estas so valem do cache FORA da trava. Dentro dela (ler, conferir e gravar:
@@ -264,7 +265,8 @@ const CACHE_SO_FORA_DA_TRAVA = {
   ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
   LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1,
   // Situacao de Carga (25/11): a geracao de cada uma e o que a tela ao vivo pergunta (acaoGeracaoCarga)
-  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1
+  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1,
+  CARGA_SEQUENCIA: 1, CARGA_PRESENCA: 1, CARGA_PASSAGEM: 1   // 8.15
 };
 
 function listar(tabela, incluirExcluidos) {

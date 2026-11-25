@@ -713,7 +713,7 @@ function cgHeroHtml() {
       ${kpi('Prontas para expedir', `<span class="cg-num">${cgN(res.prontas)}</span><small>de ${cgN(res.total)}</small>`, barra(res.total ? res.prontas / res.total * 100 : 0, 'verde'))}
       ${kpi('24 horas pendentes', `<span class="cg-num">${cgN(res.h24Pend)}</span>`, res.h24 ? 'de ' + res.h24 + (res.h24 === 1 ? ' carga 24 h' : ' cargas 24 h') : 'nenhuma carga 24 h', res.h24Pend ? 'amarelo' : '')}
       ${kpi('Separação', `<span class="cg-num">${cgPct(pSep)}</span>`, barra(pSep, 'azul') + `<span>${cgN(rs)} tarefas faltam</span>`)}
-      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'ceu') + `<span>${cgN(rc)} tarefas faltam</span>`)}
+      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'cor-conf') + `<span>${cgN(rc)} tarefas faltam</span>`)}
       ${kpi('Equilíbrio', `<span class="cg-num">${eqb && eqb.spread != null ? cgN(eqb.spread) + '<small>pp</small>' : '—'}</span>`,
         eqb && eqb.texto ? `<span class="cg-eq-pilula eq-${eqb.status}">${esc(eqb.texto)}</span>` : '', 'equilibrio')}
       ${kpi('Previsão para zerar', `<span class="cg-num">${!rs && !rc ? 'Pronto' : (etaOk ? cgDuracao(eta) : '—')}</span>`,
@@ -829,7 +829,7 @@ function cgCartaoDepHtml(id) {
       <div><b class="cg-num">${cgN(r.restSep + r.restConf)}</b><span>tarefas</span></div>
     </div>
     ${barra('Sep.', i.ind.pctSep, 'azul')}
-    ${barra('Conf.', i.ind.pctConf, 'ceu')}
+    ${barra('Conf.', i.ind.pctConf, 'cor-conf')}
     <div class="cg-dep-rodape">
       <span class="cg-equipe-mini" title="Separadores e conferentes alocados">${CG_SVG.pessoa}<b class="cg-num">${i.eq.sep}</b>&nbsp;sep · <b class="cg-num">${i.eq.conf}</b>&nbsp;conf</span>
       ${equip}
@@ -949,8 +949,8 @@ function cgLinhaTempoHtml(completo) {
   const rot = h.length > 1 ? `<text x="${pad}" y="${H - 4}" class="cg-grade-txt">${esc(cgHora(h[0].emitido))}</text><text x="${W - pad}" y="${H - 4}" class="cg-grade-txt" text-anchor="end">${esc(cgHora(h[h.length - 1].emitido))}</text>` : '';
   return `<section class="cg-cartao">
     <header class="cg-cartao-cab"><h3>Linha do tempo dos envios</h3><span class="cg-legenda"><i class="sep"></i>Separação <i class="conf"></i>Conferência</span></header>
-    <svg class="cg-grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento da separação e da conferência a cada envio">${grade}
-      ${h.length > 1 ? `<path d="${linha('pctSep')}" class="cg-linha-sep"/><path d="${linha('pctConf')}" class="cg-linha-conf"/>` : ''}${pontos}${rot}</svg>
+    ${h.length > 1 ? `<svg class="cg-grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento da separação e da conferência a cada envio">${grade}
+      <path d="${linha('pctSep')}" class="cg-linha-sep"/><path d="${linha('pctConf')}" class="cg-linha-conf"/>${pontos}${rot}</svg>` : '<p class="cg-vazio-txt">O gráfico começa no segundo envio: cada PDF novo vira um ponto da linha.</p>'}
     <ol class="cg-envios">${h.slice().reverse().slice(0, completo ? 60 : 5).map((s, i) => `<li><span class="cg-envio-hora cg-num">${esc(cgDiaHora(s.emitido))}</span>
       <span>${cgN(s.total)} cargas · ${cgN(s.prontas)} prontas${s.h24Pend ? ' · <b class="cg-24t">' + s.h24Pend + ' de 24 h</b>' : ''}</span>
       <span class="cg-envio-pct">sep. <b>${cgPct(s.pctSep)}</b> · conf. <b>${cgPct(s.pctConf)}</b></span>
@@ -985,7 +985,7 @@ function cgColunaSupHtml(id) {
     ${marca}
     ${r ? `<div class="cg-sup-pct"><b class="cg-num">${cgPct(i.pctPond)}</b><span>concluído</span></div>
       <div class="cg-mini-barra"><span>Sep.</span><span class="cg-trilho"><i class="azul" style="width:${(i.ind.pctSep || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctSep)}</b></div>
-      <div class="cg-mini-barra"><span>Conf.</span><span class="cg-trilho"><i class="ceu" style="width:${(i.ind.pctConf || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctConf)}</b></div>
+      <div class="cg-mini-barra"><span>Conf.</span><span class="cg-trilho"><i class="cor-conf" style="width:${(i.ind.pctConf || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctConf)}</b></div>
       <dl class="cg-sup-dl"><div><dt>Faltam</dt><dd class="cg-num">${cgN(r.restSep + r.restConf)}</dd></div><div><dt>Cargas</dt><dd class="cg-num">${cgN(i.pend)}</dd></div>
         <div><dt>Previsão</dt><dd class="cg-num">${i.pend ? (i.ind.etaMin == null ? '—' : cgDuracao(i.ind.etaMin)) : 'Pronto'}</dd></div></dl>` : '<p class="cg-vazio-txt">Sem situação de carga.</p>'}
     <div class="cg-zonas">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
@@ -1001,7 +1001,7 @@ function cgDepositoHtml(id) {
   const indicadores = r ? `<section class="cg-cartao cg-dep-painel">
       <header class="cg-cartao-cab"><h3>${esc(dep.nome)}${dep.grupo ? ' <small class="cg-grupo-tag">supervisão G · NG · P · B</small>' : ''}</h3><span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span></header>
       <div class="cg-dep-grade">
-        <div class="cg-aneis">${anel(ind.pctSep, 'separado', 'azul')}${anel(ind.pctConf, 'conferido', 'ceu')}</div>
+        <div class="cg-aneis">${anel(ind.pctSep, 'separado', 'azul')}${anel(ind.pctConf, 'conferido', 'cor-conf')}</div>
         <div class="cg-nums">
           ${num(cgN(r.cargas), 'cargas com ' + esc(dep.nome))}${num(cgN(r.concluidas), 'prontas', 'verde')}
           ${num(cgN(r.emSep), 'em separação')}${num(cgN(r.emConf), 'em conferência')}
@@ -1011,7 +1011,7 @@ function cgDepositoHtml(id) {
           <div class="cg-ritmo-linha"><span>Faltam</span><b class="cg-num">${cgN(r.restSep)}</b><small>tarefas de separação</small><b class="cg-num">${cgN(r.restConf)}</b><small>de conferência</small></div>
           <div class="cg-ritmo-linha"><span>Ritmo</span>${ind.ritmoSep == null ? '<small>aparece a partir do 2º envio</small>' :
             `<b class="cg-num">${cgN(ind.ritmoSep)}</b><small>sep./h</small><b class="cg-num">${cgN(ind.ritmoConf)}</b><small>conf./h</small>${ind.cargasHora != null ? `<b class="cg-num">${cgN(ind.cargasHora)}</b><small>cargas/h</small>` : ''}`}</div>
-          <div class="cg-ritmo-linha destaque"><span>Previsão</span><b class="cg-num">${i.pend ? (ind.etaMin == null ? '—' : cgDuracao(ind.etaMin)) : 'Pronto'}</b><small>${i.pend && ind.etaMin != null ? 'no ritmo atual · às ' + cgHoraMais(s.emitido, ind.etaMin) : (i.pend ? 'sem ritmo medido' : 'nada pendente')}</small></div>
+          <div class="cg-ritmo-linha cg-realce"><span>Previsão</span><b class="cg-num">${i.pend ? (ind.etaMin == null ? '—' : cgDuracao(ind.etaMin)) : 'Pronto'}</b><small>${i.pend && ind.etaMin != null ? 'no ritmo atual · às ' + cgHoraMais(s.emitido, ind.etaMin) : (i.pend ? 'sem ritmo medido' : 'nada pendente')}</small></div>
           ${i.pend ? `<div class="cg-ritmo-linha"><span>Com a equipe</span><b class="cg-num">${i.etaEquipe == null ? '—' : cgDuracao(i.etaEquipe)}</b><small>${i.etaEquipe == null ? (ind.porPessoaSep ? 'aloque separadores e conferentes' : 'ritmo por pessoa ainda não medido') : `com ${i.eq.sep} sep. e ${i.eq.conf} conf. agora (${cgN(ind.porPessoaSep)} tarefas/h por separador)`}</small></div>` : ''}
         </div>
       </div>

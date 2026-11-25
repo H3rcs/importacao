@@ -1066,8 +1066,7 @@ input[type="file"] { border: 0; background: none; padding: 0; min-height: 0; fon
    celula do calendario. */
 .rot-grupo { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
 .rot-grupo legend {
-  padding: 0; margin-bottom: 7px; font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--tinta-media);
+  padding: 0; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: var(--tinta);
 }
 .rot-pilulas { display: flex; flex-wrap: wrap; gap: 6px; }
 .rot-pilulas label { position: relative; cursor: pointer; }
@@ -1121,8 +1120,8 @@ input[type="file"] { border: 0; background: none; padding: 0; min-height: 0; fon
 /* TABELAS — cabecalho em faixa (fixo ao rolar dentro da caixa), linhas
    de 1 px, numeros tabulares, linha acesa no hover. */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { position: sticky; top: 0; z-index: 1; }
 th {
-  position: sticky; top: 0; z-index: 1;
   text-align: left; font-family: var(--fonte-texto); font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--tinta-fraca); font-weight: 600; padding: 10px 12px; white-space: nowrap;
   background: var(--superficie-2); border-bottom: 1px solid var(--linha-forte);
@@ -2059,8 +2058,7 @@ input.travado {
 /* Editar a acao: os marcados, para desmarcar quem foi marcado por engano. */
 .mencao-marcados { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
 .mencao-marcados legend {
-  padding: 0; margin-bottom: 7px; font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--tinta-media);
+  padding: 0; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: var(--tinta);
 }
 .mencao-marcados .marcador { margin: 4px 0; }
 /* No dedo: o x do chip e o "@ Marcar pessoa" tinham 15 px de altura, colados no vizinho. */

@@ -377,8 +377,8 @@ function aplicarModoLeve(ligado) {
   document.documentElement.classList.toggle('modo-leve', !!ligado);
   const b = el('modo-leve-alternar');
   if (b) b.title = ligado
-    ? 'Modo leve LIGADO — fundo animado desligado. Clique para voltar as animacoes.'
-    : 'Modo leve desligado. Clique para desligar o fundo animado e ganhar fluidez.';
+    ? 'Modo leve LIGADO — animações desligadas. Clique para voltar as animações.'
+    : 'Modo leve desligado. Clique para desligar as animações e ganhar fluidez.';
   gravarLocal(CHAVE_LEVE, ligado ? '1' : '0');
 }
 function alternarModoLeve() {
@@ -4169,7 +4169,7 @@ function cfgSistema(d) {
         <button class="botao secundario" onclick="alternarModoLeve()">${document.documentElement.classList.contains('modo-leve') ? '⚡ Modo leve: LIGADO' : '⚡ Modo leve: desligado'}</button>
         ${d.pastaAnexos ? `<button class="botao secundario" onclick="window.open(${jsArg(d.pastaAnexos)},'_blank')">📁 Abrir pasta das entregas</button>` : ''}
       </div>
-      <p class="dica"><b>Modo leve</b>: desliga o fundo animado e os desfoques, mantendo cores e
+      <p class="dica"><b>Modo leve</b>: desliga as animações de entrada e as transições, mantendo cores e
       layout. O app liga sozinho quando percebe que a maquina nao está dando conta dos quadros;
       este botão serve para forçar ou desfazer, e vale so neste computador.</p>
     </div>

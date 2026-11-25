@@ -1573,22 +1573,24 @@ function notarBolinhaDaTela(idTela, r) {
   const c = b && r && b.contagens(r.dados);
   if (!c || typeof c.abertas !== 'number') return;
   if (!PENDENCIAS || PENDENCIAS.filial !== FILIAL) PENDENCIAS = { filial: FILIAL, quando: 0, modulos: {} };
-  PENDENCIAS.modulos[b.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas || 0, minhas: c.minhas || 0 };
+  PENDENCIAS.modulos[b.modulo] = { abertas: c.abertas, atrasadas: c.atrasadas || 0, minhas: c.minhas || 0, parecer: c.parecer || 0 };
   pintarBolinhas();
 }
 
 const contarTexto = (n, um, varios) => n + ' ' + (n === 1 ? um : varios);
 function textoPendencia(p) {
   return contarTexto(p.abertas, 'ação em aberto', 'ações em aberto') +
-    (p.atrasadas ? ', ' + contarTexto(p.atrasadas, 'atrasada', 'atrasadas') : '');
+    (p.atrasadas ? ', ' + contarTexto(p.atrasadas, 'atrasada', 'atrasadas') : '') +
+    (p.parecer ? ', ' + contarTexto(p.parecer, 'situação esperando o seu parecer', 'situações esperando o seu parecer') : '');
 }
 
-/* A bolinha de um modulo (vazio quando nao ha numero, ou e zero). */
+/* A bolinha de um modulo (vazio quando nao ha numero, ou e zero). 8.13: conta tambem as situacoes que esperam o MEU parecer. */
 function bolinhaHtml(idModulo) {
   const p = PENDENCIAS && PENDENCIAS.filial === FILIAL ? PENDENCIAS.modulos[idModulo] : null;
-  if (!p || !(p.abertas > 0)) return '';
+  const n = p ? (p.abertas || 0) + (p.parecer || 0) : 0;
+  if (!p || !(n > 0)) return '';
   const dica = textoPendencia(p) + (p.minhas && p.minhas !== p.abertas ? ' · ' + contarTexto(p.minhas, 'sua', 'suas') : '');
-  return `<span class="holo-bolinha${p.atrasadas ? ' com-atraso' : ''}" aria-hidden="true" title="${esc(dica)}">${p.abertas > 99 ? '99+' : p.abertas}</span>` +
+  return `<span class="holo-bolinha${p.atrasadas ? ' com-atraso' : ''}" aria-hidden="true" title="${esc(dica)}">${n > 99 ? '99+' : n}</span>` +
     `<span class="so-leitor">, ${esc(textoPendencia(p))}</span>`;
 }
 
@@ -5169,34 +5171,75 @@ function barra(rotulo, texto, maximo, numero, cor) {
    falando com o plano em que foi aberta.
    ================================================= */
 
+/*
+ * 8.13 — SITUACOES E PARECER DO GERENTE. O plano ganhou o modelo do
+ * "Relatorio de Ocorrencias e Acoes" do gerente: cada cartao e uma
+ * SITUACAO (titulo, prioridade, descricao em texto rico, fotos com legenda)
+ * que o gerente destinatario decide: Tratar / Incluir acao (como sera
+ * tratado, responsaveis e prazo — vira acao, com comentarios e conclusao),
+ * Outro momento ou Nada a fazer. Os filtros (parecer, situacao, prioridade,
+ * turno, busca) sao feitos aqui, nos dois planos: o servidor manda tudo o
+ * que a pessoa ve (so o que a cita).
+ */
+const CAL_FILTRO = { parecer: '', situacao: 'ABERTAS', turno: '', busca: '', zona: '', crit: '', prio: '', ordem: 'urgentes' };
+let CAL_FILTRO_DA_TELA = null;           // os parametros da tela que ja foram aplicados no filtro (abrir('acoes', {...}))
 const PLANO_CAL = {
   id: 'CALENDARIO',
   dados: () => DADOS,
   acoes: { salvar: 'salvarAcao', concluir: 'concluirAcao', comentar: 'comentarAcao', reabrir: 'reabrirAcao',
-           cancelar: 'cancelarAcao', excluir: 'excluirAcao', foto: 'fotoAcao', removerFoto: 'removerFotoAcao' },
-  // No Calendário o filtro vai ao servidor (a tela pode abrir já filtrada).
-  local: null,
-  filtrar: (m) => filtrarAcoes(m),
-  extras: null
+           cancelar: 'cancelarAcao', excluir: 'excluirAcao', foto: 'fotoAcao', removerFoto: 'removerFotoAcao',
+           situacao: 'salvarSituacao', parecer: 'parecerSituacao' },
+  local: CAL_FILTRO,
+  filtrar: (m) => { Object.assign(CAL_FILTRO, m); paRepintar(); },
+  extras: null,
+  nome: 'Plano de Ação'
 };
 let PLANO = PLANO_CAL;
 const planoD = () => PLANO.dados() || {};
 const planoAcaoPorId = (id) => (planoD().lista || []).find((x) => x.id === id) || null;
 const planoAcao = (nome) => jsArg(PLANO.acoes[nome]);      // nome da ação, pronto para o onclick
 const ANDAMENTOS_ACAO = ['Em andamento', 'Aguardando', 'Concluída'];
+/* O plano tem o modelo de situacoes (Instalacao.gs desta versao) e a pessoa grava nele. */
+const paTemSituacoes = (d) => !!(d && d.modelo && d.modelo.situacoes);
 
 function pintarAcoes(r) {
   PLANO = PLANO_CAL;
   const d = r.dados, p = d.permissoes;
   const c = d.contagens;
-
+  // Os filtros que vieram na tela (link, abrir('acoes', {situacao})) valem uma vez; depois, os da pessoa.
+  const chave = JSON.stringify(d.filtro || {});
+  if (chave !== CAL_FILTRO_DA_TELA) {
+    CAL_FILTRO_DA_TELA = chave;
+    const f = d.filtro || {};
+    if (paramsAtual && paramsAtual.situacao) CAL_FILTRO.situacao = String(f.situacao || 'TODAS');
+    if (f.turno !== undefined) CAL_FILTRO.turno = f.turno || '';
+    if (f.busca !== undefined) CAL_FILTRO.busca = f.busca || '';
+  }
   el('subtitulo-pagina').textContent =
-    `${c.abertas} em aberto · ${c.atrasadas} atrasada(s) · ${c.minhas} sua(s)`;
-  el('acoes-topo').innerHTML = p.gerir
-    ? `<button class="botao" onclick="formAcao()">+ Nova ação</button>` : '';
+    `${c.abertas} em aberto · ${c.atrasadas} atrasada(s) · ${c.minhas} sua(s)` + (c.parecer ? ` · ${c.parecer} esperando o seu parecer` : '');
+  el('acoes-topo').innerHTML = paBotoesTopo(d);
   el('pagina').innerHTML = (p.editar ? '' : avisoSoVer('Plano de Ação')) + planoHtml(d);
+  paDepoisDePintar();
   abrirAcaoDoLink();
 }
+
+/* Os botoes do topo do plano: Relatorio (PDF), ação direta e a situação nova (o amarelo). */
+function paBotoesTopo(d) {
+  const p = d.permissoes || {};
+  return `<button class="botao secundario" onclick="paFormRelatorio()">&#128424; Relatório</button>` +
+    (p.editar ? `<button class="botao secundario" onclick="formAcao()" title="Já se sabe o que fazer: a ação nasce com responsáveis e prazo, sem esperar parecer">+ Nova ação direta</button>` : '') +
+    (p.editar && paTemSituacoes(d) ? `<button class="botao pa-amarelo" onclick="formSituacao()">+ Nova situação</button>` : '');
+}
+
+/* Repinta so o plano que esta na tela (o filtro mudou), sem ir ao servidor. */
+function paRepintar() {
+  if (PLANO === PLANO_CAL) {
+    if (paginaAtual !== 'acoes') return;
+    el('pagina').innerHTML = ((planoD().permissoes || {}).editar ? '' : avisoSoVer('Plano de Ação')) + planoHtml(planoD());
+  } else if (typeof pintarAbaLP === 'function') { pintarAbaLP(DADOS); return; }
+  paDepoisDePintar();
+}
+
 
 /*
  * LINK DO E-MAIL DE MENCAO (19/10): ?tela=acoes&acao=ID (ou tela=limpeza)
@@ -5232,9 +5275,16 @@ const ehMeu = (c) => String(c.autor || '').toLowerCase() === meuEmail();
  * so com "Ver e editar" na tela do plano (p.editar, do servidor): com "Ver"
  * a pessoa le a acao e o historico, sem gravar nada — nem sendo a responsavel.
  */
-const cuidaDaAcao = (a, p) => !!p.editar && ((a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1 || !!p.gerir);
-/* Comentam: quem cuida da acao e quem foi marcado num comentario dela — nunca na cancelada. */
-const podeComentarAcao = (a, p) => !!p.editar && a.situacao !== 'CANCELADA' && (cuidaDaAcao(a, p) || (a.marcadosEmails || []).indexOf(p.email) !== -1);
+const cuidaDaAcao = (a, p) => !!p.editar && (a.parecer === undefined || a.parecer === 'TRATAR') &&
+  ((a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1 || !!p.gerir);
+/*
+ * Comentam: quem cuida da acao, quem foi marcado num comentario dela e (8.13)
+ * quem registrou a situacao e o gerente destinatario — nunca na cancelada.
+ * Na situacao que ainda espera o parecer, o comentario e so conversa.
+ */
+const podeComentarAcao = (a, p) => !!p.editar && a.situacao !== 'CANCELADA' && (cuidaDaAcao(a, p) ||
+  (a.marcadosEmails || []).indexOf(p.email) !== -1 || (!!p.email && (a.autorEmail === p.email || a.destinatarioEmail === p.email)) ||
+  (!!p.gerir && (a.responsaveisEmails || []).indexOf(p.email) !== -1));
 
 /*
  * "NOVO" NESTE APARELHO. O que o aparelho ja abriu fica no localStorage so
@@ -5534,103 +5584,173 @@ function mencaoPintarEscolhidas() {
   }).join(' ') : '';
 }
 
-/* Filtro feito na tela (Limpeza): o servidor manda todas as ações que a pessoa enxerga. */
+/* ---------- FILTROS (feitos na tela, nos dois planos) ---------- */
+
+/* O parecer do cartao para o filtro: TRATAR, DEPOIS, NADA ou 'pendente' (sem definicao). */
+const paParecerDe = (a) => a.parecer === undefined ? 'TRATAR' : (a.parecer || 'pendente');
+/* Fechada: concluida, cancelada ou "nada a fazer". O resto esta em aberto (inclusive a que espera o parecer). */
+const paFechada = (a) => a.situacao === 'CONCLUIDA' || a.situacao === 'CANCELADA' || a.situacao === 'SEM_ACAO';
+const PA_SITUACOES = [['ABERTAS', 'Em aberto'], ['ATRASADAS', 'Atrasadas'], ['CONCLUIDAS', 'Concluídas'],
+                      ['CANCELADAS', 'Canceladas'], ['TODAS', 'Todas']];
+const PA_PARECERES = [['', 'Todas', ''], ['TRATAR', '&#10003; Tratar / Incluir ação', 'tratar'], ['DEPOIS', '&#9203; Outro momento', 'depois'],
+                      ['NADA', '&#10005; Nada a fazer', 'nada'], ['pendente', '&#8226; Sem definição', 'pendente']];
+const PA_NOME_PRIO = { ALTA: 'Alta', MEDIA: 'Média', NORMAL: 'Normal' };
+const paTexto = (v) => (String(v || '').charAt(0) === '<' ? paHtmlParaTexto(v) : String(v || ''));
+
+function paPassaSituacao(a, s) {
+  if (!s || s === 'TODAS') return true;
+  if (s === 'ABERTAS') return !paFechada(a);
+  if (s === 'CONCLUIDAS') return a.situacao === 'CONCLUIDA';
+  if (s === 'CANCELADAS') return a.situacao === 'CANCELADA';
+  if (s === 'ATRASADAS') return a.status === 'Atrasada';
+  return true;
+}
+/* Tudo menos o parecer e a situacao (os dois tem contador proprio). */
+function paPassaResto(a, f) {
+  const busca = semAcento(f.busca || '').trim();
+  if (f.turno && String(a.turno).toUpperCase() !== String(f.turno).toUpperCase()) return false;
+  if (f.zona && a.zona !== f.zona) return false;
+  if (f.crit && a.criticidade !== f.crit) return false;
+  if (f.prio && (a.prioridade || 'NORMAL') !== f.prio) return false;
+  if (busca && semAcento([a.acao, paTexto(a.descricao), paTexto(a.tratativa), a.responsavel, a.origem, a.zona, a.local,
+    a.relatorio, (pessoaDoPlano(a.autorEmail) || {}).nome, (pessoaDoPlano(a.destinatarioEmail) || {}).nome].join(' ')).indexOf(busca) === -1) return false;
+  return true;
+}
 function planoFiltrarLista(lista, f) {
-  const busca = String(f.busca || '').toLowerCase().trim();
-  return (lista || []).filter((a) => {
-    if (f.turno && String(a.turno).toUpperCase() !== String(f.turno).toUpperCase()) return false;
-    if (f.situacao === 'ABERTAS' && a.situacao !== 'PENDENTE') return false;
-    if (f.situacao === 'CONCLUIDAS' && a.situacao !== 'CONCLUIDA') return false;
-    if (f.situacao === 'ATRASADAS' && a.status !== 'Atrasada') return false;
-    if (f.zona && a.zona !== f.zona) return false;
-    if (f.crit && a.criticidade !== f.crit) return false;
-    if (busca && [a.acao, a.descricao, a.responsavel, a.origem, a.zona, a.local].join(' ').toLowerCase().indexOf(busca) === -1) return false;
-    return true;
-  });
+  return (lista || []).filter((a) => paPassaResto(a, f) && paPassaSituacao(a, f.situacao) &&
+    (!f.parecer || paParecerDe(a) === f.parecer));
 }
 function planoFiltrar(mudanca) { PLANO.filtrar(mudanca); }
 
-/* O plano inteiro: números, filtros, cartões e o ranking por turno. */
+/* O numero do cartao: a ordem de registro (fica o mesmo com qualquer filtro). */
+function paNumeros(lista) {
+  const ordem = (lista || []).slice().sort((x, y) => (msDoCarimbo(x.criadoEm) - msDoCarimbo(y.criadoEm)) || String(x.id).localeCompare(String(y.id)));
+  const n = {}; ordem.forEach((a, i) => { n[a.id] = i + 1; });
+  return n;
+}
+const PA_PESO_PRIO = { ALTA: 0, MEDIA: 1, NORMAL: 2 };
+function paOrdenar(lista, ordem, eu) {
+  const peso = (a) => {
+    if (a.status === 'Atrasada') return 0;
+    if (a.situacao === 'AGUARDANDO_PARECER' && a.destinatarioEmail === eu) return 1;
+    if (a.situacao === 'PENDENTE') return 2;
+    if (a.situacao === 'AGUARDANDO_PARECER') return 3;
+    if (a.situacao === 'POSTERGADA') return 4;
+    return 5;
+  };
+  return lista.slice().sort((a, b) => {
+    if (ordem === 'recentes') return msDoCarimbo(b.criadoEm) - msDoCarimbo(a.criadoEm);
+    if (ordem === 'antigas') return msDoCarimbo(a.criadoEm) - msDoCarimbo(b.criadoEm);
+    return (peso(a) - peso(b)) || ((PA_PESO_PRIO[a.prioridade] || 2) - (PA_PESO_PRIO[b.prioridade] || 2)) ||
+      String(a.prazoISO || '9999').localeCompare(String(b.prazoISO || '9999')) || msDoCarimbo(b.criadoEm) - msDoCarimbo(a.criadoEm);
+  });
+}
+
+/* ---------- O PLANO NA TELA ---------- */
 function planoHtml(d) {
-  const p = d.permissoes, c = d.contagens;
-  const f = PLANO.local || d.filtro || {};
-  const lista = PLANO.local ? planoFiltrarLista(d.lista, f) : (d.lista || []);
+  const p = d.permissoes || {}, c = d.contagens || {};
+  const f = PLANO.local || {};
+  const todas = d.lista || [];
   const ex = PLANO.extras ? PLANO.extras() : null;
-  const situacoes = [['ABERTAS', 'Em aberto'], ['ATRASADAS', 'Atrasadas'],
-                     ['CONCLUIDAS', 'Concluídas'], ['TODAS', 'Todas']];
+  const base = todas.filter((a) => paPassaResto(a, f));
+  const porParecer = (k) => base.filter((a) => paPassaSituacao(a, f.situacao) && (!k || paParecerDe(a) === k)).length;
+  const porSituacao = (s) => base.filter((a) => paPassaSituacao(a, s) && (!f.parecer || paParecerDe(a) === f.parecer)).length;
+  const lista = paOrdenar(planoFiltrarLista(todas, f), f.ordem, p.email);
+  const numeros = paNumeros(todas);
+  // O placar (como o do relatorio do gerente): sobre tudo o que a pessoa ve, sem filtro.
+  const conta = (k) => todas.filter((a) => paParecerDe(a) === k).length;
+  const tratar = conta('TRATAR'), depois = conta('DEPOIS'), nada = conta('NADA'), pendentes = conta('pendente');
+  const avaliadas = tratar + depois + nada;
+  const limpeza = PLANO.id === 'LIMPEZA';
+  const tile = (classe, rot, n, sub, filtro) => `<button type="button" class="pa-tile ${classe}${f.parecer === filtro && filtro ? ' ativo' : ''}"
+      onclick="planoFiltrar({parecer:${jsArg(f.parecer === filtro ? '' : filtro)}})"><b>${rot}</b><span class="pa-num">${n}</span><small>${sub}</small></button>`;
+  const turnos = [''].concat(d.turnos || []);
+  const sel = (v, atual) => (String(v) === String(atual || '') ? 'selected' : '');
 
-  return `
-    <div class="grade grade-kpi" style="margin-bottom:16px">
-      ${kpi(c.abertas, 'Em aberto', 'azul')}
-      ${kpi(c.atrasadas, 'Atrasadas', 'vermelho')}
-      ${kpi(c.minhas, 'Sob sua responsabilidade', 'amarelo')}
-      ${kpi(c.concluidas, 'Concluídas', 'verde')}
+  return `<div class="pa">
+    <div class="pa-topo">
+      <span class="pa-tag">BARTOFIL · ${limpeza ? 'LIMPEZA CD' : 'PLANO DE AÇÃO'}</span>
+      <h2>${limpeza ? 'Ocorrências e ações da limpeza' : 'Ocorrências e ações'}</h2>
+      <p>Cada situação é registrada com fotos do local; o gerente define a tratativa. Aqui aparecem só as que citam você${d.modelo && d.modelo.filial ? ' · ' + esc(d.modelo.filial) : ''}.</p>
+      <div class="pa-listras" aria-hidden="true"><i></i><i></i></div>
     </div>
-    ${d.geral ? `<p class="dica" style="margin:-6px 0 14px">No plano inteiro: <b>${d.geral.abertas}</b> em aberto,
-       <b>${d.geral.atrasadas}</b> atrasada(s) — só os números. As ações aparecem só para quem está citado nelas.</p>` : ''}
 
-    <div class="cartao" style="margin-bottom:14px">
-      <div class="filtros-acao">
-        <div class="tira-turnos" style="margin:0">
-          <span class="tira-rotulo">Situação</span>
-          ${situacoes.map(([id, nome]) => `
-            <button class="pastilha-turno ${f.situacao === id ? 'ativa' : ''}"
-                    onclick="planoFiltrar({situacao:${jsArg(id)}})">${nome}</button>`).join('')}
-        </div>
-        <div class="tira-turnos" style="margin:0">
-          <span class="tira-rotulo">Turno</span>
-          ${[''].concat(d.turnos || []).map((t) => `
-            <button class="pastilha-turno ${String(f.turno || '').toUpperCase() === String(t).toUpperCase() ? 'ativa' : ''}"
-                    onclick="planoFiltrar({turno:${jsArg(t)}})">${t === '' ? 'Todos' : t === 'Todos' ? 'Geral (CD)' : esc(t)}</button>`).join('')}
-        </div>
-        ${ex ? `<div class="tira-turnos" style="margin:0">
-          <select style="width:auto;max-width:260px;flex:0 0 auto" onchange="planoFiltrar({zona:this.value})"><option value="">Todas as zonas</option>
-            ${(ex.zonas || []).map((z) => `<option value="${esc(z.zona)}" ${f.zona === z.zona ? 'selected' : ''}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select>
-          <select style="width:auto;flex:0 0 auto" onchange="planoFiltrar({crit:this.value})"><option value="">Toda criticidade</option>
-            ${(ex.criticidades || []).map((x) => `<option ${f.crit === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
-        </div>` : ''}
-        <div class="busca-caixa">
-          <span class="busca-lupa" aria-hidden="true">&#128269;</span>
-          <input id="busca-acao" placeholder="Buscar ação, responsável${ex ? ', local' : ''} ou origem"
-                 value="${esc(f.busca || '')}"
-                 onkeydown="if(event.key==='Enter')planoFiltrar({busca:this.value})">
-        </div>
+    <div class="pa-placar">
+      ${tile('', 'Total registrado', todas.length, 'situação(ões)', '')}
+      ${tile('verde', 'Tratar / Ação', tratar, (c.abertas || 0) + ' em aberto' + (c.atrasadas ? ' · <em>' + c.atrasadas + ' atrasada(s)</em>' : ''), 'TRATAR')}
+      ${tile('amarelo', 'Outro momento', depois, 'postergada(s)', 'DEPOIS')}
+      ${tile('cinza', 'Sem ação / Pendente', nada + pendentes, pendentes + ' sem definição' + (c.parecer ? ' · <em>' + c.parecer + ' com você</em>' : ''), 'pendente')}
+    </div>
+    <div class="pa-acoes-linha">
+      <span class="pa-pilula"><b>${c.abertas || 0}</b> ações em aberto</span>
+      <span class="pa-pilula${c.atrasadas ? ' alerta' : ''}"><b>${c.atrasadas || 0}</b> atrasada(s)</span>
+      <span class="pa-pilula"><b>${c.minhas || 0}</b> sob sua responsabilidade</span>
+      <span class="pa-pilula ok"><b>${c.concluidas || 0}</b> concluída(s)</span>
+      ${d.geral ? `<span class="pa-nota">No plano inteiro: <b>${d.geral.abertas}</b> em aberto, <b>${d.geral.atrasadas}</b> atrasada(s) — só os números.</span>` : ''}
+    </div>
+
+    <div class="pa-secao">
+      <div class="pa-sinal" aria-hidden="true">§</div>
+      <div><h3>Situações levantadas e parecer da gerência</h3>
+        <p>Aparecem só as situações em que você está citado: quem registrou, o gerente, os responsáveis e quem foi marcado.</p></div>
+      <div class="pa-selo-secao">${avaliadas} / ${todas.length} avaliadas</div>
+    </div>
+
+    <div class="pa-filtros" role="region" aria-label="Filtrar situações">
+      <div class="pa-filtro-linha">
+        <span class="pa-filtro-rot">Parecer</span>
+        ${PA_PARECERES.map(([k, nome, cls]) => `<button type="button" class="pa-chip ${cls}${(f.parecer || '') === k ? ' ativo' : ''}"
+          data-parecer="${esc(k)}" onclick="planoFiltrar({parecer:${jsArg(k)}})">${nome} <span class="pa-cnt">${porParecer(k)}</span></button>`).join('')}
+      </div>
+      <div class="pa-filtro-linha">
+        <span class="pa-filtro-rot">Situação</span>
+        ${PA_SITUACOES.map(([k, nome]) => `<button type="button" class="pa-chip ${k === 'ATRASADAS' ? 'atrasadas' : ''}${f.situacao === k ? ' ativo' : ''}"
+          data-situacao="${k}" onclick="planoFiltrar({situacao:${jsArg(k)}})">${nome} <span class="pa-cnt">${porSituacao(k)}</span></button>`).join('')}
+      </div>
+      <div class="pa-filtro-linha pa-quebra">
+        <select aria-label="Prioridade" onchange="planoFiltrar({prio:this.value})"><option value="">Toda prioridade</option>
+          ${['ALTA', 'MEDIA', 'NORMAL'].map((x) => `<option value="${x}" ${sel(x, f.prio)}>Prioridade ${PA_NOME_PRIO[x].toLowerCase()}</option>`).join('')}</select>
+        <select aria-label="Turno" onchange="planoFiltrar({turno:this.value})">
+          ${turnos.map((t) => `<option value="${esc(t)}" ${sel(t, f.turno)}>${t === '' ? 'Todos os turnos' : t === 'Todos' ? 'Geral (CD)' : 'Turno ' + esc(t)}</option>`).join('')}</select>
+        ${ex ? `<select aria-label="Zona" onchange="planoFiltrar({zona:this.value})"><option value="">Todas as zonas</option>
+          ${(ex.zonas || []).map((z) => `<option value="${esc(z.zona)}" ${sel(z.zona, f.zona)}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select>` : ''}
+        <select aria-label="Ordem" onchange="planoFiltrar({ordem:this.value})">
+          <option value="urgentes" ${sel('urgentes', f.ordem || 'urgentes')}>Mais urgentes primeiro</option>
+          <option value="recentes" ${sel('recentes', f.ordem)}>Mais recentes primeiro</option>
+          <option value="antigas" ${sel('antigas', f.ordem)}>Mais antigas primeiro</option></select>
+        <div class="pa-busca"><span aria-hidden="true">&#128269;</span>
+          <input id="busca-acao" placeholder="Buscar título, descrição, responsável${ex ? ', local' : ''} ou origem" value="${esc(f.busca || '')}"
+                 onkeydown="if(event.key==='Enter')planoFiltrar({busca:this.value})" onchange="planoFiltrar({busca:this.value})"></div>
       </div>
     </div>
 
-    <div class="cartao" style="margin-bottom:14px">
-      <div class="cartao-titulo">${lista.length} ação(ões)</div>
-      <p class="dica" style="margin:-4px 0 12px">Aparecem aqui só as ações em que você está citado: como responsável
-         ou marcado num comentário.</p>
-      ${lista.length ? lista.map((a) => cartaoAcao(a, p)).join('')
-        : '<div class="vazio">Nenhuma ação com estes filtros.</div>'}
+    <div class="pa-lista">
+      ${lista.length ? lista.map((a) => cartaoAcao(a, p, numeros[a.id])).join('')
+        : `<div class="pa-vazio"><p>${todas.length ? 'Nenhuma situação com estes filtros.' : 'Nenhuma situação ainda.' +
+            (p.editar && paTemSituacoes(d) ? ' Registre a primeira em <b>+ Nova situação</b>.' : '')}</p>
+           ${todas.length ? `<button type="button" class="botao secundario" onclick="planoFiltrar({parecer:'',situacao:'TODAS',prio:'',turno:'',zona:'',busca:''})">Mostrar todas</button>` : ''}</div>`}
     </div>
 
     ${(d.ranking || []).length ? `
-    <div class="cartao">
-      <div class="cartao-titulo">Ranking de ações por turno — para as auditorias</div>
-      <p class="dica" style="margin:-4px 0 12px">Quantas ações cada turno recebeu e quantas
-         fechou. O percentual é de <b>conclusão</b>: propor muito e concluir pouco não é
-         desempenho, é fila. Ações canceladas ficam fora da conta.
-         ${d.geral ? 'Conta todas as ações do plano, também as em que você não está citado (só os números).'
-           : 'Conta as ações em que você está citado.'}</p>
+    <div class="pa-ranking">
+      <h3>Ranking de ações por turno — para as auditorias</h3>
+      <p class="pa-nota" style="margin:0 0 10px">Quantas ações (parecer “Tratar”) cada turno recebeu e quantas fechou. O percentual é de
+         <b>conclusão</b>: propor muito e concluir pouco não é desempenho, é fila. Ações canceladas ficam fora da conta.
+         ${d.geral ? 'Conta todas as ações do plano, também as em que você não está citado (só os números).' : 'Conta as ações em que você está citado.'}</p>
       <div style="overflow-x:auto">
         <table><thead><tr>
           <th>Turno</th><th class="numero">Propostas</th><th class="numero">Concluídas</th>
           <th class="numero">Em aberto</th><th class="numero">Atrasadas</th><th class="numero">%</th>
         </tr></thead><tbody>
           ${d.ranking.map((l) => `
-            <tr>
-              <td><strong>${esc(l.turno)}</strong></td>
-              <td class="numero">${l.total}</td>
-              <td class="numero">${l.concluidas}</td>
+            <tr><td><strong>${esc(l.turno)}</strong></td><td class="numero">${l.total}</td><td class="numero">${l.concluidas}</td>
               <td class="numero">${l.pendentes}</td>
               <td class="numero">${l.atrasadas ? `<span style="color:var(--alerta)">${l.atrasadas}</span>` : '0'}</td>
-              <td class="numero"><strong>${l.percentual}%</strong></td>
-            </tr>`).join('')}
+              <td class="numero"><strong>${l.percentual}%</strong></td></tr>`).join('')}
         </tbody></table>
       </div>
-    </div>` : ''}`;
+    </div>` : ''}
+  </div>`;
 }
 
 /* "faltam 3 dias", "vence hoje", "atrasada 2 dias" — da ação ainda aberta. */
@@ -5644,46 +5764,319 @@ function planoPrazoTexto(a) {
 const seloFotos = (n, onclick) => n
   ? `<button class="selo-foto" onclick="${onclick}" title="Ver as fotos">&#128247; ${n} foto${n > 1 ? 's' : ''}</button>` : '';
 
-/* Uma ação. O prazo vem antes da descrição: é o que decide a urgência. */
-function cartaoAcao(a, p) {
+/* ---------- TEXTO RICO ---------- */
+
+/*
+ * O HTML que vai para a tela passa por aqui (o servidor ja limpou ao gravar;
+ * aqui e a segunda barreira — alguem pode ter mexido na planilha). Ficam so
+ * b, strong, i, em, u, mark, br, div, p, ul, ol, li, sem atributo nenhum. O
+ * span do marca-texto (o execCommand do Chrome) vira mark; negrito, italico
+ * e sublinhado por estilo viram a etiqueta. script, style e companhia saem
+ * com o conteudo; o resto sai e o texto fica.
+ */
+const PA_TAGS = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', MARK: 'mark', BR: 'br', DIV: 'div', P: 'p', UL: 'ul', OL: 'ol', LI: 'li' };
+const PA_FORA = { SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1, NOSCRIPT: 1, TEMPLATE: 1, TEXTAREA: 1, SELECT: 1, SVG: 1, MATH: 1, HEAD: 1, TITLE: 1 };
+function paHtmlSeguro(html) {
+  const t = document.createElement('template');
+  t.innerHTML = String(html || '');
+  const limpar = (no) => {
+    [...no.childNodes].forEach((filho) => {
+      if (filho.nodeType === 3) return;
+      if (filho.nodeType !== 1) { filho.remove(); return; }
+      const nome = filho.tagName.toUpperCase();
+      if (PA_FORA[nome]) { filho.remove(); return; }
+      limpar(filho);
+      let tag = PA_TAGS[nome];
+      if (!tag && (nome === 'SPAN' || nome === 'FONT')) {
+        const s = filho.style || {};
+        if (s.backgroundColor && !/transparent|rgba\(0, 0, 0, 0\)/.test(s.backgroundColor)) tag = 'mark';
+        else if (s.fontWeight === 'bold' || Number(s.fontWeight) >= 600) tag = 'b';
+        else if (s.fontStyle === 'italic') tag = 'i';
+        else if (/underline/.test(s.textDecoration || s.textDecorationLine || '')) tag = 'u';
+      }
+      if (!tag) { while (filho.firstChild) no.insertBefore(filho.firstChild, filho); filho.remove(); return; }
+      const novo = document.createElement(tag);
+      while (filho.firstChild) novo.appendChild(filho.firstChild);
+      no.replaceChild(novo, filho);
+    });
+  };
+  limpar(t.content);
+  return t.innerHTML;
+}
+function paHtmlParaTexto(html) {
+  const d = document.createElement('div');
+  d.innerHTML = paHtmlSeguro(String(html || '').replace(/<br\s*\x2f?>/gi, '\n').replace(/<\x2f(div|p|li)>/gi, '\n'));
+  return (d.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+/* O valor da planilha na tela: HTML (comeca com "<") limpo, ou o texto simples de antes, escapado. */
+function paRico(valor) {
+  const s = String(valor || '').trim();
+  if (!s) return '';
+  return s.charAt(0) === '<' ? paHtmlSeguro(s) : esc(s).replace(/\n/g, '<br>');
+}
+/* Texto longo no cartao: mostra o comeco e o "Ver tudo". */
+function paRicoNoCartao(valor, id) {
+  const html = paRico(valor);
+  const longo = paHtmlParaTexto(html).length > 420 || (html.match(/<li>|<br>|<div>/g) || []).length > 9;
+  return `<div class="pa-rico${longo ? ' pa-curto' : ''}" id="${esc(id)}">${html}</div>` +
+    (longo ? `<button type="button" class="pa-mais" onclick="const e=document.getElementById(${jsArg(id)});e.classList.toggle('pa-curto');this.textContent=e.classList.contains('pa-curto')?'Ver tudo':'Ver menos'">Ver tudo</button>` : '');
+}
+
+/* O editor (barra + campo). verde: o "Como sera tratado". */
+function paEditorHtml(id, valor, placeholder, verde) {
+  const b = (cmd, rot, titulo, cls) => `<button type="button" class="pa-fmt${cls ? ' ' + cls : ''}" data-cmd="${cmd}" title="${titulo}"
+    onmousedown="event.preventDefault();paFormatar(${jsArg(id)},${jsArg(cmd)})">${rot}</button>`;
+  return `<div class="pa-barra-fmt" role="toolbar" aria-label="Formatação do texto" data-editor="${esc(id)}">
+      ${b('bold', '<b>B</b>', 'Negrito (Ctrl+B)')}${b('italic', '<i>I</i>', 'Itálico (Ctrl+I)')}${b('underline', '<u>U</u>', 'Sublinhado (Ctrl+U)')}
+      <span class="pa-fmt-sep"></span>${b('insertUnorderedList', '&#8226; Lista', 'Lista com marcadores')}${b('insertOrderedList', '1. Lista', 'Lista numerada')}
+      ${b('marca', 'Destaque', 'Marca-texto no trecho escolhido', 'marca')}${b('removeFormat', 'Tx', 'Tirar a formatação')}</div>
+    <div class="pa-editor${verde ? ' verde' : ''}" id="${esc(id)}" contenteditable="true" role="textbox" aria-multiline="true"
+      data-placeholder="${esc(placeholder)}" onpaste="paColar(event)" onkeyup="paBarraEstado(${jsArg(id)})"
+      onmouseup="paBarraEstado(${jsArg(id)})" oninput="paEditorVazio(this)">${paRico(valor)}</div>`;
+}
+function paEditorVazio(ed) {
+  if (!ed.textContent.trim() && !ed.querySelector('li') && ed.innerHTML !== '') ed.innerHTML = '';
+}
+function paFormatar(id, cmd) {
+  const ed = el(id); if (!ed) return;
+  if (document.activeElement !== ed) ed.focus();
+  if (cmd === 'marca') paMarcaTexto(ed);
+  else {
+    try { document.execCommand(cmd, false, null); } catch (e) { /* navegador sem o comando */ }
+    if (cmd === 'removeFormat') {
+      const sel = window.getSelection();
+      let no = sel && sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+      if (no && no.nodeType === 3) no = no.parentNode;
+      const m = no && no.closest ? no.closest('mark') : null;
+      if (m && ed.contains(m)) { while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m); m.remove(); }
+    }
+  }
+  paBarraEstado(id);
+}
+/* Marca-texto: liga (mark em volta do trecho) ou desliga (o mark em que o cursor esta). */
+function paMarcaTexto(ed) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  let no = r.commonAncestorContainer;
+  if (no.nodeType === 3) no = no.parentNode;
+  const m = no && no.closest ? no.closest('mark') : null;
+  if (m && ed.contains(m)) { while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m); m.remove(); return; }
+  if (r.collapsed) return;
+  try { const mk = document.createElement('mark'); r.surroundContents(mk); }
+  catch (e) { try { document.execCommand('hiliteColor', false, '#fff4d1'); } catch (x) { /* sem marca-texto */ } }
+}
+function paBarraEstado(id) {
+  const barra = document.querySelector('.pa-barra-fmt[data-editor="' + id + '"]');
+  if (!barra) return;
+  barra.querySelectorAll('.pa-fmt[data-cmd]').forEach((b) => {
+    const cmd = b.dataset.cmd;
+    let ativo = false;
+    if (cmd === 'marca') {
+      const sel = window.getSelection();
+      let no = sel && sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+      if (no && no.nodeType === 3) no = no.parentNode;
+      ativo = !!(no && no.closest && no.closest('mark'));
+    } else if (cmd !== 'removeFormat') { try { ativo = document.queryCommandState(cmd); } catch (e) { ativo = false; } }
+    b.classList.toggle('ativo', ativo);
+  });
+}
+/* Colar: so o texto (estilo de outro programa nao entra), com as quebras de linha. */
+function paColar(ev) {
+  ev.preventDefault();
+  const t = (ev.clipboardData || window.clipboardData).getData('text/plain');
+  try { document.execCommand('insertText', false, t); } catch (e) { /* sem insertText */ }
+}
+/* O que o editor manda ao servidor: HTML limpo, ou '' se nao ha texto. */
+function paEditorValor(id) {
+  const ed = el(id);
+  if (!ed) return '';
+  if (!ed.textContent.trim() && !ed.querySelector('li')) return '';
+  return '<div>' + paHtmlSeguro(ed.innerHTML) + '</div>';
+}
+
+/* ---------- FOTOS DO CARTAO: grade com legenda e miniaturas que carregam quando aparecem ---------- */
+const PA_MINIS = new Map();            // id do arquivo -> data URL pequena (480 px)
+const PA_FILA = [];
+let PA_BAIXANDO = 0, PA_OLHO = null;
+
+function paGradeFotos(a, fotos) {
+  if (!fotos.length) return '';
+  return `<div class="pa-grade-fotos">${fotos.map((f, i) => {
+    const mini = PA_MINIS.get(f.id);
+    return `<button type="button" class="pa-foto" onclick="paVerFoto(${jsArg(a.id)}, ${i})" title="${esc(f.legenda || f.nome || 'foto')}">
+      <span class="pa-foto-img${mini ? '' : ' carregando'}" data-arquivo="${esc(f.id)}" data-acao="${esc(a.id)}" data-porta="${esc(PLANO.acoes.foto)}"
+        ${mini ? `style="background-image:url('${mini}')"` : ''} aria-hidden="true">${mini ? '' : '&#128247;'}</span>
+      <span class="pa-foto-leg${f.legenda ? '' : ' vazia'}">${esc(f.legenda || 'Foto ' + (i + 1))}</span></button>`;
+  }).join('')}</div>`;
+}
+function paVerFoto(idAcao, i) {
+  const a = planoAcaoPorId(idAcao); if (!a) return;
+  verFotos(idAcao, a.fotos || [], !!((planoD().permissoes || {}).gerir), i);
+}
+/*
+ * As miniaturas vem pela porta de sempre (a foto passa pelo servidor, que
+ * confere quem ve a acao), duas por vez, so quando o cartao aparece na tela.
+ * A foto inteira fica no FOTO_CACHE (o visor abre na hora). Com o canal
+ * barrado nao ha como buscar: fica o icone, e o clique abre o visor.
+ */
+function paDepoisDePintar() {
+  if (CANAL_BARRADO || typeof IntersectionObserver === 'undefined') {
+    document.querySelectorAll('.pa-foto-img.carregando').forEach((e) => e.classList.remove('carregando'));
+    return;
+  }
+  if (!PA_OLHO) {
+    PA_OLHO = new IntersectionObserver((itens) => {
+      itens.forEach((it) => {
+        if (!it.isIntersecting) return;
+        PA_OLHO.unobserve(it.target);
+        const x = it.target.dataset;
+        if (PA_MINIS.has(x.arquivo)) { paPorMini(x.arquivo); return; }
+        if (!PA_FILA.some((q) => q.arquivo === x.arquivo)) PA_FILA.push({ arquivo: x.arquivo, acao: x.acao, porta: x.porta });
+      });
+      paBaixarMinis();
+    }, { rootMargin: '300px' });
+  }
+  document.querySelectorAll('.pa-foto-img.carregando[data-arquivo]').forEach((e) => PA_OLHO.observe(e));
+}
+async function paBaixarMinis() {
+  while (PA_BAIXANDO < 2 && PA_FILA.length) {
+    const q = PA_FILA.shift();
+    PA_BAIXANDO++;
+    paMini(q).catch(() => {
+      document.querySelectorAll('.pa-foto-img[data-arquivo="' + q.arquivo + '"]').forEach((e) => { e.classList.remove('carregando'); });
+    }).finally(() => { PA_BAIXANDO--; paBaixarMinis(); });
+  }
+}
+async function paMini(q) {
+  let url = FOTO_CACHE.get(q.arquivo);
+  if (!url) {
+    const r = await executarAcaoSrv(q.porta, { id: q.acao, arquivo: q.arquivo });
+    url = 'data:' + (r.tipo || 'image/jpeg') + ';base64,' + r.dados;
+    if (!ehUrlHeic(url)) { FOTO_CACHE.set(q.arquivo, url); if (FOTO_CACHE.size > 24) FOTO_CACHE.delete(FOTO_CACHE.keys().next().value); }
+  }
+  if (ehUrlHeic(url)) throw new Error('heic');
+  PA_MINIS.set(q.arquivo, await paReduzir(url, 480));
+  if (PA_MINIS.size > 300) PA_MINIS.delete(PA_MINIS.keys().next().value);
+  paPorMini(q.arquivo);
+}
+function paPorMini(arquivo) {
+  const mini = PA_MINIS.get(arquivo);
+  document.querySelectorAll('.pa-foto-img[data-arquivo="' + arquivo + '"]').forEach((e) => {
+    e.classList.remove('carregando'); e.textContent = ''; e.style.backgroundImage = "url('" + mini + "')";
+  });
+}
+/* A foto em JPEG com o lado maior em `lado` px (miniatura e relatorio). */
+function paReduzir(url, lado) {
+  return new Promise((ok, erro) => {
+    const i = new Image();
+    i.onload = () => {
+      const k = Math.min(1, lado / Math.max(i.naturalWidth || 1, i.naturalHeight || 1));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(i.naturalWidth * k)); c.height = Math.max(1, Math.round(i.naturalHeight * k));
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(i, 0, 0, c.width, c.height);
+      ok(c.toDataURL('image/jpeg', 0.8));
+    };
+    i.onerror = () => erro(new Error('foto'));
+    i.src = url;
+  });
+}
+
+/* ---------- O CARTAO ---------- */
+
+/* Quem decide o parecer desta situacao: o destinatario; sem ele, quem deu o parecer que esta la. */
+function paDecideParecer(a, p) {
+  if (!p.editar || a.situacao === 'CANCELADA' || a.parecer === undefined) return false;
+  return a.destinatarioEmail ? a.destinatarioEmail === p.email : (!!a.parecerPor && a.parecerPor === p.email);
+}
+const paNome = (email) => (email ? (pessoaDoPlano(email).nome || email) : '');
+const paData = (iso) => (iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) + '/' + String(iso).slice(0, 4) : '');
+const PA_STATUS_CLASSE = { 'Concluída': 'Concluida', 'Aguardando parecer': 'Aguardando', 'Outro momento': 'Outro', 'Nada a fazer': 'Nada' };
+
+function cartaoAcao(a, p, numero) {
   const minha = (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1;
-  const podeConcluir = !!p.editar && a.situacao === 'PENDENTE' && (minha || p.gerir);
+  const ehAcao = paParecerDe(a) === 'TRATAR';
+  const podeConcluir = ehAcao && !!p.editar && a.situacao === 'PENDENTE' && (minha || p.gerir);
   const podeComentar = podeComentarAcao(a, p);
   const escritos = comentariosEscritos(a).length;
   const onde = [a.zona, a.local].filter(Boolean).join(' · ');
+  const decide = paDecideParecer(a, p);
+  const parecer = a.parecer === undefined ? 'TRATAR' : (a.parecer || '');
+  const situacaoNova = !!(a.autorEmail || a.destinatarioEmail);
 
   let aviso = '';
-  if (a.situacao === 'PENDENTE' && a.dias !== null) {
+  if (a.situacao === 'PENDENTE' && a.dias !== null && a.dias !== undefined) {
     if (a.dias < 0) aviso = `<span class="prazo-aviso atraso">${Math.abs(a.dias)} dia(s) em atraso</span>`;
     else if (a.dias === 0) aviso = `<span class="prazo-aviso hoje">vence hoje</span>`;
     else if (a.dias <= 3) aviso = `<span class="prazo-aviso perto">vence em ${a.dias} dia(s)</span>`;
   }
+  const quem = [];
+  if (a.autorEmail) quem.push(`Registrada por <b>${esc(paNome(a.autorEmail))}</b>${a.autorEmail === p.email ? ' <span class="marca-voce">você</span>' : ''}`);
+  else if (a.criadoPorNome) quem.push(`Criada por <b>${esc(a.criadoPorNome)}</b>`);
+  if (a.criadoEm) quem.push('em ' + esc(String(a.criadoEm).slice(0, 10)));
+  if (a.destinatarioEmail) quem.push(`para <b>${esc(paNome(a.destinatarioEmail))}</b>${a.destinatarioEmail === p.email ? ' <span class="marca-voce">você</span>' : ''}`);
+  const extras = [a.turno ? 'Turno ' + esc(a.turno === 'Todos' ? 'Geral (CD)' : a.turno) : '', onde ? 'Local: ' + esc(onde) : '',
+    a.origem ? 'Origem: ' + esc(a.origem) : '', a.plano === 'LIMPEZA' && a.abertaEm ? 'aberta em ' + paData(a.abertaEm) : '',
+    a.relatorio ? 'Levantamento: <b>' + esc(a.relatorio) + '</b>' : ''].filter(Boolean);
+  // A acao de antes (sem "como sera tratado"): o que precisa ser feito esta na descricao.
+  const descricao = a.tratativaNaDescricao ? '' : a.descricao;
+  const tratativa = a.tratativa || (a.tratativaNaDescricao ? a.descricao : '');
+  const fotos = a.fotos || [];
+  const statusCls = PA_STATUS_CLASSE[a.status] || a.status;
+  const opcao = (k, rot) => {
+    const sel = parecer === k ? ' sel-' + k : '';
+    return decide
+      ? `<button type="button" class="pa-opcao${sel}" data-parecer="${k}" onclick="formParecer(${jsArg(a.id)}, ${jsArg(k)})" aria-pressed="${parecer === k}">
+          <span class="pa-bolha">&#10003;</span><span>${rot}</span></button>`
+      : `<div class="pa-opcao${sel}${parecer === k ? '' : ' inerte'}" data-parecer="${k}"><span class="pa-bolha">&#10003;</span><span>${rot}</span></div>`;
+  };
+  const decidiu = a.parecerPor ? `${esc(paNome(a.parecerPor))}${a.parecerEm ? ' · ' + esc(String(a.parecerEm).slice(0, 16)) : ''}` : '';
 
   return `
-    <div class="cartao-acao ${classeStatus(a.status)}">
-      <div class="acao-topo">
-        <div class="acao-titulo">${esc(a.acao)}</div>
-        <span class="acao-selos">${seloComentarios(a, podeComentar)}
-          ${a.criticidade && a.plano === 'LIMPEZA' ? `<span class="lp-crit ${esc(a.criticidade)}">${esc(a.criticidade)}</span>` : ''}
-          ${etiqueta(a.status)}</span>
+    <div class="cartao-acao pa-card ${classeStatus(a.status)} pa-p-${parecer || 'sem'}" data-id="${esc(a.id)}">
+      <div class="pa-cab acao-topo">
+        <div class="pa-numero" title="Situação nº ${numero || ''}">${numero || '•'}</div>
+        <div class="pa-cab-txt">
+          <div class="pa-titulo-txt acao-titulo">${esc(a.acao)}</div>
+          ${quem.length ? `<div class="pa-sub">${quem.join(' ')}</div>` : ''}
+          ${extras.length ? `<div class="pa-sub">${extras.join(' · ')}</div>` : ''}
+        </div>
+        <div class="pa-selos acao-selos">${seloComentarios(a, podeComentar)}
+          <span class="pa-prio ${esc(a.prioridade || 'NORMAL')}" title="Prioridade">${PA_NOME_PRIO[a.prioridade] || 'Normal'}</span>
+          <span class="pa-status ${esc(statusCls)}">${esc(a.status)}</span></div>
       </div>
-      ${a.descricao ? `<div class="acao-descricao">${esc(a.descricao)}</div>` : ''}
-      <div class="acao-meta">
-        <span><b>${(a.responsaveisEmails || []).length > 1 ? 'Responsáveis' : 'Responsável'}:</b> ${esc(a.responsavel || '—')}${minha ? ' <span class="marca-voce">você</span>' : ''}</span>
-        <span><b>Entregar até:</b> ${esc(a.prazo || '—')}</span>
-        ${a.turno ? `<span><b>Turno:</b> ${esc(a.turno)}</span>` : ''}
-        ${onde ? `<span><b>Local:</b> ${esc(onde)}</span>` : ''}
-        ${(a.marcados || []).length ? `<span><b>Marcados:</b> ${a.marcados.map((m) =>
-          esc(m.nome) + (m.email === p.email ? ' <span class="marca-voce">você</span>' : '')).join(', ')}</span>` : ''}
-        ${aviso}
-        ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
+
+      ${descricao ? `<span class="pa-rotulo">Descrição da situação</span>${paRicoNoCartao(descricao, 'pa-desc-' + a.id)}` : ''}
+
+      ${fotos.length ? `<div class="pa-fotos"><span class="pa-rotulo" style="margin-top:0">Evidências / fotos do local (${fotos.length})</span>
+        ${paGradeFotos(a, fotos)}</div>` : ''}
+
+      <div class="pa-parecer">
+        <div class="pa-parecer-cab"><span>Parecer / decisão do gerente</span>
+          <small>${parecer ? (decidiu ? 'por ' + decidiu : (situacaoNova ? '' : 'ação registrada antes do parecer')) :
+            (a.destinatarioEmail ? (decide ? 'Sua decisão: escolha uma opção' : 'Aguardando ' + esc(paNome(a.destinatarioEmail))) : 'Sem definição')}</small></div>
+        <div class="pa-opcoes">${opcao('TRATAR', 'Tratar / Incluir ação')}${opcao('DEPOIS', 'Deixar para outro momento')}${opcao('NADA', 'Nada a fazer')}</div>
+        ${parecer === 'TRATAR' ? `<div class="pa-tratado">
+          <span class="pa-rotulo">Como será tratado / plano de ação</span>
+          ${tratativa ? paRicoNoCartao(tratativa, 'pa-trat-' + a.id) : '<div class="pa-nota">—</div>'}
+          <div class="pa-meta acao-meta">
+            <span><b>${(a.responsaveisEmails || []).length > 1 ? 'Responsáveis' : 'Responsável'}:</b> ${esc(a.responsavel || '—')}${minha ? ' <span class="marca-voce">você</span>' : ''}</span>
+            <span><b>Prazo:</b> ${esc(a.prazo || '—')}</span>
+            ${aviso}
+          </div>
+          ${a.situacao === 'PENDENTE' && (a.andamento || a.depende) ? `<div class="acao-andamento">
+            ${a.andamento ? `<span class="pill-andamento">${esc(a.andamento)}</span>` : ''}
+            ${a.depende ? `<span><b>Depende de:</b> ${esc(a.depende)}</span>` : ''}</div>` : ''}
+        </div>` : ''}
+        ${parecer === 'DEPOIS' ? `<div class="pa-depois">Postergada${a.reverEm ? ' — <b>rever em ' + paData(a.reverEm) + '</b>' : ''}.${a.parecerObs ? ' ' + esc(a.parecerObs) : ''}</div>` : ''}
+        ${parecer === 'NADA' ? `<div class="pa-nada">Encerrada sem ação.${a.parecerObs ? ' ' + esc(a.parecerObs) : ''}</div>` : ''}
+        ${parecer === 'TRATAR' && a.parecerObs ? `<div class="pa-parecer-nota">${esc(a.parecerObs)}</div>` : ''}
       </div>
-      ${p.gerir && !(a.responsaveisEmails || []).length ? `<div class="acao-origem">Sem responsável com e-mail: só a gestão do plano vê esta ação.
+
+      ${(a.marcados || []).length ? `<div class="pa-sub" style="margin-top:9px"><b>Marcados:</b> ${a.marcados.map((m) =>
+        esc(m.nome) + (m.email === p.email ? ' <span class="marca-voce">você</span>' : '')).join(', ')}</div>` : ''}
+      ${p.gerir && !(a.responsaveisEmails || []).length && !situacaoNova ? `<div class="acao-origem">Sem responsável com e-mail: só a gestão do plano vê esta ação.
         Marque o responsável em <b>Editar</b>.</div>` : ''}
-      ${a.origem || (a.plano === 'LIMPEZA' && a.abertaEm) ? `<div class="acao-origem">${a.origem ? 'Origem: ' + esc(a.origem) : ''}${a.plano === 'LIMPEZA' && a.abertaEm ? (a.origem ? ' · ' : '') + 'aberta em ' + pnDataLonga(a.abertaEm) : ''}</div>` : ''}
-      ${a.situacao === 'PENDENTE' && (a.andamento || a.depende) ? `<div class="acao-andamento">
-        ${a.andamento ? `<span class="pill-andamento">${esc(a.andamento)}</span>` : ''}
-        ${a.depende ? `<span><b>Depende de:</b> ${esc(a.depende)}</span>` : ''}</div>` : ''}
       ${ultimoComentario(a.comentarios)}
       ${a.situacao === 'CONCLUIDA' ? `
         <div class="acao-conclusao">
@@ -5694,12 +6087,13 @@ function cartaoAcao(a, p) {
         ${podeComentar || (a.comentarios || []).length
           ? `<button class="botao secundario" onclick="abrirComentarios(${jsArg(a.id)}, ${podeComentar ? 'true' : 'false'})">Comentários${escritos ? ' (' + escritos + ')' : ''}</button>` : ''}
         ${podeConcluir ? `<button class="botao" onclick="formConcluirAcao(${jsArg(a.id)})">Marcar como concluída</button>` : ''}
-        ${p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir(${planoAcao('reabrir')},{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
-        ${p.gerir ? `<button class="botao-texto" onclick="formAcao(${jsArg(a.id)})">Editar</button>` : ''}
-        ${p.gerir && a.situacao !== 'CANCELADA' ? `<button class="botao-texto" onclick="formCancelarAcao(${jsArg(a.id)})">Cancelar</button>` : ''}
+        ${ehAcao && p.gerir && a.situacao === 'CONCLUIDA' ? `<button class="botao secundario" onclick="agir(${planoAcao('reabrir')},{id:${jsArg(a.id)}},'Ação reaberta')">Reabrir</button>` : ''}
+        ${p.gerir ? `<button class="botao-texto" onclick="${ehAcao ? 'formAcao' : 'formSituacao'}(${jsArg(a.id)})">Editar</button>` : ''}
+        ${ehAcao && p.gerir && a.situacao !== 'CANCELADA' ? `<button class="botao-texto" onclick="formCancelarAcao(${jsArg(a.id)})">Cancelar</button>` : ''}
       </div>
     </div>`;
 }
+
 
 /* ---------- COMENTARIOS DAS ACOES (os dois planos) ---------- */
 function ultimoComentario(lista) {
@@ -5708,7 +6102,8 @@ function ultimoComentario(lista) {
   return `<div class="coment-ultimo"><b>${esc(c.nome)}</b>${c.papel ? ' <span class="coment-papel">(' + esc(c.papel) + ')</span>' : ''}
     · ${esc((c.em || '').slice(0, 16))}${COMENT_TIPO[c.tipo] ? ' · ' + COMENT_TIPO[c.tipo] : ''}: ${esc(c.texto)}${(c.fotos || []).length ? ' &#128247;' : ''}</div>`;
 }
-const COMENT_TIPO = { CONCLUSAO: 'concluiu a ação', REABERTURA: 'reabriu a ação', CANCELAMENTO: 'cancelou a ação', STATUS: 'mudou a situação' };
+const COMENT_TIPO = { CONCLUSAO: 'concluiu a ação', REABERTURA: 'reabriu a ação', CANCELAMENTO: 'cancelou a ação', STATUS: 'mudou a situação',
+                      PARECER: 'deu o parecer' };
 
 /*
  * Historico + novo comentario. Quem avancou registra o que fez, em que
@@ -5736,7 +6131,8 @@ function abrirComentarios(id, podeComentar) {
       ${c.depende ? `<div class="coment-depende">Depende de: ${esc(c.depende)}</div>` : ''}
       ${seloFotos((c.fotos || []).length, 'verFotosDoComentario(' + jsArg(a.id) + ',' + jsArg(c.id) + ')')}
     </div>`).join('');
-  const criada = a.criadoEm ? `<div class="coment-criada">Ação criada${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}
+  const situacao = !!(a.autorEmail || a.destinatarioEmail);
+  const criada = a.criadoEm ? `<div class="coment-criada">${situacao ? 'Situação registrada' : 'Ação criada'}${a.criadoPorNome ? ' por <b>' + esc(a.criadoPorNome) + '</b>' : ''} em ${esc(String(a.criadoEm).slice(0, 16))}${a.destinatarioEmail ? ' para <b>' + esc(paNome(a.destinatarioEmail)) + '</b>' : ''}
     ${seloFotos((a.fotos || []).length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>` : '';
   fotosLimpar('cm', a.id);
   MENCAO.acao = a; MENCAO.escolhidas = []; MENCAO.tiradas = []; mencaoFechar();
@@ -5759,87 +6155,199 @@ function abrirComentarios(id, podeComentar) {
           ${ANDAMENTOS_ACAO.map((x) => `<option ${x === atual ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
         <div class="campo"><label>Depende de (o que falta para concluir)</label>
           <input id="cm-dep" value="${esc(a.depende || '')}" placeholder="Ex.: chegada do material, liberação do SESMT"></div>
-      </div>` : `<p class="dica" style="margin:0 0 12px">Marcaram você nesta ação: o seu comentário entra no histórico, e a situação dela fica com os responsáveis.</p>`}
+      </div>` : `<p class="dica" style="margin:0 0 12px">${a.parecer !== undefined && a.parecer !== 'TRATAR'
+        ? 'Esta situação ainda não é uma ação em andamento: o comentário entra no histórico (o gerente decide no parecer).'
+        : 'Marcaram você nesta ação: o seu comentário entra no histórico, e a situação dela fica com os responsáveis.'}</p>`}
       ${fotosCampoHtml('cm', 'Foto (opcional) — do que foi feito, do antes e depois')}` : ''}`, `
     <button class="botao secundario" onclick="fecharJanela()">Fechar</button>
     ${podeComentar ? `<button class="botao" onclick="registrarComentario(${jsArg(id)}, ${planoAcao('comentar')})">Registrar comentário</button>` : ''}`);
   const h = document.querySelector('.coment-historico'); if (h) h.scrollTop = h.scrollHeight;
 }
 
-function filtrarAcoes(mudanca) {
-  const f = (DADOS && DADOS.filtro) || {};
-  abrir('acoes', {
-    turno: mudanca.turno !== undefined ? mudanca.turno : f.turno,
-    situacao: mudanca.situacao !== undefined ? mudanca.situacao : f.situacao,
-    busca: mudanca.busca !== undefined ? mudanca.busca : f.busca
-  });
+/* Tela de antes chamava o filtro do servidor: agora e o da tela (os dois planos). */
+function filtrarAcoes(mudanca) { planoFiltrar(mudanca); }
+
+/* ---------- FORMULARIOS: situacao, acao direta, parecer ---------- */
+
+/* Prioridade em chips (Alta, Media, Normal). */
+function paEscolhaPrioridade(nome, atual) {
+  const v = atual || 'NORMAL';
+  return `<div class="pa-escolha" role="radiogroup" aria-label="Prioridade">${['ALTA', 'MEDIA', 'NORMAL'].map((x) => `
+    <label class="${x}${v === x ? ' marcada' : ''}"><input type="radio" name="${esc(nome)}" value="${x}" ${v === x ? 'checked' : ''}
+      onchange="this.closest('.pa-escolha').querySelectorAll('label').forEach((l)=>l.classList.toggle('marcada',l.querySelector('input').checked))">
+      ${PA_NOME_PRIO[x]}</label>`).join('')}</div>`;
+}
+const paPrioridadeEscolhida = (nome) => { const x = document.querySelector('input[name="' + nome + '"]:checked'); return x ? x.value : 'NORMAL'; };
+
+/* As fotos que ja estao na situacao, com a legenda de cada uma para editar. */
+function paFotosExistentes(a) {
+  const fotos = (a && a.fotos) || [];
+  if (!fotos.length) return '';
+  return `<div class="campo"><label>Fotos da situação (${fotos.length}) — a legenda aparece no cartão e no relatório</label>
+    <div class="pa-previas">${fotos.map((f, i) => {
+      const mini = PA_MINIS.get(f.id);
+      return `<div class="pa-previa"><span class="pa-foto-img" ${mini ? `style="background-image:url('${mini}')"` : ''}
+          role="button" tabindex="0" onclick="paVerFoto(${jsArg(a.id)}, ${i})">${mini ? '' : '&#128247;'}</span>
+        <input class="pa-leg-existente" data-id="${esc(f.id)}" maxlength="140" value="${esc(f.legenda || '')}" placeholder="Legenda (opcional)"></div>`;
+    }).join('')}</div>
+    <span class="dica">Toque na foto para ver${(planoD().permissoes || {}).gerir ? ' ou remover' : ''}.</span></div>`;
+}
+const paLegendasExistentes = () => {
+  const o = {};
+  document.querySelectorAll('.pa-leg-existente').forEach((i) => { o[i.dataset.id] = i.value; });
+  return Object.keys(o).length ? o : undefined;
+};
+
+/* Os campos da limpeza: zona, local e "aberta em". */
+function paCamposLimpeza(a, prefixo) {
+  const ex = PLANO.extras ? PLANO.extras() : null;
+  if (!ex) return '';
+  const d = planoD();
+  return `<div class="campo-duplo">
+      <div class="campo"><label>Zona</label><select id="${prefixo}-zona"><option value="">—</option>
+        ${a && a.zona && !(ex.zonas || []).some((z) => z.zona === a.zona) ? `<option value="${esc(a.zona)}" selected>${esc(a.zona)}</option>` : ''}
+        ${(ex.zonas || []).filter((z) => z.ativo || (a && a.zona === z.zona)).map((z) => `<option value="${esc(z.zona)}" ${a && a.zona === z.zona ? 'selected' : ''}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select></div>
+      <div class="campo"><label>Local exato</label><input id="${prefixo}-local" value="${esc(a ? a.local : '')}" placeholder="Ex.: Banheiro da central"></div>
+    </div>
+    <div class="campo"><label>Aberta em</label><input type="date" id="${prefixo}-aberta" value="${esc(a ? a.abertaEm : (d.hoje || (DADOS && DADOS.hoje) || ''))}"></div>`;
+}
+function paCamposLimpezaValores(params, prefixo) {
+  if (!PLANO.extras) return;
+  params.zona = val(prefixo + '-zona'); params.local = val(prefixo + '-local'); params.abertaEm = val(prefixo + '-aberta');
+}
+/* Levantamento (o "relatorio" a que a situacao pertence) e origem. */
+function paCamposOrigem(a, prefixo) {
+  const ex = PLANO.extras ? PLANO.extras() : null;
+  const rels = ((planoD().modelo || {}).relatorios) || [];
+  return `<div class="campo-duplo">
+    <div class="campo"><label>Origem (opcional)</label>
+      <input id="${prefixo}-origem" value="${a ? esc(a.origem) : ''}" ${ex ? 'list="' + prefixo + '-origens"' : ''}
+             placeholder="${ex ? 'Ex.: Vistoria setorial' : 'Ex.: Reunião turno A — 05/09'}">
+      ${ex ? `<datalist id="${prefixo}-origens">${(ex.origens || []).map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}</div>
+    ${paTemSituacoes(planoD()) ? `<div class="campo"><label>Levantamento (opcional)</label>
+      <input id="${prefixo}-relatorio" maxlength="80" list="${prefixo}-relatorios" value="${a ? esc(a.relatorio || '') : ''}" placeholder="Ex.: Auditoria externa — nov/2026">
+      <datalist id="${prefixo}-relatorios">${rels.map((r) => `<option value="${esc(r)}">`).join('')}</datalist></div>` : ''}
+  </div>`;
+}
+/* Gerente / destinatario: quem tem "Ver e editar" no plano; os gerentes primeiro. O ultimo escolhido vem marcado. */
+function paOpcoesDestinatario(atual) {
+  const d = planoD(), eu = (d.permissoes || {}).email;
+  const lembrado = lerLocal('gsl_pa_destinatario_' + PLANO.id) || '';
+  const escolhido = atual || lembrado;
+  const pessoas = (d.pessoas || []).filter((p) => p.edita !== false && p.abre !== false)
+    .sort((x, y) => (Number(!!y.gerente) - Number(!!x.gerente)) || String(x.nome).localeCompare(String(y.nome)));
+  if (atual && !pessoas.some((p) => p.email === atual)) pessoas.unshift({ email: atual, nome: paNome(atual), papel: 'sem acesso a esta tela' });
+  return `<option value="">Escolha o gerente…</option>` + pessoas.map((p) => `<option value="${esc(p.email)}" ${p.email === escolhido ? 'selected' : ''}>
+    ${esc(p.nome)}${p.email === eu ? ' (você)' : ''}${p.papel ? ' · ' + esc(p.papel) : ''}</option>`).join('');
 }
 
-/* Cadastro. Os campos estão na ordem em que o gerente fala na reunião. */
+/*
+ * REGISTRAR SITUACAO (8.13). Titulo, prioridade, descricao em texto rico,
+ * fotos com legenda e o gerente que da o parecer. Quem registra continua
+ * vendo a situacao (fica citado como autor); o gerente recebe o e-mail.
+ */
+function formSituacao(id) {
+  const d = planoD();
+  const a = id ? planoAcaoPorId(id) : null;
+  const semParecer = !a || !a.parecer;
+  fotosLimpar('st', a ? a.id : '');
+  abrirJanela(a ? 'Editar situação' : 'Nova situação', `
+    <p class="pa-nota" style="margin:0 0 14px">Registre o que foi observado, com fotos do local. O gerente escolhido recebe um e-mail e dá o parecer:
+      <b>Tratar / Incluir ação</b>, <b>Outro momento</b> ou <b>Nada a fazer</b>. A situação aparece só para você, para o gerente e, depois, para os responsáveis.</p>
+    <div class="campo"><label for="st-titulo">Título da situação</label>
+      <input id="st-titulo" maxlength="160" value="${a ? esc(a.acao) : ''}" placeholder="Ex.: Estrutura avariada no corredor B"></div>
+    <div class="campo"><label>Prioridade</label>${paEscolhaPrioridade('st-prio', a && a.prioridade)}</div>
+    <div class="pa-campo-rico campo"><div class="pa-rotulo-linha"><label for="st-descricao">Descrição da situação</label></div>
+      ${paEditorHtml('st-descricao', a ? a.descricao : '', 'Descreva o que foi observado no local, impactos na operação, riscos ou detalhes importantes…')}</div>
+    ${semParecer ? `<div class="campo"><label for="st-dest">Gerente / destinatário (dá o parecer)</label>
+      <select id="st-dest">${paOpcoesDestinatario(a && a.destinatarioEmail)}</select></div>`
+      : `<p class="pa-nota">Parecer dado por <b>${esc(paNome(a.parecerPor || a.destinatarioEmail))}</b>: o gerente não muda mais.</p>`}
+    ${paCamposLimpeza(a, 'st')}
+    <div class="campo"><label for="st-turno">Turno</label><select id="st-turno">
+      ${(d.turnos || []).map((t) => `<option value="${esc(t)}" ${(a ? a.turno : 'Todos') === t ? 'selected' : ''}>${t === 'Todos' ? 'Geral (CD)' : esc(t)}</option>`).join('')}</select></div>
+    ${paCamposOrigem(a, 'st')}
+    ${paFotosExistentes(a)}
+    ${fotosCampoHtml('st', a ? 'Acrescentar fotos (opcional)' : 'Evidências / fotos do local (opcional)')}`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    ${a && (d.permissoes || {}).gerir ? `<button class="botao-texto perigo" onclick="excluirAcao(${jsArg(a.id)}, true)">Excluir</button>` : ''}
+    <button class="botao pa-amarelo" onclick="salvarSituacao(${a ? jsArg(a.id) : 'null'})">${a ? 'Salvar' : 'Registrar situação'}</button>`);
+}
+
+function salvarSituacao(id) {
+  if (!fotosProntas('st')) return;
+  const params = {
+    titulo: val('st-titulo'), prioridade: paPrioridadeEscolhida('st-prio'), descricao: paEditorValor('st-descricao'),
+    turno: val('st-turno'), origem: val('st-origem'), relatorio: val('st-relatorio'),
+    fotos: fotosParaEnviar('st'), legendas: paLegendasExistentes()
+  };
+  if (el('st-dest')) params.destinatario = val('st-dest');
+  paCamposLimpezaValores(params, 'st');
+  if (id) params.id = id;
+  if (!params.titulo) return avisar('Informe o título da situação.', true);
+  if (el('st-dest') && !params.destinatario) return avisar('Escolha o gerente que vai dar o parecer.', true);
+  if (params.destinatario) gravarLocal('gsl_pa_destinatario_' + PLANO.id, params.destinatario);
+  agir(PLANO.acoes.situacao, params, id ? 'Situação atualizada' : 'Situação registrada').catch(() => {});
+}
+
+/*
+ * ACAO DIRETA / EDITAR ACAO. Quando ja se sabe o que fazer (a reuniao de
+ * turno): a acao nasce com responsaveis e prazo, sem esperar parecer. A
+ * mesma janela edita a acao que veio de um parecer "Tratar".
+ */
 function formAcao(id) {
   const d = planoD();
   const a = id ? planoAcaoPorId(id) : null;
-  const ex = PLANO.extras ? PLANO.extras() : null;
   // Responsavel que ja estava na acao e saiu da lista (perdeu o acesso): continua marcado.
   // Responsavel novo: so quem tem "Ver e editar" no plano (o responsavel conclui; com "Ver" nao conseguiria).
   const jaEram = (a && a.responsaveisEmails) || [];
   const pessoas = (d.pessoas || []).filter((p) => p.edita !== false || jaEram.indexOf(p.email) !== -1);
-  ((a && a.responsaveisEmails) || []).forEach((e) => {
+  jaEram.forEach((e) => {
     if (!pessoas.some((p) => p.email === e)) pessoas.push({ email: e, nome: e, turno: '', papel: 'sem acesso a esta tela' });
   });
   // Acao que veio da tabela antiga da limpeza: o responsavel era so um nome, sem e-mail.
-  const antigo = a && !(a.responsaveisEmails || []).length && a.responsavel ? a.responsavel : '';
+  const antigo = a && !jaEram.length && a.responsavel ? a.responsavel : '';
+  const modelo = paTemSituacoes(d);
+  // A acao de antes guardava o "o que precisa ser feito" na descricao: aqui ele vai para o "Como sera tratado".
+  const descricao = a ? (modelo && a.tratativaNaDescricao ? '' : a.descricao) : '';
+  const tratativa = a ? (a.tratativa || (a.tratativaNaDescricao ? a.descricao : '')) : '';
   fotosLimpar('ac', a ? a.id : '');
 
-  abrirJanela(a ? 'Editar ação' : 'Nova ação', `
-    <p style="margin:0 0 14px;color:var(--tinta-media);line-height:1.7">
+  abrirJanela(a ? 'Editar ação' : 'Nova ação direta', `
+    <p class="pa-nota" style="margin:0 0 14px">
+      ${a ? '' : 'A ação direta nasce já tratada (sem esperar parecer) — para o que já foi decidido, como numa reunião de turno. '}
       O responsável recebe um e-mail com a ação e o prazo assim que você salvar.
       A ação aparece só para quem está citado nela (os responsáveis e quem for marcado num comentário):
-      se você não estiver entre os responsáveis, ela sai da sua lista.
-    </p>
-    <div class="campo"><label>Ação</label>
-      <input id="ac-acao" value="${a ? esc(a.acao) : ''}" placeholder="${ex ? 'Ex.: Banheiro da central sem papel toalha' : 'Ex.: Iluminação do Flow'}"></div>
-    <div class="campo"><label>O que precisa ser feito</label>
-      <textarea id="ac-descricao" rows="3"
-        placeholder="${ex ? 'Ex.: Repor o papel toalha e conferir o dispenser nas rondas' : 'Ex.: Verificar e acompanhar a iluminação para garantir que todas as lâmpadas foram trocadas'}">${a ? esc(a.descricao) : ''}</textarea></div>
-    ${ex ? `<div class="campo-duplo">
-      <div class="campo"><label>Zona</label><select id="ac-zona"><option value="">—</option>
-        ${a && a.zona && !(ex.zonas || []).some((z) => z.zona === a.zona) ? `<option value="${esc(a.zona)}" selected>${esc(a.zona)}</option>` : ''}
-        ${(ex.zonas || []).filter((z) => z.ativo || (a && a.zona === z.zona)).map((z) => `<option value="${esc(z.zona)}" ${a && a.zona === z.zona ? 'selected' : ''}>${esc(z.zona)}${z.descricao ? ' — ' + esc(z.descricao) : ''}</option>`).join('')}</select></div>
-      <div class="campo"><label>Local exato</label><input id="ac-local" value="${esc(a ? a.local : '')}" placeholder="Ex.: Banheiro da central"></div>
-    </div>
-    <div class="campo-duplo">
-      <div class="campo"><label>Criticidade</label><select id="ac-crit">
-        ${(ex.criticidades || []).map((x) => `<option ${(a ? a.criticidade || 'Média' : 'Média') === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
-      <div class="campo"><label>Aberta em</label><input type="date" id="ac-aberta" value="${esc(a ? a.abertaEm : (d.hoje || (DADOS && DADOS.hoje) || ''))}"></div>
-    </div>` : ''}
+      se você não estiver entre os responsáveis, ela sai da sua lista.</p>
+    <div class="campo"><label for="ac-acao">Ação</label>
+      <input id="ac-acao" value="${a ? esc(a.acao) : ''}" placeholder="${PLANO.extras ? 'Ex.: Banheiro da central sem papel toalha' : 'Ex.: Iluminação do Flow'}"></div>
+    ${modelo ? `<div class="campo"><label>Prioridade</label>${paEscolhaPrioridade('ac-prio', a && a.prioridade)}</div>` : ''}
+    <div class="pa-campo-rico campo"><div class="pa-rotulo-linha"><label for="ac-descricao">${modelo ? 'Descrição da situação (opcional)' : 'O que precisa ser feito'}</label></div>
+      ${paEditorHtml('ac-descricao', descricao, PLANO.extras ? 'Ex.: dispenser vazio desde a ronda da manhã' : 'Ex.: as lâmpadas do corredor do Flow queimaram')}</div>
+    ${modelo ? `<div class="pa-campo-rico campo"><div class="pa-rotulo-linha"><label for="ac-tratativa">Como será tratado / plano de ação</label></div>
+      ${paEditorHtml('ac-tratativa', tratativa, PLANO.extras ? 'Ex.: repor o papel toalha e conferir o dispenser nas rondas' : 'Ex.: verificar e acompanhar a troca de todas as lâmpadas', true)}</div>` : ''}
+    ${paCamposLimpeza(a, 'ac')}
     <div class="campo"><label>Responsáveis (marque um ou mais — ação conjunta)</label>
       ${antigo ? `<p class="dica" style="margin:0 0 8px">Registrado antes como <b>${esc(antigo)}</b>, sem e-mail — por isso, por enquanto, só a gestão do plano vê esta ação. Marque quem acompanha esta ação para ela aparecer para a pessoa (ou deixe como está).</p>` : ''}
       <input placeholder="Procurar pessoa…" oninput="const t=this.value.toLowerCase();document.querySelectorAll('.ac-pessoa').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(t)===-1?'none':''})">
       <div class="ac-pessoas">
         ${pessoas.map((pe) => `
           <label class="marcador ac-pessoa"><input type="checkbox" class="ac-resp" value="${esc(pe.email)}"
-            ${a && (a.responsaveisEmails || [a.responsavelEmail]).indexOf(pe.email) !== -1 ? 'checked' : ''}>
+            ${a && jaEram.indexOf(pe.email) !== -1 ? 'checked' : ''}>
             ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}${pe.papel ? ' · ' + esc(pe.papel) : ''}</label>`).join('')}
       </div></div>
     ${a && (a.marcados || []).length ? `<fieldset class="mencao-marcados"><legend>Marcados (veem e comentam esta ação)</legend>
       ${a.marcados.map((m) => `<label class="marcador"><input type="checkbox" class="ac-marcado" value="${esc(m.email)}" checked> ${esc(m.nome)}</label>`).join('')}
       <p class="dica">Desmarque quem foi marcado por engano: a pessoa deixa de ver esta ação.</p></fieldset>` : ''}
     <div class="campo-duplo">
-      <div class="campo"><label>Entregar até</label>
+      <div class="campo"><label for="ac-prazo">Entregar até</label>
         <input type="date" id="ac-prazo" value="${a ? esc(a.prazoISO) : ''}"></div>
-      <div class="campo"><label>Turno</label>
+      <div class="campo"><label for="ac-turno">Turno</label>
         <select id="ac-turno">
           ${(d.turnos || []).map((t) => `<option ${(a ? a.turno : 'Todos') === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
         </select></div>
     </div>
-    <div class="campo"><label>Origem (opcional)</label>
-      <input id="ac-origem" value="${a ? esc(a.origem) : ''}" ${ex ? 'list="ac-origens"' : ''}
-             placeholder="${ex ? 'Ex.: Vistoria setorial' : 'Ex.: Reunião turno A — 05/09'}">
-      ${ex ? `<datalist id="ac-origens">${(ex.origens || []).map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}</div>
-    ${a && (a.fotos || []).length ? `<div class="campo"><label>Fotos da ação</label>
-      ${seloFotos(a.fotos.length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}
-      <span class="dica">Abra para ver${d.permissoes && d.permissoes.gerir ? ' ou remover alguma' : ''}.</span></div>` : ''}
+    ${paCamposOrigem(a, 'ac')}
+    ${paFotosExistentes(a)}
     ${fotosCampoHtml('ac', a ? 'Acrescentar fotos (opcional)' : 'Fotos (opcional) — do que foi encontrado')}`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     ${a ? `<button class="botao-texto perigo" onclick="excluirAcao(${jsArg(a.id)})">Excluir</button>` : ''}
@@ -5849,19 +6357,24 @@ function formAcao(id) {
 function salvarAcao(id) {
   if (!fotosProntas('ac')) return;
   const a = id ? planoAcaoPorId(id) : null;
+  const modelo = paTemSituacoes(planoD());
   const params = {
     acao: val('ac-acao'),
-    descricao: val('ac-descricao'),
+    descricao: paEditorValor('ac-descricao'),
+    rico: true,
     responsaveisEmails: [...document.querySelectorAll('.ac-resp')].filter((c) => c.checked).map((c) => c.value),
     prazo: val('ac-prazo'),
     turno: val('ac-turno'),
     origem: val('ac-origem'),
     fotos: fotosParaEnviar('ac')
   };
-  if (PLANO.extras) {
-    params.zona = val('ac-zona'); params.local = val('ac-local');
-    params.criticidade = val('ac-crit'); params.abertaEm = val('ac-aberta');
+  if (modelo) {
+    params.prioridade = paPrioridadeEscolhida('ac-prio');
+    params.tratativa = paEditorValor('ac-tratativa');
+    params.relatorio = val('ac-relatorio');
+    params.legendas = paLegendasExistentes();
   }
+  paCamposLimpezaValores(params, 'ac');
   // Quem a gestao desmarcou (19/10): vai so quem saiu — o servidor so tira, e quem outra pessoa marcou com o formulario aberto fica.
   if (document.querySelector('.ac-marcado')) params.desmarcados = [...document.querySelectorAll('.ac-marcado')].filter((c) => !c.checked).map((c) => c.value);
   if (id) params.id = id;
@@ -5874,12 +6387,282 @@ function salvarAcao(id) {
     .catch(() => {});
 }
 
-function excluirAcao(id) {
-  abrirJanela('Excluir ação', `
+/*
+ * O PARECER DO GERENTE (8.13). Tratar: como sera tratado, responsaveis e
+ * prazo — a situacao vira acao. Outro momento: data para rever (opcional).
+ * Nada a fazer: o porque (opcional). So o gerente destinatario decide.
+ */
+function formParecer(id, parecer) {
+  const a = planoAcaoPorId(id); if (!a) return;
+  const d = planoD();
+  const nomes = { TRATAR: 'Tratar / Incluir ação', DEPOIS: 'Deixar para outro momento', NADA: 'Nada a fazer' };
+  const jaEram = a.responsaveisEmails || [];
+  const pessoas = (d.pessoas || []).filter((p) => p.edita !== false || jaEram.indexOf(p.email) !== -1);
+  const tratativa = a.tratativa || (a.tratativaNaDescricao ? a.descricao : '');
+  let corpo = `<p class="pa-nota" style="margin:0 0 12px"><b>${esc(a.acao)}</b>${a.autorEmail ? ' — registrada por ' + esc(paNome(a.autorEmail)) : ''}.</p>`;
+  if (parecer === 'TRATAR') {
+    corpo += `<div class="pa-campo-rico campo"><div class="pa-rotulo-linha"><label for="pr-tratativa">Como será tratado / plano de ação</label></div>
+        ${paEditorHtml('pr-tratativa', tratativa, 'Descreva qual ação será tomada para resolver ou tratar esta situação…', true)}</div>
+      <div class="campo"><label>Responsáveis (marque um ou mais — eles recebem o e-mail e concluem a ação)</label>
+        <input placeholder="Procurar pessoa…" oninput="const t=this.value.toLowerCase();document.querySelectorAll('.pr-pessoa').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(t)===-1?'none':''})">
+        <div class="ac-pessoas">${pessoas.map((pe) => `
+          <label class="marcador pr-pessoa"><input type="checkbox" class="pr-resp" value="${esc(pe.email)}" ${jaEram.indexOf(pe.email) !== -1 ? 'checked' : ''}>
+            ${esc(pe.nome)}${pe.turno ? ' · turno ' + esc(pe.turno) : ''}${pe.papel ? ' · ' + esc(pe.papel) : ''}</label>`).join('')}</div></div>
+      <div class="campo-duplo">
+        <div class="campo"><label for="pr-prazo">Prazo</label><input type="date" id="pr-prazo" value="${esc(a.prazoISO || '')}"></div>
+        <div class="campo"><label for="pr-turno">Turno</label><select id="pr-turno">
+          ${(d.turnos || []).map((t) => `<option value="${esc(t)}" ${(a.turno || 'Todos') === t ? 'selected' : ''}>${t === 'Todos' ? 'Geral (CD)' : esc(t)}</option>`).join('')}</select></div>
+      </div>`;
+  } else if (parecer === 'DEPOIS') {
+    corpo += `<div class="campo"><label for="pr-rever">Rever em (opcional)</label><input type="date" id="pr-rever" value="${esc(a.reverEm || '')}"></div>`;
+  }
+  if (parecer !== 'TRATAR') {
+    corpo += `<div class="campo"><label for="pr-obs">${parecer === 'NADA' ? 'Por que não há nada a fazer (opcional)' : 'Observação (opcional)'}</label>
+      <textarea id="pr-obs" rows="3" maxlength="1000">${esc(a.parecer === parecer ? a.parecerObs || '' : '')}</textarea></div>`;
+  }
+  const retirar = a.parecer && a.situacao !== 'CONCLUIDA' && a.parecer !== 'TRATAR';
+  abrirJanela('Parecer: ' + nomes[parecer], corpo, `
+    <button class="botao secundario" onclick="fecharJanela()">Voltar</button>
+    ${retirar ? `<button class="botao-texto" onclick="agir(${planoAcao('parecer')},{id:${jsArg(id)},parecer:''},'Parecer retirado').catch(()=>{})">Voltar para “Sem definição”</button>` : ''}
+    <button class="botao${parecer === 'DEPOIS' ? ' pa-amarelo' : ''}" onclick="enviarParecer(${jsArg(id)}, ${jsArg(parecer)})">Registrar parecer</button>`);
+}
+
+function enviarParecer(id, parecer) {
+  const params = { id: id, parecer: parecer };
+  if (parecer === 'TRATAR') {
+    params.tratativa = paEditorValor('pr-tratativa');
+    params.responsaveisEmails = [...document.querySelectorAll('.pr-resp')].filter((c) => c.checked).map((c) => c.value);
+    params.prazo = val('pr-prazo'); params.turno = val('pr-turno');
+    if (!params.tratativa) return avisar('Descreva como a situação será tratada.', true);
+    if (!params.responsaveisEmails.length) return avisar('Marque pelo menos um responsável.', true);
+    if (!params.prazo) return avisar('Informe o prazo.', true);
+  } else {
+    params.observacao = val('pr-obs');
+    if (parecer === 'DEPOIS') params.reverEm = val('pr-rever');
+  }
+  agir(PLANO.acoes.parecer, params, 'Parecer registrado').catch(() => {});
+}
+
+
+/* ---------- RELATORIO (PDF A4) NO MODELO DO GERENTE ---------- */
+
+/*
+ * "Relatorio de Ocorrencias e Acoes": as situacoes escolhidas (as da tela,
+ * as de um periodo de registro ou as de um levantamento) numa folha A4 em
+ * pe, no desenho do relatorio do gerente — faixa azul com o circulo amarelo,
+ * listras verde e amarela, logo, os campos de identificacao, o placar, os
+ * cartoes numerados com as fotos e o parecer. A janela abre no clique (o
+ * navegador nao barra) e as fotos chegam depois; "Imprimir / Salvar como PDF".
+ */
+function paFormRelatorio() {
+  const d = planoD(), f = PLANO.local || {};
+  const naTela = planoFiltrarLista(d.lista || [], f).length;
+  const rels = ((d.modelo || {}).relatorios) || [];
+  const eu = (SESSAO && SESSAO.usuario && (SESSAO.usuario.nome || SESSAO.usuario.email)) || '';
+  const dests = {};
+  (d.lista || []).forEach((a) => { if (a.destinatarioEmail) dests[a.destinatarioEmail] = (dests[a.destinatarioEmail] || 0) + 1; });
+  const gerente = Object.keys(dests).sort((x, y) => dests[y] - dests[x])[0];
+  const hoje = d.hoje || (DADOS && DADOS.hoje) || new Date().toISOString().slice(0, 10);
+  abrirJanela('Relatório de ocorrências e ações (PDF)', `
+    <p class="pa-nota" style="margin:0 0 12px">Sai no modelo do relatório da gerência, em A4: cabeçalho Bartofil, identificação, placar e os cartões com fotos e parecer.</p>
+    <div class="campo"><label>Quais situações</label>
+      <label class="marcador"><input type="radio" name="rel-quais" value="tela" checked> As da tela, com os filtros de agora (${naTela})</label>
+      <label class="marcador"><input type="radio" name="rel-quais" value="periodo"> Registradas num período</label>
+      <div class="campo-duplo" style="margin:4px 0 6px 26px">
+        <div class="campo"><label for="rel-de">De</label><input type="date" id="rel-de" value="${esc(hoje.slice(0, 8) + '01')}" onchange="document.querySelector('input[name=rel-quais][value=periodo]').checked=true"></div>
+        <div class="campo"><label for="rel-ate">Até</label><input type="date" id="rel-ate" value="${esc(hoje)}" onchange="document.querySelector('input[name=rel-quais][value=periodo]').checked=true"></div></div>
+      ${rels.length ? `<label class="marcador"><input type="radio" name="rel-quais" value="levantamento"> Do levantamento
+        <select id="rel-levantamento" style="width:auto;margin-left:6px" onchange="document.querySelector('input[name=rel-quais][value=levantamento]').checked=true">
+          ${rels.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <div class="campo"><label for="rel-titulo">Título</label><input id="rel-titulo" value="Relatório de Ocorrências e Ações"></div>
+    <div class="campo"><label for="rel-sub">Subtítulo</label><input id="rel-sub" value="Levantamento de situações · ${esc(PLANO.id === 'LIMPEZA' ? 'Limpeza CD' : 'Centro de Distribuição')}"></div>
+    <div class="campo-duplo">
+      <div class="campo"><label for="rel-unidade">Unidade / setor</label><input id="rel-unidade" value="${esc((d.modelo && d.modelo.filial) || '')}"></div>
+      <div class="campo"><label for="rel-data">Data</label><input type="date" id="rel-data" value="${esc(hoje)}"></div></div>
+    <div class="campo-duplo">
+      <div class="campo"><label for="rel-autor">Elaborado por</label><input id="rel-autor" value="${esc(eu)}"></div>
+      <div class="campo"><label for="rel-gerente">Gerente / destinatário</label><input id="rel-gerente" value="${esc(gerente ? paNome(gerente) : '')}"></div></div>
+    <label class="marcador"><input type="checkbox" id="rel-fotos" checked> Com as fotos (o relatório espera elas chegarem)</label>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="paImprimir()">Gerar relatório</button>`);
+}
+
+function paImprimir() {
+  const d = planoD(), f = PLANO.local || {};
+  const quais = (document.querySelector('input[name="rel-quais"]:checked') || {}).value || 'tela';
+  let lista;
+  if (quais === 'periodo') {
+    const de = val('rel-de'), ate = val('rel-ate');
+    const iso = (a) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(String(a.criadoEm || '')); return m ? m[3] + '-' + m[2] + '-' + m[1] : ''; };
+    lista = (d.lista || []).filter((a) => { const x = iso(a); return x && (!de || x >= de) && (!ate || x <= ate); });
+  } else if (quais === 'levantamento') {
+    const r = val('rel-levantamento');
+    lista = (d.lista || []).filter((a) => a.relatorio === r);
+  } else lista = planoFiltrarLista(d.lista || [], f);
+  if (!lista.length) return avisar('Nenhuma situação para o relatório com esta escolha.', true);
+  const cab = { titulo: val('rel-titulo') || 'Relatório de Ocorrências e Ações', sub: val('rel-sub'), unidade: val('rel-unidade'),
+                data: val('rel-data'), autor: val('rel-autor'), gerente: val('rel-gerente'), fotos: !!(el('rel-fotos') || {}).checked };
+  const numeros = paNumeros(d.lista || []);
+  lista = lista.slice().sort((a, b) => (numeros[a.id] || 0) - (numeros[b.id] || 0));
+  const w = window.open('', '_blank');
+  if (!w) return avisar('O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo.', true);
+  fecharJanela();
+  w.document.open();
+  w.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Preparando o relatório…</title></head>' +
+    '<body style="font-family:Arial,sans-serif;color:#111785;padding:40px">Preparando o relatório…</body></html>');
+  w.document.close();
+  paMontarRelatorio(w, lista, cab, numeros).catch((e) => {
+    try { w.document.body.textContent = 'Não foi possível montar o relatório: ' + (e.message || e); } catch (x) { /* janela fechada */ }
+  });
+}
+
+async function paMontarRelatorio(w, lista, cab, numeros) {
+  const fotos = {};
+  if (cab.fotos && !CANAL_BARRADO) {
+    const todas = [];
+    lista.forEach((a) => (a.fotos || []).forEach((f) => todas.push({ a: a, f: f })));
+    let feitas = 0;
+    const aviso = () => { try { w.document.body.textContent = 'Preparando o relatório… fotos ' + feitas + ' de ' + todas.length; } catch (e) { /* fechada */ } };
+    aviso();
+    const fila = todas.slice();
+    const trabalhador = async () => {
+      while (fila.length) {
+        const x = fila.shift();
+        try {
+          let url = FOTO_CACHE.get(x.f.id);
+          if (!url) {
+            const r = await executarAcaoSrv(PLANO.acoes.foto, { id: x.a.id, arquivo: x.f.id });
+            url = 'data:' + (r.tipo || 'image/jpeg') + ';base64,' + r.dados;
+          }
+          if (!ehUrlHeic(url)) fotos[x.f.id] = await paReduzir(url, 900);
+        } catch (e) { /* a foto fica de fora, com o aviso no cartao */ }
+        feitas++; aviso();
+      }
+    };
+    await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
+  }
+  if (w.closed) return;
+  w.document.open();
+  w.document.write(paHtmlRelatorio(lista, cab, numeros, fotos));
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) { /* janela fechada */ } }, 600);
+}
+
+function paHtmlRelatorio(lista, cab, numeros, fotos) {
+  const logo = typeof pnLogoMarca === 'function' ? pnLogoMarca() : '';
+  const conta = (k) => lista.filter((a) => paParecerDe(a) === k).length;
+  const tratar = conta('TRATAR'), depois = conta('DEPOIS'), nada = conta('NADA'), pend = conta('pendente');
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const gerado = new Date().toLocaleString('pt-BR');
+  const campo = (rot, v) => `<div class="field"><label>${rot}</label><span>${esc(v || '—')}</span></div>`;
+  const opc = (a, k, rot) => `<div class="mgr-opt${(a.parecer === undefined ? 'TRATAR' : a.parecer) === k ? ' sel-' + k : ''}"><span class="bub">&#10003;</span><span>${rot}</span></div>`;
+  const cartoes = lista.map((a) => {
+    const parecer = a.parecer === undefined ? 'TRATAR' : (a.parecer || '');
+    const desc = a.tratativaNaDescricao ? '' : a.descricao;
+    const trat = a.tratativa || (a.tratativaNaDescricao ? a.descricao : '');
+    const fs = a.fotos || [];
+    const com = fs.filter((f) => fotos[f.id]);
+    return `<div class="q status-${parecer || 'sem'}">
+      <div class="qh"><div class="num">${numeros[a.id] || ''}</div><div class="sit">${esc(a.acao)}
+        <small>${[a.autorEmail ? 'Registrada por ' + esc(paNome(a.autorEmail)) : '', a.criadoEm ? 'em ' + esc(String(a.criadoEm).slice(0, 10)) : '',
+          a.zona || a.local ? esc([a.zona, a.local].filter(Boolean).join(' · ')) : '', a.relatorio ? esc(a.relatorio) : ''].filter(Boolean).join(' · ')}</small></div>
+        <span class="prio p-${esc(a.prioridade || 'NORMAL')}">${PA_NOME_PRIO[a.prioridade] || 'Normal'}</span></div>
+      ${desc ? `<div class="lbl">Descrição da situação</div><div class="rich">${paRico(desc)}</div>` : ''}
+      ${fs.length ? `<div class="lbl">Evidências / fotos do local (${fs.length})</div>
+        ${com.length ? `<div class="grid">${com.map((f) => `<figure><img src="${fotos[f.id]}" alt=""><figcaption>${esc(f.legenda || '')}</figcaption></figure>`).join('')}</div>` : ''}
+        ${com.length < fs.length ? `<div class="obs">${fs.length - com.length} foto(s) não incluída(s) — veja no GSL.</div>` : ''}` : ''}
+      <div class="mgr"><div class="mgr-h">Parecer / decisão do gerente${a.parecerPor ? ' <small>· ' + esc(paNome(a.parecerPor)) + (a.parecerEm ? ' · ' + esc(String(a.parecerEm).slice(0, 10)) : '') + '</small>' : ''}</div>
+        <div class="mgr-opts">${opc(a, 'TRATAR', 'Tratar / Incluir ação')}${opc(a, 'DEPOIS', 'Deixar para outro momento')}${opc(a, 'NADA', 'Não fazer nada')}</div>
+        ${parecer === 'TRATAR' ? `<div class="plan"><div class="lbl">Como será tratado / plano de ação</div><div class="rich">${trat ? paRico(trat) : '—'}</div>
+          <div class="meta"><span><b>Responsável:</b> ${esc(a.responsavel || '—')}</span><span><b>Prazo:</b> ${esc(a.prazo || '—')}</span>
+          <span><b>Situação:</b> ${esc(a.status)}${a.situacao === 'CONCLUIDA' && a.concluidoEm ? ' em ' + esc(String(a.concluidoEm).slice(0, 10)) : ''}</span></div></div>` : ''}
+        ${parecer === 'DEPOIS' ? `<div class="obs">Postergada${a.reverEm ? ' — rever em ' + paData(a.reverEm) : ''}.${a.parecerObs ? ' ' + esc(a.parecerObs) : ''}</div>` : ''}
+        ${parecer === 'NADA' && a.parecerObs ? `<div class="obs">${esc(a.parecerObs)}</div>` : ''}
+        ${!parecer ? `<div class="obs">Sem definição${a.destinatarioEmail ? ' — aguardando ' + esc(paNome(a.destinatarioEmail)) : ''}.</div>` : ''}
+      </div></div>`;
+  }).join('');
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(cab.titulo)} · Bartofil</title>
+  <link rel="stylesheet" href="${'https:'}${'/'}${'/'}fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+  <style>${PA_CSS_RELATORIO}</style></head><body>
+  <div class="barra"><button onclick="window.print()">Imprimir / Salvar como PDF</button></div>
+  <div class="sheet">
+    <div class="top"><div class="top-left"><span class="tag">BARTOFIL · RELATÓRIO OPERACIONAL</span>
+      <h1>${esc(cab.titulo)}</h1><div class="subt">${esc(cab.sub || '')}</div><div class="stripe"><i></i><i></i></div></div>
+      ${logo ? `<div class="top-logo"><img src="${esc(logo)}" alt="Bartofil Distribuidora"></div>` : ''}</div>
+    <div class="ident">${campo('Unidade / setor', cab.unidade)}${campo('Data', paData(cab.data))}${campo('Elaborado por', cab.autor)}${campo('Gerente / destinatário', cab.gerente)}</div>
+    <div class="score">
+      <div><b>Total registrado</b><span class="val">${lista.length}</span>situação(ões)</div>
+      <div class="sc-green"><b>Tratar / Ação</b><span class="val">${tratar}</span>com plano definido</div>
+      <div><b>Outro momento</b><span class="val">${depois}</span>postergada(s)</div>
+      <div class="sc-last"><b>Sem ação / Pendente</b><span class="val">${nada + pend}</span>aguardando ou encerrada</div></div>
+    <div class="part"><div class="pn">§</div><div><h2>Situações levantadas e parecer da gerência</h2>
+      <p>Cada ocorrência com as fotos do local e, abaixo, a tratativa definida pelo gerente.</p></div>
+      <div class="pp">${tratar + depois + nada} / ${lista.length} avaliadas</div></div>
+    ${cartoes}
+    <div class="end"><b>Bartofil · Registro interno de acompanhamento</b><span>GSL Bartofil · ${esc(filial)} · gerado em ${esc(gerado)}</span></div>
+  </div></body></html>`;
+}
+
+/* O CSS da folha (o do relatorio do gerente, enxuto). */
+const PA_CSS_RELATORIO = [
+  '@page { size: A4; margin: 12mm 12mm 14mm 12mm; }',
+  '* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
+  'body { font-family: Inter, Arial, sans-serif; color: #1b1b33; font-size: 10.5pt; line-height: 1.4; background: #e9ebf3; margin: 0; padding: 16px 10px 40px; }',
+  'h1, h2, .num, .val, .tag, .sit, .mgr-h, .prio, .pp, .pn, .field label, .lbl, .mgr-opt { font-family: Poppins, Arial, sans-serif; }',
+  '.barra { text-align: center; margin-bottom: 12px; } .barra button { font: 700 13px Poppins, Arial, sans-serif; padding: 9px 18px; background: #111785; color: #fff; border: 0; border-bottom: 3px solid #1e9e57; border-radius: 9px; cursor: pointer; }',
+  '.sheet { max-width: 196mm; margin: 0 auto; background: #fff; padding: 13mm 12mm 15mm; border-radius: 16px; box-shadow: 0 6px 24px rgba(17,23,133,.09); }',
+  '.top { background: linear-gradient(120deg, #0d126b 0%, #111785 45%, #1e27a8 100%); color: #fff; border-radius: 16px; padding: 18px 22px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 18px; }',
+  '.top::after { content: ""; position: absolute; right: -45px; top: -45px; width: 175px; height: 175px; border-radius: 50%; background: #fbb917; opacity: .95; }',
+  '.top-left { position: relative; z-index: 1; flex: 1; min-width: 0; }',
+  '.tag { display: inline-block; background: #fbb917; color: #111785; font-weight: 700; font-size: 8.5pt; padding: 3px 11px; border-radius: 20px; letter-spacing: .5px; }',
+  'h1 { font-size: 20pt; font-weight: 800; line-height: 1.15; margin: 8px 0 4px; }',
+  '.subt { font-size: 10pt; opacity: .92; }',
+  '.stripe { display: flex; gap: 6px; margin-top: 12px; } .stripe i { height: 5px; width: 62px; border-radius: 3px; background: #1e9e57; display: inline-block; } .stripe i + i { background: #fbb917; }',
+  '.top-logo { position: relative; z-index: 1; background: #111785; border-radius: 14px; padding: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.22); border: 2px solid rgba(255,255,255,.16); }',
+  '.top-logo img { width: 120px; height: auto; display: block; border-radius: 8px; }',
+  '.ident { display: grid; grid-template-columns: 1.6fr 1fr 1.4fr 1.4fr; gap: 10px 14px; margin: 14px 0 12px; }',
+  '.field { border-bottom: 1.6px solid #111785; padding: 4px 0 3px; display: flex; flex-direction: column; }',
+  '.field label { font-size: 7.8pt; color: #666b80; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 2px; }',
+  '.field span { font-size: 10pt; font-weight: 600; }',
+  '.score { display: grid; grid-template-columns: repeat(4, 1fr); border: 1.5px solid #111785; border-radius: 12px; overflow: hidden; margin-bottom: 14px; }',
+  '.score div { padding: 7px 11px; border-right: 1px solid #d8dbea; font-size: 8.5pt; color: #666b80; background: #fff; } .score div.sc-last { border-right: 0; background: #fff4d1; } .score div.sc-green { background: #e3f6eb; }',
+  '.score b { display: block; color: #111785; font-size: 9.5pt; font-family: Poppins, Arial, sans-serif; } .val { display: block; font-weight: 800; font-size: 14pt; color: #1b1b33; line-height: 1.15; margin-top: 2px; } .sc-green .val { color: #1e9e57; }',
+  '.part { display: flex; align-items: center; gap: 14px; border-radius: 14px; padding: 10px 16px; margin: 12px 0; background: linear-gradient(120deg, #0d126b, #111785 50%, #1e27a8); color: #fff; break-after: avoid; }',
+  '.pn { font-weight: 800; font-size: 20pt; line-height: 1; opacity: .92; } .part h2 { margin: 0; font-size: 13.5pt; line-height: 1.15; } .part p { margin: 2px 0 0; font-size: 8.8pt; opacity: .9; }',
+  '.pp { margin-left: auto; font-weight: 700; font-size: 9pt; background: rgba(255,255,255,.18); padding: 4px 11px; border-radius: 20px; white-space: nowrap; }',
+  '.q { border: 1.5px solid #d8dbea; border-left: 5px solid #4fb6e8; border-radius: 14px; padding: 13px 15px 14px; margin: 12px 0; background: #fff; break-inside: avoid; page-break-inside: avoid; }',
+  '.q.status-TRATAR { border-left-color: #1e9e57; } .q.status-DEPOIS { border-left-color: #fbb917; } .q.status-NADA { border-left-color: #9aa0b8; }',
+  '.qh { display: flex; align-items: center; gap: 10px; } .num { flex: 0 0 30px; height: 30px; border-radius: 8px; background: #111785; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 11.5pt; }',
+  '.sit { flex: 1; min-width: 0; font-weight: 700; font-size: 11.5pt; color: #111785; } .sit small { display: block; font: 400 8.3pt Inter, Arial, sans-serif; color: #666b80; }',
+  '.prio { font-size: 8pt; font-weight: 700; border-radius: 20px; padding: 4px 10px; border: 1px solid #d8dbea; } .p-ALTA { background: #fdeaea; color: #d93a3a; border-color: #f3baba; } .p-MEDIA { background: #fff4d1; color: #8a5d00; border-color: #f4d47c; } .p-NORMAL { background: #e6f5fd; color: #156691; border-color: #b7e1f7; }',
+  '.lbl { display: block; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #666b80; margin: 10px 0 4px; }',
+  '.rich { border: 1px solid #d8dbea; border-radius: 8px; padding: 7px 10px; background: #fcfcfe; font-size: 10pt; line-height: 1.45; } .rich mark { background: #fff4d1; padding: 0 3px; border-radius: 3px; } .rich ul, .rich ol { margin: 4px 0 4px 20px; padding: 0; } .rich p { margin: 0 0 4px; }',
+  '.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } figure { margin: 0; border: 1.3px solid #d8dbea; border-radius: 10px; overflow: hidden; background: #f4f5fb; break-inside: avoid; }',
+  'figure img { width: 100%; height: 120px; object-fit: cover; display: block; } figcaption { font-size: 8.5pt; padding: 4px 7px; border-top: 1px solid #d8dbea; background: #fff; min-height: 18px; } figcaption:empty { display: none; }',
+  '.mgr { margin-top: 12px; background: #f4f5fb; border: 1.4px solid #d8dbea; border-radius: 12px; padding: 10px 12px; } .mgr-h { font-weight: 700; font-size: 9pt; color: #111785; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px; } .mgr-h small { text-transform: none; color: #666b80; font-weight: 500; letter-spacing: 0; }',
+  '.mgr-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } .mgr-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; border: 1.6px solid #d8dbea; background: #fff; font-weight: 600; font-size: 9pt; }',
+  '.bub { flex: 0 0 18px; height: 18px; border: 1.8px solid #111785; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8pt; font-weight: 800; color: transparent; }',
+  '.sel-TRATAR { background: #e3f6eb; border-color: #1e9e57; color: #116637; } .sel-TRATAR .bub { background: #1e9e57; border-color: #1e9e57; color: #fff; }',
+  '.sel-DEPOIS { background: #fff4d1; border-color: #e09e00; color: #704c00; } .sel-DEPOIS .bub { background: #fbb917; border-color: #c98d00; color: #111785; }',
+  '.sel-NADA { background: #ebedf5; border-color: #7c829c; color: #3a3f54; } .sel-NADA .bub { background: #666b80; border-color: #666b80; color: #fff; }',
+  '.plan { margin-top: 10px; background: #e3f6eb; border: 1.5px solid #9ad9b6; border-left: 4px solid #1e9e57; border-radius: 10px; padding: 9px 12px; } .plan .lbl { color: #136b3a; margin-top: 0; } .plan .rich { background: #fff; border-color: #9ad9b6; }',
+  '.meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 7px; font-size: 9pt; } .obs { margin-top: 8px; font-size: 9pt; color: #4a4f6a; }',
+  '.end { text-align: center; margin-top: 16px; padding: 10px 14px; break-inside: avoid; border-radius: 14px; background: #111785; color: #fff; } .end b { font-size: 11pt; display: block; font-family: Poppins, Arial, sans-serif; } .end span { font-size: 8.8pt; opacity: .88; }',
+  '@media screen and (max-width: 720px) { .ident, .score { grid-template-columns: 1fr 1fr; } .mgr-opts { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr 1fr; } }',
+  '@media print { body { background: #fff; padding: 0; } .sheet { max-width: 100%; margin: 0; padding: 0; box-shadow: none; border-radius: 0; } .barra { display: none; } }'
+].join('\n');
+
+
+function excluirAcao(id, situacao) {
+  abrirJanela(situacao ? 'Excluir situação' : 'Excluir ação', situacao ? `
+    <p style="line-height:1.7">Isso apaga a situação do plano, com as fotos e o histórico dela fora da lista.
+       Se ela só não precisa de ação, o gerente pode dar o parecer <b>Nada a fazer</b> — assim ela fica registrada.</p>` : `
     <p style="line-height:1.7">Isso apaga a ação do plano. Se ela apenas deixou de fazer
        sentido, prefira <b>Cancelar</b> — assim ela some das contagens mas fica no histórico.</p>`, `
-    <button class="botao secundario" onclick="formAcao(${jsArg(id)})">Voltar</button>
-    <button class="botao perigo" onclick="agir(${planoAcao('excluir')},{id:${jsArg(id)}},'Ação excluída').catch(()=>{})">Excluir mesmo assim</button>`);
+    <button class="botao secundario" onclick="${situacao ? 'formSituacao' : 'formAcao'}(${jsArg(id)})">Voltar</button>
+    <button class="botao perigo" onclick="agir(${planoAcao('excluir')},{id:${jsArg(id)}},${situacao ? "'Situação excluída'" : "'Ação excluída'"}).catch(()=>{})">Excluir mesmo assim</button>`);
 }
 
 function formConcluirAcao(id) {
@@ -5926,7 +6709,8 @@ function fotosProntas(chave) {
   return false;
 }
 function fotosParaEnviar(chave) {
-  return (FOTOS_PENDENTES[chave] || []).map((f) => ({ nome: f.nome, tipo: f.tipo, dados: f.dados }));
+  // 8.13: a legenda de cada foto vai junto (o servidor guarda em LEGENDAS).
+  return (FOTOS_PENDENTES[chave] || []).map((f) => ({ nome: f.nome, tipo: f.tipo, dados: f.dados, legenda: f.legenda || '' }));
 }
 
 /*
@@ -5998,6 +6782,17 @@ async function fotosEscolhidas(input, chave) {
 
 function fotosPintarPrevias(chave) {
   const alvo = el(chave + '-previas'); if (!alvo) return;
+  // Situacao e acao (8.13): cada foto com a legenda (aparece no cartao e no relatorio). Comentario e conclusao: so a foto.
+  if (chave === 'st' || (chave === 'ac' && paTemSituacoes(planoD()))) {
+    alvo.classList.add('pa-previas');
+    alvo.innerHTML = (FOTOS_PENDENTES[chave] || []).map((f, i) => `
+      <span class="foto-previa pa-previa">${f.previa ? `<img src="${f.previa}" alt="" class="pa-foto-img" style="object-fit:cover;padding:0">`
+        : `<span class="foto-sem-previa pa-foto-img" style="font-size:12px">${f.heic ? 'HEIC · ' : ''}${esc(f.nome)}</span>`}
+        <input maxlength="140" placeholder="Legenda da foto (opcional)" value="${esc(f.legenda || '')}"
+          oninput="(FOTOS_PENDENTES[${jsArg(chave)}][${i}]||{}).legenda=this.value">
+        <button type="button" class="pa-tirar" title="Tirar esta foto" onclick="fotosTirar(${jsArg(chave)}, ${i})">&times;</button></span>`).join('');
+    return;
+  }
   alvo.innerHTML = (FOTOS_PENDENTES[chave] || []).map((f, i) => `
     <span class="foto-previa">${f.previa ? `<img src="${f.previa}" alt="">` : `<span class="foto-sem-previa">${f.heic ? 'HEIC · ' : ''}${esc(f.nome)}</span>`}
       <button type="button" title="Tirar esta foto" onclick="fotosTirar(${jsArg(chave)}, ${i})">&times;</button></span>`).join('');
@@ -6098,9 +6893,9 @@ function verFotosDoComentario(idAcao, idComentario) {
   if (c) verFotos(idAcao, c.fotos || [], false);
 }
 
-function verFotos(idAcao, fotos, podeRemover) {
+function verFotos(idAcao, fotos, podeRemover, inicio) {
   if (!fotos.length) return;
-  VISOR = { idAcao: idAcao, fotos: fotos.slice(), i: 0, podeRemover: podeRemover, pedido: 0,
+  VISOR = { idAcao: idAcao, fotos: fotos.slice(), i: Math.min(Math.max(0, Number(inicio) || 0), fotos.length - 1), podeRemover: podeRemover, pedido: 0,
             acaoFoto: PLANO.acoes.foto, acaoRemover: PLANO.acoes.removerFoto };
   let v = el('visor-fotos');
   if (!v) {
@@ -6139,7 +6934,8 @@ async function visorMostrar() {
   const f = V.fotos[V.i];
   const pedido = ++V.pedido;
   V.url = '';
-  el('visor-legenda').textContent = (f.nome || 'foto') + (V.fotos.length > 1 ? ' · ' + (V.i + 1) + ' de ' + V.fotos.length : '');
+  // 8.13: a legenda da foto, quando ha; senao o nome do arquivo.
+  el('visor-legenda').textContent = (f.legenda || f.nome || 'foto') + (V.fotos.length > 1 ? ' · ' + (V.i + 1) + ' de ' + V.fotos.length : '');
   el('visor-rodape').innerHTML = `
     ${V.podeRemover ? `<button class="botao-texto perigo" onclick="visorRemover()">Remover esta foto</button>` : ''}
     <button class="botao secundario" id="visor-baixar" disabled onclick="visorBaixar()">Baixar</button>

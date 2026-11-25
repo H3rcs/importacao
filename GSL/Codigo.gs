@@ -675,7 +675,7 @@ function include(nome) {
     throw e;
   }
 }
-const INCLUDES_OPCIONAIS = ['Aprendiz'];
+const INCLUDES_OPCIONAIS = ['Aprendiz', 'PlanoEstilo'];   // PlanoEstilo (8.13): sem ele o plano abre sem o visual novo
 
 /**
  * CATALOGO DE ACOES — a unica porta de gravacao (e das leituras sob demanda).

@@ -1876,7 +1876,7 @@ caso('atualizacao 8.11: banco da 8.10 (sem a FERIAS_PROG) ganha a tabela na entr
   m.cache.clear();
   const adm = entrar(m, DONO, '4321');                        // a entrada roda a migracao
   const aba = banco.abas.find((x) => x.nome === 'FERIAS_PROG');
-  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.12', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.13', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
   afirmar(acao(m, adm, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)).recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).', 'grava depois da migracao');
   afirmar(tela(m, adm, 'quadro').programacoes.length === 1 && s, 'a tela le');
   // Instalacao.gs de antes (colado pela metade): sem a FERIAS_PROG no esquema
@@ -2422,7 +2422,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.12', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.13', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);

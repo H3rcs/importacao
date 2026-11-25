@@ -1,0 +1,411 @@
+<script>
+/*
+ * SITUACAO DE CARGA — LEITOR DO PDF (so funcoes puras: os testes rodam este
+ * bloco fora do navegador, em testes/carga.js).
+ *
+ * O relatorio "SITUACAO DE EXPEDICAO DAS CARGAS EM PROCESSO" (Stimulsoft)
+ * vira uma tabela a partir da POSICAO de cada texto na pagina (pdf.js):
+ *   1. a linha com SEP e CONF repetidos e o sub-cabecalho: cada par SEP/CONF
+ *      e um deposito, e o centro de cada palavra e o centro da coluna;
+ *   2. o nome do deposito e o texto logo acima do par (GRANDEZA, MIUDEZA,
+ *      BLOCADO, PESAVEIS, NOBRE, NOBRE GRANDEZA — e um deposito novo, se
+ *      o relatorio ganhar um);
+ *   3. NRO, NOME CARGA, VEICULO e BOX: o centro de cada cabecalho; cada texto
+ *      vai para a coluna do cabecalho mais perto (o relatorio centraliza);
+ *   4. cada linha de dados comeca num numero de carga (a coluna mais a
+ *      esquerda); todo texto vai para a linha do numero mais perto na
+ *      vertical — o nome quebrado em duas linhas continua na carga dele;
+ *   5. a carga de 24 horas: o "*" depois do numero ou a faixa amarela da
+ *      linha (as duas marcas, quando existem);
+ *   6. a data e hora de emissao: o primeiro dd/mm/aaaa hh:mm(:ss) acima do
+ *      cabecalho.
+ * Cada pagina tem o cabecalho de novo; as paginas sao lidas em sequencia.
+ *
+ * REGRA DO HTMLSERVICE: nada de barra-barra nem barra-asterisco em texto,
+ * template ou regex (ver App.html). Use \/ dentro das regex.
+ */
+const CG_PDFJS_VERSAO = '3.11.174';
+const CG_DEPS_PADRAO = ['GRANDEZA', 'MIUDEZA', 'BLOCADO', 'PESAVEIS', 'NOBRE', 'NOBRE_GRANDEZA'];
+const CG_DEPS_NOMES = { GRANDEZA: 'Grandeza', MIUDEZA: 'Miudeza', BLOCADO: 'Blocado', PESAVEIS: 'Pesáveis', NOBRE: 'Nobre', NOBRE_GRANDEZA: 'Nobre Grandeza' };
+
+function cgNorm(t) {
+  return String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+}
+function cgIdDeposito(v) {
+  const t = cgNorm(v).replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!t) return '';
+  if (/NOBRE/.test(t) && /GRAND/.test(t)) return 'NOBRE_GRANDEZA';
+  if (/NOBRE/.test(t)) return 'NOBRE';
+  if (/GRAND/.test(t)) return 'GRANDEZA';
+  if (/MIUD/.test(t)) return 'MIUDEZA';
+  if (/BLOC/.test(t)) return 'BLOCADO';
+  if (/PESAV|PESAD/.test(t)) return 'PESAVEIS';
+  return t.replace(/ /g, '_').slice(0, 24);
+}
+/* Celula: 'X' · '-' · 'a/b' · '' (nao lida) */
+function cgCelulaTexto(v) {
+  const t = String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+  if (t === 'X' || t === '✓') return 'X';
+  if (t === '-' || t === '–' || t === '—') return '-';
+  const m = /^(\d{1,5})\/(\d{1,5})$/.exec(t);
+  if (m && +m[2] > 0 && +m[1] <= +m[2]) return (+m[1]) + '/' + (+m[2]);
+  return '';
+}
+function cgMediana(lista) {
+  const v = lista.filter((x) => isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return 0;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+/* Data e hora do texto: "25/11/2026 08:05:37" -> "2026-11-25T08:05:37" */
+function cgDataHoraDoTexto(t) {
+  const m = /(\d{2})\/(\d{2})\/(\d{4})\s*[-,]?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(t || ''));
+  if (!m) return '';
+  const z = (n) => String(n).padStart(2, '0');
+  const d = +m[1], me = +m[2], a = +m[3], h = +m[4], mi = +m[5], s = +(m[6] || 0);
+  if (me < 1 || me > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return '';
+  return a + '-' + z(me) + '-' + z(d) + 'T' + z(h) + ':' + z(mi) + ':' + z(s);
+}
+
+/*
+ * Os textos de uma pagina com x, y (de cima para baixo: y e a linha de base),
+ * largura e altura. Item com espacos dentro e quebrado em palavras (posicao
+ * proporcional ao numero de letras) so quando atravessa colunas — ver cgPalavras.
+ */
+function cgPalavras(it) {
+  const s = String(it.s);
+  const saida = [];
+  const re = /\S+/g;
+  let m;
+  const porLetra = s.length ? it.w / s.length : 0;
+  while ((m = re.exec(s))) saida.push({ s: m[0], x: it.x + m.index * porLetra, w: m[0].length * porLetra, y: it.y, h: it.h });
+  return saida;
+}
+const cgCentro = (it) => it.x + it.w / 2;
+
+/*
+ * LER UMA SITUACAO. paginas = [{ largura, altura, itens: [{ s, x, y, w, h }], faixas: [{ y0, y1 }] }]
+ * (faixas: os retangulos amarelos da largura da tabela, em y de cima para baixo).
+ * Devolve { titulo, emitidoEm, depositos: [{ id, nome }], cargas: [...], problemas: [...], avisos: [...], paginas }.
+ */
+function cgLerSituacao(paginas) {
+  const saida = { titulo: '', emitidoEm: '', depositos: [], cargas: [], problemas: [], avisos: [], paginas: paginas.length, reconhecido: false };
+  let modelo = null;                       // as colunas da pagina anterior (pagina sem cabecalho usa as dela)
+  const vistas = {};
+  paginas.forEach((pg, ip) => {
+    const nPag = ip + 1;
+    const itens = (pg.itens || []).filter((it) => it && String(it.s || '').trim() && isFinite(it.x) && isFinite(it.y))
+      .map((it) => ({ s: String(it.s).replace(/\s+/g, ' ').trim(), x: +it.x, y: +it.y, w: Math.max(0, +it.w || 0), h: Math.max(1, +it.h || 8) }));
+    if (!itens.length) return;
+    const lh = cgMediana(itens.map((it) => it.h)) || 8;
+    const linhas = cgLinhas(itens, lh);
+    linhas.forEach((l) => {
+      const t = cgNorm(l.texto);
+      if (!saida.titulo && /SITUAC/.test(t) && /(EXPEDIC|CARGA)/.test(t)) { saida.titulo = l.texto; saida.reconhecido = true; }
+    });
+
+    // 1. o sub-cabecalho SEP/CONF
+    const sub = cgSubcabecalho(itens, lh);
+    let m = null;
+    if (sub) m = cgModeloDaPagina(itens, sub, lh, nPag, saida);
+    if (!m && modelo) { m = modelo; saida.avisos.push('Página ' + nPag + ': sem o cabeçalho SEP/CONF; usei as colunas da página anterior.'); }
+    if (!m) { saida.problemas.push({ pagina: nPag, texto: '', motivo: 'Não achei o cabeçalho com SEP e CONF nesta página.' }); return; }
+    modelo = m;
+    if (!saida.depositos.length) saida.depositos = m.depositos.map((d) => ({ id: d.id, nome: d.nome }));
+    else if (saida.depositos.map((d) => d.id).join() !== m.depositos.map((d) => d.id).join()) {
+      saida.avisos.push('Página ' + nPag + ': os depósitos estão em outra ordem; li pela ordem desta página.');
+    }
+
+    // 2. emissao: o primeiro dd/mm/aaaa hh:mm acima do cabecalho
+    if (!saida.emitidoEm) {
+      const acima = linhas.filter((l) => !sub || l.y < sub.y - lh * 0.5);
+      for (const l of acima.concat(linhas)) { const d = cgDataHoraDoTexto(l.texto); if (d) { saida.emitidoEm = d; break; } }
+    }
+
+    // 3. as linhas de dados
+    const topoDados = (sub ? sub.y : m.ySub) + lh * 0.6;
+    const corpo = itens.filter((it) => it.y > topoDados && !cgRodape(it.s));
+    const candidatos = corpo.filter((it) => cgCentro(it) < m.L && /^\*?\d{4,10}\*?$/.test(it.s.replace(/\s+/g, '')));
+    if (!candidatos.length) return;
+    const xMin = Math.min.apply(null, candidatos.map((it) => it.x));
+    const ancoras = candidatos.filter((it) => it.x <= xMin + lh * 3).sort((a, b) => a.y - b.y);
+    const passo = ancoras.length > 1 ? cgMediana(ancoras.slice(1).map((a, i) => a.y - ancoras[i].y)) : lh * 1.8;
+    const folga = Math.max(lh * 0.9, passo * 0.72);
+    const linhasDados = ancoras.map((a) => ({ ancora: a, itens: [] }));
+    corpo.forEach((it) => {
+      const yc = it.y - it.h * 0.35;
+      let melhor = null, dist = Infinity;
+      linhasDados.forEach((r) => { const d = Math.abs((r.ancora.y - r.ancora.h * 0.35) - yc); if (d < dist) { dist = d; melhor = r; } });
+      if (melhor && dist <= folga) melhor.itens.push(it);
+    });
+    linhasDados.forEach((r) => {
+      const c = cgMontarLinha(r, m, pg, lh, nPag, saida);
+      if (!c) return;
+      if (vistas[c.nro]) { saida.avisos.push('Carga ' + c.nro + ' aparece duas vezes (página ' + vistas[c.nro] + ' e ' + nPag + '): ficou a primeira.'); return; }
+      vistas[c.nro] = nPag;
+      saida.cargas.push(c);
+    });
+  });
+  if (!saida.reconhecido && saida.cargas.length) saida.avisos.push('Não achei o título "Situação de Expedição das Cargas em Processo". Confira se o PDF é o relatório certo.');
+  if (!saida.emitidoEm) saida.avisos.push('Não achei a data e a hora de emissão no PDF. Informe abaixo.');
+  return saida;
+}
+
+/* As linhas de texto da pagina (para o titulo e a data): itens com a mesma linha de base. */
+function cgLinhas(itens, lh) {
+  const ord = itens.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+  const linhas = [];
+  ord.forEach((it) => {
+    const l = linhas.length ? linhas[linhas.length - 1] : null;
+    if (l && Math.abs(it.y - l.y) <= lh * 0.4) l.itens.push(it);
+    else linhas.push({ y: it.y, itens: [it] });
+  });
+  linhas.forEach((l) => { l.texto = l.itens.sort((a, b) => a.x - b.x).map((i) => i.s).join(' '); });
+  return linhas;
+}
+function cgRodape(s) {
+  const t = cgNorm(s);
+  return /CARGAS\s*24\s*H/.test(t) || /^PAGINA\s*\d/.test(t) || /^PAG\.?\s*\d+\s*(DE|\/)\s*\d+$/.test(t);
+}
+
+/* A linha do sub-cabecalho: a que tem mais SEP e CONF (pelo menos dois de cada). */
+function cgSubcabecalho(itens, lh) {
+  const pal = [];
+  itens.forEach((it) => cgPalavras(it).forEach((p) => {
+    const t = cgNorm(p.s).replace(/[^A-Z]/g, '');
+    if (/^SEP(ARACAO|ARADO)?$/.test(t)) pal.push(Object.assign(p, { tipo: 'SEP' }));
+    else if (/^CONF(ERENCIA|ERIDO)?$/.test(t)) pal.push(Object.assign(p, { tipo: 'CONF' }));
+  }));
+  const grupos = [];
+  pal.sort((a, b) => a.y - b.y).forEach((p) => {
+    const g = grupos.length ? grupos[grupos.length - 1] : null;
+    if (g && Math.abs(p.y - g.y) <= lh * 0.5) g.pal.push(p); else grupos.push({ y: p.y, pal: [p] });
+  });
+  const bons = grupos.filter((g) => g.pal.filter((p) => p.tipo === 'SEP').length >= 2 && g.pal.filter((p) => p.tipo === 'CONF').length >= 2);
+  if (!bons.length) return null;
+  bons.sort((a, b) => b.pal.length - a.pal.length);
+  return bons[0];
+}
+
+/* Colunas da pagina a partir do sub-cabecalho: os pares SEP/CONF, os nomes dos depositos e os cabecalhos da esquerda. */
+function cgModeloDaPagina(itens, sub, lh, nPag, saida) {
+  const pal = sub.pal.slice().sort((a, b) => a.x - b.x);
+  const colunas = [];
+  for (let i = 0; i < pal.length; i++) {
+    if (pal[i].tipo === 'SEP' && pal[i + 1] && pal[i + 1].tipo === 'CONF') {
+      colunas.push({ sep: cgCentro(pal[i]), conf: cgCentro(pal[i + 1]) });
+      i++;
+    }
+  }
+  if (!colunas.length) return null;
+  const centros = [];
+  colunas.forEach((c) => centros.push(c.sep, c.conf));
+  const passo = cgMediana(centros.slice(1).map((x, i) => x - centros[i])) || lh * 4;
+  const L = centros[0] - passo * 0.6, R = centros[centros.length - 1] + passo * 0.6;
+
+  // nomes dos depositos: o texto logo acima de cada par
+  const faixaTopo = sub.y - lh * 4, faixaBase = sub.y - lh * 0.5;
+  const acima = itens.filter((it) => it.y >= faixaTopo && it.y <= faixaBase);
+  const nomes = colunas.map(() => []);
+  acima.forEach((it) => {
+    const cx = cgCentro(it);
+    if (cx < L || cx > R) return;
+    let k = 0, d = Infinity;
+    colunas.forEach((c, i) => { const dd = Math.abs((c.sep + c.conf) / 2 - cx); if (dd < d) { d = dd; k = i; } });
+    nomes[k].push(it);
+  });
+  const usados = {};
+  const depositos = colunas.map((c, i) => {
+    const texto = nomes[i].sort((a, b) => a.y - b.y || a.x - b.x).map((x) => x.s).join(' ');
+    let id = cgIdDeposito(texto);
+    if (!id || usados[id]) {
+      id = CG_DEPS_PADRAO.filter((x) => !usados[x])[0] || ('DEPOSITO_' + (i + 1));
+      saida.avisos.push('Página ' + nPag + ': não li o nome do ' + (i + 1) + 'º depósito' + (texto ? ' ("' + texto + '")' : '') + '; usei ' + (CG_DEPS_NOMES[id] || id) + '.');
+    }
+    usados[id] = true;
+    return { id: id, nome: CG_DEPS_NOMES[id] || texto || id, sep: c.sep, conf: c.conf };
+  });
+
+  // cabecalhos da esquerda (na linha dos nomes ou na do SEP/CONF)
+  const esquerda = itens.filter((it) => it.y >= faixaTopo && it.y <= sub.y + lh * 0.6 && cgCentro(it) < L);
+  const achar = (re) => esquerda.filter((it) => re.test(cgNorm(it.s)))[0];
+  const cab = {
+    nro: achar(/^(NRO|NR|N[O°º]|NUM|NUMERO|CARGA)\.?$/),
+    nome: achar(/^NOME/),
+    veiculo: achar(/^VEIC/),
+    box: achar(/^BOX/)
+  };
+  const esq = ['nro', 'nome', 'veiculo', 'box'].filter((k) => cab[k]).map((k) => ({ k: k, cx: cgCentro(cab[k]) })).sort((a, b) => a.cx - b.cx);
+  return { depositos: depositos, passo: passo, L: L, R: R, ySub: sub.y, esq: esq };
+}
+
+/* Uma linha de dados: as colunas da esquerda, a marca de 24 horas e as celulas de cada deposito. */
+function cgMontarLinha(r, m, pg, lh, nPag, saida) {
+  const doLado = { nro: [], nome: [], veiculo: [], box: [] };
+  const celulas = m.depositos.map(() => [[], []]);
+  const bruto = [];
+  let estrela = false, foraDeColuna = [];
+  r.itens.slice().sort((a, b) => a.x - b.x).forEach((it) => bruto.push(it.s));
+  r.itens.forEach((it) => {
+    const cx = cgCentro(it);
+    if (cx < m.L) {
+      let s = it.s;
+      if (/^\*+$/.test(s)) { estrela = true; return; }
+      if (/^\*\s*/.test(s) || /\s*\*$/.test(s)) { estrela = true; s = s.replace(/^\*\s*/, '').replace(/\s*\*$/, ''); }
+      if (it === r.ancora) { doLado.nro.push({ s: s, x: it.x, y: it.y }); return; }
+      let col = 'nome';
+      if (m.esq.length) {
+        let d = Infinity;
+        m.esq.forEach((c) => { const dd = Math.abs(c.cx - cx); if (dd < d) { d = dd; col = c.k; } });
+      }
+      if (col === 'nro') col = 'nome';         // so a ancora e o numero da carga
+      doLado[col].push({ s: s, x: it.x, y: it.y });
+      return;
+    }
+    cgPalavras(it).forEach((p) => {
+      const pcx = cgCentro(p);
+      let k = -1, lado = 0, d = Infinity;
+      m.depositos.forEach((dep, i) => {
+        [dep.sep, dep.conf].forEach((x, j) => { const dd = Math.abs(x - pcx); if (dd < d) { d = dd; k = i; lado = j; } });
+      });
+      if (k < 0 || d > m.passo * 0.75) { foraDeColuna.push(p.s); return; }
+      celulas[k][lado].push(p);
+    });
+  });
+  const juntar = (lista) => {
+    const ord = lista.sort((a, b) => (Math.abs(a.y - b.y) > lh * 0.5 ? a.y - b.y : a.x - b.x));
+    let t = '';
+    ord.forEach((p) => {
+      if (!t) { t = p.s; return; }
+      t += (/[\/-]$/.test(t) || /^[\/-]/.test(p.s)) ? p.s : ' ' + p.s;
+    });
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  const nro = juntar(doLado.nro).replace(/\D+/g, '');
+  const yLinha = r.ancora.y - r.ancora.h * 0.35;
+  const amarelo = (pg.faixas || []).some((f) => yLinha >= f.y0 - 1 && yLinha <= f.y1 + 1);
+  const c = {
+    nro: nro, nome: juntar(doLado.nome), veiculo: juntar(doLado.veiculo), box: juntar(doLado.box).replace(/\s+/g, ''),
+    h24: estrela || amarelo, estrela: estrela, amarelo: amarelo, d: {}, pagina: nPag, bruto: bruto.join(' ')
+  };
+  const ruins = [];
+  let lidas = 0;
+  m.depositos.forEach((dep, i) => {
+    const par = celulas[i].map((lista, j) => {
+      const txt = lista.sort((a, b) => a.x - b.x).map((p) => p.s).join('');
+      const v = cgCelulaTexto(txt);
+      if (v) lidas++;
+      else ruins.push((CG_DEPS_NOMES[dep.id] || dep.nome) + ' ' + (j ? 'CONF' : 'SEP') + (txt ? ' ("' + txt + '")' : ' vazia'));
+      return v;
+    });
+    c.d[dep.id] = par;
+  });
+  if (!/^\d{3,10}$/.test(nro)) { saida.problemas.push({ pagina: nPag, nro: '', texto: c.bruto, motivo: 'número da carga ilegível' }); return null; }
+  if (!lidas) { saida.problemas.push({ pagina: nPag, nro: nro, texto: c.bruto, motivo: 'nenhuma célula de depósito lida' }); return null; }
+  if (ruins.length) saida.problemas.push({ pagina: nPag, nro: nro, texto: c.bruto, motivo: 'célula sem leitura: ' + ruins.join(', '), parcial: true });
+  if (foraDeColuna.length) saida.avisos.push('Carga ' + nro + ': texto fora das colunas (' + foraDeColuna.join(' ') + ').');
+  if (c.box && !/^\d{1,4}$/.test(c.box)) saida.avisos.push('Carga ' + nro + ': box "' + c.box + '" não é um número.');
+  return c;
+}
+
+/*
+ * TEXTO COLADO (quando o PDF nao abre): cada linha que comeca no numero da carga;
+ * as 12 ultimas palavras sao as celulas (X, - ou a/b), antes delas o BOX e o veiculo.
+ */
+const CG_VEICULOS = /(?:^|\s)((?:BI-?TRUCK|TRUCK|TOCO|MEDIO|MÉDIO|VUC|CARRETA|LEVE|VAN|FIORINO|UTILITARIO|3\/4|TRUCADO|SEMI-?LEVE)(?:\s*-\s*DEP|\s+\d{3,4})?)$/i;
+function cgLerTexto(texto) {
+  const saida = { titulo: '', emitidoEm: cgDataHoraDoTexto(texto), depositos: CG_DEPS_PADRAO.map((id) => ({ id: id, nome: CG_DEPS_NOMES[id] })),
+    cargas: [], problemas: [], avisos: [], paginas: 0, reconhecido: /SITUA/i.test(texto) };
+  const n = CG_DEPS_PADRAO.length * 2;
+  const vistas = {};
+  String(texto || '').split(/\r?\n/).forEach((linha) => {
+    const m = /^\s*(\d{4,10})\s*(\*?)\s+(.*)$/.exec(linha);
+    if (!m) return;
+    const pal = m[3].trim().split(/\s+/);
+    const cel = [];
+    while (pal.length && cel.length < n && /^(X|x|-|–|\d+\/\d+)$/.test(pal[pal.length - 1])) cel.unshift(pal.pop());
+    if (cel.length !== n) { saida.problemas.push({ pagina: 0, nro: m[1], texto: linha.trim(), motivo: 'esperava ' + n + ' células e li ' + cel.length }); return; }
+    let estrela = !!m[2];
+    let resto = pal.join(' ');
+    if (/^\*\s*/.test(resto)) { estrela = true; resto = resto.replace(/^\*\s*/, ''); }
+    let box = '';
+    const mb = /\s(\d{1,3})$/.exec(' ' + resto);
+    if (mb) { box = mb[1]; resto = resto.slice(0, resto.length - mb[0].length + 1).trim(); }
+    let veiculo = '';
+    const mv = CG_VEICULOS.exec(resto);
+    if (mv) { veiculo = mv[1].trim(); resto = resto.slice(0, mv.index).trim(); }
+    if (vistas[m[1]]) return;
+    vistas[m[1]] = true;
+    const c = { nro: m[1], nome: resto, veiculo: veiculo, box: box, h24: estrela, estrela: estrela, amarelo: false, d: {}, pagina: 0, bruto: linha.trim() };
+    CG_DEPS_PADRAO.forEach((id, i) => { c.d[id] = [cgCelulaTexto(cel[i * 2]), cgCelulaTexto(cel[i * 2 + 1])]; });
+    saida.cargas.push(c);
+  });
+  if (!saida.emitidoEm) saida.avisos.push('Não achei a data e a hora de emissão no texto. Informe abaixo.');
+  return saida;
+}
+
+/*
+ * PDF -> paginas (para o cgLerSituacao). doc: o documento aberto pelo pdf.js; lib: o pdfjsLib
+ * (no navegador e nos testes, no Node). As faixas amarelas saem dos retangulos pintados de amarelo
+ * com mais da metade da largura da pagina (a linha inteira da carga de 24 horas).
+ */
+async function cgPaginasDoPdf(doc, lib, aoLer) {
+  const paginas = [];
+  const total = Math.min(doc.numPages, 60);
+  for (let p = 1; p <= total; p++) {
+    if (aoLer) aoLer(p, total);
+    const pg = await doc.getPage(p);
+    const vp = pg.getViewport({ scale: 1 });
+    const tc = await pg.getTextContent({ disableCombineTextItems: true });
+    const itens = [];
+    tc.items.forEach((it) => {
+      if (!it || !it.str || !String(it.str).trim()) return;
+      const t = lib.Util.transform(vp.transform, it.transform);
+      const h = Math.hypot(t[2], t[3]) || it.height || 8;
+      itens.push({ s: it.str, x: t[4], y: t[5], w: it.width * (vp.scale || 1), h: h });
+    });
+    let faixas = [];
+    try { faixas = cgFaixasAmarelas(await pg.getOperatorList(), lib, vp); } catch (e) { faixas = []; }
+    paginas.push({ largura: vp.width, altura: vp.height, itens: itens, faixas: faixas });
+  }
+  return paginas;
+}
+function cgFaixasAmarelas(ops, lib, vp) {
+  const OPS = lib.OPS;
+  const faixas = [];
+  let cor = null;
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const pilha = [];
+  const amarelo = (c) => {
+    if (!c) return false;
+    let r, g, b;
+    if (typeof c === 'string') { const h = c.replace('#', ''); r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16); }
+    else { r = c[0]; g = c[1]; b = c[2]; if (r <= 1 && g <= 1 && b <= 1) { r *= 255; g *= 255; b *= 255; } }
+    return r >= 200 && g >= 180 && b <= 130;
+  };
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const f = ops.fnArray[i], a = ops.argsArray[i];
+    if (f === OPS.save) pilha.push(ctm.slice());
+    else if (f === OPS.restore) ctm = pilha.pop() || [1, 0, 0, 1, 0, 0];
+    else if (f === OPS.transform) ctm = lib.Util.transform(ctm, a);
+    else if (f === OPS.setFillRGBColor) cor = a && a.length === 1 ? a[0] : a;
+    else if (f === OPS.setFillGray) cor = null;
+    else if (f === OPS.constructPath && amarelo(cor)) {
+      const sub = a[0] || [], coords = a[1] || [];
+      let k = 0;
+      sub.forEach((op) => {
+        if (op === OPS.rectangle) {
+          const x = coords[k], y = coords[k + 1], w = coords[k + 2], h = coords[k + 3];
+          k += 4;
+          const m = lib.Util.transform(vp.transform, ctm);
+          const p1 = lib.Util.applyTransform([x, y], m), p2 = lib.Util.applyTransform([x + w, y + h], m);
+          if (Math.abs(p2[0] - p1[0]) >= vp.width * 0.5) faixas.push({ y0: Math.min(p1[1], p2[1]), y1: Math.max(p1[1], p2[1]) });
+        } else if (op === OPS.moveTo || op === OPS.lineTo) k += 2;
+        else if (op === OPS.curveTo) k += 6;
+        else if (op === OPS.curveTo2 || op === OPS.curveTo3) k += 4;
+      });
+    }
+  }
+  return faixas;
+}
+</script>

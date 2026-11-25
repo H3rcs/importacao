@@ -154,6 +154,22 @@ const ESQUEMA = {
                 'OBSERVACAO', 'CONFIRMADA_EM', 'CONFIRMADA_POR'],
 
   /*
+   * SITUACAO DE CARGA (8.12 — Carga.gs).
+   * CARGA_SNAPSHOTS: um envio do relatorio "Situacao de Expedicao das Cargas em Processo". EMITIDO_EM e a
+   * hora do relatorio (aaaa-mm-ddThh:mm:ss); CARGAS e a lista em JSON (envio grande continua em CARGAS_2 e
+   * CARGAS_3; os envios antigos vao para o Drive: DRIVE:<id>); RESUMO, os numeros por deposito, a equipe
+   * alocada na hora e o que foi feito desde o envio anterior (o ritmo sai dai). ASSINATURA recusa o mesmo
+   * relatorio duas vezes.
+   * CARGA_EQUIPE: uma linha viva por pessoa (PESSOA = a chave do Quadro do CD): onde ela esta agora.
+   * PAPEL: SEPARADOR · CONFERENTE; ANDAR: 0 (terreo) a 4, so no flowrack do Nobre.
+   * CARGA_EQUIPAMENTOS: paleteiras e carrinhos de cada deposito. ESTADO: LIVRE · USO · MANUTENCAO.
+   */
+  CARGA_SNAPSHOTS: ['EMITIDO_EM', 'ENVIADO_EM', 'ENVIADO_POR', 'ENVIADO_NOME', 'ARQUIVO', 'PAGINAS', 'TOTAL_CARGAS',
+                    'NAO_LIDAS', 'ASSINATURA', 'DEPOSITOS', 'RESUMO', 'CARGAS', 'CARGAS_2', 'CARGAS_3'],
+  CARGA_EQUIPE:    ['PESSOA', 'NOME', 'FUNCAO', 'EQUIPE', 'DEPOSITO', 'PAPEL', 'ANDAR', 'DESDE'],
+  CARGA_EQUIPAMENTOS: ['DEPOSITO', 'TIPO', 'NUMERO', 'ESTADO', 'OBSERVACAO'],
+
+  /*
    * CONVERSA — uma linha por mensagem.
    * CONTEXTO diz onde ela vive: 'ATIVIDADE' (a caixa dentro da atividade)
    * ou 'DIRETO' (conversa de duas pessoas). ALVO e o ID da atividade ou a
@@ -249,6 +265,7 @@ function instalar(emailAdmin) {
   garantirFilialPrincipalGravada_();
   semearZonasLimpeza();
   semearNobreaks();
+  semearEquipamentosCarga_();
   inserirVarios('PARAMETROS', PARAMETROS_NOVOS.filter(function (p) {
     return p[0].indexOf('APRESENTACAO_') !== 0;   // estas ja vem em semearParametros
   }).map(function (p) { return { CHAVE: p[0], VALOR: p[2] || '', DESCRICAO: p[1] }; }), 'sistema');
@@ -306,7 +323,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.11';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) (a proxima e 8.12: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.12';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) (a proxima e 8.13: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -365,6 +382,9 @@ function garantirEsquema() {
   if (principal && versaoAntes < numeroDaVersao_('8.1') && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
   // 8.9: o Jovem Aprendiz entra ligado na principal (uma vez; depois vale o que o administrador escolher).
   if (principal && versaoAntes < numeroDaVersao_('8.9') && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
+  // 8.12: a Situacao de Carga entra ligada na principal, e cada filial ganha as paleteiras e os carrinhos padrao.
+  if (principal && versaoAntes < numeroDaVersao_('8.12') && adicionarPaineisNovosNaPrincipal_(['carga'])) mexeu = true;
+  if (versaoAntes < numeroDaVersao_('8.12') && typeof semearEquipamentosCarga_ === 'function' && semearEquipamentosCarga_()) mexeu = true;
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
@@ -619,22 +639,22 @@ function perfisPadrao() {
       telas: TELAS.map(function (t) { return t.id; }), podes: CAPACIDADES },
     { PERFIL: 'GERENTE', DESCRICAO: 'Gerência — valida as entregas', ESCOPO: 'TODOS',
       telas: ['inicio', 'calendario', 'acoes', 'assiduidade', 'apresentacao', 'config', 'acessos', 'relatos',
-              'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'],
+              'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz', 'carga'],
       podes: ['VER_INDIVIDUAL', 'EDITAR', 'EXCLUIR', 'ANEXAR', 'VALIDAR', 'PROGRAMAR',
-              'GERIR_ACESSOS', 'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA'] },
+              'GERIR_ACESSOS', 'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA', 'GERIR_CARGA'] },
     /*
      * O coordenador ganha o Plano de Acao e a Conversa. Ele NAO cria acao
      * (nao tem GERIR_ACOES) — o plano e feito para ele pelo gerente; o que
      * ele faz e concluir as que sao dele.
      */
     { PERFIL: 'COORDENADOR', DESCRICAO: 'Coordenação de turno — entrega', ESCOPO: 'TURNO',
-      telas: ['inicio', 'calendario', 'acoes', 'nobreaks'],
-      podes: ['ANEXAR', 'ENTREGAR', 'LANCAR_NOBREAK'] },
+      telas: ['inicio', 'calendario', 'acoes', 'nobreaks', 'carga'],
+      podes: ['ANEXAR', 'ENTREGAR', 'LANCAR_NOBREAK', 'GERIR_CARGA'] },
     /* Supervisor de limpeza (4.2.2): cuida da Limpeza CD — acoes, compras e consumo. */
     { PERFIL: 'SUPERVISOR', DESCRICAO: 'Supervisão de limpeza', ESCOPO: 'TODOS',
       telas: ['limpeza'], podes: ['GERIR_LIMPEZA'] },
     { PERFIL: 'CONSULTA', DESCRICAO: 'Somente leitura', ESCOPO: 'TODOS',
-      telas: ['inicio', 'calendario', 'acoes', 'nobreaks', 'limpeza', 'quadro'], podes: [] },
+      telas: ['inicio', 'calendario', 'acoes', 'nobreaks', 'limpeza', 'quadro', 'carga'], podes: [] },
     { PERFIL: 'PENDENTE', DESCRICAO: 'Aguardando liberação', ESCOPO: 'PROPRIAS', telas: [], podes: [] }
   ];
 }

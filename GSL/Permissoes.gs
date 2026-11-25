@@ -25,6 +25,10 @@
 const BUILD_PERMISSOES = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const MODULOS = [
+  /* Situacao de Carga (25/11): o relatorio de expedicao virando indicadores, equipe e equipamentos ao vivo — Carga.gs e Carga.html. */
+  { id: 'carga',        nome: 'Situação de Carga',
+    frase: 'Cargas em processo, separação e conferência por depósito, com a equipe e os equipamentos ao vivo.',
+    acao: 'Abrir situação', icone: 'carga', cor: 'azul' },
   { id: 'calendario',   nome: 'Calendário',
     frase: 'Atividades do mês, entregas, validações e o andamento por turno.',
     acao: 'Abrir calendário', icone: 'calendario', cor: 'azul' },
@@ -73,6 +77,7 @@ const TELAS = [
   { id: 'quadro',      nome: 'Quadro do CD', cor: 'amarelo', modulo: 'quadro',      funcao: 'dadosQuadro' },
   { id: 'estoque',     nome: 'Estoque de TI', cor: 'azul',   modulo: 'estoque',     funcao: 'dadosEstoque' },
   { id: 'aprendiz',    nome: 'Portal RH Aprendiz', cor: 'azul', modulo: 'aprendiz',  funcao: 'dadosAprendiz' },
+  { id: 'carga',       nome: 'Situação de Carga', cor: 'azul', modulo: 'carga',     funcao: 'dadosCarga' },
   { id: 'config',      nome: 'Configuração', cor: 'branco',  modulo: 'config',      funcao: 'dadosConfig', exige: 'PROGRAMAR' },
   { id: 'acessos',     nome: 'Pessoas e acessos', cor: 'branco', modulo: 'config',  funcao: 'dadosPessoas', exige: 'GERIR_ACESSOS' },
   { id: 'filiais',     nome: 'Filiais e painéis', cor: 'branco', modulo: 'config',  funcao: 'dadosFiliais', exige: 'GERIR_FILIAIS' },
@@ -96,7 +101,9 @@ const TELAS = [
 const CAPACIDADES = ['VER_INDIVIDUAL', 'ENTREGAR', 'VALIDAR', 'PROGRAMAR',
                      'EDITAR', 'EXCLUIR', 'ANEXAR', 'GERIR_ACESSOS',
                      'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA',
-                     'GERIR_FILIAIS', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'];
+                     'GERIR_FILIAIS', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE',
+                     // GERIR_CARGA (25/11): envia a situacao de carga, aloca a equipe e mexe nas paleteiras e carrinhos
+                     'GERIR_CARGA'];
 
 /*
  * MODULOS POR PESSOA.
@@ -115,7 +122,8 @@ const MODULOS_AJUSTAVEIS = {
   calendario: [], assiduidade: [], apresentacao: [], quadro: [], aprendiz: [],
   nobreaks: ['LANCAR_NOBREAK'],
   limpeza: ['GERIR_LIMPEZA'],
-  estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE']
+  estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'],
+  carga: ['GERIR_CARGA']
 };
 const MODOS_MODULO = ['NAO', 'VER', 'EDITAR'];
 

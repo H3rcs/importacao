@@ -675,7 +675,7 @@ function include(nome) {
     throw e;
   }
 }
-const INCLUDES_OPCIONAIS = ['Aprendiz'];
+const INCLUDES_OPCIONAIS = ['Aprendiz', 'Carga', 'CargaEstilo'];
 
 /**
  * Catalogo de acoes de escrita. Cada uma declara a capacidade exigida.
@@ -836,6 +836,15 @@ const ACOES = {
   confirmarFerias:     { capacidade: 'PROGRAMAR',      funcao: 'acaoConfirmarFerias', modulo: ['quadro', 'config'] },
   cancelarProgramacaoFerias: { capacidade: 'PROGRAMAR', funcao: 'acaoCancelarProgramacaoFerias', modulo: ['quadro', 'config'] },
   atualizarQuadro:     { capacidade: null,             funcao: 'acaoAtualizarQuadro', modulo: 'quadro' },
+
+  // situacao de carga (25/11 — Carga.gs). geracaoCarga e a pergunta barata da tela ao vivo (so le tres numeros).
+  geracaoCarga:        { capacidade: null,           funcao: 'acaoGeracaoCarga', modulo: 'carga', tela: 'carga', leitura: true },
+  enviarSituacaoCarga: { capacidade: 'GERIR_CARGA',  funcao: 'acaoEnviarSituacaoCarga', modulo: 'carga', tela: 'carga' },
+  excluirSituacaoCarga:{ capacidade: 'GERIR_CARGA',  funcao: 'acaoExcluirSituacaoCarga', modulo: 'carga', tela: 'carga' },
+  moverPessoaCarga:    { capacidade: 'GERIR_CARGA',  funcao: 'acaoMoverPessoaCarga', modulo: 'carga', tela: 'carga' },
+  limparAlocacaoCarga: { capacidade: 'GERIR_CARGA',  funcao: 'acaoLimparAlocacaoCarga', modulo: 'carga', tela: 'carga' },
+  equipamentoCarga:    { capacidade: 'GERIR_CARGA',  funcao: 'acaoEquipamentoCarga', modulo: 'carga', tela: 'carga' },
+  quantidadeEquipamentoCarga: { capacidade: 'GERIR_CARGA', funcao: 'acaoQuantidadeEquipamentoCarga', modulo: 'carga', tela: 'carga' },
 
   // entrada (4.2)
   zerarPin:            { capacidade: 'GERIR_ACESSOS', funcao: 'acaoZerarPin' },

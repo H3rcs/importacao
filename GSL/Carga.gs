@@ -518,7 +518,7 @@ function dadosCarga(usuario, params) {
     // fase 2 (8.15)
     turnos: turnos,
     turnoAgora: cgTurnosNoHorario_(turnos, cgMinDoDia_(agora)),
-    faltas: cgFaltas_(turnos, agora),
+    faltas: cgFaltas_(turnos, agora, true),
     flowrack: { ruas: cgRuasFlowrack_() },
     envios: cgListaEnvios_(snaps),
     passagens: cgPassagens_(),
@@ -1075,12 +1075,21 @@ function cgDiaDoTurno_(turnoId, agoraIso, turnos) {
 /* FALTA DO DIA (CARGA_PRESENCA)                                       */
 /* ------------------------------------------------------------------ */
 
-function cgFaltas_(turnos, agora) {
+/*
+ * As faltas que valem agora. recentes = true: as de ontem e de hoje, cada uma com `ativa` na hora do
+ * servidor — e o que a tela leva (a tela guardada no servidor vale o dia todo; quem decide se a falta
+ * ainda vale e o relogio da tela, pelo mesmo cgDiaDoTurno).
+ */
+function cgFaltas_(turnos, agora, recentes) {
+  const hoje = String(agora).slice(0, 10), ontem = cgDiaMais_(hoje, -1);
   return listar('CARGA_PRESENCA').filter(function (r) {
-    return String(r.STATUS) === 'FALTA' && String(r.DATA) === cgDiaDoTurno_(cgTurnoDaEquipe_(r.EQUIPE), agora, turnos);
+    if (String(r.STATUS) !== 'FALTA') return false;
+    const ativa = String(r.DATA) === cgDiaDoTurno_(cgTurnoDaEquipe_(r.EQUIPE), agora, turnos);
+    return recentes ? (ativa || String(r.DATA) === hoje || String(r.DATA) === ontem) : ativa;
   }).map(function (r) {
     return { id: r.ID, k: String(r.PESSOA), nome: String(r.NOME || ''), equipe: String(r.EQUIPE || ''), turno: cgTurnoDaEquipe_(r.EQUIPE),
-      data: String(r.DATA), por: String(r.CRIADO_POR || ''), porNome: String(r.POR_NOME || ''), em: String(r.CRIADO_EM || '') };
+      data: String(r.DATA), por: String(r.CRIADO_POR || ''), porNome: String(r.POR_NOME || ''), em: String(r.CRIADO_EM || ''),
+      ativa: String(r.DATA) === cgDiaDoTurno_(cgTurnoDaEquipe_(r.EQUIPE), agora, turnos) };
   });
 }
 function cgFaltaDe_(k, turnos, agora) { return cgFaltas_(turnos, agora).filter(function (f) { return f.k === k; })[0] || null; }
@@ -1116,7 +1125,7 @@ function acaoPresencaCarga(usuario, params) {
   });
   esquecerLeituras();
   const nomeCurto = cgTitulo_(nome);
-  return { ok: true, faltas: cgFaltas_(cgTurnos_(), cgAgoraIso_()), equipe: cgEquipe_(), g: cgGeracao_(),
+  return { ok: true, faltas: cgFaltas_(cgTurnos_(), cgAgoraIso_(), true), equipe: cgEquipe_(), g: cgGeracao_(),
     recado: marcar ? nomeCurto + ' marcado como falta' + (tirou ? ' e tirado da alocação' : '') + '.' : 'Falta de ' + nomeCurto + ' desfeita.' };
 }
 
@@ -1538,7 +1547,7 @@ function cgLerPlanilhaBoxes_(id) {
   exigirPorta_();
   const ss = SpreadsheetApp.openById(id);
   const abas = ss.getSheets().slice(0, 12).map(function (aba) {
-    const nl = Math.min(800, Math.max(1, aba.getLastRow())), nc = Math.min(60, Math.max(1, aba.getLastColumn()));
+    const nl = Math.min(800, Math.max(1, aba.getLastRow())), nc = Math.min(60, aba.getMaxColumns(), Math.max(1, aba.getLastColumn()));
     return { nome: aba.getName(), valores: aba.getRange(1, 1, nl, nc).getDisplayValues() };
   });
   const lido = cgInterpretarBoxes_(abas);
@@ -1564,7 +1573,7 @@ function cgInterpretarBoxes_(abas) {
   const acharCabecalho = function (valores) {
     for (let l = 0; l < Math.min(15, valores.length); l++) {
       const linha = (valores[l] || []).map(nn);
-      if (!linha.some(function (c) { return /^CARGA/.test(c); }) || !linha.some(function (c) { return /^(BOX|DOCA)/.test(c); })) continue;
+      if (!linha.some(function (c) { return /\bCARGA/.test(c); }) || !linha.some(function (c) { return /^(BOX|DOCA)/.test(c); })) continue;
       const col = {}, usada = {};
       COLS.forEach(function (x) {
         x[1].some(function (re) {

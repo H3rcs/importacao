@@ -1788,7 +1788,7 @@ function cgSeqItemHtml(x, i, total) {
       <span class="cg-seq-nome">${esc(x.nm || '—')}</span>
       <small>${esc(x.v || '')}${x.bx ? ' · box ' + esc(x.bx) : ''}${pat ? ' · pátio: ' + esc(pat.box ? 'box ' + pat.box : 'fila') + (pat.situacao ? ' (' + esc(pat.situacao) + ')' : '') : ''}${x.gargalo ? ' · <span class="cg-gargalo-txt">gargalo: ' + esc(cgNomeDep(x.gargalo)) + '</span>' : ''}</small></div>
     <div class="cg-seq-prog"><span class="cg-trilho"><i class="${x.estado === 'pronta' ? 'verde' : 'azul'}" style="width:${pct.toFixed(1)}%"></i></span>
-      <span><b class="cg-num">${x.pct == null ? '—' : Math.round(pct) + '%'}</b> ${esc(CG_SEQ_ESTADO[x.estado] || x.estado)}</span></div>
+      <span><b class="cg-num">${cgPctBaixo(x.pct)}</b> ${esc(CG_SEQ_ESTADO[x.estado] || x.estado)}</span></div>
     <div class="cg-seq-flags">${flags}</div>
     ${pode ? `<div class="cg-seq-botoes" role="group" aria-label="Mover a carga ${esc(x.n)}">
       <button type="button" ${i ? '' : 'disabled'} onclick="cgSeqMover(${jsArg(x.n)}, 1)" title="Para o topo" aria-label="Para o topo">⤒</button>
@@ -2036,12 +2036,14 @@ function cgDocaHtml(b) {
     ${b.itens.map((x) => cgCargaNaDocaHtml(x)).join('')}
   </div>`;
 }
-function cgBarraMini(rot, p, cls) { return `<span class="cg-bm"><small>${rot}</small><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(0)}%"></i></span><b class="cg-num">${p == null ? '—' : Math.round(p) + '%'}</b></span>`; }
+/* % sem arredondar para cima: 99,6% de uma carga que nao terminou aparece 99%, nunca 100%. */
+function cgPctBaixo(p) { return p == null ? '—' : (p >= 100 ? 100 : Math.floor(p)) + '%'; }
+function cgBarraMini(rot, p, cls) { return `<span class="cg-bm"><small>${rot}</small><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(0)}%"></i></span><b class="cg-num">${cgPctBaixo(p)}</b></span>`; }
 function cgCargaNaDocaHtml(x) {
   const pode = CG.dados.podeEditar, p = x.pdf;
   return `<div class="cg-doca-carga et-${x.etapa.toLowerCase()}" ${pode ? `draggable="true" ondragstart="cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()"` : ''} data-id="${esc(x.id)}">
     <button type="button" class="cg-doca-carga-cab" onclick="cgMenuCarregamento(${jsArg(x.id)})"><b class="cg-num">${esc(x.n)}</b>${p && p.h ? '<i class="cg-24">24 h</i>' : ''}${x.prio ? `<i class="cg-prio">prior. ${esc(x.prio)}</i>` : ''}
-      <span class="cg-doca-pct">${p ? Math.round(p.pct) + '%' : 'fora do PDF'}</span></button>
+      <span class="cg-doca-pct">${p ? cgPctBaixo(p.pct) : 'fora do PDF'}</span></button>
     ${p ? `<span class="cg-doca-barras">${cgBarraMini('sep', p.sep, 'azul')}${cgBarraMini('conf', p.conf, 'cor-conf')}</span>
       <small class="cg-doca-gargalo">${p.estado === 'pronta' ? '✓ pronta' : (p.gargalo ? 'gargalo: ' + esc(cgNomeDep(p.gargalo)) : esc(CG_SEQ_ESTADO[p.estado] || ''))}</small>` : ''}
     ${x.situacao ? `<span class="cg-sit cat-${x.situacaoCat || 'outra'}">${esc(x.situacao)}</span>` : ''}
@@ -2055,7 +2057,7 @@ function cgCartaoCarregHtml(x) {
   return `<div class="cg-carreg" ${pode ? `draggable="true" ondragstart="cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()"` : ''} data-id="${esc(x.id)}">
     <div class="cg-carreg-veic">${cgVeiculoSvg(x.tipo, x.chegada ? '' : 'fantasma')}</div>
     <button type="button" class="cg-doca-carga-cab" onclick="cgMenuCarregamento(${jsArg(x.id)})"><b class="cg-num">${esc(x.n)}</b>${p && p.h ? '<i class="cg-24">24 h</i>' : ''}${x.prio ? `<i class="cg-prio">prior. ${esc(x.prio)}</i>` : ''}
-      <span class="cg-doca-pct">${p ? Math.round(p.pct) + '%' : 'fora do PDF'}</span></button>
+      <span class="cg-doca-pct">${p ? cgPctBaixo(p.pct) : 'fora do PDF'}</span></button>
     <small>${esc(x.veiculo || CG_VEIC[cgTipoVeiculoCli(x.tipo)].nome)}${x.chegada ? ' · no pátio desde ' + esc(cgHora(x.chegada)) : (x.previsao ? ' · previsão ' + esc(x.previsao) : '')}${p && p.bx ? ' · box ' + esc(p.bx) + ' no relatório' : ''}</small>
     ${x.situacao ? `<span class="cg-sit cat-${x.situacaoCat || 'outra'}">${esc(x.situacao)}</span>` : ''}
   </div>`;
@@ -2212,8 +2214,10 @@ function cgLinhaTurnosSvg(turnos, agora) {
   const faixas = turnos.map((t, i) => {
     const y = 14 + i * 22;
     const seg = t.cruza ? [[t.ini, 1440], [0, t.fim]] : [[t.ini, t.fim]];
+    const maior = seg.slice().sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
+    const meio = Math.max(60, Math.min(W - 60, x((maior[0] + maior[1]) / 2)));
     return seg.map((s) => `<rect x="${x(s[0]).toFixed(1)}" y="${y}" width="${(x(s[1]) - x(s[0])).toFixed(1)}" height="16" rx="5" class="cg-tl-${t.id}"/>`).join('') +
-      `<text x="${(x(t.cruza ? t.ini : (t.ini + t.fim) / 2) + (t.cruza ? 6 : 0)).toFixed(1)}" y="${y + 12}" class="cg-tl-txt" text-anchor="${t.cruza ? 'start' : 'middle'}">${t.id} ${esc(t.texto)}</text>`;
+      `<text x="${meio.toFixed(1)}" y="${y + 12}" class="cg-tl-txt${maior[1] - maior[0] < 200 ? ' fora' : ''}" text-anchor="middle">${t.id} ${esc(t.texto)}</text>`;
   }).join('');
   const horas = [0, 6, 12, 18, 24].map((h) => `<text x="${x(h * 60).toFixed(1)}" y="92" class="cg-grade-txt" text-anchor="middle">${String(h).padStart(2, '0')}h</text>`).join('');
   return `<svg class="cg-tl" viewBox="0 0 ${W} 96" role="img" aria-label="Horário dos turnos e a hora de agora">${faixas}${horas}
@@ -2403,7 +2407,7 @@ function cgComparacaoHtml(c) {
       <small>${cgPct(x.pctAntes)} → <b>${cgPct(x.pctDepois)}</b> · ${cgN(x.sep)} sep · ${cgN(x.conf)} conf · ${x.concluidas} prontas</small></div>`; }).join('')}</div>
     ${Object.keys(CG_CMP).filter((k) => grupos[k]).map((k) => `<details class="cg-cmp-grupo"${k === 'concluiu' || k === 'parada' ? ' open' : ''}><summary><span class="cg-sit cat-${CG_CMP[k][1]}">${CG_CMP[k][0]}</span> <b>${grupos[k].length}</b></summary>
       <ul class="cg-lista colunas">${grupos[k].slice(0, 60).map((x) => `<li class="cg-item"><span class="cg-item-nro">${esc(x.n)}${x.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
-        <span class="cg-item-nome">${esc(x.nm || '—')}<small>${x.antes == null ? '—' : Math.round(x.antes) + '%'} → ${x.depois == null ? '—' : Math.round(x.depois) + '%'}</small></span></li>`).join('')}</ul></details>`).join('')}
+        <span class="cg-item-nome">${esc(x.nm || '—')}<small>${cgPctBaixo(x.antes)} → ${cgPctBaixo(x.depois)}</small></span></li>`).join('')}</ul></details>`).join('')}
   </section>`;
 }
 </script>

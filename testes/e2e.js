@@ -5054,7 +5054,8 @@ async function rodar() {
     afirmar(cartoes === 'Grandeza|Miudeza|Blocado|Pesáveis|Nobre|Nobre Grandeza', 'cartoes: ' + cartoes);
     const eq = (await f.textContent('.cg-equilibrio')).replace(/\s+/g, ' ');
     afirmar(/Equilíbrio entre depósitos · CD/.test(eq) && /(Equilibrado|Atenção|Desequilibrado)/.test(eq) && /mais atrasado/.test(eq), 'equilibrio: ' + eq.slice(0, 200));
-    afirmar(await f.evaluate(() => document.querySelectorAll('.cg-pal-pool .cg-equip').length) === 12, '12 paleteiras desenhadas');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-tipo="PALETEIRA"] .cg-equip').length) === 12 &&
+      await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-tipo="CHECKOUT"] .cg-equip').length) === 12, '12 paleteiras e 12 check-outs desenhados');
     await foto(aba, 'carga-desktop-painel');
     // supervisao: as quatro colunas e o pool
     await f.click('.cg-aba[data-aba="supervisao"]');
@@ -5063,8 +5064,8 @@ async function rodar() {
     await foto(aba, 'carga-desktop-supervisao');
     // deposito Nobre: andares do flowrack
     await f.click('.cg-aba[data-aba="NOBRE"]');
-    const andares = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-equipe-dep .cg-zona .cg-zona-cab span')).map((x) => x.textContent).join('|'));
-    afirmar(andares === '4º andar|3º andar|2º andar|1º andar|Térreo|Conferentes', 'andares: ' + andares);
+    const andares = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-fr-rotulo span')).map((x) => x.textContent).join('|'));
+    afirmar(andares === '4º andar|3º andar|2º andar|1º andar|Térreo', 'andares do flowrack: ' + andares);
     await foto(aba, 'carga-desktop-nobre');
     // o mesmo PDF de novo: a previa ja diz que nao e mais novo e o Salvar fica desligado
     await f.click('.cg-btn-primario');
@@ -5101,7 +5102,7 @@ async function rodar() {
    * separacao da Grandeza; a outra ve na proxima pergunta da geracao. A outra move pelo toque (janela
    * "Onde ... fica?") alguem para o 3º andar do flowrack; uma paleteira vai para a Pesaveis.
    */
-  await cenario('situacao de carga: ao vivo — arrastar uma pessoa num navegador aparece no outro; toque para mover; paleteira do pool', async () => {
+  await cenario('situacao de carga: ao vivo — arrastar uma pessoa num navegador aparece no outro; toque para mover; paleteira em manutencao', async () => {
     const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
     const dono = pelaPorta(s, DONO, DONO, '4321');
     dono('salvarFonteQuadro', { link: quadroDeTeste(s) });
@@ -5140,19 +5141,17 @@ async function rodar() {
     await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="BLOCADO"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
     afirmar(!(await B.f.$(zonaG + ' .cg-boneco[data-k="' + k + '"]')), 'nao ficou na Grandeza');
     await foto(A.aba, 'carga-desktop-equipe');
-    // paleteira: A leva a 1 do pool para a Pesaveis (Painel do CD); B ve na Supervisao
+    // paleteira (8.15): o uso vem dos separadores; A manda a 1 para a manutencao (Painel do CD) e B ve na Supervisao
     await A.f.click('.cg-aba[data-aba="geral"]');
-    await A.f.click('.cg-pal-pool .cg-equip[data-numero="1"]');
-    await A.f.click('.cg-mover-dep .cg-opcao:has-text("Pesáveis")');
-    await A.f.waitForSelector('.cg-pal-pool .cg-equip.est-uso[data-numero="1"]', { timeout: 5000 });
+    await A.f.click('.cg-equip-pool[data-tipo="PALETEIRA"] .cg-equip[data-numero="1"]');
+    await A.f.fill('#cg-equip-obs', 'roda');
+    await A.f.click('.cg-mover .cg-opcao:has-text("manutenção")');
+    await A.f.waitForSelector('.cg-equip-pool[data-tipo="PALETEIRA"] .cg-equip.est-manutencao[data-numero="1"]', { timeout: 5000 });
     await B.f.click('.cg-aba[data-aba="supervisao"]');
-    await B.f.waitForSelector('.cg-sup-col[data-dep="PESAVEIS"] .cg-equip.est-uso[data-numero="1"]', { timeout: 15000 });
-    // arrastar a paleteira da Pesaveis para a Grandeza, na supervisao (B)
-    await B.f.dragAndDrop('.cg-sup-col[data-dep="PESAVEIS"] .cg-equip[data-numero="1"]', '.cg-sup-col[data-dep="GRANDEZA"] .cg-pal-zona');
-    await B.f.waitForSelector('.cg-sup-col[data-dep="GRANDEZA"] .cg-equip[data-numero="1"]', { timeout: 5000 });
+    await B.f.waitForSelector('.cg-equip-pool[data-tipo="PALETEIRA"] .cg-equip.est-manutencao[data-numero="1"]', { timeout: 15000 });
     const servidor = JSON.parse(s.chamar(DONO, 'carregarTela', { t: (await A.f.evaluate(() => TOKEN)), f: 'FSA' }, 'carga', {}).valor).dados;
     const p1 = servidor.equipamentos.find((e) => e.tipo === 'PALETEIRA' && e.numero === 1);
-    afirmar(p1.estado === 'USO' && p1.dep === 'GRANDEZA', 'paleteira no servidor: ' + JSON.stringify(p1));
+    afirmar(p1.estado === 'MANUTENCAO' && p1.obs === 'roda', 'paleteira no servidor: ' + JSON.stringify(p1));
     afirmar(servidor.equipe.length === 2 && servidor.equipe.filter((p) => p.k === k).length === 1, 'equipe no servidor: ' + JSON.stringify(servidor.equipe));
     await foto(B.aba, 'carga-desktop-supervisao-ao-vivo');
     const medidas = await A.f.evaluate(() => CG_VIVO.medidas.slice());
@@ -5398,7 +5397,7 @@ async function rodar() {
   });
 
   /* Duas telas: o que uma mexe (sequencia, patio, falta, passagem) aparece na outra; quem so ve nao mexe. */
-  await cenario('situacao de carga fase 2: ao vivo — sequencia, patio, falta e "Ciente" da passagem de um navegador aparecem no outro; quem so ve nao mexe', async () => {
+  await cenario('situacao de carga fase 2: ao vivo — sequencia, patio e "Ciente" da passagem de um navegador aparecem no outro; quem so ve nao mexe', async () => {
     const s = await subir({ agora: AGORA_F2 }); instalarComPessoas(s);
     cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Consulta');
     const dono = pelaPorta(s, DONO, DONO, '4321');

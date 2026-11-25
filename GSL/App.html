@@ -5892,7 +5892,8 @@ function paEditorValor(id) {
   const ed = el(id);
   if (!ed) return '';
   if (!ed.textContent.trim() && !ed.querySelector('li')) return '';
-  return '<div>' + paHtmlSeguro(ed.innerHTML) + '</div>';
+  const h = paHtmlSeguro(ed.innerHTML).trim();
+  return h.charAt(0) === '<' ? h : '<div>' + h + '</div>';
 }
 
 /* ---------- FOTOS DO CARTAO: grade com legenda e miniaturas que carregam quando aparecem ---------- */

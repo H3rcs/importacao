@@ -94,7 +94,7 @@ function hidratarAcao(r) {
   return {
     id: String(r.ID || ''),
     acao: String(r.ACAO || '').trim(),
-    descricao: String(r.DESCRICAO || '').trim(),
+    descricao: htmlGuardado_(r.DESCRICAO),
     responsavel: String(r.RESPONSAVEL || '').trim(),
     responsaveisEmails: responsaveis,
     responsavelEmail: responsaveis[0] || '',
@@ -231,7 +231,7 @@ function htmlRico_(valor) {
   saida = saida.trim();
   if (!textoDoHtml_('<div>' + saida + '</div>').trim()) return '';
   if (saida.length > TEXTO_RICO_MAXIMO) throw new Error('O texto é grande demais (máximo de ' + TEXTO_RICO_MAXIMO + ' caracteres).');
-  return '<div>' + saida + '</div>';
+  return saida.charAt(0) === '<' ? saida : '<div>' + saida + '</div>';
 }
 
 /* O que veio da tela: HTML limpo (rico, ou comecando com "<") ou o texto simples de antes, como esta. */
@@ -1274,7 +1274,9 @@ function salvarSituacaoDoPlano_(plano, usuario, params) {
   const parecerAntes = antes ? parecerDe_(antes) : '';
   const destAntes = antes ? emailsDaAcao_(antes.DESTINATARIO)[0] || '' : '';
   // O destinatario muda so sem parecer; com parecer, fica o que estava (a tela nem mostra o campo).
-  const destinatario = !antes || !parecerAntes ? destinatarioDoPedido_(plano, params.destinatario, destAntes) : destAntes;
+  // Editar sem mandar o destinatario (tela de antes, ou outro campo) mantem o que estava.
+  const destinatario = !antes || !parecerAntes
+    ? destinatarioDoPedido_(plano, antes && params.destinatario === undefined ? destAntes : params.destinatario, destAntes) : destAntes;
 
   const campos = {
     ACAO: titulo,

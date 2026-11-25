@@ -367,7 +367,8 @@ function acaoGerarMes(usuario, params) {
  * continuam existindo porque ha gatilho instalado com os dois nomes; com
  * a trava e o marcador, a segunda a rodar nao faz nada — so le o marcador.
  */
-function gerarMesSeNecessario() {
+function gerarMesSeNecessario(e) {
+  if (typeof gatilhoDeVerdade_ === 'function') gatilhoDeVerdade_(e);   // ver GATILHO DE VERDADE, no Codigo.gs
   return emCadaFilial_('calendario', gerarMesDaFilial_);
 }
 

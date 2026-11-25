@@ -152,6 +152,7 @@ async function abrirAba(s, conta, extras) {
 }
 
 async function frame(aba) {
+  if (aba.local) return aba.page.mainFrame();          // pagina local: sem a moldura do Google
   for (let i = 0; i < 50; i++) {
     const h = await aba.page.$('#userHtmlFrame');
     const f = h && await h.contentFrame();
@@ -159,6 +160,47 @@ async function frame(aba) {
     await aba.page.waitForTimeout(100);
   }
   throw new Error('iframe do GSL nao apareceu');
+}
+
+/*
+ * VERSAO LOCAL (GSL-Local): a pasta montada pelo ferramentas/montar-local.js com o gsl-config.js
+ * apontando para o /exec deste emulador, aberta como file:// (sem moldura, sem cookie do Google).
+ */
+const { montar: montarPastaLocal } = require('../ferramentas/montar-local.js');
+function montarLocal(s, ajuste) {
+  const fs = require('fs'), os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-local-'));
+  montarPastaLocal({ fonte: PASTA, saida: dir, url: s.url, silencioso: true });
+  if (ajuste) ajuste(dir);
+  return dir;
+}
+async function abrirLocal(s, extras) {
+  extras = extras || {};
+  const dir = extras.pasta || montarLocal(s);
+  const contexto = extras.contexto || await navegador.newContext({ acceptDownloads: true });
+  const page = await contexto.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !/fonts\.googleapis|Failed to load resource/.test(m.text()) &&
+        !(extras.semServidor && /CORS policy/.test(m.text()))) erros.push('console: ' + m.text());
+  });
+  await page.goto('file://' + dir + '/GSL.html' + (extras.query || ''), { waitUntil: 'domcontentloaded' });
+  const aba = { page, contexto, erros, s, local: true, pasta: dir };
+  await esperarTela(aba);
+  return aba;
+}
+/* A pagina local nao pode tocar no caminho da reserva: nenhum POST de pagina, nenhum google.script.run de verdade. */
+async function semReserva(aba) {
+  const f = await frame(aba);
+  const x = await f.evaluate(() => ({ barrado: CANAL_BARRADO, url: URL_APP, marca: localStorage.getItem('gsl_canal_barrado'), local: MODO_LOCAL }));
+  afirmar(x.local && x.barrado === false && x.url === '' && !x.marca, 'pagina local fora da reserva: ' + JSON.stringify(x));
+  afirmar(!aba.s.registro.some((r) => r.tipo === 'doPost' || r.tipo === 'run'), 'nenhum POST de pagina nem google.script.run: ' +
+    aba.s.registro.filter((r) => r.tipo === 'doPost' || r.tipo === 'run').map((r) => r.tipo + ':' + (r.fn || '')).join(','));
+}
+async function fecharLocal(aba) {
+  await aba.contexto.close();
+  try { require('fs').rmSync(aba.pasta, { recursive: true, force: true }); } catch (e) { /* pasta temporaria */ }
 }
 
 const TELAS = ['carregando', 'falha', 'instalacao', 'entrar', 'sem-acesso', 'escolher-filial', 'aplicacao'];
@@ -4524,6 +4566,222 @@ async function rodar() {
       /Saída prevista para 19\/10 — confirme/.test(document.querySelector('.qd-fe-ficha').innerText)), 'quem so ve: a situacao, sem botao');
     afirmar(!pc.erros.length, 'erros: ' + pc.erros.join(' | '));
     await pc.contexto.close(); await s.fechar();
+  });
+
+  /*
+   * VERSAO LOCAL (GSL-Local) — a pasta compartilhada da Bartofil, sem programa instalado. A pagina
+   * montada pelo ferramentas/montar-local.js abre como file:// (sem moldura, sem cookie do Google) e
+   * conversa com o /exec por fetch (a API em JSON do doPost). Para o servidor, quem chama e anonimo.
+   */
+  await cenario('local: pasta GSL-Local pelo file:// — primeiro acesso com o codigo do e-mail, escolha da filial, todas as telas do administrador sem erro, F5 continua dentro e Sair encerra a sessao', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador - BA', codigo: 'SSA', paineis: { calendario: 'ATIVO', limpeza: 'ATIVO' } });
+    const aba = await abrirLocal(s);
+    afirmar(await esperarTela(aba, ['entrar']) === 'entrar', 'a pasta abre na entrada');
+    afirmar(aba.page.url().indexOf('file://') === 0, 'aberta pelo file://: ' + aba.page.url());
+    const f = await frame(aba);
+    // primeiro acesso da coordenadora: sem conta Google do outro lado, o codigo vai para o e-mail dela
+    await entrar(aba, COORD, '1234', true);
+    afirmar(await esperarTela(aba, ['escolher-filial', 'aplicacao', 'falha']) === 'escolher-filial', 'duas filiais: escolhe');
+    afirmar(s.mundo.emails.some((m) => m.to === COORD && /código de primeiro acesso/i.test(m.subject)), 'o codigo do primeiro acesso foi para o e-mail');
+    await f.click('.cartao-filial:has-text("CD Salvador")');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou na filial escolhida');
+    afirmar(await f.evaluate(() => FILIAL) === 'SSA' && (await texto(aba, 'usuario-conta')).includes(COORD), 'em Salvador, como a coordenadora');
+    await f.evaluate(() => sair());
+    afirmar(await esperarTela(aba, ['entrar']) === 'entrar', 'Sair volta para a entrada');
+    // o administrador (PIN ja criado): filial principal e todas as telas
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['escolher-filial']);
+    await f.click('.cartao-filial:has-text("CD Feira de Santana")');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'administrador entrou');
+    afirmar(!(await f.evaluate(() => !!document.getElementById('aviso-versao'))), 'pasta e servidor na mesma versao: sem a faixa');
+    const telas = await f.evaluate(() => SESSAO.telas.map((t) => t.id));
+    const problemas = [];
+    for (const id of telas) {
+      aba.erros.length = 0;
+      await f.evaluate((i) => abrir(i), id);
+      let conteudo = '';
+      for (let k = 0; k < 80; k++) {
+        conteudo = await f.evaluate(() => document.getElementById('pagina').innerText);
+        if (!/Carregando/.test(conteudo)) break;
+        await aba.page.waitForTimeout(150);
+      }
+      const erroCaixa = await f.evaluate(() => Array.from(document.querySelectorAll('#pagina .erro-caixa')).map((e) => e.innerText).join(' | '));
+      if (/Carregando/.test(conteudo)) problemas.push(id + ': ficou carregando');
+      if (erroCaixa) problemas.push(id + ': ' + erroCaixa.slice(0, 200));
+      if (aba.erros.length) problemas.push(id + ': ' + aba.erros.join(' | ').slice(0, 300));
+    }
+    afirmar(telas.length >= 8 && !problemas.length, telas.length + ' telas; problemas:\n' + problemas.join('\n'));
+    // F5: a sessao da aba continua (como na versao online)
+    const token = await f.evaluate(() => TOKEN);
+    await aba.page.reload();
+    afirmar(await esperarTela(aba, ['aplicacao', 'entrar', 'falha']) === 'aplicacao', 'F5 continua dentro');
+    afirmar(await (await frame(aba)).evaluate(() => TOKEN) === token, 'a mesma sessao');
+    await semReserva(aba);
+    const apis = s.registro.filter((r) => r.tipo === 'api');
+    afirmar(apis.length > 10 && apis.every((r) => r.origem === 'null' && !/[a-f0-9]{32}/.test(r.fn)), 'tudo pela API, da origem file:// (null): ' + apis.length);
+    await (await frame(aba)).evaluate(() => sair());
+    afirmar(await esperarTela(aba, ['entrar']) === 'entrar', 'saiu');
+    await aba.page.waitForTimeout(400);
+    const r = s.chamar(GERAL, 'retomarSessao', { t: token, f: '' });
+    afirmar(r.ok && JSON.parse(r.valor).entrada === 'ENTRAR', 'a sessao acabou no servidor: ' + JSON.stringify(r).slice(0, 200));
+    await aba.page.reload();
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao']) === 'entrar', 'F5 depois de sair pede o PIN');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await fecharLocal(aba); await s.fechar();
+  });
+
+  await cenario('local: link ?tela=acoes abre o plano depois do PIN; comentar com foto grava pela API, o visor abre a foto e o Estoque de TI baixa o Excel', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] });
+    const aba = await abrirLocal(s, { query: '?tela=acoes' });
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou');
+    const f = await frame(aba);
+    await f.waitForFunction(() => paginaAtual === 'acoes' && !!document.querySelector('.cartao-acao'), null, { timeout: 15000 });
+    // comentario com foto
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    await f.fill('#cm-texto', 'Lâmpadas trocadas, foto do corredor');
+    await escolherFotos(f, 'cm', [{ name: 'corredor.png', mimeType: 'image/png', buffer: png }]);
+    await f.click('.janela .botao >> text=Registrar comentário');
+    await f.waitForFunction(() => (planoD().lista || []).some((a) => a.acao === 'Iluminação do Flow' &&
+      (a.comentarios || []).some((c) => (c.fotos || []).length === 1)), null, { timeout: 20000 });
+    const gravou = s.registro.filter((r) => r.tipo === 'api' && /^executarAcao/.test(r.fn));
+    afirmar(gravou.length === 1 && /"fotos":\[\{"nome":"corredor\.[a-z]+","tipo":"image\/[a-z]+","dados":"[A-Za-z0-9+\/=]{40,}/.test(gravou[0].corpo) && /"comentarAcao"/.test(gravou[0].corpo), 'a gravacao foi uma chamada da API com a foto no corpo: ' + gravou.map((r) => r.fn + ' ' + r.corpo.slice(0, 200)).join(' | '));
+    // o visor abre a foto (o servidor le do Drive e devolve pela API)
+    await f.click('.cartao-acao button:has-text("Comentários")');
+    await f.click('.coment-item .selo-foto');
+    await f.waitForFunction(visorComFoto, null, { timeout: 15000 });
+    await aba.page.keyboard.press('Escape');
+    await f.evaluate(() => fecharJanela());
+    // Excel do Estoque de TI: baixa da pagina local
+    await f.evaluate(async () => { await executarAcaoSrv('salvarItemEstoque', { nome: 'Mouse', minimo: '1', ideal: '3', saldoInicial: '2' }); esquecerTelas(); abrir('estoque'); });
+    await f.waitForSelector('text=Exportar Excel', { timeout: 15000 });
+    const [down] = await Promise.all([aba.page.waitForEvent('download', { timeout: 15000 }), f.click('text=Exportar Excel')]);
+    const caminho = path.join(require('os').tmpdir(), 'gsl-local-ti-' + Date.now() + '.xlsx');
+    await down.saveAs(caminho);
+    const folha = require('child_process').execSync('unzip -p "' + caminho + '" xl/worksheets/sheet1.xml').toString();
+    require('fs').unlinkSync(caminho);
+    afirmar(/\.xlsx$/.test(down.suggestedFilename()) && /Mouse/.test(folha) && /Estoque ideal/.test(folha), 'planilha baixada: ' + down.suggestedFilename());
+    await semReserva(aba);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await fecharLocal(aba); await s.fechar();
+  });
+
+  await cenario('local: sessao que acabou no servidor (1 h sem uso) volta para a entrada com o aviso; o PIN errado bloqueia como na online', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const aba = await abrirLocal(s);
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou');
+    const f = await frame(aba);
+    const token = await f.evaluate(() => TOKEN);
+    const c = s.contexto(DONO); c._porta = true; c.encerrarSessao_(token);    // como a 1 h sem uso, no servidor
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    afirmar(await esperarTela(aba, ['entrar'], 15000) === 'entrar', 'voltou para a entrada');
+    await f.waitForFunction(() => /sessão terminou/i.test(document.getElementById('entrar-msg').textContent), null, { timeout: 10000 });
+    afirmar(!(await f.evaluate(() => TOKEN)) && !(await f.evaluate(() => sessionStorage.getItem('gsl_sessao'))), 'a aba esqueceu a sessao');
+    afirmar(!/\[SESSAO\]/.test(await texto(aba, 'entrar-msg')), 'sem a marca tecnica na tela');
+    await aba.page.reload();
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao']) === 'entrar', 'F5 pede o PIN');
+    // PIN errado: as mesmas 5 tentativas por e-mail
+    for (let i = 0; i < 5; i++) {
+      await entrar(aba, DONO, '9999');
+      await f.waitForFunction((n) => /incorreto|muitas vezes/i.test(document.getElementById('entrar-msg').textContent) &&
+        !document.getElementById('entrar-botao').disabled, i, { timeout: 10000 });
+      await f.evaluate(() => { document.getElementById('entrar-msg').textContent = ''; });
+    }
+    await entrar(aba, DONO, '4321');
+    await f.waitForFunction(() => /muitas vezes/i.test(document.getElementById('entrar-msg').textContent), null, { timeout: 10000 });
+    afirmar((await telaVisivel(aba)).includes('entrar'), 'bloqueado mesmo com o PIN certo');
+    await semReserva(aba);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await fecharLocal(aba); await s.fechar();
+  });
+
+  await cenario('local: servidor fora do alcance — implantacao "Qualquer pessoa em Bartofil" (login do Google, sem CORS) e gsl-config.js sem endereco: a tela diz o que conferir e oferece a versao online', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    s.definirAcesso('dominio');
+    const aba = await abrirLocal(s, { semServidor: true });
+    afirmar(await esperarTela(aba, ['falha', 'entrar'], 20000) === 'falha', 'tela de falha');
+    const msg = await texto(aba, 'falha-texto');
+    afirmar(/Sem conexão com o servidor do GSL/.test(msg) && /Qualquer pessoa/.test(msg) && /gsl-config\.js/.test(msg) && !/\[API\]/.test(msg), 'explica: ' + msg);
+    const f = await frame(aba);
+    afirmar(await f.isVisible('#falha-online'), 'botao "Abrir a versão online"');
+    const [online] = await Promise.all([aba.contexto.waitForEvent('page', { timeout: 10000 }), f.click('#falha-online')]);
+    afirmar(online.url().indexOf(s.url) === 0, 'abre o /exec: ' + online.url());
+    await online.close();
+    afirmar(s.registro.some((r) => r.tipo === 'api' && r.fn === 'inicio'), 'tentou a API');
+    // implantacao corrigida para "Qualquer pessoa": Tentar de novo entra
+    s.definirAcesso('qualquer');
+    await f.click('#falha button:has-text("Tentar de novo")');
+    afirmar(await esperarTela(aba, ['entrar', 'falha'], 20000) === 'entrar', 'Tentar de novo (recarregar a pasta) chega na entrada');
+    await fecharLocal(aba);
+    // pasta sem o endereco configurado
+    const pasta = montarLocal(s, (dir) => {
+      const cfg = path.join(dir, 'gsl-config.js');
+      require('fs').writeFileSync(cfg, require('fs').readFileSync(cfg, 'utf8').replace(s.url, 'https://script.google.com/macros/s/COLE_AQUI_O_ID_DA_IMPLANTACAO/exec'));
+    });
+    const sem = await abrirLocal(s, { pasta });
+    afirmar(await esperarTela(sem, ['falha', 'entrar']) === 'falha' && /Falta o endereço do servidor no arquivo gsl-config\.js/.test(await texto(sem, 'falha-texto')),
+      'sem endereco: ' + await texto(sem, 'falha-texto'));
+    afirmar(!sem.erros.length, 'erros: ' + sem.erros.join(' | '));
+    await fecharLocal(sem); await s.fechar();
+  });
+
+  await cenario('local: chamada forjada pela API — sem sessao, funcao fora da lista, instalar e JSON com preflight sao recusados, nada gravado', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    const idAcao = dono('salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [DONO] }).id;
+    const aba = await abrirLocal(s);
+    const f = await frame(aba);
+    const linhas = () => { const c = s.contexto(DONO); c._porta = true; return c.listar('ACOES').length + '/' + c.listar('ACESSOS').length; };
+    const antes = linhas();
+    const r = await f.evaluate(async ([url, id]) => {
+      const api = (corpo, tipo) => fetch(url, { method: 'POST', headers: { 'Content-Type': tipo || 'text/plain' }, body: JSON.stringify(corpo) })
+        .then((x) => x.json()).catch((e) => ({ rede: String(e) }));
+      const falso = { t: 'f'.repeat(64), f: 'FSA' };
+      return {
+        semSessao: await api({ api: 1, fn: 'executarAcao', args: [falso, 'excluirAcao', { id }] }),
+        semCtx: await api({ api: 1, fn: 'carregarTela', args: ['FSA', 'acessos', {}] }),
+        tela: await api({ api: 1, fn: 'executarAcaoETela', args: [falso, 'salvarUsuario', { email: 'x@bartofil.com.br', perfil: 'ADMIN' }, 'acessos', {}] }),
+        interna: await api({ api: 1, fn: 'listar', args: ['ACESSOS'] }),
+        instalar: await api({ api: 1, fn: 'instalar', args: ['x@bartofil.com.br'] }),
+        proto: await api({ api: 1, fn: '__proto__', args: [] }),
+        semApi: await api({ fn: 'carregarTela', args: [] }),
+        json: await api({ api: 1, fn: 'sondarCanal', args: [] }, 'application/json')
+      };
+    }, [s.url, idAcao]);
+    afirmar(r.semSessao.ok === false && /^\[SESSAO\]/.test(r.semSessao.erro), 'executarAcao sem sessao: ' + JSON.stringify(r.semSessao));
+    afirmar(r.semCtx.ok === false && /^\[SESSAO\]/.test(r.semCtx.erro), 'carregarTela sem o codigo: ' + JSON.stringify(r.semCtx));
+    afirmar(r.tela.ok === false && /^\[SESSAO\]/.test(r.tela.erro), 'executarAcaoETela sem sessao: ' + JSON.stringify(r.tela));
+    ['interna', 'instalar', 'proto'].forEach((k) => afirmar(r[k].ok === false && /não liberada/.test(r[k].erro), k + ': ' + JSON.stringify(r[k])));
+    afirmar(r.semApi.ok === false && /inválido/.test(r.semApi.erro), 'sem "api":1: ' + JSON.stringify(r.semApi));
+    afirmar(r.json.rede && s.registro.some((x) => x.tipo === 'preflight'), 'application/json pede preflight, que o Apps Script nao responde: ' + JSON.stringify(r.json));
+    afirmar(linhas() === antes, 'nada gravado: ' + antes + ' -> ' + linhas());
+    await fecharLocal(aba); await s.fechar();
+  });
+
+  await cenario('local: pasta de outra versao (servidor atualizado, pasta nao) mostra a faixa "Atualização incompleta" pedindo a pasta nova', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const pasta = montarLocal(s, (dir) => {
+      const js = path.join(dir, 'gsl-app.js');
+      require('fs').writeFileSync(js, require('fs').readFileSync(js, 'utf8').replace(/const BUILD_APP = '[^']+'/, "const BUILD_APP = '2026.09.30'"));
+    });
+    const aba = await abrirLocal(s, { pasta });
+    await entrar(aba, DONO, '4321');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou');
+    const f = await frame(aba);
+    await f.waitForSelector('#aviso-versao', { timeout: 10000 });
+    const faixa = (await f.textContent('#aviso-versao')).replace(/\s+/g, ' ');
+    afirmar(/Atualização incompleta/.test(faixa) && /pasta GSL-Local/.test(faixa) && /2026\.09\.30/.test(faixa) && /2026\.10\.21|servidor está na/.test(faixa) &&
+      !/Codigo\.gs/.test(faixa), 'faixa: ' + faixa);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await fecharLocal(aba); await s.fechar();
   });
 
   await navegador.close();

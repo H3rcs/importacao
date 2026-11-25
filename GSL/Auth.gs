@@ -576,8 +576,11 @@ function exigirPorta_() {
   const ativo = emailDeQuemAbriu();
   // EMAIL_ADMIN lido direto: o prop() passa por aqui (seria recursao).
   const admin = String(PropertiesService.getScriptProperties().getProperty('EMAIL_ADMIN') || '').toLowerCase().trim();
-  if (!ativo ||                                         // gatilho: ninguem do outro lado
-      ativo === donoDoScript() ||                       // editor, pelo dono
+  // Vazio so vale com a prova do gatilho (gatilhoDeVerdade_, no Codigo.gs): com a implantacao em
+  // "Qualquer pessoa" (versao local), quem chama pelo navegador sem conta Google tambem chega vazio.
+  const gatilho = !ativo && typeof _gatilhoConferido !== 'undefined' && _gatilhoConferido;
+  if (gatilho ||                                        // gatilho instalado neste projeto
+      (ativo && ativo === donoDoScript()) ||            // editor, pelo dono
       (admin && ativo === admin)) {
     _portaConferida = true;
     return;

@@ -76,6 +76,7 @@ function arquivosForaDaVersao_() {
  *   /exec                 entrada normal (pede e-mail e PIN)
  *   /exec?filial=SSA      filial preferida depois de entrar
  *   /exec?diagnostico=1   diz se o Google esta informando quem abriu
+ *   POST text/plain       API em JSON da versao local, a pasta GSL-Local (ver API DA VERSAO LOCAL)
  */
 function doGet(e) {
   _porta = true;
@@ -101,6 +102,9 @@ function doGet(e) {
  */
 function doPost(e) {
   _porta = true;
+  // API da versao local (pasta GSL-Local): pedido e resposta em JSON, sem pagina. Ver API DA VERSAO LOCAL.
+  const api = pedidoDaApi_(e);
+  if (api) return responderApi_(api);
   const p = (e && e.parameter) || {};
   const pagina = doPost_(p);
   terminarBilhete_(p.bilhete);          // a folga de reenvio conta a partir daqui
@@ -337,6 +341,132 @@ function acaoPelaPagina_(p) {
  */
 function sondarCanal() { return 'ok'; }
 
+/*
+ * API DA VERSAO LOCAL (GSL-Local, a pasta compartilhada da Bartofil).
+ *
+ * A pagina aberta da pasta (file://, sem programa instalado) nao tem o
+ * google.script.run: cada chamada vai por fetch() num POST text/plain
+ * (pedido "simples", sem preflight) no mesmo /exec:
+ *   {"api":1,"fn":"carregarTela","args":[{"t":"<sessao>","f":"FSA"},"acoes",{}]}
+ * e volta {"ok":true,"valor":...} ou {"ok":false,"erro":"mensagem"} — o
+ * mesmo que o google.script.run entrega a tela (o valor, ou a mensagem do
+ * erro, com o [SESSAO] quando a sessao acabou). Tambem aceita o formulario
+ * api=1&pedido=<o mesmo JSON>.
+ *
+ * O fetch de uma pagina file:// so passa com a implantacao em "Qualquer
+ * pessoa" (sem login do Google): quem chama e ANONIMO para o Google. Por
+ * isso:
+ *   - so as portas que a tela ja chama passam (API_PORTAS); o resto, nem
+ *     as funcoes internas, nem instalar, nem nada novo, e recusado;
+ *   - cada porta roda com as conferencias de sempre (sessao, filial,
+ *     capacidade, modulo — e o bloqueio do PIN na entrada);
+ *   - fora a entrada (inicio, entrar, sondarCanal), a API exige o codigo
+ *     de uma sessao viva ANTES de chamar a porta. Sem ela, a porta nem
+ *     roda: volta o [SESSAO] (ou a resposta de "sem sessao" que a porta
+ *     ja dava, para a tela reagir igual).
+ * As paginas (doGet e o resto do doPost) continuam como estavam.
+ */
+const SESSAO_TERMINOU_API = '[SESSAO] Sua sessão terminou. Entre de novo com o seu e-mail e PIN.';
+const API_PORTAS = {
+  // entrada: sem sessao
+  inicio:            { funcao: 'inicioPelaApi_', publica: true },
+  entrar:            { funcao: 'entrar', publica: true },
+  sondarCanal:       { funcao: 'sondarCanal', publica: true },
+  // com sessao viva (semSessao: o que a propria porta responde sem sessao — a tela reage igual)
+  retomarSessao:     { funcao: 'retomarSessao', semSessao: { ok: true, instalado: true, entrada: 'ENTRAR' } },
+  abrirFilial:       { funcao: 'abrirFilial', semSessao: { ok: false, entrada: 'SEM_SESSAO', erro: SESSAO_TERMINOU_API } },
+  manterSessao:      { funcao: 'manterSessao', semSessao: { ok: false } },
+  sairDoSistema:     { funcao: 'sairDoSistema', semSessao: { ok: true } },
+  carregarTela:      { funcao: 'carregarTela' },
+  executarAcao:      { funcao: 'executarAcao' },
+  executarAcaoETela: { funcao: 'executarAcaoETela' },
+  obterAnexo:        { funcao: 'obterAnexo' },
+  encerrarSimulacao: { funcao: 'encerrarSimulacao' }
+};
+const API_MAX_ARGS = 8;
+
+/* O pedido da API, ou null quando o POST e de pagina (formulario de entrada, reserva). */
+function pedidoDaApi_(e) {
+  const pd = (e && e.postData) || null;
+  const p = (e && e.parameter) || {};
+  let bruto;
+  if (pd && /^text\/plain/i.test(String(pd.type || ''))) bruto = String(pd.contents || '');
+  else if (p.api === '1') bruto = String(p.pedido || '');
+  else return null;
+  let pedido = null;
+  try { pedido = JSON.parse(bruto); } catch (x) { pedido = null; }
+  if (!pedido || typeof pedido !== 'object' || Array.isArray(pedido) || pedido.api !== 1) return { invalido: true };
+  return pedido;
+}
+
+function responderApi_(pedido) {
+  let r;
+  try {
+    r = { ok: true, valor: rodarPortaDaApi_(pedido) };
+  } catch (erro) {
+    r = { ok: false, erro: String((erro && erro.message) || erro || 'Erro desconhecido.') };
+  }
+  r.build = APP.build;          // a pasta compara com o carimbo dela (faixa "Atualização incompleta")
+  let texto;
+  try { texto = JSON.stringify(r); }
+  catch (x) { texto = JSON.stringify({ ok: false, erro: 'O servidor montou uma resposta que não passa para a tela.', build: APP.build }); }
+  return ContentService.createTextOutput(texto).setMimeType(ContentService.MimeType.JSON);
+}
+
+function rodarPortaDaApi_(pedido) {
+  if (pedido.invalido) throw new Error('Pedido inválido para a API do GSL.');
+  const nome = String(pedido.fn || '');
+  const porta = Object.prototype.hasOwnProperty.call(API_PORTAS, nome) ? API_PORTAS[nome] : null;
+  if (!porta) throw new Error('Função não liberada na API do GSL: ' + nome.replace(/[^\w.-]/g, '').slice(0, 60) + '.');
+  // IDENTIDADE=GOOGLE (modo antigo) depende da conta do navegador, que a pagina local nao manda.
+  if (modoGoogle_()) throw new Error('A versão local não funciona com a propriedade IDENTIDADE=GOOGLE. Use a versão online.');
+  const args = Array.isArray(pedido.args) ? pedido.args.slice(0, API_MAX_ARGS) : [];
+  if (!porta.publica) {
+    const ctx = args[0];
+    const token = ctx && typeof ctx === 'object' ? String(ctx.t || '') : '';
+    if (!emailDaSessao_(token)) {
+      if (porta.semSessao) return JSON.stringify(porta.semSessao);
+      throw new Error(SESSAO_TERMINOU_API);
+    }
+  }
+  const executor = globalThis[porta.funcao];
+  if (typeof executor !== 'function') throw new Error('A porta ' + nome + ' não existe neste Codigo.gs.');
+  const valor = executor.apply(null, args);
+  return valor === undefined ? null : valor;
+}
+
+/*
+ * O que a pagina local precisa para abrir (o CARGA_INICIAL que o doGet poe
+ * dentro do HTML): entrada, link de e-mail (?tela=...), endereco online.
+ * NUNCA com sessao: a aba que ja tem sessao continua pelo retomarSessao.
+ */
+function inicioPelaApi_(pedido) {
+  const q = pedido && typeof pedido === 'object' ? pedido : {};
+  const texto = function (v) { return v === undefined || v === null ? '' : String(v).slice(0, 2000); };
+  const carga = cargaDaPagina_({ filial: texto(q.filial), tela: texto(q.tela), p: texto(q.p), aba: texto(q.aba), acao: texto(q.acao) });
+  carga.urlApp = urlDoApp_();
+  return JSON.stringify(carga);
+}
+
+/*
+ * GATILHO DE VERDADE (versao local). Com a implantacao em "Qualquer pessoa",
+ * quem chama pelo navegador tambem chega sem conta Google (vazio), como um
+ * gatilho. A porta obrigatoria (exigirPorta_) deixava passar o vazio
+ * pensando no gatilho; agora ela so deixa passar o vazio quando a funcao
+ * do gatilho provou que e um gatilho: o evento traz o triggerUid de um
+ * gatilho instalado neste projeto. Quem chama a funcao pelo console nao
+ * tem esse numero.
+ */
+var _gatilhoConferido = false;
+function gatilhoDeVerdade_(e) {
+  const uid = e && typeof e === 'object' && e.triggerUid ? String(e.triggerUid) : '';
+  if (!uid) return false;
+  try {
+    if (ScriptApp.getProjectTriggers().some(function (g) { return String(g.getUniqueId()) === uid; })) _gatilhoConferido = true;
+  } catch (x) { /* sem a lista, nao conta como gatilho */ }
+  return _gatilhoConferido;
+}
+
 function paginaComCarga_(carga) {
   carga.urlApp = urlDoApp_();
   carga.bilhete = novoBilhete_();
@@ -495,15 +625,21 @@ function paginaDiagnostico_() {
 
   const linha = (r, v) => '<tr><td style="padding:8px 14px;color:#555">' + r +
     '</td><td style="padding:8px 14px;font-weight:bold">' + v + '</td></tr>';
+  /*
+   * Implantacao em "Qualquer pessoa" (versao local): esta pagina abre para quem
+   * nao tem conta Google nenhuma. Sem ninguem identificado, a conta do dono vai
+   * mascarada e os numeros das sessoes ficam de fora.
+   */
+  const anonimo = !emailDeQuemAbriu();
   // typeof: o Auth.gs da entrega anterior (colado pela metade) nao tem o resumo — a pagina abre assim mesmo
-  const sessoes = typeof resumoDasSessoes_ === 'function' ? resumoDasSessoes_() : null;
+  const sessoes = !anonimo && typeof resumoDasSessoes_ === 'function' ? resumoDasSessoes_() : null;
 
   const html =
     '<div style="font-family:Arial,sans-serif;max-width:640px;margin:40px auto;color:#14152B">' +
     '<div style="background:#111785;color:#fff;padding:14px 18px;font-weight:bold">GSL — diagnóstico de identidade</div>' +
     '<table style="width:100%;border-collapse:collapse;background:#f7f8fc">' +
     linha('Quem o Google diz que abriu', d.usuarioAtivo || '(vazio)') +
-    linha('Conta que executa o script', d.donoDoScript || '(vazio)') +
+    linha('Conta que executa o script', anonimo ? mascararEmail_(d.donoDoScript) : (d.donoDoScript || '(vazio)')) +
     linha('Cadastrada no GSL?', d.cadastrado ? 'SIM — ' + (d.perfil || '') : 'NÃO') +
     linha('Endereço usado pelo sistema', htmlSeguro(urlDoApp_() || '(vazio)') +
       (/\/dev$/.test(urlDoApp_()) ? ' — é o de TESTE: grave o /exec na propriedade URL_APP' : '')) +
@@ -511,9 +647,18 @@ function paginaDiagnostico_() {
       linha('Sessões guardadas agora', sessoes.naLoja < 0 ? '(não consegui ler)' : String(sessoes.naLoja)) : '') +
     '</table>' +
     '<p style="line-height:1.7;background:#FFF8D6;padding:14px 18px;border-left:4px solid #EA6D0B">' +
-    d.veredito + '</p></div>';
+    d.veredito + (anonimo ? ' Com a implantação em "Qualquer pessoa" (a que a pasta GSL-Local usa), isto é o esperado: ' +
+      'quem entra é dito pelo e-mail e PIN do GSL, não pela conta Google.' : '') + '</p></div>';
 
   return HtmlService.createHtmlOutput(html).setTitle('GSL — diagnóstico');
+}
+
+/* d***o@bartofil.com.br — a pagina de diagnostico aberta sem conta Google nao mostra o e-mail do dono. */
+function mascararEmail_(email) {
+  const e = String(email || '');
+  const i = e.indexOf('@');
+  if (i < 1) return e ? '(oculto)' : '(vazio)';
+  return htmlSeguro(e.charAt(0) + '***' + (i > 1 ? e.charAt(i - 1) : '') + e.slice(i));
 }
 
 function acaoDiagnosticoIdentidade(usuario) {
@@ -824,7 +969,8 @@ function carregarTela(ctx, idTela, params) {
  *
  * So trabalha em horario util, para nao gastar cota de madrugada.
  */
-function aquecerCache() {
+function aquecerCache(e) {
+  gatilhoDeVerdade_(e);         // o gatilho prova que e gatilho (ver GATILHO DE VERDADE)
   exigirPorta_();
   // As sessoes paradas saem da loja aqui (a qualquer hora), e nao na entrada de alguem.
   try { if (typeof podarSessoes_ === 'function') podarSessoes_(500); } catch (e) {}

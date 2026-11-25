@@ -12,7 +12,7 @@
  */
 'use strict';
 const path = require('path');
-const { Mundo, chamarPeloNavegador } = require('./emulador/gas.js');
+const { Mundo, chamarPeloNavegador, novaExecucao } = require('./emulador/gas.js');
 const { HEIC_MINI } = require('./emulador/miniatura-drive.js');
 
 const PASTA = path.resolve(process.argv[2] || path.join(__dirname, '..', 'GSL'));
@@ -114,6 +114,28 @@ bloqueadas.forEach(([fn, ...a]) => {
 });
 ok(m.emails.length === emailsAntesDosAtaques, 'nenhum e-mail saiu pelas chamadas diretas (marcar pessoa pelo console nao avisa ninguem)');
 
+/*
+ * VERSAO LOCAL: a implantacao em "Qualquer pessoa" deixa chegar quem nao tem conta Google
+ * nenhuma — o Google entrega o e-mail vazio, como num gatilho. As mesmas chamadas, anonimas.
+ */
+console.log('\nAs mesmas chamadas sem conta Google (implantacao em "Qualquer pessoa", versao local):');
+let anonimasPassaram = [];
+bloqueadas.forEach(([fn, ...a]) => {
+  const r = run('', fn, ...a);
+  if (!(!r.ok && /Acesso negado|not found/i.test(r.erro.message))) anonimasPassaram.push(fn + (r.ok ? ' DEVOLVEU ' + JSON.stringify(r.valor).slice(0, 60) : ' ' + r.erro.message.slice(0, 60)));
+});
+ok(!anonimasPassaram.length, bloqueadas.length + ' chamadas anonimas bloqueadas' + (anonimasPassaram.length ? ' — PASSARAM: ' + anonimasPassaram.join(' | ') : ''));
+ok(m.emails.length === emailsAntesDosAtaques, 'nenhum e-mail saiu pelas chamadas anonimas');
+const gatilhoFalso = run('', 'atualizarCompetenciaAberta', { triggerUid: '12345', authMode: 'FULL' });
+ok(!gatilhoFalso.ok && /Acesso negado/.test(gatilhoFalso.erro.message), 'evento de gatilho inventado (triggerUid que nao existe) nao passa');
+['rotinaDiaria', 'aquecerCache', 'gerarMesSeNecessario'].forEach((fn) => {
+  const r = run('', fn);
+  ok(!r.ok && /Acesso negado/.test(r.erro.message), fn + ' anonimo (sem o evento do gatilho) bloqueado');
+});
+// rotinaMensal engole o erro do gerarMesSeNecessario (que e barrado la dentro): nada roda, nada volta
+const rm = run('', 'rotinaMensal');
+ok(rm.ok ? rm.valor === null && m.emails.length === emailsAntesDosAtaques : /Acesso negado/.test(rm.erro.message), 'rotinaMensal anonima nao faz nada');
+
 console.log('\nPortas novas sem sessao (10/10):');
 const ea = run(ATACANTE, 'executarAcaoETela', { t: 'f'.repeat(64), f: ctx.f }, 'excluirAcao', { id: 'x' }, 'acoes', {});
 ok(!ea.ok && /\[SESSAO\]/.test(ea.erro.message), 'executarAcaoETela sem sessao: ' + (ea.ok ? 'DEVOLVEU ' + String(ea.valor).slice(0, 60) : ea.erro.message.slice(0, 50)));
@@ -133,8 +155,13 @@ const cp = run(ATACANTE, 'executarAcao', { t: 'f'.repeat(64), f: ctx.f }, 'conve
 ok(!cp.ok && /\[SESSAO\]/.test(cp.erro.message) && noDrive() === antesHeic, 'converterFoto pela porta sem sessao: recusado, nada criado no Drive');
 
 console.log('\nQuem deve continuar passando:');
-const g = run('', 'atualizarCompetenciaAberta');                        // gatilho: sem usuario do outro lado
-ok(g.ok, 'gatilho (sem usuario) roda atualizarCompetenciaAberta');
+// gatilho de verdade: o Google entrega o evento com o triggerUid de um gatilho instalado neste projeto
+const gat = novaExecucao(m, PASTA, { contaGoogle: DONO }, { apagarComentarios: 'nenhum' }).ScriptApp
+  .newTrigger('atualizarCompetenciaAberta').timeBased().everyHours(1).create();
+const g = run('', 'atualizarCompetenciaAberta', { triggerUid: gat.getUniqueId(), authMode: 'FULL' });
+ok(g.ok, 'gatilho (sem usuario, com o evento do gatilho instalado) roda atualizarCompetenciaAberta' + (g.ok ? '' : ': ' + g.erro.message));
+const ga = run('', 'aquecerCache', { triggerUid: gat.getUniqueId() });
+ok(ga.ok, 'gatilho roda aquecerCache' + (ga.ok ? '' : ': ' + ga.erro.message));
 const d = run(DONO, 'prop', 'ID_BANCO');                                 // dono pelo editor
 ok(d.ok && d.valor, 'dono pelo editor le propriedade');
 const t = JSON.parse(run(ATACANTE, 'carregarTela', ctx, 'inicio', {}).valor);

@@ -28,6 +28,18 @@
  *
  * criarServidor({ agora: '2026-10-19T10:00:00-03:00' }) (19/10): o relogio do
  * script comeca nesse instante e anda dali (ver Mundo, em gas.js).
+ *
+ * API DA VERSAO LOCAL (GSL-Local): POST /exec com corpo text/plain (ou o
+ * formulario api=1) e a API em JSON do doPost. Como o Google:
+ *   - a resposta do /exec e um 302 para o "eco" (/__eco?k=..., no Google e o
+ *     script.googleusercontent.com), os dois com Access-Control-Allow-Origin: *;
+ *   - quem chama de uma pagina file:// nao manda cookie: para o script, ele e
+ *     anonimo (Session.getActiveUser vazio);
+ *   - OPTIONS (preflight) recebe 405 sem cabecalho de CORS: so o pedido
+ *     "simples" (text/plain) passa;
+ *   - definirAcesso('dominio') imita a implantacao "Qualquer pessoa em
+ *     Bartofil": sem a conta Google, o POST vira 302 para o login, sem CORS
+ *     (o fetch da pagina local falha). 'qualquer' (padrao) e "Qualquer pessoa".
  */
 'use strict';
 const http = require('http');
@@ -140,6 +152,9 @@ function criarServidor(opcoes) {
   const execOpcoes = { apagarComentarios: opcoes.apagarComentarios, ordem: opcoes.ordem };
   const registro = [];
   const falhasFeitas = new Map();          // gas_falha com limite: quantas ja falharam
+  const ecos = new Map();                  // respostas da API esperando o GET do "eco"
+  const estado = { acesso: opcoes.acesso || 'qualquer' };
+  const CORS = { 'Access-Control-Allow-Origin': '*' };
 
   const servidor = http.createServer(async (req, res) => {
     const base = 'http://' + req.headers.host;
@@ -148,6 +163,31 @@ function criarServidor(opcoes) {
     const cookies = lerCookies(req);
     const execucao = { contaGoogle: cookies.gas_conta !== undefined ? cookies.gas_conta : opcoes.contaPadrao };
     try {
+      if (url.pathname === '/exec' && req.method === 'OPTIONS') {
+        // O Apps Script nao responde preflight: um fetch com Content-Type application/json nao passa.
+        registro.push({ tipo: 'preflight', t: Date.now() });
+        res.writeHead(405); res.end(); return;
+      }
+      if (url.pathname === '/__eco' && req.method === 'GET') {
+        const k = url.searchParams.get('k') || '';
+        const r = ecos.get(k);
+        ecos.delete(k);
+        if (!r) { res.writeHead(404, CORS); res.end('eco vencido'); return; }
+        res.writeHead(200, Object.assign({ 'Content-Type': r.tipo }, CORS));
+        res.end(r.texto);
+        return;
+      }
+      if (url.pathname === '/__login') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!DOCTYPE html><html><body>Fazer login - Contas do Google</body></html>');
+        return;
+      }
+      const tipoCorpo = String(req.headers['content-type'] || '');
+      if (url.pathname === '/exec' && req.method === 'POST' && (/^text\/plain/i.test(tipoCorpo) || url.searchParams.get('api') === '1')) {
+        const corpo = await lerCorpo(req);
+        await responderApi(req, res, url, corpo, tipoCorpo, cookies);
+        return;
+      }
       if (url.pathname === '/exec' && (req.method === 'GET' || req.method === 'POST')) {
         const ctx = novaExecucao(mundo, opcoes.pasta, execucao, execOpcoes);
         let saida;
@@ -166,6 +206,8 @@ function criarServidor(opcoes) {
         } else {
           const corpo = await lerCorpo(req);
           const params = new URLSearchParams(corpo);
+          // formulario api=1&pedido=...: tambem e a API (resposta em JSON, nao pagina)
+          if (params.get('api') === '1') { await responderApi(req, res, url, corpo, 'application/x-www-form-urlencoded', cookies); return; }
           registro.push({ tipo: 'doPost', campos: [...params.keys()], corpo: corpo, t: Date.now() });
           const e = eventoDe(params);
           e.postData = { contents: corpo, type: 'application/x-www-form-urlencoded', length: corpo.length };
@@ -213,6 +255,36 @@ function criarServidor(opcoes) {
     }
   });
 
+  /*
+   * API: o doPost com o corpo do fetch. A resposta (ContentService) vai para o eco e o /exec responde
+   * 302 — como o Google. Sem cookie (pagina file://), a conta Google e vazia.
+   */
+  async function responderApi(req, res, url, corpo, tipoCorpo, cookies) {
+    const base = 'http://' + req.headers.host;
+    let fn = '';
+    try { fn = String(JSON.parse(/^text\/plain/i.test(tipoCorpo) ? corpo : (new URLSearchParams(corpo).get('pedido') || '')).fn || ''); } catch (e) { fn = '?'; }
+    registro.push({ tipo: 'api', fn, origem: req.headers.origin || '', corpo, t: Date.now() });
+    if (estado.acesso === 'dominio' && cookies.gas_conta === undefined) {
+      res.writeHead(302, { Location: base + '/__login?continue=exec' });       // login do Google, sem CORS
+      res.end(); return;
+    }
+    const e = eventoDe(url.searchParams);
+    if (!/^text\/plain/i.test(tipoCorpo)) {
+      const extra = eventoDe(new URLSearchParams(corpo));
+      Object.keys(extra.parameter).forEach((k) => { if (!(k in e.parameter)) e.parameter[k] = extra.parameter[k]; });
+      Object.keys(extra.parameters).forEach((k) => { e.parameters[k] = (e.parameters[k] || []).concat(extra.parameters[k]); });
+    }
+    e.postData = { contents: corpo, type: tipoCorpo.split(';')[0].trim(), length: corpo.length };
+    const ctx = novaExecucao(mundo, opcoes.pasta, { contaGoogle: cookies.gas_conta !== undefined ? cookies.gas_conta : '' }, execOpcoes);
+    const saida = ctx.doPost(e);
+    const texto = saida && typeof saida.getContent === 'function' ? saida.getContent() : String(saida);
+    const tipo = saida && saida._mime === 'JSON' ? 'application/json; charset=utf-8' : (saida && saida._estado ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8');
+    const k = require('crypto').randomUUID();
+    ecos.set(k, { texto, tipo });
+    res.writeHead(302, Object.assign({ Location: base + '/__eco?k=' + k }, CORS));
+    res.end();
+  }
+
   return new Promise((ok) => {
     servidor.listen(opcoes.porta, '127.0.0.1', () => {
       const porta = servidor.address().port;
@@ -220,6 +292,7 @@ function criarServidor(opcoes) {
       ok({ servidor, mundo, registro, url: 'http://127.0.0.1:' + porta + '/exec', porta,
         fechar: () => new Promise((f) => servidor.close(f)),
         chamar: (conta, fn, ...args) => chamarPeloNavegador(mundo, opcoes.pasta, { contaGoogle: conta }, fn, args, execOpcoes),
+        definirAcesso: (modo) => { estado.acesso = modo; },
         contexto: (conta) => novaExecucao(mundo, opcoes.pasta, { contaGoogle: conta }, execOpcoes) });
     });
   });

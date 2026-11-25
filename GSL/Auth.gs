@@ -929,6 +929,20 @@ function entrar(email, pin, confirmacao, filial, codigo, tela, p) {
   }
 }
 
+/*
+ * 25/11: no login a pessoa digita so o nome (joao.silva) — o dominio da
+ * Bartofil entra sozinho. Quem digita o e-mail inteiro (outro dominio,
+ * conta do administrador) continua entrando como antes.
+ */
+const DOMINIO_EMAIL_PADRAO = 'bartofil.com.br';
+function completarEmail_(bruto) {
+  let v = String(bruto || '').toLowerCase().replace(/\s+/g, '');
+  if (!v) return '';
+  if (v.indexOf('@') === -1) return v + '@' + DOMINIO_EMAIL_PADRAO;
+  if (v.charAt(v.length - 1) === '@') return v + DOMINIO_EMAIL_PADRAO;
+  return v;
+}
+
 function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
   _porta = true;
   if (!bancoInstalado()) return { ok: false, erro: 'O sistema ainda não foi instalado.' };
@@ -936,7 +950,7 @@ function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
     return { ok: false, erro: 'Não consegui atualizar o banco: ' + (erro.message || erro) };
   }
 
-  const email = String(emailBruto || '').toLowerCase().trim();
+  const email = completarEmail_(emailBruto);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, erro: 'Digite o seu e-mail.' };
   if (pinBloqueado_(email)) {
     return { ok: false, erro: 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.' };

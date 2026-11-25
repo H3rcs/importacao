@@ -272,7 +272,7 @@ async function entrar(aba, email, pin, confirmar, codigo) {
   if (confirmar) {
     await f.waitForSelector('#entrar-confirma:not(.oculto)', { timeout: 10000 });
     if (await f.isVisible('#entrar-codigo')) {
-      await f.fill('#entrar-codigo', codigo || codigoDoEmail(aba.s, email));
+      await f.fill('#entrar-codigo', codigo || codigoDoEmail(aba.s, email.indexOf('@') === -1 ? email + '@bartofil.com.br' : email));
     }
     await f.fill('#entrar-pin2', pin);
     await f.click('#entrar-botao');
@@ -568,7 +568,7 @@ async function rodar() {
     afirmar(await f.inputValue('#instalacao-email') === DONO, 'e-mail do dono preenchido');
     await f.click('#botao-instalar');
     afirmar(await esperarTela(aba, ['entrar'], 20000) === 'entrar', 'depois de instalar, pede e-mail e PIN');
-    afirmar(await f.inputValue('#entrar-email') === DONO, 'e-mail do dono ja preenchido');
+    afirmar(await f.inputValue('#entrar-email') === DONO.split('@')[0], 'usuario do dono ja preenchido (o dominio fica fixo ao lado)');
     await entrar(aba, DONO, '4321', true);
     afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'sem-acesso']) === 'aplicacao', 'dono entrou depois de instalar');
     afirmar(!s.registro.some((r) => r.tipo === 'moldura-recarregada'), 'nenhuma moldura recarregada (ficaria em branco no Google)');
@@ -589,7 +589,10 @@ async function rodar() {
   await cenario('coordenadora no computador compartilhado: e-mail + PIN novo, entra', async () => {
     const s = await subir(); instalarComPessoas(s);
     const aba = await abrirAba(s, GERAL);
-    await entrar(aba, COORD, '1234', true);
+    const f0 = await frame(aba);
+    afirmar(await f0.isVisible('#entrar-email-sufixo'), '@bartofil.com.br fixo ao lado do campo');
+    // 25/11: digita so o usuario (sem @bartofil.com.br)
+    await entrar(aba, COORD.split('@')[0], '1234', true);
     afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'sem-acesso']) === 'aplicacao', 'entrou');
     afirmar((await texto(aba, 'usuario-conta')).includes(COORD), 'entrou como ela, nao como a conta do computador');
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));

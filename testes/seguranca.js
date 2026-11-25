@@ -166,6 +166,13 @@ const d = run(DONO, 'prop', 'ID_BANCO');                                 // dono
 ok(d.ok && d.valor, 'dono pelo editor le propriedade');
 const t = JSON.parse(run(ATACANTE, 'carregarTela', ctx, 'inicio', {}).valor);
 ok(t && t.ok !== false, 'a tela, com sessao valida, continua abrindo');
+// 25/11: no login basta o usuario — o dominio da Bartofil completa sozinho (e o e-mail inteiro continua valendo)
+const soUsuario = JSON.parse(run(ATACANTE, 'entrar', 'Dono', '4321', '', '', '').valor);
+ok(!!soUsuario.ok, 'entra digitando so o usuario (dono) e o PIN' + (soUsuario.ok ? '' : ': ' + soUsuario.erro));
+const comArroba = JSON.parse(run(ATACANTE, 'entrar', 'dono@', '4321', '', '', '').valor);
+ok(comArroba.ok, 'usuario terminado em @ tambem completa o dominio');
+const errado = JSON.parse(run(ATACANTE, 'entrar', 'dono', '9999', '', '', '').valor);
+ok(!errado.ok, 'PIN errado com so o usuario continua recusado');
 
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo ok'));
 process.exit(falhas ? 1 : 0);

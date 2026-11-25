@@ -263,6 +263,11 @@ tr.lp-atrasada td:first-child { box-shadow: inset 3px 0 0 var(--alerta); }
 /* ENTRADA (4.2) — e-mail e PIN */
 .entrar-caixa { gap: 8px; text-align: left; }
 .entrar-rotulo { font-size: 13px; font-weight: 700; color: var(--tinta-media); margin-top: 4px; }
+.entrar-email-campo { position: relative; display: flex; align-items: center; }
+.login-caixa .entrar-email-campo input { padding-right: 148px; }
+.entrar-email-sufixo { position: absolute; right: 14px; font-size: 15px; color: var(--tinta-media); pointer-events: none; white-space: nowrap; }
+.entrar-email-campo.com-arroba .entrar-email-sufixo { display: none; }
+.login-caixa .entrar-email-campo.com-arroba input { padding-right: 15px; }
 .entrar-confirma { display: flex; flex-direction: column; gap: 8px; }
 .entrar-confirma.oculto { display: none; }
 .pin-mascara { -webkit-text-security: disc; letter-spacing: .35em; font-size: 18px; }

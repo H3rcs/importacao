@@ -646,7 +646,8 @@ function mostrarEntrada(info) {
   const form = el('form-entrar');
   if (form && URL_APP) form.action = URL_APP;
   el('entrar-bilhete').value = bilheteDaPagina();
-  if (info.emailDigitado) el('entrar-email').value = info.emailDigitado;
+  if (info.emailDigitado) el('entrar-email').value = emailParaCampo(info.emailDigitado);
+  sufixoDoEmail();
   el('entrar-pin').value = '';
   el('entrar-pin2').value = '';
   el('entrar-codigo').value = '';
@@ -696,10 +697,29 @@ function esquecerPrimeiroAcesso() {
   const msg = el('entrar-msg'); msg.textContent = ''; msg.className = 'entrar-msg';
 }
 
+/* 25/11: o campo mostra so o nome; o dominio da Bartofil completa (o servidor completa de novo). */
+const DOMINIO_EMAIL = 'bartofil.com.br';
+function completarEmail(v) {
+  v = String(v || '').toLowerCase().replace(/\s+/g, '');
+  if (!v) return '';
+  if (v.indexOf('@') === -1) return v + '@' + DOMINIO_EMAIL;
+  if (v.charAt(v.length - 1) === '@') return v + DOMINIO_EMAIL;
+  return v;
+}
+function emailParaCampo(v) {
+  v = String(v || '').trim();
+  const fim = '@' + DOMINIO_EMAIL;
+  return v.toLowerCase().slice(-fim.length) === fim ? v.slice(0, -fim.length) : v;
+}
+function sufixoDoEmail() {
+  const campo = el('entrar-email-campo');
+  if (campo) campo.classList.toggle('com-arroba', val('entrar-email').indexOf('@') !== -1);
+}
+
 async function entrarNoSistema(ev) {
   if (ev) ev.preventDefault();
   if (ENTRADA_ENVIADA) return false;
-  const email = val('entrar-email').trim().toLowerCase();
+  const email = completarEmail(val('entrar-email'));
   const pin = val('entrar-pin').trim();
   const criando = !el('entrar-confirma').classList.contains('oculto');
   const conf = criando ? val('entrar-pin2').trim() : '';
@@ -707,7 +727,7 @@ async function entrarNoSistema(ev) {
   const codigo = pedindoCodigo ? val('entrar-codigo').replace(/\D/g, '') : '';
   const msg = el('entrar-msg');
   const falar = (t, tipo) => { msg.textContent = t; msg.className = 'entrar-msg ' + (tipo || 'erro'); };
-  if (!email || email.indexOf('@') === -1) { falar('Digite o seu e-mail.'); return false; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { falar('Digite o seu usuário (o nome antes do @bartofil.com.br).'); return false; }
   if (!/^\d{4,6}$/.test(pin)) { falar('O PIN tem de 4 a 6 números.'); return false; }
   if (pedindoCodigo && !/^\d{6}$/.test(codigo)) { falar('Digite o código de 6 números que chegou no seu e-mail.'); return false; }
   if (criando && !conf) { falar('Repita o PIN no segundo campo.'); return false; }

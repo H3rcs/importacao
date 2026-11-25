@@ -61,7 +61,7 @@
   <div id="entrar" class="tela-espera oculto">
     <div class="logo-completa" role="img" aria-label="Bartofil Distribuidora"></div>
     <h1>Entrar no GSL</h1>
-    <p>Digite o seu e-mail da Bartofil e o seu PIN.</p>
+    <p>Digite o seu usuário da Bartofil (o nome antes do @) e o seu PIN.</p>
     <!-- 10/10: a aba ainda tem a sessao (F5 com o canal barrado, pagina recusada,
          falha passageira): um clique continua, sem PIN. -->
     <div id="entrar-continuar" class="login-caixa entrar-caixa oculto">
@@ -71,10 +71,15 @@
     </div>
     <form id="form-entrar" class="login-caixa entrar-caixa" method="post" target="_top"
           autocomplete="off" onsubmit="return entrarNoSistema(event)">
-      <label class="entrar-rotulo" for="entrar-email">E-mail</label>
-      <input id="entrar-email" name="email" type="email" inputmode="email" autocomplete="off"
-             autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome@bartofil.com.br"
-             oninput="esquecerPrimeiroAcesso()">
+      <label class="entrar-rotulo" for="entrar-email">Usuário</label>
+      <!-- 25/11: digita so o nome; o @bartofil.com.br fica fixo no campo (some se a pessoa digitar um @). -->
+      <div id="entrar-email-campo" class="entrar-email-campo">
+        <input id="entrar-email" name="email" type="text" inputmode="email" autocomplete="off"
+               autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome"
+               aria-describedby="entrar-email-sufixo"
+               oninput="esquecerPrimeiroAcesso(); sufixoDoEmail()">
+        <span id="entrar-email-sufixo" class="entrar-email-sufixo">@bartofil.com.br</span>
+      </div>
       <label class="entrar-rotulo" for="entrar-pin">PIN</label>
       <input id="entrar-pin" name="pin" type="text" class="pin-mascara" inputmode="numeric" maxlength="6"
              autocomplete="off" placeholder="4 a 6 números">

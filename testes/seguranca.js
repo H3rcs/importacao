@@ -92,7 +92,13 @@ const bloqueadas = [
   // 21/10: programacao das ferias do Quadro (grava no banco da filial)
   ['acaoProgramarFerias', FALSO, { matricula: '123', nome: 'x', paFim: '2026-06-09', inicio: '2026-12-07', dias: 30 }],
   ['acaoConfirmarFerias', FALSO, { id: 'x' }], ['acaoCancelarProgramacaoFerias', FALSO, { id: 'x' }],
-  ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
+  ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE],
+  // 25/11: Situacao de Carga — a tela (nomes do Quadro), os envios, a equipe, os equipamentos e a geracao
+  ['dadosCarga', FALSO, {}], ['acaoGeracaoCarga', FALSO],
+  ['acaoEnviarSituacaoCarga', FALSO, { emitidoEm: '2026-11-25T08:00:00', depositos: [{ id: 'GRANDEZA' }], cargas: [{ nro: '762480', d: { GRANDEZA: ['X', 'X'] } }] }],
+  ['acaoExcluirSituacaoCarga', FALSO, { id: 'x' }], ['acaoMoverPessoaCarga', FALSO, { pessoa: { k: 'C123', nome: 'x' }, destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } }],
+  ['acaoLimparAlocacaoCarga', FALSO, {}], ['acaoEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', numero: 1, estado: 'MANUTENCAO' }],
+  ['acaoQuantidadeEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', quantidade: 0 }], ['semearEquipamentosCarga_'], ['cgCargasDe_', { CARGAS: 'DRIVE:x' }]
 ];
 const emailsAntesDosAtaques = m.emails.length;
 bloqueadas.forEach(([fn, ...a]) => {

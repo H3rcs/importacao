@@ -5720,7 +5720,7 @@ function planoHtml(d) {
           <option value="antigas" ${sel('antigas', f.ordem)}>Mais antigas primeiro</option></select>
         <div class="pa-busca"><span aria-hidden="true">&#128269;</span>
           <input id="busca-acao" placeholder="Buscar título, descrição, responsável${ex ? ', local' : ''} ou origem" value="${esc(f.busca || '')}"
-                 onkeydown="if(event.key==='Enter')planoFiltrar({busca:this.value})" onchange="planoFiltrar({busca:this.value})"></div>
+                 onkeydown="if(event.key==='Enter')planoFiltrar({busca:this.value})" onchange="if(this.value!==String((PLANO.local||{}).busca||''))planoFiltrar({busca:this.value})"></div>
       </div>
     </div>
 
@@ -6049,7 +6049,7 @@ function cartaoAcao(a, p, numero) {
 
       ${descricao ? `<span class="pa-rotulo">Descrição da situação</span>${paRicoNoCartao(descricao, 'pa-desc-' + a.id)}` : ''}
 
-      ${fotos.length ? `<div class="pa-fotos"><span class="pa-rotulo" style="margin-top:0">Evidências / fotos do local (${fotos.length})</span>
+      ${fotos.length ? `<div class="pa-fotos"><div class="pa-rotulo-linha"><span class="pa-rotulo" style="margin:0">Evidências / fotos do local (${fotos.length})</span>${seloFotos(fotos.length, 'verFotosDaAcao(' + jsArg(a.id) + ')')}</div>
         ${paGradeFotos(a, fotos)}</div>` : ''}
 
       <div class="pa-parecer">
@@ -6572,7 +6572,7 @@ function paHtmlRelatorio(lista, cab, numeros, fotos) {
         <span class="prio p-${esc(a.prioridade || 'NORMAL')}">${PA_NOME_PRIO[a.prioridade] || 'Normal'}</span></div>
       ${desc ? `<div class="lbl">Descrição da situação</div><div class="rich">${paRico(desc)}</div>` : ''}
       ${fs.length ? `<div class="lbl">Evidências / fotos do local (${fs.length})</div>
-        ${com.length ? `<div class="grid">${com.map((f) => `<figure><img src="${fotos[f.id]}" alt=""><figcaption>${esc(f.legenda || '')}</figcaption></figure>`).join('')}</div>` : ''}
+        ${com.length ? `<div class="grid">${com.map((f) => `<figure><img src="${fotos[f.id]}" alt="">${f.legenda ? '<figcaption>' + esc(f.legenda) + '</figcaption>' : ''}</figure>`).join('')}</div>` : ''}
         ${com.length < fs.length ? `<div class="obs">${fs.length - com.length} foto(s) não incluída(s) — veja no GSL.</div>` : ''}` : ''}
       <div class="mgr"><div class="mgr-h">Parecer / decisão do gerente${a.parecerPor ? ' <small>· ' + esc(paNome(a.parecerPor)) + (a.parecerEm ? ' · ' + esc(String(a.parecerEm).slice(0, 10)) : '') + '</small>' : ''}</div>
         <div class="mgr-opts">${opc(a, 'TRATAR', 'Tratar / Incluir ação')}${opc(a, 'DEPOIS', 'Deixar para outro momento')}${opc(a, 'NADA', 'Não fazer nada')}</div>

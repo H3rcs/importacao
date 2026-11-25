@@ -1141,7 +1141,7 @@ async function rodar() {
     await f.fill('#ac-descricao', 'Repor o papel toalha');
     await f.selectOption('#ac-zona', 'Z7');
     await f.fill('#ac-local', 'Banheiro da central');
-    await f.selectOption('#ac-crit', 'Alta');
+    await f.check('input[name="ac-prio"][value="ALTA"]');            // 8.13: a criticidade virou a prioridade
     await f.check('.ac-resp[value="' + DONO + '"]');
     await f.fill('#ac-prazo', '2026-12-01');
     await f.setInputFiles('#ac-fotos', { name: 'banheiro.png', mimeType: 'image/png', buffer: png });
@@ -1149,7 +1149,7 @@ async function rodar() {
     await f.click('.janela .botao >> text=Criar ação');
     await f.waitForFunction(() => ((DADOS.plano || {}).lista || []).some((a) => a.acao === 'Banheiro da central sem papel' && a.fotos.length === 1), null, { timeout: 20000 });
     const card = await f.evaluate(() => document.querySelector('#conteudo-lp .cartao-acao').textContent.replace(/\s+/g, ' '));
-    afirmar(/Z7 · Banheiro da central/.test(card) && /Alta/.test(card) && /1 foto/.test(card), 'cartao: ' + card.slice(0, 300));
+    afirmar(/Z7 · Banheiro da central/.test(card) && /Alta/.test(card) && /fotos do local \(1\)/i.test(card), 'cartao: ' + card.slice(0, 300));
     if (process.env.FOTO_LIMPEZA) await aba.page.screenshot({ path: process.env.FOTO_LIMPEZA + '-plano.png', fullPage: true });
     // o visor abre a foto (veio do Drive pelo servidor)
     await f.click('#conteudo-lp .cartao-acao .selo-foto');
@@ -1407,6 +1407,170 @@ async function rodar() {
     afirmar(posts.length === 1 && fotos === 'doca.jpg,IMG_0001.HEIC', 'um POST com as fotos (' + posts.length + '): ' + fotos);
     const recado = await g.evaluate(() => document.getElementById('recado').textContent);
     afirmar(!/bloqueia/.test(recado), 'sem a recusa de antes: ' + recado);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  /*
+   * SITUACOES E PARECER DO GERENTE (8.13) — o modelo do "Relatorio de Ocorrencias e Acoes".
+   */
+  await cenario('situacao e parecer (8.13): a coordenadora registra pela tela com texto rico (negrito, lista, marca-texto) e fotos com legenda; o gerente da cada parecer (Outro momento, Nada a fazer, Tratar); Tratar cria a acao; placar e filtros com contadores; relatorio A4', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const jpeg = Buffer.from(JPEG_MINI, 'base64');
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, COORD, '1234', true);
+    await esperarTela(aba, ['aplicacao']);
+    let f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForFunction(paginaPronta, 'acoes', { timeout: 15000 });
+    await f.click('#acoes-topo >> text=Nova situação');
+    await f.waitForSelector('#janela:not(.oculto) #st-titulo');
+    await f.fill('#st-titulo', 'Lixeira quebrada no refeitório');
+    await f.check('input[name="st-prio"][value="ALTA"]');
+    await f.click('#st-descricao');
+    await f.click('.pa-fmt[data-cmd="bold"]');
+    await aba.page.keyboard.type('Tampa solta');
+    await f.click('.pa-fmt[data-cmd="bold"]');
+    await aba.page.keyboard.type(' e lixo no chão. ');
+    await aba.page.keyboard.press('Enter');
+    await f.click('.pa-fmt[data-cmd="insertUnorderedList"]');
+    await aba.page.keyboard.type('Frente do refeitório');
+    // marca-texto: seleciona a palavra "lixo" e liga o destaque
+    await f.evaluate(() => {
+      const ed = el('st-descricao'), w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+      let n; while ((n = w.nextNode())) { const i = n.textContent.indexOf('lixo'); if (i !== -1) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 4); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); break; } }
+    });
+    await f.click('.pa-fmt[data-cmd="marca"]');
+    await f.selectOption('#st-dest', GERENTE);
+    await f.fill('#st-relatorio', 'Vistoria de novembro');
+    await escolherFotos(f, 'st', [{ name: 'lixeira.jpg', mimeType: 'image/jpeg', buffer: jpeg }, { name: 'chao.jpg', mimeType: 'image/jpeg', buffer: jpeg }]);
+    await f.fill('#st-previas .pa-previa:nth-child(1) input', 'Lixeira vista de frente');
+    await f.click('.janela .botao >> text=Registrar situação');
+    await f.waitForFunction(() => (planoD().lista || []).some((a) => a.acao === 'Lixeira quebrada no refeitório'), null, { timeout: 20000 })
+      .catch(async (e) => { throw new Error('situacao nao apareceu: ' + await f.evaluate(() => el('recado').textContent + ' | ' + (el('janela').classList.contains('oculto') ? '' : el('janela-titulo').textContent))); });
+    const a = await f.evaluate(() => planoD().lista.find((x) => x.acao === 'Lixeira quebrada no refeitório'));
+    afirmar(/<b>Tampa solta<\/b>/.test(a.descricao) && /<mark>lixo<\/mark>/.test(a.descricao) && /<ul><li>Frente do refeitório<\/li><\/ul>/.test(a.descricao) && !/style=|span/.test(a.descricao),
+      'texto rico gravado limpo: ' + a.descricao);
+    afirmar(a.prioridade === 'ALTA' && a.destinatarioEmail === GERENTE && a.relatorio === 'Vistoria de novembro' &&
+      a.fotos.map((x) => x.legenda).join('|') === 'Lixeira vista de frente|', 'situacao: ' + JSON.stringify(a).slice(0, 300));
+    const card = () => f.evaluate(() => { const c = document.querySelector('.pa-card'); return c ? c.innerText.replace(/\s+/g, ' ') : ''; });
+    afirmar(/Registrada por Maria Souza/.test(await card()) && /para João Lima/.test(await card()) && /Aguardando parecer/.test(await card()), 'cartao: ' + (await card()).slice(0, 300));
+    afirmar(await f.evaluate(() => !document.querySelector('.pa-opcao[data-parecer] button, button.pa-opcao')), 'a autora nao tem os botoes do parecer');
+    // a miniatura chega pela porta da foto quando o cartao aparece na tela
+    await f.evaluate(() => document.querySelector('.pa-fotos').scrollIntoView());
+    await f.waitForFunction(() => document.querySelectorAll('.pa-foto-img[style*="background-image"]').length === 2, null, { timeout: 20000 })
+      .catch(async () => { throw new Error('miniaturas: ' + await f.evaluate(() => document.querySelector('.pa-fotos').outerHTML.slice(0, 600))); });
+    afirmar(s.mundo.emails.some((e) => e.to === GERENTE && /Situação para o seu parecer: Lixeira quebrada/.test(e.subject)), 'o gerente recebe o e-mail');
+    await aba.contexto.close();
+
+    // o gerente: o placar e os filtros, e os tres pareceres
+    const ab2 = await abrirAba(s, GERAL);
+    await entrar(ab2, GERENTE, '5555');
+    await esperarTela(ab2, ['aplicacao']);
+    f = await frame(ab2);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.pa-card button.pa-opcao', { timeout: 15000 });
+    const placar = () => f.evaluate(() => [...document.querySelectorAll('.pa-tile .pa-num')].map((x) => x.textContent).join(','));
+    const contador = (k) => f.evaluate((p) => document.querySelector('.pa-chip[data-parecer="' + p + '"] .pa-cnt').textContent, k);
+    afirmar(await placar() === '1,0,0,1' && await contador('pendente') === '1' && await contador('TRATAR') === '0', 'placar: ' + await placar());
+    afirmar(await f.evaluate(() => (PENDENCIAS.modulos.calendario || {}).parecer) === 1, 'a bolinha conta o parecer que espera o gerente');
+    await f.click('.pa-card button.pa-opcao[data-parecer="DEPOIS"]');
+    await f.fill('#pr-rever', '2027-01-15');
+    await f.fill('#pr-obs', 'Junto com a reforma');
+    await f.click('.janela .botao >> text=Registrar parecer');
+    await f.waitForFunction(() => planoD().lista[0].parecer === 'DEPOIS' && document.querySelector('.pa-card .pa-depois'), null, { timeout: 15000 });
+    afirmar(/rever em 15\/01\/2027/.test(await card()) && await placar() === '1,0,1,0', 'outro momento: ' + await placar());
+    await f.click('.pa-card button.pa-opcao[data-parecer="NADA"]');
+    await f.click('.janela .botao >> text=Registrar parecer');
+    await f.waitForFunction(() => planoD().lista[0].parecer === 'NADA', null, { timeout: 15000 });
+    // "Nada a fazer" fecha: sai de "Em aberto" e o filtro mostra o vazio com "Mostrar todas"
+    afirmar(await f.evaluate(() => !document.querySelector('.pa-card') && !!document.querySelector('.pa-vazio')), 'fechada sai de Em aberto');
+    await f.click('.pa-vazio >> text=Mostrar todas');
+    await f.waitForSelector('.pa-card .pa-opcao.sel-NADA');
+    await f.click('.pa-card button.pa-opcao[data-parecer="TRATAR"]');
+    await f.click('#pr-tratativa');
+    await ab2.page.keyboard.type('Trocar a lixeira e recolher o lixo');
+    await f.check('.pr-resp[value="' + COORD + '"]');
+    await f.fill('#pr-prazo', '2026-12-15');
+    await f.click('.janela .botao >> text=Registrar parecer');
+    await f.waitForFunction(() => planoD().lista[0].parecer === 'TRATAR' && planoD().lista[0].situacao === 'PENDENTE', null, { timeout: 15000 });
+    const t = await f.evaluate(() => planoD().lista[0]);
+    afirmar(t.responsaveisEmails.join() === COORD && t.prazoISO === '2026-12-15' && /Trocar a lixeira/.test(t.tratativa), 'virou acao: ' + JSON.stringify(t).slice(0, 300));
+    afirmar(/Como será tratado/i.test(await card()) && /Responsável: Maria Souza/.test(await card()) && await placar() === '1,1,0,0', 'cartao da acao: ' + await placar());
+    // filtros: "Tratar" com contador e a busca
+    await f.click('.pa-chip[data-parecer="TRATAR"]');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.pa-card').length) === 1 && await contador('TRATAR') === '1', 'filtro Tratar');
+    await f.fill('#busca-acao', 'inexistente'); await f.press('#busca-acao', 'Enter');
+    afirmar(await f.evaluate(() => !document.querySelector('.pa-card')), 'busca sem resultado');
+    await f.fill('#busca-acao', 'refeitório'); await f.press('#busca-acao', 'Enter');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.pa-card').length) === 1, 'busca sem acento e na descricao');
+    // relatorio A4 no modelo do gerente
+    await f.click('#acoes-topo >> text=Relatório');
+    const [janela] = await Promise.all([ab2.contexto.waitForEvent('page', { timeout: 15000 }), f.click('.janela .botao >> text=Gerar relatório')]);
+    await janela.waitForFunction(() => document.querySelector('.sheet .q'), null, { timeout: 30000 });
+    const rel = await janela.evaluate(() => ({ t: document.body.innerText, fotos: document.querySelectorAll('.q figure img').length,
+      top: getComputedStyle(document.querySelector('.top')).backgroundImage, sel: !!document.querySelector('.q .mgr-opt.sel-TRATAR'),
+      ajuste: getComputedStyle(document.body).getPropertyValue('-webkit-print-color-adjust') }));
+    afirmar(/RELATÓRIO OPERACIONAL/.test(rel.t) && /Lixeira quebrada no refeitório/.test(rel.t) && /Total registrado\s*1/i.test(rel.t) &&
+      /Lixeira vista de frente/.test(rel.t) && rel.fotos === 2 && rel.sel && /gradient/.test(rel.top) && rel.ajuste === 'exact' && /Trocar a lixeira/.test(rel.t),
+      'relatorio: ' + JSON.stringify(rel).slice(0, 400));
+    afirmar(!ab2.erros.length, 'erros: ' + ab2.erros.join(' | '));
+    await ab2.contexto.close(); await s.fechar();
+  });
+
+  await cenario('situacao e parecer (8.13): com "Ver" no plano a tela nao tem botao de gravar (nem Nova situacao, nem parecer, nem Editar); no celular de 390 px o cartao, as fotos e os filtros cabem na tela', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const maria = pelaPorta(s, GERAL, COORD, '1234');
+    const id = maria('salvarSituacao', { titulo: 'Doca 4 com piso solto e um título bem comprido para ver a quebra no celular', prioridade: 'MEDIA', destinatario: GERENTE,
+      descricao: '<div>Piso <b>solto</b> perto da doca.</div>', fotos: [{ nome: 'a.jpg', tipo: 'image/jpeg', dados: JPEG_MINI, legenda: 'Perto da doca' }, { nome: 'b.jpg', tipo: 'image/jpeg', dados: JPEG_MINI }] }).id;
+    // o gerente so com "Ver" no Plano de Acao
+    const c = s.contexto(DONO); c._porta = true;
+    const reg = c.listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === GERENTE);
+    c.acaoDefinirAjustePessoa({ email: DONO, perfil: 'ADMIN', permissoes: c.permissoesDe('ADMIN') }, { id: reg.ID, tela: 'acoes', nivel: 'VER' });
+    criarPin(s, GERAL, GERENTE, '5555');
+    const aba = await abrirAba(s, GERAL, { contexto: await navegador.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }) });
+    await entrar(aba, GERENTE, '5555');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForSelector('.pa-card', { timeout: 15000 });
+    const x = await f.evaluate(() => ({
+      topo: el('acoes-topo').innerText, soVer: !!document.querySelector('.aviso-so-ver'),
+      opcoes: document.querySelectorAll('.pa-card button.pa-opcao').length, divs: document.querySelectorAll('.pa-card .pa-opcao').length,
+      editar: [...document.querySelectorAll('.pa-card .acao-botoes button')].map((b) => b.textContent.trim()).join('|'),
+      largura: document.documentElement.scrollWidth, janela: window.innerWidth,
+      vazando: [...document.querySelectorAll('.pa-card, .pa-card *, .pa-placar, .pa-topo')].filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.right > window.innerWidth + 1 && !e.closest('.pa-filtro-linha'); }).map((e) => e.className).slice(0, 5)
+    }));
+    afirmar(!/Nova situação|Nova ação/.test(x.topo) && /Relatório/.test(x.topo) && x.soVer && x.opcoes === 0 && x.divs === 3 && !/Editar|Cancelar|concluída/.test(x.editar),
+      'so ver: ' + JSON.stringify(x));
+    afirmar(x.largura <= x.janela + 1 && !x.vazando.length, 'nada vaza dos 390 px: ' + JSON.stringify(x));
+    if (process.env.FOTO_PLANO) await aba.page.screenshot({ path: process.env.FOTO_PLANO + '-celular-ver.png', fullPage: true });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    void id;
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('situacao e parecer (8.13): canal barrado — registrar a situacao com foto e legenda e dar o parecer gravam pela pagina (1 POST cada) e voltam no plano', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    const { aba, f } = await planoComHeic(s, DONO, '4321');
+    await aba.contexto.addCookies([{ name: 'gas_403', value: '1', url: s.url }]);
+    await f.evaluate(() => formSituacao(null));
+    await escolherFotos(f, 'st', [{ name: 'doca.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(JPEG_MINI, 'base64') }]);
+    await f.fill('#st-previas .pa-previa input', 'Doca 5');
+    await f.fill('#st-titulo', 'Goteira na doca 5');
+    await f.click('#st-descricao'); await aba.page.keyboard.type('Pinga no corredor');
+    await f.selectOption('#st-dest', DONO);
+    const posts = []; aba.page.on('request', (r) => { if (r.method() === 'POST' && /\/exec/.test(r.url())) posts.push(1); });
+    await f.click('.janela .botao >> text=Registrar situação');
+    let g = await paginaNova(aba, () => paginaAtual === 'acoes' && (planoD().lista || []).some((a) => a.acao === 'Goteira na doca 5'));
+    const a = await g.evaluate(() => planoD().lista.find((x) => x.acao === 'Goteira na doca 5'));
+    afirmar(posts.length === 1 && a.fotos.length === 1 && a.fotos[0].legenda === 'Doca 5' && /Pinga no corredor/.test(a.descricao), 'situacao pela pagina: ' + posts.length + ' ' + JSON.stringify(a.fotos));
+    await g.click('.pa-card button.pa-opcao[data-parecer="NADA"]');
+    await g.fill('#pr-obs', 'Já consertada');
+    await g.click('.janela .botao >> text=Registrar parecer');
+    g = await paginaNova(aba, () => paginaAtual === 'acoes' && (planoD().lista || []).some((a) => a.parecer === 'NADA'));
+    afirmar(posts.length === 2, 'o parecer foi pela pagina: ' + posts.length);
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await aba.contexto.close(); await s.fechar();
   });
@@ -2318,7 +2482,7 @@ async function rodar() {
     afirmar(/passou a acompanhar/.test(mp.htmlBody) && /passou a acompanhar/.test(mg.htmlBody), 'quem nao estava citado passou a acompanhar');
     // o historico destaca quem foi marcado; o cartao diz quem esta marcado
     await f.waitForSelector('.cartao-acao button:has-text("Comentários (1)")', { timeout: 15000 });
-    const card = await f.evaluate(() => document.querySelector('.cartao-acao .acao-meta').textContent.replace(/\s+/g, ' '));
+    const card = await f.evaluate(() => document.querySelector('.cartao-acao').textContent.replace(/\s+/g, ' '));
     afirmar(/Marcados: Pedro Alves, João Lima/.test(card), 'cartao: ' + card);
     await f.click('.cartao-acao button:has-text("Comentários (1)")');
     await f.waitForSelector('.coment-item .coment-mencao', { timeout: 10000 });
@@ -2658,7 +2822,7 @@ async function rodar() {
     const pag = await f.evaluate(() => ({ janela: !el('janela').classList.contains('oculto'), pagina: paginaAtual,
       cartoes: document.querySelectorAll('.cartao-acao').length, texto: el('pagina').innerText.replace(/\s+/g, ' ') }));
     afirmar(!pag.janela && pag.pagina === 'acoes' && !pag.cartoes && !/Iluminação/.test(pag.texto) && /No plano inteiro: 1 em aberto/.test(pag.texto) &&
-      /Aparecem aqui só as ações em que você está citado/.test(pag.texto), 'o link: ' + JSON.stringify(pag).slice(0, 500));
+      /Aparecem só as situações em que você está citado/.test(pag.texto), 'o link: ' + JSON.stringify(pag).slice(0, 500));
     // (2) o menu: nenhuma bolinha — nada em aberto em que ele esteja citado
     await f.evaluate(() => abrirModulos());
     await f.waitForFunction(() => paginaAtual === 'modulos' && PENDENCIAS && PENDENCIAS.modulos && PENDENCIAS.modulos.limpeza && PENDENCIAS.modulos.calendario, null, { timeout: 15000 });

@@ -180,11 +180,11 @@ function entrarNaFilial(usuario, codigo) {
 /* QUEM PODE O QUE, POR FILIAL                                         */
 /* ------------------------------------------------------------------ */
 
-/** true para quem administra o sistema (ve painel oculto, gere filiais). */
+/** true para quem administra o sistema: o nivel ADMIN, ou Ver e editar em Filiais e paineis (ve painel oculto, entra em toda filial). */
 function ehAdministrador(usuario) {
   if (!usuario) return false;
   if (String(usuario.perfil || '').toUpperCase() === 'ADMIN') return true;
-  return usuario.permissoes && usuario.permissoes.podes.indexOf('GERIR_FILIAIS') !== -1;
+  return nivelNaMatriz(usuario, 'filiais') === NIVEL_EDITAR;   // quem tem Ver e editar em Filiais e paineis
 }
 
 /*
@@ -243,8 +243,8 @@ function estadoDoPainel(idPainel) {
  * Ativo: todos com o nivel liberado. Oculto: so o administrador (com a
  * etiqueta "oculto"). Desativado ou fora da filial: ninguem, nem ele (19/10)
  * — antes o ADMIN via todos e o painel desativado nao saia do menu dele.
- * Ele nao fica trancado: Filiais e paineis e do modulo config (nunca e
- * painel), e permissoesDe('ADMIN') nao depende da tabela PERFIS.
+ * Ele nao fica trancado: os menus de Configuracao nunca sao painel, e no nivel
+ * ADMIN Pessoas e acessos e sempre Ver e editar (a trava da matriz, Permissoes.gs).
  */
 function painelVisivel(usuario, idPainel) {
   const estado = estadoDoPainel(idPainel);
@@ -332,7 +332,6 @@ function emCadaFilial_(idPainel, fn) {
 /* ------------------------------------------------------------------ */
 
 function dadosFiliais(usuario) {
-  exigirCapacidade(usuario, 'GERIR_FILIAIS');
   const pessoas = listar('ACESSOS').filter(function (p) { return marcado(p.ATIVO); });
   return {
     pessoas: pessoas.map(function (p) {
@@ -370,7 +369,6 @@ function dadosFiliais(usuario) {
  * entradas de cada uma).
  */
 function acaoSalvarFilial(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_FILIAIS');
   const nome = String(params.nome || '').trim();
   const cidade = String(params.cidade || '').trim();
   if (!nome) throw new Error('Informe o nome da filial (ex.: CD Salvador).');
@@ -446,7 +444,6 @@ function acaoSalvarFilial(usuario, params) {
 
 /** Muda o estado de UM painel numa filial — o clique da tela. */
 function acaoAlterarPainel(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_FILIAIS');
   garantirFilialPrincipalGravada_();
   const f = filialPorCodigo(params.codigo);
   if (!f) throw new Error('Filial não encontrada.');
@@ -489,7 +486,6 @@ function recadoDoPainel_(painel, filial, estado) {
 
 /** Liga ou desliga a filial inteira (some da escolha de entrada). */
 function acaoAlternarFilial(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_FILIAIS');
   garantirFilialPrincipalGravada_();
   const f = filialPorCodigo(params.codigo);
   if (!f) throw new Error('Filial não encontrada.');
@@ -544,7 +540,6 @@ function adicionarPaineisNovosNaPrincipal_(ids) {
  * em "todas" ou e ADMIN continua como esta.
  */
 function acaoSalvarPessoasDaFilial(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_FILIAIS');
   const f = filialPorCodigo(params.codigo);
   if (!f) throw new Error('Filial não encontrada.');
   const marcados = {};

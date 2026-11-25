@@ -43,8 +43,11 @@ e.telas.forEach((t) => run(DONO, 'carregarTela', ctx, t.id, {}));      // caches
 // um primeiro acesso em andamento (codigo guardado no cache)
 run(ATACANTE, 'entrar', DONO.replace('dono', 'outro'), '1111', '', '', '');
 
-// "usuario" montado no console, com todas as capacidades — so a porta pode barrar.
-const FALSO = { email: ATACANTE, perfil: 'ADMIN', permissoes: { escopo: 'TODOS', telas: ['limpeza', 'acoes', 'estoque', 'aprendiz'],
+// "usuario" montado no console, com "Ver e editar" em tudo (e os campos do modelo antigo) — so a porta pode barrar.
+const TODAS_EDITAR = {};
+['inicio', 'calendario', 'acoes', 'assiduidade', 'apresentacao', 'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz', 'config', 'acessos', 'filiais', 'relatos']
+  .forEach((t) => { TODAS_EDITAR[t] = 'EDITAR'; });
+const FALSO = { email: ATACANTE, perfil: 'ADMIN', permissoes: { escopo: 'TODOS', niveis: TODAS_EDITAR, telas: ['limpeza', 'acoes', 'estoque', 'aprendiz'],
   podes: ['GERIR_LIMPEZA', 'GERIR_ACOES', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE', 'PROGRAMAR'] } };
 const apz = JSON.parse(run(DONO, 'carregarTela', ctx, 'aprendiz', {}).valor).dados;
 ok(apz && apz.lista && apz.lista.length === 5, 'preparo: Jovem Aprendiz ligado e com o cache quente (' + (apz && apz.lista ? apz.lista.length : 0) + ' aprendizes)');
@@ -92,7 +95,16 @@ const bloqueadas = [
   // 21/10: programacao das ferias do Quadro (grava no banco da filial)
   ['acaoProgramarFerias', FALSO, { matricula: '123', nome: 'x', paFim: '2026-06-09', inicio: '2026-12-07', dias: 30 }],
   ['acaoConfirmarFerias', FALSO, { id: 'x' }], ['acaoCancelarProgramacaoFerias', FALSO, { id: 'x' }],
-  ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE]
+  ['gerarCompetencia', 'OUT 2026', ATACANTE], ['sincronizarRotina_', null, null, ATACANTE],
+  // 8.12: a matriz de tres faixas — mexer na matriz, no ajuste de alguem, restaurar o padrao, converter o banco,
+  // ler a faixa de alguem ou a lista de pessoas com as faixas: nada disso anda fora da porta
+  ['acaoAlterarPermissao', FALSO, { id: 'x', coluna: 'TELA_ACESSOS', valor: 'EDITAR' }],
+  ['acaoDefinirAjustePessoa', FALSO, { id: 'x', tela: 'filiais', nivel: 'EDITAR' }],
+  ['acaoDefinirModuloPessoa', FALSO, { id: 'x', modulo: 'config', modo: 'EDITAR' }],
+  ['acaoSalvarUsuario', FALSO, { email: ATACANTE, nome: 'x', perfil: 'ADMIN', ajustes: { acessos: 'EDITAR' } }],
+  ['acaoRestaurarPerfis', FALSO], ['migrarParaTresFaixas_'], ['permissoesDe', 'ADMIN'], ['permissoesDaPessoa', 'ADMIN', {}],
+  ['nivelNaTela', FALSO, 'estoque'], ['exigirAcao_', FALSO, 'x', { tela: 'estoque' }], ['dadosPessoas', FALSO], ['listarPessoas'],
+  ['linhaCruaDoNivel_', 'ADMIN'], ['marcaDoMenu', FALSO]
 ];
 const emailsAntesDosAtaques = m.emails.length;
 bloqueadas.forEach(([fn, ...a]) => {

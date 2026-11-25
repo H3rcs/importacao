@@ -3302,7 +3302,7 @@ async function rodar() {
    * P5 (revisao de 19/10): o aviso diz a causa. O "Sem acesso" de uma pessoa (o painel continua ativo para os
    * outros) nao e "painel desligado"; a tela que o nivel perdeu (Configuracao sem PROGRAMAR) nem painel e.
    */
-  await cenario('"Sem acesso" da pessoa com ela dentro: a acao recusada volta ao menu com "Este painel não está mais liberado para você nesta filial."; o nivel sem a capacidade da tela: a mensagem do servidor, sem o aviso de painel', async () => {
+  await cenario('"Oculto" para a pessoa com ela dentro: a acao recusada volta ao menu com a frase do servidor (a matriz, nao o painel); o nivel com a tela Oculta: o mesmo, sem o aviso de painel', async () => {
     const s = await subir(); instalarComPessoas(s);
     const dono = criarPin(s, DONO, DONO, '4321');
     criarPin(s, GERAL, COORD, '1234');
@@ -3316,11 +3316,11 @@ async function rodar() {
     const f = await frame(aba);
     await f.click('.holocard[data-modulo="nobreaks"]');
     await f.waitForFunction(paginaPronta, 'nobreaks', { timeout: 15000 });
-    pelaPorta('definirModuloPessoa', { id: idDe(COORD), modulo: 'nobreaks', modo: 'NAO' });
+    pelaPorta('definirAjustePessoa', { id: idDe(COORD), tela: 'nobreaks', nivel: 'OCULTO' });
     await f.evaluate(() => agir('semanaNobreak', {}).catch(() => {}));
-    await f.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Este painel não está mais liberado para você nesta filial.', null, { timeout: 15000 });
+    await f.waitForFunction(() => paginaAtual === 'modulos' && document.getElementById('recado').textContent === 'Seu acesso (COORDENADOR) não inclui a tela "Nobreaks".', null, { timeout: 15000 });
     afirmar(await cartoesDoMenu(f) === 'calendario', 'o cartao saiu so para ela: ' + await cartoesDoMenu(f));
-    // o gerente na Configuracao; o administrador tira o PROGRAMAR do nivel GERENTE
+    // o gerente na Configuracao; o administrador poe a Configuracao em Oculto no nivel GERENTE
     const ger = await abrirAba(s, GERENTE);
     await entrar(ger, GERENTE, '5555');
     await esperarTela(ger, ['aplicacao'], 20000);
@@ -3328,13 +3328,142 @@ async function rodar() {
     await fg.evaluate(() => abrirConfig('config'));
     await fg.waitForFunction(paginaPronta, 'config', { timeout: 15000 });
     const nivel = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
-    pelaPorta('alterarPermissao', { id: nivel.ID, coluna: 'PODE_PROGRAMAR', valor: false });
+    pelaPorta('alterarPermissao', { id: nivel.ID, coluna: 'TELA_CONFIG', valor: 'OCULTO' });
     await fg.evaluate(() => { document.getElementById('recado').textContent = ''; esquecerTelas(); abrir('config'); });
-    await fg.waitForFunction(() => !!document.querySelector('#pagina .erro-caixa'), null, { timeout: 15000 });
-    const r = await fg.evaluate(() => ({ pagina: paginaAtual, erro: document.querySelector('#pagina .erro-caixa').textContent, recado: document.getElementById('recado').textContent }));
-    afirmar(r.pagina === 'config' && r.erro === 'Seu perfil (GERENTE) nao tem acesso a tela "config".' && !/painel/i.test(r.recado), 'nivel: ' + JSON.stringify(r));
+    await fg.waitForFunction(() => paginaAtual === 'modulos' && /não inclui a tela/.test(document.getElementById('recado').textContent), null, { timeout: 15000 });
+    const r = await fg.evaluate(() => ({ pagina: paginaAtual, recado: document.getElementById('recado').textContent,
+      menu: (SESSAO.telas || []).map((t) => t.id).join(), lateral: !!document.querySelector('.item-menu[data-pagina="config"]') }));
+    afirmar(r.recado === 'Seu acesso (GERENTE) não inclui a tela "Configuração".' && !/painel/i.test(r.recado) &&
+      r.menu.split(',').indexOf('config') === -1 && !r.lateral, 'nivel: ' + JSON.stringify(r));
     afirmar(!aba.erros.length && !ger.erros.length, 'erros: ' + aba.erros.concat(ger.erros).join(' | '));
     await ger.contexto.close(); await aba.contexto.close(); await s.fechar();
+  });
+
+  /*
+   * PERFIS EM TRES FAIXAS (8.12): o administrador muda uma celula da grade de Niveis de acesso (o <select>
+   * da tela) e a pessoa que ja esta dentro acompanha — pelo caminho normal e pela reserva por POST.
+   */
+  await cenario('perfis em 3 faixas: a celula da grade (Oculto / Ver / Ver e editar) muda o menu e a tela de quem esta dentro; com Ver a tela nao tem botao de gravar e a gravacao forjada e recusada — pelo canal e pela reserva por POST', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
+    const dono = criarPin(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, CONSULTA, '7777');
+    afirmar(s.chamar(DONO, 'executarAcao', { t: dono.token, f: dono.filial.codigo }, 'salvarItemEstoque', { nome: 'Mouse USB', saldoInicial: '3' }).ok, 'item do estoque');
+    const itens = () => { const c = s.contexto(DONO); c._porta = true; return c.listar('EST_ITENS').filter((i) => !c.marcado(i.EXCLUIDO)).map((i) => i.NOME); };
+    const saldo = () => { const c = s.contexto(DONO); c._porta = true; return c.listar('EST_MOVIMENTOS').length; };
+    // o administrador na grade de Niveis de acesso
+    const adm = await abrirAba(s, DONO);
+    await entrar(adm, DONO, '4321');
+    await esperarTela(adm, ['aplicacao'], 20000);
+    const fa = await frame(adm);
+    const celula = 'select.nv-celula[data-perfil="CONSULTA"][data-tela="estoque"]';
+    const faixaPelaGrade = async (faixa) => {
+      await fa.evaluate(() => { ABA_PESSOAS = 'niveis'; if (paginaAtual !== 'acessos') abrirConfig('acessos'); else pintarAbaPessoas(DADOS); });
+      await fa.waitForSelector(celula, { timeout: 15000 });
+      await fa.selectOption(celula, faixa);
+      await fa.waitForFunction(([sel, v]) => paginaAtual === 'acessos' && !/Carregando/.test(document.getElementById('pagina').innerText) &&
+        (DADOS.perfis || []).some((p) => p.perfil === 'CONSULTA' && p.niveis.estoque === v) && document.querySelector(sel) && document.querySelector(sel).value === v,
+        [celula, faixa], { timeout: 15000 });
+    };
+    // a Carla (CONSULTA) entra: o Estoque de TI e Oculto para o nivel dela
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, CONSULTA, '7777');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    let f = await frame(aba);
+    afirmar(!/estoque/.test(await cartoesDoMenu(f)), 'Oculto: sem o cartao — ' + await cartoesDoMenu(f));
+    const releMenu = async (cond) => {        // a proxima tela que ela abre traz o retrato do menu: o menu se acerta sozinho
+      await f.evaluate(() => { esquecerTelas(); abrir('inicio'); });
+      await f.waitForFunction(cond, null, { timeout: 15000 });
+      await f.evaluate(() => abrirModulos());
+    };
+    // Ver e editar: o cartao aparece e a tela tem os botoes de gravar
+    await faixaPelaGrade('EDITAR');
+    await releMenu(() => (SESSAO.telas || []).some((t) => t.id === 'estoque' && t.nivel === 'EDITAR'));
+    afirmar(/(^|,)estoque(,|$)/.test(await cartoesDoMenu(f)), 'Ver e editar: o cartao aparece — ' + await cartoesDoMenu(f));
+    await f.click('.holocard[data-modulo="estoque"]');
+    await f.waitForFunction(paginaPronta, 'estoque', { timeout: 15000 });
+    let t = await f.evaluate(() => ({ topo: document.getElementById('acoes-topo').innerText, aviso: !!document.querySelector('#pagina .aviso-so-ver'), editar: podeEditar('estoque') }));
+    afirmar(/Novo item/.test(t.topo) && !t.aviso && t.editar, 'Ver e editar: botoes de gravar — ' + JSON.stringify(t));
+    // Ver, com ela dentro da tela: a gravacao forjada e recusada, a tela volta sem os botoes e o aviso diz por que
+    await faixaPelaGrade('VER');
+    await f.evaluate(() => { document.getElementById('recado').textContent = ''; agir('salvarItemEstoque', { nome: 'Forjado' }).catch(() => {}); });
+    await f.waitForFunction(() => paginaAtual === 'estoque' && document.getElementById('recado').textContent === 'Seu acesso a esta tela agora é só para ver: nada foi gravado.' &&
+      !!document.querySelector('#pagina .aviso-so-ver') && !/Novo item/.test(document.getElementById('acoes-topo').innerText), null, { timeout: 15000 });
+    t = await f.evaluate(() => ({ itens: (DADOS.itens || []).length, editar: podeEditar('estoque'), faixa: nivelDoMenu('estoque'),
+      botoes: [...document.querySelectorAll('#pagina button')].map((b) => b.textContent.trim()).filter((x) => /Entrada|Saída|Editar|Novo|Estornar|Colar/.test(x)) }));
+    afirmar(t.itens === 1 && !t.editar && t.faixa === 'VER' && !t.botoes.length, 'Ver: le tudo, sem botao de gravar — ' + JSON.stringify(t));
+    afirmar(itens().join() === 'Mouse USB', 'nada gravado: ' + itens().join());
+    // Oculto: o cartao some
+    await faixaPelaGrade('OCULTO');
+    await releMenu(() => !(SESSAO.telas || []).some((t) => t.id === 'estoque'));
+    afirmar(!/estoque/.test(await cartoesDoMenu(f)), 'Oculto: o cartao some — ' + await cartoesDoMenu(f));
+    await f.evaluate(() => abrir('estoque'));
+    afirmar(await f.evaluate(() => paginaAtual === 'modulos'), 'o atalho velho nao abre');
+    // RESERVA POR POST (o Google barra a conversa nesta maquina): a mesma porta
+    await faixaPelaGrade('VER');
+    await aba.contexto.addCookies([{ name: 'gas_403', value: '1', url: s.url }]);
+    await f.evaluate(() => { esquecerTelas(); abrir('inicio'); });
+    f = await paginaNova(aba, () => paginaAtual === 'inicio' && (SESSAO.telas || []).some((t) => t.id === 'estoque' && t.nivel === 'VER'));
+    await f.evaluate(() => abrir('estoque'));
+    f = await paginaNova(aba, () => paginaAtual === 'estoque' && !!DADOS && !!DADOS.itens && !!document.querySelector('#pagina .aviso-so-ver'));
+    afirmar(await f.evaluate(() => CANAL_BARRADO && !/Novo item/.test(document.getElementById('acoes-topo').innerText)), 'pela reserva: a tela so para ver');
+    const movs = saldo();
+    await f.evaluate(() => { window.__paginaVelha = true; agir('movimentarEstoque', { tipo: 'SAIDA', item: DADOS.itens[0].codigo, quantidade: '1', destino: 'Loja 2' }).catch(() => {}); });
+    f = await paginaNova(aba, () => paginaAtual === 'estoque' && /só para ver/.test(document.getElementById('recado').textContent));
+    afirmar(saldo() === movs, 'pela reserva, com Ver, nada gravado');
+    // Ver e editar pela reserva: os botoes voltam e a gravacao passa
+    await faixaPelaGrade('EDITAR');
+    await f.evaluate(() => { window.__paginaVelha = true; esquecerTelas(); abrir('inicio'); });
+    f = await paginaNova(aba, () => paginaAtual === 'inicio');
+    await f.evaluate(() => { window.__paginaVelha = true; abrir('estoque'); });
+    f = await paginaNova(aba, () => paginaAtual === 'estoque' && !!DADOS && !!DADOS.itens && /Novo item/.test(document.getElementById('acoes-topo').innerText));
+    await f.evaluate(() => { window.__paginaVelha = true; agir('movimentarEstoque', { tipo: 'SAIDA', item: DADOS.itens[0].codigo, quantidade: '1', destino: 'Loja 2' }).catch(() => {}); });
+    f = await paginaNova(aba, () => paginaAtual === 'estoque' && !!DADOS && !!DADOS.itens && DADOS.itens[0].saldo === 2);
+    afirmar(saldo() === movs + 1, 'pela reserva, com Ver e editar, gravou');
+    afirmar(!aba.erros.length && !adm.erros.length, 'erros: ' + aba.erros.concat(adm.erros).join(' | '));
+    await adm.contexto.close(); await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('perfis em 3 faixas: ajuste desta pessoa pela tela (aba Ajustes por pessoa e o cadastro), ao lado do nivel; a trava do ADMIN aparece travada na grade', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Qualidade');
+    criarPin(s, DONO, DONO, '4321');
+    const aba = await abrirAba(s, DONO);
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao'], 20000);
+    const f = await frame(aba);
+    const ajustes = () => { const c = s.contexto(DONO); c._porta = true; return c.listar('ACESSOS').find((a) => a.EMAIL === CONSULTA).AJUSTES; };
+    // a grade: a celula do ADMIN em Pessoas e acessos e fixa (com o motivo), as outras sao seletores de tres opcoes
+    await f.evaluate(() => { ABA_PESSOAS = 'niveis'; abrirConfig('acessos'); });
+    await f.waitForSelector('select.nv-celula[data-perfil="GERENTE"][data-tela="acessos"]', { timeout: 15000 });
+    const g = await f.evaluate(() => ({
+      travada: !document.querySelector('select.nv-celula[data-perfil="ADMIN"][data-tela="acessos"]') && !!document.querySelector('#tabela-niveis tr[data-tela="acessos"] .nv-fixa[title*="sempre"]'),
+      opcoes: [...document.querySelector('select.nv-celula[data-perfil="CONSULTA"][data-tela="estoque"]').options].map((o) => o.textContent).join('|'),
+      grupos: [...document.querySelectorAll('#tabela-niveis tr.nv-grupo')].map((x) => x.textContent.trim()).join('|'),
+      alcance: !!document.querySelector('select.nv-escopo[data-perfil="COORDENADOR"]') }));
+    afirmar(g.travada && g.opcoes === 'Oculto|Ver|Ver e editar' && /Calendário\|Assiduidade/.test(g.grupos) && /Configuração$/.test(g.grupos) && g.alcance, 'grade: ' + JSON.stringify(g));
+    // aba Ajustes por pessoa: Ajustar abre a grade da pessoa; cada troca grava na hora
+    await f.evaluate(() => trocarAbaPessoas('ajustes'));
+    await f.click('#tabela-ajpes tr[data-email="' + CONSULTA + '"] button');
+    await f.waitForSelector('#janela:not(.oculto) .aj-celula[data-tela="estoque"]', { timeout: 10000 });
+    await f.selectOption('#janela .aj-celula[data-tela="estoque"]', 'EDITAR');
+    await f.waitForFunction(() => paginaAtual === 'acessos' && ((DADOS.pessoas || []).find((p) => p.email === 'carla.dias@bartofil.com.br') || {}).ajustes.estoque === 'EDITAR', null, { timeout: 15000 });
+    afirmar(ajustes() === '{"estoque":"EDITAR"}', 'gravou o ajuste: ' + ajustes());
+    const linha = await f.evaluate((e) => document.querySelector('#tabela-ajpes tr[data-email="' + e + '"]').innerText.replace(/\s+/g, ' '), CONSULTA);
+    afirmar(/Estoque de TI: Ver e editar \(nível: Oculto\)/.test(linha), 'ao lado do nivel: ' + linha);
+    // o cadastro: "Igual ao nivel" tira, as outras opcoes valem so para ela
+    await f.evaluate(() => trocarAbaPessoas('pessoas'));
+    await f.click('#tabela-pessoas tr:has-text("Carla Dias") button:has-text("Editar")');
+    await f.waitForSelector('#u-grade .aj-celula[data-tela="estoque"]', { timeout: 10000 });
+    await f.selectOption('#u-grade .aj-celula[data-tela="estoque"]', 'PADRAO');
+    await f.selectOption('#u-grade .aj-celula[data-tela="quadro"]', 'OCULTO');
+    const fica = await f.evaluate(() => document.querySelector('#u-grade .aj-celula[data-tela="quadro"]').closest('tr').querySelector('.aj-fica').textContent.trim());
+    afirmar(fica === 'Oculto', 'a previa do "Fica valendo": ' + fica);
+    await f.click('.janela .botao >> text=Salvar');
+    await f.waitForFunction(() => document.getElementById('janela').classList.contains('oculto'), null, { timeout: 15000 });
+    afirmar(ajustes() === '{"quadro":"OCULTO"}', 'pelo cadastro: ' + ajustes());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
   });
 
   await cenario('filiais e paineis: o administrador desliga a filial em que esta e vai para a escolha de filial, com o aviso', async () => {

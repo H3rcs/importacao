@@ -46,7 +46,7 @@ function _limpaNomeEntrega(s) {
  * inteiro para so entao ouvir "nao pode".
  */
 function acaoIniciarEntrega(usuario, params) {
-  exigirPodeEntregar_(usuario);
+  exigirPorta_();   // quem entrega: Ver e editar no Calendario, conferido em executarAcao
   var atividade = obter('ATIVIDADES', params.id);
   if (!atividade) throw new Error('Atividade não encontrada.');
   garantirAlcanceEscrita_(usuario, atividade);
@@ -65,7 +65,7 @@ function acaoIniciarEntrega(usuario, params) {
  * acaoIniciarEntrega() cria a pasta do envio.
  */
 function acaoReceberParte(usuario, params) {
-  exigirPodeEntregar_(usuario);
+  exigirPorta_();   // quem entrega: Ver e editar no Calendario, conferido em executarAcao
   var pasta = DriveApp.getFolderById(String(params.pasta));
   if (!dentroDoTemporario_(pasta)) {
     throw new Error('Pasta de envio invalida. Comece a entrega de novo.');
@@ -93,7 +93,7 @@ function acaoReceberParte(usuario, params) {
  *   2. na trava (curta), rele a linha e acrescenta a URL.
  */
 function acaoFinalizarEntrega(usuario, params) {
-  exigirPodeEntregar_(usuario);
+  exigirPorta_();   // quem entrega: Ver e editar no Calendario, conferido em executarAcao
   var atividade = obter('ATIVIDADES', params.id);
   if (!atividade) throw new Error('Atividade não encontrada.');
   garantirAlcanceEscrita_(usuario, atividade);
@@ -171,7 +171,7 @@ function acaoFinalizarEntrega(usuario, params) {
     var atual = obter('ATIVIDADES', params.id);
     if (!atual) throw new Error('Atividade não encontrada.');
     var anexosAntes = String(atual.ANEXOS || '').trim();
-    var campos = camposDaEntrega_(atual);
+    var campos = camposDaEntrega_(atual, usuario.email);
     campos.ANEXOS = anexosAntes ? (anexosAntes + ',' + url) : url;
     atualizar('ATIVIDADES', params.id, campos, usuario.email);
     return { depois: comCampos_(atual, campos), reentrega: campos.VALIDACAO === '' };

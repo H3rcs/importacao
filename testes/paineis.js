@@ -236,26 +236,40 @@ caso('limpeza: acoes da tabela antiga (LP_ACOES) passam para o Plano de Acao na 
   afirmar(oleo2.responsavel === 'Equipe do turno' && oleo2.abertaEm === '2026-09-01' && oleo2.comentarios.length === 2 && oleo2.prazoISO === '2026-09-10', 'editada: ' + JSON.stringify(oleo2).slice(0, 300));
 });
 
-caso('limpeza: responsavel precisa enxergar a Limpeza; quem tem o modulo so em "Ver" ve e conclui so as suas', () => {
+caso('limpeza (3 faixas): responsavel precisa de "Ver e editar" na Limpeza; com "Ver" a pessoa so le — nem a dela conclui ou comenta; com "Ver e editar" conclui a dela e nao ve a dos outros', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const pessoas = tela(m, adm, 'limpeza').plano.pessoas;
   afirmar(!pessoas.some((p) => p.email === COORD) && pessoas.some((p) => p.email === GERENTE), 'lista: ' + pessoas.map((p) => p.email).join());
   const e = erroDe(() => acao(m, adm, 'salvarAcaoLimpeza', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }));
   afirmar(/Sem acesso ao Plano de Ação da Limpeza/.test(e), 'recusado: ' + e);
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
-  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'limpeza', modo: 'VER' });
-  acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], zona: 'Z7', criticidade: 'Alta' });
+  // Ver: aparece na lista (pode ser marcada), mas nao pode ser responsavel — nao conseguiria concluir
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'limpeza', nivel: 'VER' });
+  const comVer = tela(m, adm, 'limpeza').plano.pessoas.find((p) => p.email === COORD);
+  afirmar(comVer && comVer.edita === false, 'na lista, so para ver: ' + JSON.stringify(comVer));
+  const soVer = erroDe(() => acao(m, adm, 'salvarAcaoLimpeza', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }));
+  afirmar(/Só pode ser responsável quem tem “Ver e editar”/.test(soVer), 'responsavel com Ver recusado: ' + soVer);
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'limpeza', nivel: 'EDITAR' });
+  const idDaMaria = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Da Maria', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD], zona: 'Z7', criticidade: 'Alta' }).id;
   const idDoGerente = acao(m, adm, 'salvarAcaoLimpeza', { acao: 'Do gerente', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }).id;
   const maria = entrar(m, COORD, '1234');
   const dm = tela(m, maria, 'limpeza');
-  afirmar(dm.plano.lista.length === 1 && dm.plano.lista[0].acao === 'Da Maria' && !dm.plano.permissoes.gerir, 'maria ve so a dela: ' + dm.plano.lista.map((a) => a.acao).join());
-  afirmar(!dm.estoque.permissoes.cadastrar && !dm.estoque.permissoes.movimentar, 'estoque so para ver');
-  const doGerente = { id: idDoGerente };      // 21/10: o admin, que criou e nao esta citado, nem a ve
-  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, maria, 'comentarAcaoLimpeza', { id: doGerente.id, texto: 'oi' }))), 'nao comenta a do gerente');
-  acao(m, maria, 'comentarAcaoLimpeza', { id: dm.plano.lista[0].id, texto: 'Feito', situacao: 'Concluída' });
-  afirmar(tela(m, maria, 'limpeza').plano.lista[0].situacao === 'CONCLUIDA', 'concluiu a dela');
+  afirmar(dm.plano.lista.length === 1 && dm.plano.lista[0].acao === 'Da Maria' && dm.plano.permissoes.editar, 'maria ve so a dela: ' + dm.plano.lista.map((a) => a.acao).join());
+  afirmar(dm.estoque.permissoes.cadastrar && dm.estoque.permissoes.movimentar, 'Ver e editar na Limpeza: o estoque dela tambem');
+  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, maria, 'comentarAcaoLimpeza', { id: idDoGerente, texto: 'oi' }))), 'nao comenta a do gerente');
+  // Volta a "Ver": a tela abre, so leitura; o servidor recusa ate a acao dela
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'limpeza', nivel: 'VER' });
+  const dv = tela(m, maria, 'limpeza');
+  afirmar(dv.plano.lista.length === 1 && !dv.plano.permissoes.editar && !dv.plano.permissoes.gerir && !dv.permissoes.gerir, 'em Ver, so le');
+  afirmar(!dv.estoque.permissoes.cadastrar && !dv.estoque.permissoes.movimentar, 'estoque so para ver');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, maria, 'comentarAcaoLimpeza', { id: idDaMaria, texto: 'Feito', situacao: 'Concluída' }))), 'em Ver nao comenta nem conclui a dela');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, maria, 'concluirAcaoLimpeza', { id: idDaMaria }))), 'em Ver nao conclui');
   afirmar(erroDe(() => acao(m, maria, 'salvarItemLimpeza', { nome: 'X' })), 'em Ver nao cadastra no estoque');
   afirmar(erroDe(() => acao(m, maria, 'salvarAcaoLimpeza', { acao: 'x', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] })), 'em Ver nao cria acao');
+  // Ver e editar de novo: conclui a dela
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'limpeza', nivel: 'EDITAR' });
+  acao(m, maria, 'comentarAcaoLimpeza', { id: idDaMaria, texto: 'Feito', situacao: 'Concluída' });
+  afirmar(tela(m, maria, 'limpeza').plano.lista[0].situacao === 'CONCLUIDA', 'concluiu a dela');
 });
 
 caso('planos separados: a acao de um plano nao abre pela porta do outro, e cada tela so lista as suas', () => {
@@ -312,7 +326,11 @@ caso('fotos: na acao e no comentario vao para Anexos/ACOES/<id>; so quem enxerga
   afirmar(/não é desta ação/.test(erroDe(() => acao(m, maria, 'fotoAcao', { id: a.id, arquivo: 'qualquer-id-do-drive' }))), 'arquivo qualquer');
   const pelaPortaGenerica = chamar(m, 'pedro@bartofil.com.br', 'obterAnexo', { t: pedro.t, f: pedro.f }, a.fotos[0].id);
   afirmar(!pelaPortaGenerica.ok && /Plano de Ação/.test(pelaPortaGenerica.erro.message), 'obterAnexo nao entrega foto de acao: ' + JSON.stringify(pelaPortaGenerica.erro || pelaPortaGenerica.valor).slice(0, 120));
-  afirmar(erroDe(() => acao(m, maria, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id })), 'responsavel nao remove');
+  // 3 faixas: quem so ve o Plano de Acao nao tira foto (o coordenador padrao tem Ver e editar ali)
+  const regMaria = ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirAjustePessoa', { id: regMaria.ID, tela: 'acoes', nivel: 'VER' });
+  afirmar(/só para ver/.test(erroDe(() => acao(m, maria, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id }))), 'com Ver nao remove');
+  acao(m, adm, 'definirAjustePessoa', { id: regMaria.ID, tela: 'acoes', nivel: 'PADRAO' });
   afirmar(/não é anexo deste registro/.test(erroDe(() => acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: fc.id }))), 'foto de comentario fica');
   acao(m, adm, 'removerFotoAcao', { id: a.id, arquivo: a.fotos[0].id });
   let depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === a.id);
@@ -419,14 +437,14 @@ caso('fotos HEIC: converterFoto recusa o que nao e HEIC pelos bytes, mais de 10 
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
   acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'calendario', modo: 'NAO' });
   const e2 = erroDe(() => acao(m, entrar(m, COORD, '1234'), 'converterFoto', { foto: heic(), plano: 'CALENDARIO', uso: 'cc', id: daMaria }));
-  afirmar(/não tem acesso ao módulo/.test(e2), 'sem calendario e sem limpeza: ' + e2);
+  afirmar(/não inclui a tela/.test(e2), 'sem calendario e sem limpeza: ' + e2);
 });
 
 /*
  * 19/10 (revisao): converter e o primeiro passo de anexar. Antes, qualquer um que visse o Calendario
  * ou a Limpeza — ate a CONSULTA, pelo console — subia ate 10 MB por chamada ao Drive do dono.
  */
-caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o plano; comentario: quem esta citado — responsavel ou marcado; conclusao: responsavel ou gestao) — CONSULTA sem contexto e recusada, marcada converte; no maximo 30 por pessoa a cada 10 min', () => {
+caso('fotos HEIC: so converte quem pode anexar a foto ali ("Ver e editar" no plano; comentario: quem esta citado — responsavel ou marcado; conclusao: responsavel ou gestao) — CONSULTA (so Ver) e recusada ate marcada; com Ver e editar, marcada converte; no maximo 30 por pessoa a cada 10 min', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   const drive = miniaturaDrive(m);
   const CARLA = 'carla.dias@bartofil.com.br';
@@ -438,17 +456,22 @@ caso('fotos HEIC: so converte quem pode anexar a foto ali (acao: quem gere o pla
   const conv = (s, contexto) => erroDe(() => afirmar(acao(m, s, 'converterFoto', Object.assign({ foto: heic() }, contexto)).dados === JPEG_MINI, 'converteu'));
   const noDrive = () => m.arquivos.size + m.pastas.size + drive.apagadas.length;
   const antes = noDrive();
-  afirmar(/nao pode executar/.test(conv(carla, {})), 'CONSULTA sem contexto (o console): recusada');
-  afirmar(/nao pode executar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'CONSULTA nao cria acao: recusada');
-  afirmar(/Só os responsáveis pela ação e quem foi marcado nela podem comentar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), 'CONSULTA no comentario de uma acao em que nao foi marcada: recusada');
+  afirmar(/só para ver/.test(conv(carla, {})), 'CONSULTA sem contexto (o console): recusada');
+  afirmar(/só para ver/.test(conv(carla, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'CONSULTA nao cria acao: recusada');
+  afirmar(/só para ver/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: doDono })), 'CONSULTA (so Ver) nem marcada comenta: recusada');
   afirmar(/Só os responsáveis pela ação e quem foi marcado nela podem comentar/.test(conv(adm, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), '21/10: nem o admin, no comentario da acao em que nao esta citado');
   afirmar(/Ação não encontrada/.test(conv(adm, { plano: 'CALENDARIO', uso: 'ac', id: daMaria })), '21/10: nem na foto da acao que ele editaria (nao a ve)');
-  afirmar(/Ação não encontrada/.test(conv(carla, { plano: 'LIMPEZA', uso: 'cm', id: doDono })), 'pela porta do outro plano a acao nao existe');
+  afirmar(/só para ver/.test(conv(carla, { plano: 'LIMPEZA', uso: 'cm', id: doDono })), 'na Limpeza a CONSULTA so ve');
   afirmar(noDrive() === antes, 'as recusas nao subiram nada ao Drive');
-  afirmar(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: doDono }) === '', 'CONSULTA marcada converte no comentario da acao');
+  // Ver e editar no Plano de Acao so para a Carla (ajuste dela): marcada, converte; na acao em que nao foi marcada, nao
+  const regCarla = ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === CARLA);
+  acao(m, adm, 'definirAjustePessoa', { id: regCarla.ID, tela: 'acoes', nivel: 'EDITAR' });
+  afirmar(/Só os responsáveis pela ação e quem foi marcado nela podem comentar/.test(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: daMaria })), 'no comentario de uma acao em que nao foi marcada: recusada');
+  afirmar(/só para ver/.test(conv(carla, { plano: 'LIMPEZA', uso: 'cm', id: doDono })), 'na Limpeza ela continua so vendo');
+  afirmar(conv(carla, { plano: 'CALENDARIO', uso: 'cm', id: doDono }) === '', 'marcada converte no comentario da acao');
   afirmar(conv(maria, { plano: 'CALENDARIO', uso: 'cc', id: daMaria }) === '', 'a responsavel converte na conclusao da acao dela');
   afirmar(/Só o responsável pela ação anexa a foto da conclusão/.test(conv(maria, { plano: 'CALENDARIO', uso: 'cc', id: doDono })), 'conclusao da acao de outro: recusada');
-  afirmar(/nao pode executar/.test(conv(maria, { plano: 'CALENDARIO', uso: 'ac', id: '' })), 'coordenadora nao cria acao: recusada');
+  afirmar(/não inclui a tela "Limpeza CD"/.test(conv(maria, { plano: 'LIMPEZA', uso: 'ac', id: '' })), 'coordenadora nao cria acao na Limpeza (Oculto para ela): recusada');
   // o limite e por pessoa: a 31a do dono em 10 min e recusada antes de subir; a coordenadora continua
   for (let i = 0; i < 30; i++) afirmar(conv(adm, { plano: 'CALENDARIO', uso: 'ac', id: '' }) === '', 'conversao ' + (i + 1));
   const depois = noDrive();
@@ -718,28 +741,33 @@ caso('limpeza: Remover confirmado apaga o produto e as movimentacoes; o proximo 
   afirmar(ti.itens.length === 1 && ti.itens[0].codigo === 'TI-0001' && ti.itens[0].saldo === 4 && ti.totalMovimentos === 1, 'TI intacto: ' + JSON.stringify(ti.itens));
 });
 
-caso('estoque: so quem cadastra (GERIR_ESTOQUE / GERIR_LIMPEZA) remove — quem so movimenta, quem so ve e o modulo em "Ver" sao recusados e nada muda', () => {
+caso('estoque (3 faixas): com "Ver" no Estoque nao movimenta nem remove; "Ver e editar" faz tudo; a Limpeza em "Ver" e o estoque dela; nada muda nas recusas', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321');
   acao(m, adm, 'salvarItemEstoque', { nome: 'Toner HP 85A', saldoInicial: '3' });
   acao(m, adm, 'salvarItemLimpeza', { nome: 'Saco de lixo 100L', saldoInicial: '2' });
   const toner = tela(m, adm, 'estoque').itens[0], saco = tela(m, adm, 'limpeza').estoque.itens[0];
-  // o gerente ve o Estoque de TI sem GERIR_ESTOQUE; com MOVIMENTAR_ESTOQUE ele movimenta, mas nao remove
+  // o nivel GERENTE com o Estoque de TI em "Ver": le tudo, nao grava nada
   const linha = ctx(m).listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
-  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'PODE_MOVIMENTAR_ESTOQUE', valor: true });
+  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'TELA_ESTOQUE', valor: 'VER' });
   const g = entrar(m, GERENTE, '5555');
   const dg = tela(m, g, 'estoque');
-  afirmar(dg.permissoes.movimentar && !dg.permissoes.cadastrar, 'gerente so movimenta: ' + JSON.stringify(dg.permissoes));
-  acao(m, g, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', destino: 'Loja 3' });
+  afirmar(!dg.permissoes.movimentar && !dg.permissoes.cadastrar && dg.itens.length === 1, 'gerente so ve: ' + JSON.stringify(dg.permissoes));
+  afirmar(/só para ver/.test(erroDe(() => acao(m, g, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', destino: 'Loja 3' }))), 'em Ver nao movimenta');
   [{ id: toner.id, excluirMovimentos: true }, { id: toner.id, desativar: true }, { id: toner.id }].forEach((p) => {
-    afirmar(erroDe(() => acao(m, g, 'excluirItemEstoque', p)), 'gerente recusado: ' + JSON.stringify(p));
+    afirmar(/só para ver/.test(erroDe(() => acao(m, g, 'excluirItemEstoque', p))), 'gerente recusado: ' + JSON.stringify(p));
   });
+  afirmar(acao(m, g, 'historicoItemEstoque', { codigo: toner.codigo }).total === 1, 'historico (leitura) com Ver');
+  // Ver e editar: movimenta (o gerente ainda nao remove nada aqui — so para manter as contas do fim)
+  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'TELA_ESTOQUE', valor: 'EDITAR' });
+  afirmar(tela(m, g, 'estoque').permissoes.movimentar, 'Ver e editar movimenta');
+  acao(m, g, 'movimentarEstoque', { tipo: 'SAIDA', item: toner.codigo, quantidade: '1', destino: 'Loja 3' });
   // a coordenadora com a Limpeza em "Ver"
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
-  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'limpeza', modo: 'VER' });
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'limpeza', nivel: 'VER' });
   const maria = entrar(m, COORD, '1234');
-  afirmar(erroDe(() => acao(m, maria, 'excluirItemLimpeza', { id: saco.id, excluirMovimentos: true })), 'coordenadora em Ver recusada');
-  afirmar(erroDe(() => acao(m, maria, 'excluirItemEstoque', { id: toner.id, excluirMovimentos: true })), 'coordenadora sem o Estoque de TI recusada');
-  // o gerente tem GERIR_LIMPEZA, mas a porta do TI nao apaga produto da limpeza (e vice-versa)
+  afirmar(/só para ver/.test(erroDe(() => acao(m, maria, 'excluirItemLimpeza', { id: saco.id, excluirMovimentos: true }))), 'coordenadora em Ver recusada');
+  afirmar(/não inclui a tela/.test(erroDe(() => acao(m, maria, 'excluirItemEstoque', { id: toner.id, excluirMovimentos: true }))), 'coordenadora sem o Estoque de TI recusada');
+  // o gerente tem Ver e editar na Limpeza, mas a porta da limpeza nao apaga item do TI (e vice-versa)
   afirmar(/Item não encontrado/.test(erroDe(() => acao(m, g, 'excluirItemLimpeza', { id: toner.id, excluirMovimentos: true }))), 'id do TI pela porta da limpeza');
   const t = tela(m, adm, 'estoque').itens[0], sc = tela(m, adm, 'limpeza').estoque.itens[0];
   afirmar(t.ativo && t.saldo === 2 && t.movimentacoes === 2 && sc.ativo && sc.saldo === 2 && sc.movimentacoes === 1, 'nada mudou: ' + JSON.stringify([t, sc]));
@@ -809,7 +837,7 @@ caso('rotinas: sigla repetida e dia semanal invalido sao recusados', () => {
   acao(m, s, 'salvarRotina', { id: reu.ID, tipo: 'REU', atividade: reu.ATIVIDADE + ' (editada)', frequencia: reu.FREQUENCIA, dia: String(reu.DIA), ativo: true });
 });
 
-caso('rotinas pela porta (19/10): a Configuracao traz as pendentes da rotina e os meses gerados; Desativar exige PROGRAMAR e tira a rotina do calendario', () => {
+caso('rotinas pela porta (19/10): a Configuracao traz as pendentes da rotina e os meses gerados; Desativar exige Ver e editar na Configuracao e tira a rotina do calendario', () => {
   const m = new Mundo({ dono: DONO, agora: '2026-10-19T10:00:00-03:00' });
   ctx(m).instalar(DONO);
   const c = ctx(m);
@@ -823,8 +851,8 @@ caso('rotinas pela porta (19/10): a Configuracao traz as pendentes da rotina e o
   const ron = cfg.rotinas.find((x) => x.tipo === 'RON');
   afirmar(ron.pendentes.total === 6 && ron.temAtividades && cfg.mesesGerados.join() === 'OUT 2026,NOV 2026', JSON.stringify([ron, cfg.mesesGerados]));
   const coord = entrar(m, COORD, '1234');
-  afirmar(/nao pode executar/.test(erroDe(() => acao(m, coord, 'alternarRotina', { id: ron.id, ativo: false }))), 'coordenador recusado');
-  afirmar(/nao pode executar/.test(erroDe(() => acao(m, coord, 'limparSiglaOrfa', { sigla: 'RON' }))), 'coordenador recusado no "Tirar do calendario" da removida');
+  afirmar(/não inclui a tela "Configuração"/.test(erroDe(() => acao(m, coord, 'alternarRotina', { id: ron.id, ativo: false }))), 'coordenador recusado');
+  afirmar(/não inclui a tela "Configuração"/.test(erroDe(() => acao(m, coord, 'limparSiglaOrfa', { sigla: 'RON' }))), 'coordenador recusado no "Tirar do calendario" da removida');
   // Uma ida so: a Configuracao volta junto com a gravacao (esquecerTelas, nao invalidarTudo: sem refazer o menu)
   const ida = JSON.parse(chamar(m, DONO, 'executarAcaoETela', { t: adm.t, f: adm.f }, 'alternarRotina', { id: ron.id, ativo: false }, 'config', {}).valor);
   const d = ida.r;
@@ -876,12 +904,12 @@ const gravarNaTela = (m, s, nome, params, idTela) =>
  * 19/10 (substitui o "ADMIN ve todas as telas e paineis" da 4.2.2): o ADMIN continua com todas as
  * telas e permissoes sem depender da tabela PERFIS, mas nos paineis vale o estado da filial.
  */
-caso('ADMIN com PERFIS incompleto (banco antigo) nunca fica trancado fora da Configuracao; painel fora da filial some ate para ele e volta ao ligar (Oculto com a etiqueta)', () => {
+caso('ADMIN (3 faixas): a matriz vale para ele tambem — com tudo Oculto ele so ve Pessoas e acessos (a trava), e e por ela que se destranca; painel fora da filial some ate para ele e volta ao ligar (Oculto com a etiqueta)', () => {
   const m = mundo(); const c = ctx(m);
-  // banco antigo: linha ADMIN sem nenhuma permissao e sem as telas da Configuracao; principal so com calendario e assiduidade
+  // a linha ADMIN com a Configuracao inteira e os paineis em Oculto (Pessoas e acessos tambem, direto na planilha); principal so com calendario e assiduidade
   const adm = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'ADMIN');
   const apaga = {};
-  Object.keys(adm).forEach((k) => { if (/^TELA_(NOBREAKS|LIMPEZA|QUADRO|ESTOQUE|CONFIG|ACESSOS|FILIAIS|RELATOS)$|^PODE_/.test(k)) apaga[k] = 'NAO'; });
+  Object.keys(adm).forEach((k) => { if (/^TELA_(NOBREAKS|LIMPEZA|QUADRO|ESTOQUE|CONFIG|ACESSOS|FILIAIS|RELATOS)$/.test(k)) apaga[k] = 'OCULTO'; });
   c.atualizar('PERFIS', adm.ID, apaga, DONO);
   const pr = c.listar('FILIAIS').find((l) => c.marcado(l.PRINCIPAL));
   c.atualizar('FILIAIS', pr.ID, { PAINEIS: JSON.stringify({ calendario: 'ATIVO', assiduidade: 'ATIVO' }) }, DONO);
@@ -889,15 +917,23 @@ caso('ADMIN com PERFIS incompleto (banco antigo) nunca fica trancado fora da Con
   const s = entrar(m, DONO, '4321');
   let r = sessaoDe(m, s);
   const telas = r.telas.map((t) => t.id).join(',');
-  afirmar(telas === 'inicio,calendario,acoes,assiduidade,config,acessos,filiais,relatos', 'ADMIN: ' + telas);
-  const capacidades = Object.keys(adm).filter((k) => /^PODE_/.test(k)).map((k) => k.slice(5));
-  afirmar(capacidades.length >= 14 && capacidades.every((k) => r.usuario.podes.indexOf(k) !== -1), 'todas as permissoes: ' + r.usuario.podes.join(','));
+  afirmar(telas === 'inicio,calendario,acoes,assiduidade,acessos', 'ADMIN obedece a matriz, menos a trava: ' + telas);
+  afirmar(r.telas.find((t) => t.id === 'acessos').nivel === 'EDITAR', 'Pessoas e acessos: sempre Ver e editar no ADMIN');
   afirmar(cartoes(r) === 'calendario,assiduidade,config', 'cartoes: ' + cartoes(r));
-  ['config', 'acessos', 'filiais', 'relatos'].forEach((id) => tela(m, s, id));
-  afirmar(/não está ligado na filial/.test(erroDe(() => tela(m, s, 'estoque'))), 'estoque fora da filial nao abre nem para o ADMIN');
-  // ele liga em Filiais e paineis: Ativo para todos, Oculto so para ele (com a etiqueta)
+  ['config', 'filiais', 'relatos'].forEach((id) => afirmar(/não inclui a tela/.test(erroDe(() => tela(m, s, id))), id + ' Oculto para o ADMIN'));
+  const np = tela(m, s, 'acessos');
+  afirmar(np.perfis.find((p) => p.perfil === 'ADMIN').travas.acessos, 'a grade mostra a trava');
+  afirmar(/sempre “Ver e editar”/.test(erroDe(() => acao(m, s, 'alterarPermissao', { id: adm.ID, coluna: 'TELA_ACESSOS', valor: 'VER' }))), 'a trava nao sai');
+  // pela trava ele se destranca: Filiais e paineis, e liga os paineis
+  acao(m, s, 'alterarPermissao', { id: adm.ID, coluna: 'TELA_FILIAIS', valor: 'EDITAR' });
+  afirmar(/não está ligado na filial/.test(erroDe(() => tela(m, s, 'estoque'))) || /não inclui a tela/.test(erroDe(() => tela(m, s, 'estoque'))), 'estoque nao abre');
   acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'estoque', estado: 'ATIVO' });
   acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'quadro', estado: 'OCULTO' });
+  afirmar(cartoes(sessaoDe(m, s)) === 'calendario,assiduidade,config', 'painel ligado, mas Oculto na matriz do ADMIN: nao aparece');
+  acao(m, s, 'alterarPermissao', { id: adm.ID, coluna: 'TELA_ESTOQUE', valor: 'EDITAR' });
+  acao(m, s, 'alterarPermissao', { id: adm.ID, coluna: 'TELA_QUADRO', valor: 'VER' });
+  afirmar(/não está ligado na filial/.test(erroDe(() => (acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'estoque', estado: 'REMOVER' }), tela(m, s, 'estoque')))), 'estoque fora da filial nao abre nem para o ADMIN');
+  acao(m, s, 'alterarPainel', { codigo: 'FSA', painel: 'estoque', estado: 'ATIVO' });
   r = sessaoDe(m, s);
   afirmar(cartoes(r) === 'calendario,assiduidade,quadro(oculto),estoque,config', 'depois de ligar: ' + cartoes(r));
   tela(m, s, 'estoque'); tela(m, s, 'quadro');
@@ -993,18 +1029,18 @@ caso('menu da gravacao: quem tira a si mesmo da filial em que esta recebe semFil
  * P5 (19/10): a recusa diz a causa. "Este painel nao esta ligado" so quando o painel nao aparece para a
  * pessoa na filial; o nivel (a tela que exige uma capacidade) e o ajuste da pessoa (Sem acesso) tem a frase deles.
  */
-caso('recusas: o nivel sem a capacidade da tela e o "Sem acesso" da pessoa nao viram "painel nao esta ligado"; o painel desligado sim (tela e acao)', () => {
+caso('recusas: o nivel com a tela Oculta e o ajuste Oculto da pessoa nao viram "painel nao esta ligado"; o painel desligado sim (tela e acao)', () => {
   const m = mundo(); const adm = entrar(m, DONO, '4321'); const g = entrar(m, GERENTE, '5555');
   tela(m, g, 'config');
   const linha = ctx(m).listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
-  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'PODE_PROGRAMAR', valor: false });
+  acao(m, adm, 'alterarPermissao', { id: linha.ID, coluna: 'TELA_CONFIG', valor: 'OCULTO' });
   const e1 = erroDe(() => tela(m, g, 'config'));
-  afirmar(/Seu perfil \(GERENTE\) nao tem acesso a tela "config"/.test(e1), 'Configuracao sem PROGRAMAR: ' + e1);
+  afirmar(/Seu acesso \(GERENTE\) não inclui a tela "Configuração"/.test(e1), 'Configuracao Oculta no nivel: ' + e1);
   const maria = entrar(m, COORD, '1234');
   const reg = ctx(m).listar('ACESSOS').find((a) => String(a.EMAIL).toLowerCase() === COORD);
-  acao(m, adm, 'definirModuloPessoa', { id: reg.ID, modulo: 'nobreaks', modo: 'NAO' });
+  acao(m, adm, 'definirAjustePessoa', { id: reg.ID, tela: 'nobreaks', nivel: 'OCULTO' });
   const e2 = erroDe(() => acao(m, maria, 'semanaNobreak', {}));
-  afirmar(/Você não tem acesso ao módulo Nobreaks na filial CD Feira de Santana/.test(e2), 'Sem acesso (o painel continua ativo): ' + e2);
+  afirmar(/Seu acesso \(COORDENADOR\) não inclui a tela "Nobreaks"/.test(e2), 'Oculto para ela (o painel continua ativo): ' + e2);
   acao(m, adm, 'alterarPainel', { codigo: 'FSA', painel: 'nobreaks', estado: 'DESATIVADO' });
   afirmar(/Este painel não está ligado na filial CD Feira de Santana/.test(erroDe(() => acao(m, maria, 'semanaNobreak', {}))), 'painel desligado: a acao');
   afirmar(/Este painel não está ligado na filial CD Feira de Santana/.test(erroDe(() => tela(m, g, 'nobreaks'))), 'painel desligado: a tela');
@@ -1788,7 +1824,7 @@ caso('ferias (21/10): confirmar a saida (do dia do inicio em diante), desfazer a
   [coord, consulta].forEach((q) => {
     [['programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)], ['confirmarFerias', { id: idEva }], ['cancelarProgramacaoFerias', { id: idAna }]].forEach(([nome, p]) => {
       const msg = erroDe(() => acao(m, q, nome, p));
-      afirmar(/nao pode executar esta acao/.test(msg), q.email + ' em ' + nome + ': ' + msg);
+      afirmar(/não inclui a tela "Quadro do CD"|só para ver/.test(msg), q.email + ' em ' + nome + ': ' + msg);   // coordenador: Oculto; consulta: Ver
     });
   });
   afirmar(ctx(m).listar('FERIAS_PROG').every((x) => x.SITUACAO === 'PROGRAMADA') && ctx(m).listar('FERIAS_PROG').length === 2, 'nada mudou com as recusas');
@@ -1840,7 +1876,7 @@ caso('atualizacao 8.11: banco da 8.10 (sem a FERIAS_PROG) ganha a tabela na entr
   m.cache.clear();
   const adm = entrar(m, DONO, '4321');                        // a entrada roda a migracao
   const aba = banco.abas.find((x) => x.nome === 'FERIAS_PROG');
-  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.11', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(aba && aba.dados[0].join() === FERIAS_PROG_COLUNAS && m.props.script.VERSAO_ESQUEMA === '8.12', 'tabela criada e versao: ' + m.props.script.VERSAO_ESQUEMA);
   afirmar(acao(m, adm, 'programarFerias', Object.assign({ inicio: '2026-12-07' }, PER_ANA)).recado === 'Férias de ANA LIMA programadas para 07/12/2026 (30 dias).', 'grava depois da migracao');
   afirmar(tela(m, adm, 'quadro').programacoes.length === 1 && s, 'a tela le');
   // Instalacao.gs de antes (colado pela metade): sem a FERIAS_PROG no esquema
@@ -1982,10 +2018,8 @@ caso('estoque de TI: minimo 1, ideal 1, estoque 1 nao pede reposicao', () => {
 });
 
 caso('plano de acao: coordenador ve so as suas (inclusive conjuntas) e conclui', () => {
-  const m = mundo(); let c = ctx(m);
-  // banco antigo: coordenador sem a tela do Plano de Acao
-  const co = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'COORDENADOR');
-  c.atualizar('PERFIS', co.ID, { TELA_ACOES: 'NAO' }, DONO); m.cache.clear();
+  const m = mundo();
+  // (a regra antiga "quem ve o Calendario ve o Plano de Acao" agora so vale na conversao do banco antigo — testes/perfis.js)
   const adm = entrar(m, DONO, '4321');
   acao(m, adm, 'salvarUsuario', { email: 'pedro@bartofil.com.br', nome: 'Pedro', perfil: 'COORDENADOR', turno: 'B', filiais: '*', papel: 'Coord' });
   acao(m, adm, 'salvarAcao', { acao: 'Trocar lâmpadas', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, 'pedro@bartofil.com.br'] });
@@ -2241,7 +2275,7 @@ caso('marcar pessoa: a marcacao so e conferida depois da acao e de quem comenta 
   afirmar(!respostas.some((r) => /Sueli|Fulano|marcar/.test(r)), 'nenhum nome: ' + respostas.join(' | '));
 });
 
-caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em aberto, bolinha e foto) e a responder — sem concluir nem mudar a situacao; "Sob sua responsabilidade" nao muda; editar a acao mantem os marcados', () => {
+caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em aberto, bolinha e foto) e a responder — com o Plano de Acao so em "Ver", nem responde; "Sob sua responsabilidade" nao muda; editar a acao mantem os marcados', () => {
   const { m, adm } = mundoComMencoes();
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação do Flow', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO], fotos: [foto(1)] }).id;
   const outra = acao(m, adm, 'salvarAcao', { acao: 'Pintura da faixa', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD] }).id;
@@ -2257,13 +2291,19 @@ caso('marcar pessoa: o coordenador de outro turno passa a ver a acao (lista, Em 
   afirmar(d.contagens.minhas === antes.minhas && d.contagens.abertas === antes.abertas + 1, 'contagens: ' + JSON.stringify([antes, d.contagens]));
   afirmar(acao(m, pedro, 'pendencias').pendencias.calendario.abertas === d.contagens.abertas, 'a bolinha continua igual ao Em aberto');
   afirmar(acao(m, pedro, 'fotoAcao', { id, arquivo: a.fotos[0].id }).dados === PNG_1x1, 've a foto da acao');
-  afirmar(/Só o responsável/.test(erroDe(() => acao(m, pedro, 'concluirAcao', { id }))), 'nao conclui pelo botao');
-  const r = acao(m, pedro, 'comentarAcao', { id, texto: 'Tenho dois, mando amanhã', situacao: 'Concluída', depende: 'nada' });
+  // 3 faixas: com o Plano de Acao so em "Ver" (ajuste dele), o marcado le a acao e nao grava nada
+  const regPedro = ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === PEDRO);
+  acao(m, adm, 'definirAjustePessoa', { id: regPedro.ID, tela: 'acoes', nivel: 'VER' });
+  afirmar(tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'em Ver, marcado, continua vendo');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, pedro, 'concluirAcao', { id }))), 'em Ver nao conclui');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id, texto: 'x' }))), 'em Ver nao comenta');
+  acao(m, adm, 'definirAjustePessoa', { id: regPedro.ID, tela: 'acoes', nivel: 'PADRAO' });
+  const r = acao(m, pedro, 'comentarAcao', { id, texto: 'Tenho dois, mando amanhã', situacao: 'Aguardando', depende: 'extintores' });
   afirmar(r.recado === 'Comentário registrado.', 'responde: ' + r.recado);
   const depois = tela(m, adm, 'acoes', { situacao: 'TODAS' }).lista.find((x) => x.id === id);
-  afirmar(depois.situacao === 'PENDENTE' && depois.andamento === 'Aguardando' && depois.depende === 'extintores', 'a situacao fica com os responsaveis: ' + JSON.stringify([depois.situacao, depois.andamento, depois.depende]));
+  afirmar(depois.situacao === 'PENDENTE' && depois.andamento === 'Aguardando' && depois.depende === 'extintores', 'a acao segue em aberto: ' + JSON.stringify([depois.situacao, depois.andamento, depois.depende]));
   const ult = depois.comentarios.slice(-1)[0];
-  afirmar(ult.autor === PEDRO && ult.tipo === 'COMENTARIO' && !ult.situacao && !ult.depende, 'registro do marcado: ' + JSON.stringify(ult));
+  afirmar(ult.autor === PEDRO && ult.tipo === 'COMENTARIO', 'registro do marcado: ' + JSON.stringify(ult));
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
   acao(m, adm, 'salvarAcao', { id, acao: 'Iluminação do Flow', prazo: '2026-12-05', turno: 'A', responsaveisEmails: [COORD, DONO] });
   afirmar(ctx(m).obter('ACOES', id).MARCADOS === PEDRO && tela(m, pedro, 'acoes').lista.some((x) => x.id === id), 'editar a acao mantem o marcado');
@@ -2288,8 +2328,13 @@ caso('desmarcar (Editar a acao): a gestao tira quem foi marcado por engano — a
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, pedro, 'comentarAcao', { id, texto: 'oi' }))), 'nem comenta');
   editar({ desmarcados: [], marcadosEmails: [PEDRO, GERENTE], marcados: PEDRO + ',' + GERENTE, MARCADOS: PEDRO });
   afirmar(marcados() === CONSULTA, 'ninguem entra pela edicao: ' + marcados());
+  // so quem tem "Ver e editar" no Plano de Acao edita: a responsavel com o plano em "Ver" (ajuste dela) nao desmarca ninguem
   const coord = entrar(m, COORD, '1234');
-  afirmar(/nao pode executar|não pode/i.test(erroDe(() => acao(m, coord, 'salvarAcao', Object.assign({ id, desmarcados: [CONSULTA] }, base)))) && marcados() === CONSULTA, 'so a gestao edita');
+  const regCoord = ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === COORD);
+  acao(m, adm, 'definirAjustePessoa', { id: regCoord.ID, tela: 'acoes', nivel: 'VER' });
+  afirmar(/só para ver/.test(erroDe(() => acao(m, coord, 'salvarAcao', Object.assign({ id, desmarcados: [CONSULTA] }, base)))) && marcados() === CONSULTA, 'so quem edita o plano edita');
+  // responsavel precisa de "Ver e editar" no plano (a CONSULTA so ve): o ajuste dela libera
+  acao(m, adm, 'definirAjustePessoa', { id: ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === CONSULTA).ID, tela: 'acoes', nivel: 'EDITAR' });
   editar({ responsaveisEmails: [COORD, CONSULTA, DONO] });
   afirmar(!marcados(), 'virou responsavel: sai de MARCADOS — ' + marcados());
   editar({});
@@ -2320,12 +2365,13 @@ caso('marcar pessoa (21/10): a gestao e a CONSULTA nao veem nem comentam a acao 
   const maria = entrar(m, COORD, '1234');
   const pessoas = tela(m, maria, 'acoes').pessoas;
   const gere = (e) => (pessoas.find((p) => p.email === e) || {}).gere;
-  afirmar(gere(GERENTE) === true && gere(DONO) === true && gere(CONSULTA) === false && gere(PEDRO) === false && gere(COORD) === false &&
+  // gere = "Ver e editar" no Plano de Acao (o coordenador padrao tem; a CONSULTA so ve)
+  afirmar(gere(GERENTE) === true && gere(DONO) === true && gere(CONSULTA) === false && gere(PEDRO) === true && gere(COORD) === true &&
     !pessoas.some((p) => 'veTodas' in p), 'gere: ' + JSON.stringify(pessoas.map((p) => [p.email, p.gere, p.veTodas])));
   const carla = entrar(m, CONSULTA, '7777'), ger = entrar(m, GERENTE, '5555');
   const ids = (s) => tela(m, s, 'acoes', { situacao: 'TODAS' }).lista.map((a) => a.id).join();
   afirmar(ids(carla) === '' && ids(ger) === '', 'antes de marcar, nem a CONSULTA nem o gerente veem: ' + ids(carla) + ' / ' + ids(ger));
-  afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'oi' }))), 'a CONSULTA nao comenta');
+  afirmar(/só para ver/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'oi' }))), 'a CONSULTA (so Ver) nao comenta');
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, ger, 'comentarAcao', { id, texto: 'oi' }))), 'nem o gerente (gere o plano, mas nao esta citado)');
   const e0 = m.emails.length;
   acao(m, maria, 'comentarAcao', { id, texto: '@Carla Dias @João Lima confere na auditoria?', mencoes: [CONSULTA, GERENTE] });
@@ -2333,6 +2379,9 @@ caso('marcar pessoa (21/10): a gestao e a CONSULTA nao veem nem comentam a acao 
   afirmar(mails.length === 2 && mails.every((e) => /passou a acompanhar/.test(e.htmlBody)), 'os dois passam a acompanhar: ' + mails.map((e) => e.to).join());
   afirmar(ctx(m).obter('ACOES', id).MARCADOS === CONSULTA + ',' + GERENTE, 'MARCADOS: ' + ctx(m).obter('ACOES', id).MARCADOS);
   afirmar(ids(carla) === id && ids(ger) === id, 'marcados, veem so aquela: ' + ids(carla) + ' / ' + ids(ger));
+  afirmar(/só para ver/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id, texto: 'Conferido' }))), 'a CONSULTA marcada le, mas com "Ver" nao responde');
+  // com "Ver e editar" no Plano de Acao (ajuste dela), responde — so naquela acao
+  acao(m, adm, 'definirAjustePessoa', { id: ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === CONSULTA).ID, tela: 'acoes', nivel: 'EDITAR' });
   afirmar(acao(m, carla, 'comentarAcao', { id, texto: 'Conferido' }).recado === 'Comentário registrado.', 'a CONSULTA responde');
   afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, carla, 'comentarAcao', { id: outra, texto: 'oi' }))), 'so naquela acao');
   // o gerente marcado gere o plano E ve a acao: muda a situacao e pode cancelar; a outra continua "nao existe" para ele
@@ -2373,7 +2422,7 @@ caso('atualizacao 8.10: banco da 8.9 (sem MENCOES nem MARCADOS) ganha as duas co
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const cab = (aba) => banco.abas.find((x) => x.nome === aba).dados[0];
   afirmar(cab('ACOES').indexOf('MARCADOS') !== -1 && cab('COMENTARIOS').indexOf('MENCOES') !== -1, 'colunas criadas');
-  afirmar(m.props.script.VERSAO_ESQUEMA === '8.11', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
+  afirmar(m.props.script.VERSAO_ESQUEMA === '8.12', 'versao: ' + m.props.script.VERSAO_ESQUEMA);
   const id = acao(m, adm, 'salvarAcao', { acao: 'Iluminação', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [COORD, DONO] }).id;
   acao(m, adm, 'comentarAcao', { id, texto: '@João Lima', mencoes: [GERENTE] });
   const c2 = ctx(m);
@@ -2464,8 +2513,9 @@ caso('quem ve a acao (21/10): ADMIN, GERENTE e CONSULTA nao citados nao veem nad
     afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcao', { id: idC, arquivo: fotoC }))), quem + ' › foto da acao');
     afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcao', { id: idC, arquivo: fotoCm }))), quem + ' › foto do comentario');
     afirmar(/Ação não encontrada/.test(erroDe(() => acao(m, s, 'fotoAcaoLimpeza', { id: idL, arquivo: fotoL }))), quem + ' › foto da limpeza');
-    afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, s, 'comentarAcao', { id: idC, texto: 'oi' }))), quem + ' › comentar');
-    afirmar(/Só os responsáveis/.test(erroDe(() => acao(m, s, 'comentarAcaoLimpeza', { id: idL, texto: 'oi' }))), quem + ' › comentar na limpeza');
+    // (a CONSULTA so ve os dois planos: a porta recusa antes, pela faixa)
+    afirmar(/Só os responsáveis|só para ver/.test(erroDe(() => acao(m, s, 'comentarAcao', { id: idC, texto: 'oi' }))), quem + ' › comentar');
+    afirmar(/Só os responsáveis|só para ver/.test(erroDe(() => acao(m, s, 'comentarAcaoLimpeza', { id: idL, texto: 'oi' }))), quem + ' › comentar na limpeza');
   });
   // os citados veem tudo: a acao, o historico, as fotos, a bolinha
   const dm = tela(m, maria, 'acoes', { situacao: 'TODAS' });
@@ -2482,7 +2532,7 @@ caso('quem ve a acao (21/10): ADMIN, GERENTE e CONSULTA nao citados nao veem nad
   afirmar(lg.geral && lg.geral.abertas === 1 && lg.geral.atrasadas === 1 && lg.ranking.length === 1 && lg.ranking[0].turno === 'B', 'gerente na Limpeza: o plano inteiro em numeros: ' + JSON.stringify([lg.geral, lg.ranking]));
   const dc = tela(m, carla, 'acoes', { situacao: 'TODAS' });
   afirmar(dc.geral === null && !dc.ranking.length, 'consulta: sem os numeros do plano inteiro');
-  afirmar(dm.geral === null && dm.ranking.length === 1 && dm.ranking[0].total === 1, 'Maria: o ranking das que ve');
+  afirmar(dm.geral && dm.geral.abertas === 1 && dm.ranking.length === 1 && dm.ranking[0].total === 1, 'Maria (Ver e editar no plano): o ranking e o total do plano');
   // a tela que o link do e-mail abre (?tela=acoes&acao=ID) e a mesma lista: para quem nao esta citado, a acao nao vem
   const r = JSON.parse(chamar(m, GERENTE, 'entrar', GERENTE, '5555', '', '', '', 'acoes', '{"situacao":"TODAS"}').valor);
   afirmar(r.telaEmbutida && !r.telaEmbutida.resposta.dados.lista.length && !segredos.test(JSON.stringify(r)), 'link do e-mail: a tela embutida nao traz a acao');
@@ -2861,7 +2911,7 @@ caso('jovem aprendiz: a atualizacao (8.9) liga o painel na principal e libera o 
   afirmar(JSON.parse(pr2.PAINEIS).aprendiz === 'ATIVO', 'painel ligado: ' + pr2.PAINEIS);
   const ger = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'GERENTE');
   const coo = c.listar('PERFIS').find((l) => String(l.PERFIL).toUpperCase() === 'COORDENADOR');
-  afirmar(c.marcado(ger.TELA_APRENDIZ) && !c.marcado(coo.TELA_APRENDIZ), 'gerente sim, coordenador nao: ' + ger.TELA_APRENDIZ + ' / ' + coo.TELA_APRENDIZ);
+  afirmar(ger.TELA_APRENDIZ === 'EDITAR' && coo.TELA_APRENDIZ === 'OCULTO', 'gerente sim (Ver e editar), coordenador nao (Oculto): ' + ger.TELA_APRENDIZ + ' / ' + coo.TELA_APRENDIZ);
   afirmar(c.listar('PARAMETROS').some((p) => p.CHAVE === 'APRENDIZ_PLANILHA'), 'parametro criado');
 });
 

@@ -446,8 +446,10 @@ const PN_ESTADOS = { ATIVO: 'Ativo', OCULTO: 'Oculto', DESATIVADO: 'Desativado' 
 function pintarFiliais(r) {
   const d = r.dados;
   el('subtitulo-pagina').textContent = d.filiais.length + ' filial(is) · cada uma com banco e painéis próprios';
-  el('acoes-topo').innerHTML = `<button class="botao" onclick="formFilial()">Nova filial</button>`;
-  el('pagina').innerHTML = `
+  // Com "Ver" em Filiais e paineis: so le (estado de cada painel, quem entra) — nada de criar, ligar ou desligar.
+  const ed = podeEditar('filiais');
+  el('acoes-topo').innerHTML = ed ? `<button class="botao" onclick="formFilial()">Nova filial</button>` : '';
+  el('pagina').innerHTML = `${ed ? '' : avisoSoVer('Filiais e painéis')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Como funciona</div>
       <div class="pn-grade quatro">
@@ -463,6 +465,7 @@ function pintarFiliais(r) {
 }
 
 function cartaoFilial(f, d) {
+  const ed = podeEditar('filiais');
   return `<div class="cartao" style="${f.ativa ? '' : 'opacity:.7'}">
     <div class="linha-titulo" style="margin-bottom:10px">
       <div>
@@ -479,18 +482,18 @@ function cartaoFilial(f, d) {
       ${d.catalogo.map((p) => {
         const e = f.paineis[p.id] || '';
         return `<tr><td><strong>${esc(p.nome)}</strong><div class="pn-mini">${esc(p.frase)}</div></td>
-          <td><select onchange="agir('alterarPainel',{codigo:${jsArg(f.codigo)},painel:${jsArg(p.id)},estado:this.value},'Painel atualizado')">
+          <td>${ed ? `<select onchange="agir('alterarPainel',{codigo:${jsArg(f.codigo)},painel:${jsArg(p.id)},estado:this.value},'Painel atualizado')">
             <option value="REMOVER" ${e ? '' : 'selected'}>Não usar nesta filial</option>
             ${Object.keys(PN_ESTADOS).map((k) => `<option value="${k}" ${e === k ? 'selected' : ''}>${PN_ESTADOS[k]}</option>`).join('')}
-          </select></td></tr>`;
+          </select>` : `<span class="pn-chip ${e === 'ATIVO' ? 'ok' : e === 'OCULTO' ? 'atencao' : 'neutro'}">${esc(e ? (PN_ESTADOS[e] || e) : 'Não usar nesta filial')}</span>`}</td></tr>`;
       }).join('')}
     </tbody></table>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+    ${ed ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button class="icone-botao" onclick="formPessoasFilial(${jsArg(f.codigo)})">Quem entra (${f.pessoas})</button>
       <button class="icone-botao" onclick="formFilial(${jsArg(f.codigo)})">Editar nome</button>
       ${f.banco ? `<button class="icone-botao" onclick="window.open(${jsArg(f.banco)},'_blank')">Abrir banco de dados</button>` : ''}
       ${f.principal ? '' : `<button class="icone-botao" onclick="agir('alternarFilial',{codigo:${jsArg(f.codigo)}},'Filial atualizada')">${f.ativa ? 'Desligar filial' : 'Religar filial'}</button>`}
-    </div>
+    </div>` : ''}
   </div>`;
 }
 
@@ -598,7 +601,7 @@ function pintarNobreaks(r) {
   const abas = [['painel', 'Painel'], ['lancar', 'Lançar semana'], ['historico', 'Histórico'], ['equipamentos', 'Equipamentos']]
     .filter((a) => a[0] !== 'lancar' || d.permissoes.lancar);
   if (!abas.some((a) => a[0] === ABA_NB)) ABA_NB = 'painel';
-  el('pagina').innerHTML = pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
+  el('pagina').innerHTML = (podeEditar('nobreaks') ? '' : avisoSoVer('Nobreaks')) + pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
   pintarAbaNB(d);
 }
 
@@ -1229,7 +1232,7 @@ function pintarLimpeza(r) {
   // Link do e-mail de mencao da Limpeza: a acao abre na aba do plano. typeof: App.html de antes (colado pela metade).
   if (typeof ACAO_DO_LINK !== 'undefined' && ACAO_DO_LINK && ACAO_DO_LINK.tela === 'limpeza') ABA_LP = 'plano';
   if (!abas.some((a) => a[0] === ABA_LP)) ABA_LP = 'gestao';
-  el('pagina').innerHTML = pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
+  el('pagina').innerHTML = (podeEditar('limpeza') ? '' : avisoSoVer('Limpeza CD')) + pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
   pintarAbaLP(d);
 }
 
@@ -3562,7 +3565,7 @@ function pintarEstoque(r) {
   const abas = [['itens', 'Estoque'], ['painel', 'Resumo'], ['movimentos', 'Movimentações']]
     .concat(p.cadastrar ? [['inventario', 'Inventário']] : []);
   if (!abas.some((a) => a[0] === ABA_EST)) ABA_EST = 'itens';
-  el('pagina').innerHTML = pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
+  el('pagina').innerHTML = (podeEditar('estoque') ? '' : avisoSoVer('Estoque de TI')) + pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
   pintarAbaEst(d);
 }
 

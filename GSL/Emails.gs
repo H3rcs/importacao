@@ -27,7 +27,7 @@ const COR_ALERTA_FUNDO = '#FFF3CC';  /* fundo claro da caixa de motivo */
 function instalarGatilhos() {
   exigirPorta_();
   const usuario = usuarioAtual();
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
+  exigirEditar(usuario, 'config');
   removerGatilhos();
 
   ScriptApp.newTrigger('rotinaDiaria').timeBased().atHour(5).everyDays(1).create();

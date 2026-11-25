@@ -12,7 +12,9 @@ const ESQUEMA = {
   // O coracao: uma linha por entrega, como na aba do mes.
   ATIVIDADES: ['COMPETENCIA', 'SEMANA', 'PRAZO', 'ATIVIDADE', 'TIPO', 'TURNO',
                'COORDENADOR', 'COORDENADOR_EMAIL', 'SETOR', 'ANEXOS',
-               'ENTREGUE_EM', 'VALIDACAO', 'MOTIVO', 'STATUS'],
+               'ENTREGUE_EM', 'VALIDACAO', 'MOTIVO', 'STATUS',
+               // 8.12: quem mandou arquivo (e-mails) — ninguem valida a propria entrega.
+               'ENTREGUE_POR'],
 
   // CONFIG da planilha, quebrada em tabelas
   EQUIPE:     ['PAPEL', 'NOME', 'EMAIL', 'TURNO', 'ATIVO'],
@@ -55,9 +57,11 @@ const ESQUEMA = {
                // Filiais que a pessoa enxerga: vazio = so a principal,
                // * = todas, ou os codigos separados por virgula (FSA,SSA).
                'FILIAIS',
-               // Ajuste de modulos SO desta pessoa, por cima do nivel dela.
-               // JSON: {"estoque":"EDITAR","calendario":"NAO"}. Vazio = so o nivel.
+               // Ajuste por modulo do modelo antigo (ate 8.11): so leitura, convertido em AJUSTES.
                'MODULOS',
+               // 8.12: ajuste SO desta pessoa por menu, por cima do nivel, nas tres faixas.
+               // JSON: {"estoque":"EDITAR","limpeza":"OCULTO"}. "{}" = igual ao nivel.
+               'AJUSTES',
                // PIN de entrada (4.2): so o resumo (hash) fica gravado, nunca o numero.
                // Vazio = a pessoa cria o PIN no primeiro acesso.
                'PIN_HASH', 'PIN_EM'],
@@ -264,8 +268,8 @@ function colunasDe(tabela) {
   let colunas = ESQUEMA[tabela].slice();
   if (tabela === 'PERFIS') {
     colunas = colunas
-      .concat(TELAS.map(function (t) { return 'TELA_' + t.id.toUpperCase(); }))
-      .concat(CAPACIDADES.map(function (c) { return 'PODE_' + c; }));
+      .concat(TELAS.map(function (t) { return 'TELA_' + t.id.toUpperCase(); }));
+    // As colunas PODE_ do modelo antigo nao nascem mais; nos bancos antigos ficam, ignoradas.
   }
   if (TABELAS_SEM_CONTROLE.indexOf(tabela) === -1) {
     colunas = ['ID'].concat(colunas).concat(COLUNAS_CONTROLE.slice(1));
@@ -306,7 +310,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.11';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) (a proxima e 8.12: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.12';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) (a proxima e 8.13: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -319,7 +323,7 @@ function garantirEsquema() {
   const planilha = abrirBanco();
   let mexeu = false;
 
-  // Colunas de nivel (TELA_/PODE_) que ainda nao existem: guardadas para
+  // Colunas de nivel (TELA_) que ainda nao existem: guardadas para
   // receber o padrao de cada nivel logo depois de criadas.
   let colunasNovasPerfis = [];
   if (principal) {
@@ -328,7 +332,7 @@ function garantirEsquema() {
       const tem = abaP.getRange(1, 1, 1, Math.max(1, abaP.getLastColumn())).getValues()[0]
         .map(function (c) { return String(c).trim().toUpperCase(); });
       colunasNovasPerfis = colunasDe('PERFIS').filter(function (c) {
-        return (c.indexOf('TELA_') === 0 || c.indexOf('PODE_') === 0) && tem.indexOf(c) === -1;
+        return c.indexOf('TELA_') === 0 && tem.indexOf(c) === -1;
       });
     }
   }
@@ -434,8 +438,14 @@ function garantirEsquema() {
     if (migrarAcoesDaLimpeza_()) mexeu = true;
   } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'LP_ACOES', '', String(e)); }
 
-  // 6 · o ADMIN nunca pode perder acesso quando uma tela nova aparece
-  if (mexeu) { if (principal) liberarTudoParaAdmin(); limparCache(); }
+  /*
+   * 6 · a matriz de tres faixas (8.12): niveis e ajustes por pessoa do modelo
+   * antigo convertidos. Tela nova ganha a faixa do padrao de cada nivel
+   * (aplicarPadraoNasColunasNovas_, acima; o ADMIN, Ver e editar) — e o que o
+   * administrador marcou para o nivel ADMIN nao e mais sobrescrito aqui.
+   */
+  if (principal && migrarParaTresFaixas_()) mexeu = true;
+  if (mexeu) limparCache();
   if (!migracaoPendente) PropertiesService.getScriptProperties().setProperty(chaveVersao, VERSAO_ESQUEMA);
   esquecerProps();
   return mexeu;
@@ -462,7 +472,7 @@ function tabelasDoBanco_(principal) {
 }
 
 /*
- * Tela nova = coluna nova na matriz de niveis, e ela nasce vazia (NAO para
+ * Tela nova = coluna nova na matriz de niveis, e ela nasce vazia (Oculto para
  * todo mundo). Aqui cada nivel padrao recebe o que o padrao dele diz para
  * essas colunas — e SO para elas: o que voce ja ajustou a mao fica.
  */
@@ -550,20 +560,6 @@ function migrarEquipeParaAcessos() {
   return (mudancas.length + novos.length) > 0;
 }
 
-/** Marca SIM em toda coluna TELA_ e PODE_ do perfil ADMIN. */
-function liberarTudoParaAdmin() {
-  const admin = listar('PERFIS').filter(function (p) {
-    return String(p.PERFIL || '').toUpperCase().trim() === 'ADMIN';
-  })[0];
-  if (!admin) return;
-
-  const campos = {};
-  TELAS.forEach(function (t) { campos['TELA_' + t.id.toUpperCase()] = 'SIM'; });
-  CAPACIDADES.forEach(function (c) { campos['PODE_' + c] = 'SIM'; });
-  campos.ESCOPO = 'TODOS';
-  atualizar('PERFIS', admin.ID, campos, 'sistema');
-}
-
 function sincronizarEsquema() {
   exigirPorta_();
   const planilha = abrirBanco();
@@ -605,55 +601,90 @@ function semearPerfis() {
 }
 
 /*
- * Perfis padrao do sistema — a fonte unica da verdade.
- *   ADMIN       ve tudo, pode tudo
- *   GERENTE     valida entregas, programa, ve assiduidade e config
- *   COORDENADOR so entrega, escopo do seu turno; NAO valida, NAO ve
- *               assiduidade, apresentacao nem config
- *   CONSULTA    so leitura
+ * Perfis padrao do sistema — a fonte unica da verdade (instalacao nova,
+ * nivel que falta, coluna de tela nova e "Restaurar niveis de acesso").
+ * Cada tela recebe uma das tres faixas; tela fora da lista = Oculto.
+ *   ADMIN       Ver e editar em tudo
+ *   GERENTE     Ver e editar na operacao, em Configuracao, Pessoas e Relatos;
+ *               Filiais e paineis so para ver
+ *   COORDENADOR entrega no Calendario, conclui as acoes dele, lanca nobreak;
+ *               escopo do seu turno
+ *   SUPERVISOR  cuida da Limpeza CD
+ *   CONSULTA    so ver
  *   PENDENTE    aguardando liberacao, sem telas
  */
 function perfisPadrao() {
+  const E = NIVEL_EDITAR, V = NIVEL_VER;
+  const todas = {};
+  TELAS.forEach(function (t) { todas[t.id] = E; });
   return [
-    { PERFIL: 'ADMIN', DESCRICAO: 'Administrador do sistema', ESCOPO: 'TODOS',
-      telas: TELAS.map(function (t) { return t.id; }), podes: CAPACIDADES },
+    { PERFIL: 'ADMIN', DESCRICAO: 'Administrador do sistema', ESCOPO: 'TODOS', niveis: todas },
     { PERFIL: 'GERENTE', DESCRICAO: 'Gerência — valida as entregas', ESCOPO: 'TODOS',
-      telas: ['inicio', 'calendario', 'acoes', 'assiduidade', 'apresentacao', 'config', 'acessos', 'relatos',
-              'nobreaks', 'limpeza', 'quadro', 'estoque', 'aprendiz'],
-      podes: ['VER_INDIVIDUAL', 'EDITAR', 'EXCLUIR', 'ANEXAR', 'VALIDAR', 'PROGRAMAR',
-              'GERIR_ACESSOS', 'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA'] },
-    /*
-     * O coordenador ganha o Plano de Acao e a Conversa. Ele NAO cria acao
-     * (nao tem GERIR_ACOES) — o plano e feito para ele pelo gerente; o que
-     * ele faz e concluir as que sao dele.
-     */
+      niveis: { inicio: E, calendario: E, acoes: E, assiduidade: E, apresentacao: E, nobreaks: E, limpeza: E,
+                quadro: E, estoque: E, aprendiz: E, config: E, acessos: E, relatos: E, filiais: V } },
     { PERFIL: 'COORDENADOR', DESCRICAO: 'Coordenação de turno — entrega', ESCOPO: 'TURNO',
-      telas: ['inicio', 'calendario', 'acoes', 'nobreaks'],
-      podes: ['ANEXAR', 'ENTREGAR', 'LANCAR_NOBREAK'] },
+      niveis: { inicio: E, calendario: E, acoes: E, nobreaks: E } },
     /* Supervisor de limpeza (4.2.2): cuida da Limpeza CD — acoes, compras e consumo. */
-    { PERFIL: 'SUPERVISOR', DESCRICAO: 'Supervisão de limpeza', ESCOPO: 'TODOS',
-      telas: ['limpeza'], podes: ['GERIR_LIMPEZA'] },
+    { PERFIL: 'SUPERVISOR', DESCRICAO: 'Supervisão de limpeza', ESCOPO: 'TODOS', niveis: { limpeza: E } },
     { PERFIL: 'CONSULTA', DESCRICAO: 'Somente leitura', ESCOPO: 'TODOS',
-      telas: ['inicio', 'calendario', 'acoes', 'nobreaks', 'limpeza', 'quadro'], podes: [] },
-    { PERFIL: 'PENDENTE', DESCRICAO: 'Aguardando liberação', ESCOPO: 'PROPRIAS', telas: [], podes: [] }
+      niveis: { inicio: V, calendario: V, acoes: V, nobreaks: V, limpeza: V, quadro: V } },
+    { PERFIL: 'PENDENTE', DESCRICAO: 'Aguardando liberação', ESCOPO: 'PROPRIAS', niveis: {} }
   ];
 }
 
+/* A linha da tabela PERFIS: uma coluna TELA_<id> por tela, com a faixa (OCULTO, VER ou EDITAR). */
 function linhaPerfil(p) {
   const r = { PERFIL: p.PERFIL, DESCRICAO: p.DESCRICAO, ESCOPO: p.ESCOPO };
-  TELAS.forEach(function (t) { r['TELA_' + t.id.toUpperCase()] = p.telas.indexOf(t.id) !== -1 ? 'SIM' : 'NAO'; });
-  CAPACIDADES.forEach(function (c) { r['PODE_' + c] = p.podes.indexOf(c) !== -1 ? 'SIM' : 'NAO'; });
+  TELAS.forEach(function (t) { r['TELA_' + t.id.toUpperCase()] = (p.niveis || {})[t.id] || NIVEL_OCULTO; });
   return r;
+}
+
+/*
+ * MIGRACAO PARA A MATRIZ DE TRES FAIXAS (8.12). Nada e apagado:
+ *   - PERFIS: cada celula TELA_<id> que ainda e SIM/NAO (ou vazia) vira a
+ *     faixa que o modelo antigo dava (nivelAntigo_: tela liberada + uma
+ *     capacidade que grava nela = Ver e editar; sem = Ver; nao liberada =
+ *     Oculto; ADMIN = Ver e editar em tudo). As colunas PODE_ ficam como estao.
+ *   - ACESSOS: quem tinha ajuste por modulo (MODULOS) ganha o ajuste por menu
+ *     (AJUSTES) equivalente; a coluna MODULOS fica como esta.
+ * Roda de novo sem estrago: so mexe no que ainda nao foi convertido.
+ */
+function migrarParaTresFaixas_() {
+  let mexeu = false;
+  const mudancasP = [];
+  listar('PERFIS').forEach(function (l) {
+    if (!linhaNoModeloAntigo_(l)) return;
+    const niveis = niveisDaLinha_(l);
+    const campos = {};
+    TELAS.forEach(function (t) { campos['TELA_' + t.id.toUpperCase()] = niveis[t.id]; });
+    mudancasP.push({ id: l.ID, campos: campos });
+  });
+  const mudancasA = [];
+  listar('ACESSOS').forEach(function (a) {
+    if (String(a.AJUSTES || '').trim()) return;
+    const ajustes = lerAjustesPessoa('', a.MODULOS, a.PERFIL);
+    mudancasA.push({ id: a.ID, campos: { AJUSTES: textoDosAjustes(ajustes) } });
+  });
+  if (mudancasA.length) { atualizarVarios('ACESSOS', mudancasA, 'migracao'); mexeu = true; }
+  if (mudancasP.length) { atualizarVarios('PERFIS', mudancasP, 'migracao'); mexeu = true; }
+  if (mexeu) {
+    try { CacheService.getScriptCache().removeAll(['perfis', 'acessos']); } catch (e) {}
+    registrarLog('migracao', 'MIGRAR', 'PERFIS', '', 'Matriz de acesso em tres faixas: ' + mudancasP.length +
+      ' nível(is) e ' + mudancasA.length + ' pessoa(s) convertidos');
+  }
+  return mexeu;
 }
 
 /**
  * Reescreve os perfis padrao por cima dos existentes — conserta de uma vez
  * um perfil que foi editado errado (ex.: coordenador que ficou podendo
  * validar ou vendo assiduidade). Nao mexe em ACESSOS: as pessoas continuam
- * nos seus perfis, so a definicao do perfil volta ao correto.
+ * nos seus perfis (e com os ajustes delas), so a definicao do nivel volta ao padrao.
+ * So o administrador: o padrao reescreve a linha ADMIN e o acesso a Pessoas
+ * e a Filiais de todos os niveis.
  */
 function acaoRestaurarPerfis(usuario) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
+  protegerTelasDoAdmin_(usuario, TELAS_SO_DO_ADMIN);
   // Uma leitura da tabela e duas escritas no total, em vez de um
   // atualizar()/inserir() por perfil (eram ate 10 idas ao Google).
   const existentes = listar('PERFIS');
@@ -679,7 +710,7 @@ function acaoRestaurarPerfis(usuario) {
   try { CacheService.getScriptCache().remove('perfis'); } catch (e) {}
   try { avancarGeracao(); } catch (e) {}
   const coord = carregarPerfis()['COORDENADOR'];
-  return { ok: true, coordenadorEscopo: coord ? coord.escopo : '(nao encontrado)' };
+  return { ok: true, invalidarTudo: true, coordenadorEscopo: coord ? coord.escopo : '(nao encontrado)' };
 }
 
 /**
@@ -720,7 +751,6 @@ function semearRotinas() {
  * NAO apaga nada que voce tenha acrescentado.
  */
 function acaoRestaurarDePara(usuario) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
 
   const existentes = {};
   listar('DE_PARA').forEach(function (l) {

@@ -37,14 +37,14 @@ const LP_EST_UNIDADES = ['un', 'galão', 'L', 'cx', 'fardo', 'pct', 'rolo', 'par
  * movimentacoes, minimo e ideal, entrada, saida, estorno, inventario e
  * historico. Nao e uma copia do codigo — e este mesmo codigo, apontado
  * para outras tabelas (LP_EST_ITENS e LP_EST_MOVIMENTOS) e com as
- * capacidades da limpeza. Corrigiu aqui, corrigiu nos dois.
+ * a tela da limpeza (quem grava: Ver e editar nela). Corrigiu aqui, corrigiu nos dois.
  */
 const ESTOQUES = {
   TI: { chave: 'TI', nome: 'Estoque de TI', itens: 'EST_ITENS', movs: 'EST_MOVIMENTOS', prefixo: 'TI',
-        capCadastrar: 'GERIR_ESTOQUE', capMovimentar: 'MOVIMENTAR_ESTOQUE',
+        tela: 'estoque',   // quem grava: Ver e editar nesta tela (matriz de permissoes)
         categorias: EST_CATEGORIAS, unidades: EST_UNIDADES, exemplo: 'Mouse USB' },
   LP: { chave: 'LP', nome: 'Estoque da limpeza', itens: 'LP_EST_ITENS', movs: 'LP_EST_MOVIMENTOS', prefixo: 'LP',
-        capCadastrar: 'GERIR_LIMPEZA', capMovimentar: 'GERIR_LIMPEZA',
+        tela: 'limpeza',
         categorias: LP_EST_CATEGORIAS, unidades: LP_EST_UNIDADES, exemplo: 'Detergente neutro 5L' }
 };
 /*
@@ -199,8 +199,8 @@ function dadosDoEstoque_(cfg, usuario, params) {
     },
     prefixo: cfg.prefixo,
     permissoes: {
-      cadastrar: podeFazer(usuario, cfg.capCadastrar),
-      movimentar: podeFazer(usuario, cfg.capMovimentar)
+      cadastrar: podeEditar(usuario, cfg.tela),
+      movimentar: podeEditar(usuario, cfg.tela)
     }
   };
 }
@@ -240,7 +240,6 @@ function proximoCodigoEstoque_(itens, prefixo) {
 function acaoSalvarItemEstoque(usuario, params) { return salvarItemEstoque_(ESTOQUES.TI, usuario, params); }
 
 function salvarItemEstoque_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capCadastrar);
   const campos = camposItem_(params);
   if (!campos.NOME) throw new Error('Informe o nome do item (ex.: ' + cfg.exemplo + ').');
   if (campos.ESTOQUE_IDEAL !== '' && campos.ESTOQUE_MINIMO !== '' && campos.ESTOQUE_IDEAL < campos.ESTOQUE_MINIMO) {
@@ -301,7 +300,6 @@ function acaoExcluirItemEstoque(usuario, params) { return excluirItemEstoque_(ES
  *                            sempre (com movimentacao desativa, sem apaga).
  */
 function excluirItemEstoque_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capCadastrar);
   // Conferir e apagar na mesma trava: uma entrada no meio nao deixa movimento orfao.
   return comTrava(function () {
     const item = itensEstoque_(cfg).filter(function (i) { return i.id === params.id; })[0];
@@ -340,7 +338,6 @@ function excluirItemEstoque_(cfg, usuario, params) {
 function acaoImportarItensEstoque(usuario, params) { return importarItensEstoque_(ESTOQUES.TI, usuario, params); }
 
 function importarItensEstoque_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capCadastrar);
   const texto = String(params.texto || '');
   if (!texto.trim()) throw new Error('Cole as linhas da planilha.');
   // Lista lida, codigos gerados e gravacao na mesma trava (ver salvarItemEstoque_).
@@ -385,10 +382,8 @@ function importarItensEstoque_(cfg, usuario, params) {
 function acaoMovimentarEstoque(usuario, params) { return movimentarEstoque_(ESTOQUES.TI, usuario, params); }
 
 function movimentarEstoque_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capMovimentar);
   const tipo = String(params.tipo || '').toUpperCase().trim();
   if (EST_TIPOS.indexOf(tipo) === -1) throw new Error('Escolha o tipo da movimentação.');
-  if (tipo === 'AJUSTE') exigirCapacidade(usuario, cfg.capCadastrar);
   const codigo = String(params.item || '').toUpperCase().trim();
   let qtd = num_(params.quantidade);
   if (qtd === null || qtd === 0) throw new Error('Informe a quantidade.');
@@ -432,7 +427,6 @@ function movimentarEstoque_(cfg, usuario, params) {
 function acaoEstornarMovimento(usuario, params) { return estornarMovimento_(ESTOQUES.TI, usuario, params); }
 
 function estornarMovimento_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capCadastrar);
   // "Ja foi estornado?" e o estorno na mesma trava: dois cliques ao mesmo tempo nao estornam duas vezes.
   // Item inativo pode ser estornado: o estorno corrige o historico, nao e uso do item.
   return comTrava(function () {
@@ -467,7 +461,6 @@ function estornarMovimento_(cfg, usuario, params) {
 function acaoInventarioEstoque(usuario, params) { return inventarioEstoque_(ESTOQUES.TI, usuario, params); }
 
 function inventarioEstoque_(cfg, usuario, params) {
-  exigirCapacidade(usuario, cfg.capCadastrar);
   return comTrava(function () {
     const saldo = saldosEstoque_(null, cfg);
     const itens = {};
@@ -522,7 +515,7 @@ function historicoItemEstoque_(cfg, usuario, params) {
 
 /* ------------------------------------------------------------------ */
 /* ESTOQUE DA LIMPEZA — as mesmas funcoes, nas tabelas da limpeza      */
-/* (a tela e a Limpeza CD; a capacidade e GERIR_LIMPEZA)               */
+/* (a tela e a Limpeza CD: grava quem tem Ver e editar nela)          */
 /* ------------------------------------------------------------------ */
 
 function acaoSalvarItemLimpeza(usuario, params) { return salvarItemEstoque_(ESTOQUES.LP, usuario, params); }

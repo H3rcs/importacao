@@ -1,17 +1,37 @@
 /**
- * PERMISSOES
+ * PERMISSOES — UMA MATRIZ, TRES FAIXAS.
  *
  * Toda regra de acesso do sistema esta neste arquivo e na tabela PERFIS.
  * Em nenhum outro lugar existe "if perfil == GERENTE".
  *
- * A tabela PERFIS e criada pelo instalador: uma linha por nivel,
- * uma coluna TELA_<id> por tela e uma coluna PODE_<capacidade> por acao.
- * Tela nova: registre em TELAS e rode sincronizarEsquema().
+ * Para cada nivel (linha da tabela PERFIS) e cada MENU (tela de TELAS), a
+ * coluna TELA_<id> guarda uma de tres faixas:
+ *   OCULTO - o menu nao existe para a pessoa: sem cartao, sem item na barra,
+ *            sem link direto, sem dado e sem acao;
+ *   VER    - abre e le tudo o que a tela mostra (exportar inclusive); toda
+ *            gravacao e recusada pelo servidor e a tela nao mostra botao de gravar;
+ *   EDITAR - "Ver e editar": toda acao de gravacao daquela tela vale.
  *
- * ESCOPO define o alcance de cada nivel:
+ * QUEM DECIDE, NESTA ORDEM (uma funcao so: nivelNaTela):
+ *   1. o painel na filial em uso (Filiais e paineis): Desativado ou "Nao usar
+ *      nesta filial" some para todos; Oculto so aparece para o administrador;
+ *   2. o ajuste desta pessoa naquele menu (Pessoas e acessos), se houver;
+ *   3. senao, a faixa do nivel dela na matriz.
+ *   A unica trava: no nivel ADMIN, "Pessoas e acessos" e sempre Ver e editar
+ *   (ninguem se tranca do lado de fora).
+ *
+ * Toda acao do catalogo ACOES (Codigo.gs) diz de qual tela ela e (`tela`)
+ * e se so le (`leitura`). executarAcao confere aqui, antes de qualquer coisa.
+ * Tela nova: registre em TELAS, de `tela` as acoes dela e rode sincronizarEsquema().
+ *
+ * ESCOPO define o alcance de cada nivel (quanto dado, nao o que pode):
  *   TODOS    - ve a operacao inteira
  *   TURNO    - ve o que for do proprio turno
  *   PROPRIAS - ve so o que e dele: atividade onde e responsavel ou que criou
+ *
+ * As colunas PODE_<capacidade> do modelo antigo continuam na planilha,
+ * intactas e ignoradas: servem so para converter um banco antigo (ver
+ * nivelAntigo_).
  */
 
 /*
@@ -73,96 +93,60 @@ const TELAS = [
   { id: 'quadro',      nome: 'Quadro do CD', cor: 'amarelo', modulo: 'quadro',      funcao: 'dadosQuadro' },
   { id: 'estoque',     nome: 'Estoque de TI', cor: 'azul',   modulo: 'estoque',     funcao: 'dadosEstoque' },
   { id: 'aprendiz',    nome: 'Portal RH Aprendiz', cor: 'azul', modulo: 'aprendiz',  funcao: 'dadosAprendiz' },
-  { id: 'config',      nome: 'Configuração', cor: 'branco',  modulo: 'config',      funcao: 'dadosConfig', exige: 'PROGRAMAR' },
-  { id: 'acessos',     nome: 'Pessoas e acessos', cor: 'branco', modulo: 'config',  funcao: 'dadosPessoas', exige: 'GERIR_ACESSOS' },
-  { id: 'filiais',     nome: 'Filiais e painéis', cor: 'branco', modulo: 'config',  funcao: 'dadosFiliais', exige: 'GERIR_FILIAIS' },
-  { id: 'relatos',     nome: 'Relatos de erro', cor: 'branco', modulo: 'config',   funcao: 'dadosRelatos', exige: 'GERIR_ACESSOS' }
+  { id: 'config',      nome: 'Configuração', cor: 'branco',  modulo: 'config',      funcao: 'dadosConfig' },
+  { id: 'acessos',     nome: 'Pessoas e acessos', cor: 'branco', modulo: 'config',  funcao: 'dadosPessoas' },
+  { id: 'filiais',     nome: 'Filiais e painéis', cor: 'branco', modulo: 'config',  funcao: 'dadosFiliais' },
+  { id: 'relatos',     nome: 'Relatos de erro', cor: 'branco', modulo: 'config',   funcao: 'dadosRelatos' }
 ];
 
+/* As tres faixas e como a tela as chama. */
+const NIVEL_OCULTO = 'OCULTO', NIVEL_VER = 'VER', NIVEL_EDITAR = 'EDITAR';
+const NIVEIS_TELA = [NIVEL_OCULTO, NIVEL_VER, NIVEL_EDITAR];
+const NOMES_NIVEL = { OCULTO: 'Oculto', VER: 'Ver', EDITAR: 'Ver e editar' };
+const PESO_NIVEL = { OCULTO: 0, VER: 1, EDITAR: 2 };
+
 /*
- * ENTREGAR  - anexa a propria entrega (coordenador)
- * VALIDAR   - aprova, reprova ou cancela (gerente)
- * PROGRAMAR - gera mes, remarca, define setor, agenda treinamento, mexe na config
+ * A TRAVA DO ADMIN: no nivel ADMIN, Pessoas e acessos e sempre Ver e editar.
+ * Tudo o mais que o administrador marcar para o nivel ADMIN e obedecido.
  */
+const TELA_TRAVADA_ADMIN = 'acessos';
+const MOTIVO_TRAVA_ADMIN = 'No nível ADMIN, Pessoas e acessos é sempre “Ver e editar” — assim ninguém se tranca do lado de fora.';
+
 /*
- * GERIR_ACOES - cria, edita, cancela e exclui acao do plano (gerente).
- *               Concluir NAO exige isso: o responsavel conclui a dele.
- */
-/*
- * LANCAR_NOBREAK - lanca e corrige leituras dos nobreaks.
- * GERIR_LIMPEZA  - registra acoes da limpeza, compras e produtos.
- * GERIR_FILIAIS  - cria filial e liga/oculta/desativa paineis.
+ * MODELO ANTIGO — so para converter banco antigo (8.11 e anteriores).
+ * Cada tela era SIM/NAO e o que se podia fazer vinha das capacidades
+ * (PODE_<capacidade>). Na conversao: tela liberada + uma capacidade que
+ * grava nela = EDITAR; liberada sem nenhuma = VER; nao liberada = OCULTO.
+ * Tela que nao tem gravacao nenhuma (Central, Apresentacao): EDITAR para o
+ * nivel que tinha alguma capacidade, VER para o que nao tinha nenhuma.
+ * O Plano de Acao conta ENTREGAR: e o coordenador que conclui as acoes dele.
  */
 const CAPACIDADES = ['VER_INDIVIDUAL', 'ENTREGAR', 'VALIDAR', 'PROGRAMAR',
                      'EDITAR', 'EXCLUIR', 'ANEXAR', 'GERIR_ACESSOS',
                      'GERIR_ACOES', 'LANCAR_NOBREAK', 'GERIR_LIMPEZA',
                      'GERIR_FILIAIS', 'GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'];
-
-/*
- * MODULOS POR PESSOA.
- *
- * O nivel (ADMIN, GERENTE, COORDENADOR...) continua sendo o ponto de
- * partida. Por cima dele, cada pessoa pode ter um ajuste por modulo:
- *   NAO    nao ve o modulo, mesmo que o nivel dela veja
- *   VER    ve o modulo, sem poder lancar/editar nele
- *   EDITAR ve e pode lancar/editar (so nos modulos listados abaixo com
- *          capacidades; nos outros, o que ela pode fazer vem do nivel)
- * Configuracao nao entra: ela segue sempre o nivel.
- *
- * Capacidades que "editar" liga (e "ver" desliga) em cada modulo:
- */
-const MODULOS_AJUSTAVEIS = {
-  calendario: [], assiduidade: [], apresentacao: [], quadro: [], aprendiz: [],
+const ESCRITA_ANTIGA = {
+  inicio: [], apresentacao: [],
+  calendario: ['ENTREGAR', 'ANEXAR', 'VALIDAR', 'PROGRAMAR', 'EDITAR'],
+  acoes: ['GERIR_ACOES', 'ENTREGAR'],
+  assiduidade: ['PROGRAMAR'],
   nobreaks: ['LANCAR_NOBREAK'],
   limpeza: ['GERIR_LIMPEZA'],
-  estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE']
+  quadro: ['PROGRAMAR'],
+  estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE'],
+  aprendiz: ['PROGRAMAR'],
+  config: ['PROGRAMAR'],
+  acessos: ['GERIR_ACESSOS'],
+  filiais: ['GERIR_FILIAIS'],
+  relatos: ['GERIR_ACESSOS']
 };
-const MODOS_MODULO = ['NAO', 'VER', 'EDITAR'];
-
-function lerModulosPessoa(texto) {
-  const saida = {};
-  let obj = {};
-  try { obj = JSON.parse(String(texto || '{}')) || {}; } catch (e) { obj = {}; }
-  Object.keys(obj).forEach(function (m) {
-    const modo = String(obj[m] || '').toUpperCase().trim();
-    if (MODULOS_AJUSTAVEIS[m] && MODOS_MODULO.indexOf(modo) !== -1) {
-      saida[m] = (modo === 'EDITAR' && !MODULOS_AJUSTAVEIS[m].length) ? 'VER' : modo;
-    }
-  });
-  return saida;
-}
-
-/* Aplica os ajustes da pessoa sobre as permissoes do nivel (sem alterar o nivel). */
-function aplicarModulosDaPessoa(base, ajustes) {
-  const chaves = Object.keys(ajustes || {});
-  if (!chaves.length) return base;
-  const p = { escopo: base.escopo, telas: base.telas.slice(), podes: base.podes.slice(),
-              descricao: base.descricao, id: base.id };
-  const tira = function (lista, x) { const i = lista.indexOf(x); if (i !== -1) lista.splice(i, 1); };
-  const poe = function (lista, x) { if (lista.indexOf(x) === -1) lista.push(x); };
-  chaves.forEach(function (m) {
-    const modo = ajustes[m];
-    const telas = TELAS.filter(function (t) { return t.modulo === m; });
-    const caps = MODULOS_AJUSTAVEIS[m] || [];
-    if (modo === 'NAO') {
-      telas.forEach(function (t) { tira(p.telas, t.id); });
-      caps.forEach(function (c) { tira(p.podes, c); });
-      return;
-    }
-    if (modo === 'EDITAR') caps.forEach(function (c) { poe(p.podes, c); });
-    if (modo === 'VER') caps.forEach(function (c) { tira(p.podes, c); });
-    telas.forEach(function (t) { if (!t.exige || p.podes.indexOf(t.exige) !== -1) poe(p.telas, t.id); });
-  });
-  return p;
-}
-
-/* Como o modulo fica para a pessoa, depois do nivel e do ajuste: NAO · VER · EDITAR */
-function modoEfetivo(permissoes, idModulo) {
-  const ve = TELAS.some(function (t) { return t.modulo === idModulo && permissoes.telas.indexOf(t.id) !== -1; });
-  if (!ve) return 'NAO';
-  const caps = MODULOS_AJUSTAVEIS[idModulo] || [];
-  return (caps.length && caps.every(function (c) { return permissoes.podes.indexOf(c) !== -1; })) ? 'EDITAR' : 'VER';
-}
+/* Telas que, no modelo antigo, so abriam com uma capacidade (o antigo `exige`). */
+const EXIGIA_ANTIGA = { config: 'PROGRAMAR', acessos: 'GERIR_ACESSOS', filiais: 'GERIR_FILIAIS', relatos: 'GERIR_ACESSOS' };
+/* Ajuste por modulo do modelo antigo (ACESSOS.MODULOS): as capacidades que "editar" ligava. */
+const MODULOS_ANTIGOS = {
+  calendario: [], assiduidade: [], apresentacao: [], quadro: [], aprendiz: [],
+  nobreaks: ['LANCAR_NOBREAK'], limpeza: ['GERIR_LIMPEZA'], estoque: ['GERIR_ESTOQUE', 'MOVIMENTAR_ESTOQUE']
+};
 
 /**
  * Quem abre o sistema pela primeira vez cai aqui: fica registrado,
@@ -174,7 +158,57 @@ const PERFIL_PADRAO_NOVO_USUARIO = 'PENDENTE';
 const ESCOPOS = ['TODOS', 'TURNO', 'PROPRIAS'];
 
 /** Rede de seguranca: usado so se a tabela PERFIS estiver vazia. */
-const PERFIL_MINIMO = { escopo: 'TODOS', telas: ['inicio'], podes: [], descricao: '' };
+const PERFIL_MINIMO = { escopo: 'TODOS', niveis: { inicio: NIVEL_VER }, descricao: '' };
+
+function telaPorId_(id) {
+  return TELAS.filter(function (t) { return t.id === id; })[0] || null;
+}
+
+/* O texto de uma celula da matriz como faixa ('' = nao e faixa: SIM/NAO do modelo antigo, vazio...). */
+function faixaDoTexto_(valor) {
+  const t = String(valor == null ? '' : valor).toUpperCase().trim()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+  if (t === 'EDITAR' || t === 'VER E EDITAR') return NIVEL_EDITAR;
+  if (t === 'VER') return NIVEL_VER;
+  if (t === 'OCULTO') return NIVEL_OCULTO;
+  return '';
+}
+
+/*
+ * CONVERSAO DO MODELO ANTIGO, para UMA tela de UMA linha da tabela PERFIS
+ * (TELA_<id> SIM/NAO + as colunas PODE_). Usada pela migracao (que grava o
+ * resultado) e na leitura, para qualquer celula que ainda nao seja faixa —
+ * um banco antigo funciona igual antes e depois de migrar.
+ *   - ADMIN: EDITAR em tudo (no modelo antigo ele via e podia tudo);
+ *   - quem via o Calendario via o Plano de Acao (regra antiga de 4.2.2).
+ */
+function nivelAntigo_(idTela, linha) {
+  const perfil = String(linha.PERFIL || '').toUpperCase().trim();
+  if (perfil === 'ADMIN') return NIVEL_EDITAR;
+  const sim = function (coluna) { return marcado(linha[coluna]); };
+  const podes = CAPACIDADES.filter(function (c) { return sim('PODE_' + c); });
+  let liberada = sim('TELA_' + idTela.toUpperCase());
+  if (idTela === 'acoes' && sim('TELA_CALENDARIO')) liberada = true;
+  if (EXIGIA_ANTIGA[idTela] && podes.indexOf(EXIGIA_ANTIGA[idTela]) === -1) liberada = false;
+  if (!liberada) return NIVEL_OCULTO;
+  const escreve = ESCRITA_ANTIGA[idTela] || [];
+  if (!escreve.length) return podes.length ? NIVEL_EDITAR : NIVEL_VER;
+  return escreve.some(function (c) { return podes.indexOf(c) !== -1; }) ? NIVEL_EDITAR : NIVEL_VER;
+}
+
+/* A faixa de cada tela numa linha da tabela PERFIS (celula antiga convertida na hora). */
+function niveisDaLinha_(linha) {
+  const niveis = {};
+  TELAS.forEach(function (t) {
+    niveis[t.id] = faixaDoTexto_(linha['TELA_' + t.id.toUpperCase()]) || nivelAntigo_(t.id, linha);
+  });
+  return niveis;
+}
+
+/* true se alguma celula de tela da linha ainda nao e faixa (a migracao regrava a linha). */
+function linhaNoModeloAntigo_(linha) {
+  return TELAS.some(function (t) { return !faixaDoTexto_(linha['TELA_' + t.id.toUpperCase()]); });
+}
 
 function carregarPerfis() {
   return comCache('perfis', function () {
@@ -182,20 +216,10 @@ function carregarPerfis() {
     listar('PERFIS').forEach(function (l) {
       const nome = String(l.PERFIL || '').toUpperCase().trim();
       if (!nome) return;
-
-      const telas = [];
-      const podes = [];
-      Object.keys(l).forEach(function (coluna) {
-        if (!marcado(l[coluna])) return;
-        if (coluna.indexOf('TELA_') === 0) telas.push(coluna.substring(5).toLowerCase());
-        if (coluna.indexOf('PODE_') === 0) podes.push(coluna.substring(5).toUpperCase());
-      });
-
       const escopo = String(l.ESCOPO || 'TODOS').toUpperCase().trim();
       perfis[nome] = {
         escopo: ESCOPOS.indexOf(escopo) !== -1 ? escopo : 'TODOS',
-        telas: telas,
-        podes: podes,
+        niveis: niveisDaLinha_(l),
         descricao: String(l.DESCRICAO || '').trim(),
         id: l.ID
       };
@@ -204,53 +228,230 @@ function carregarPerfis() {
   });
 }
 
+/*
+ * As permissoes de um NIVEL: a linha dele na matriz, com a trava do ADMIN.
+ * Nao existe mais "o ADMIN ve tudo": o que estiver na linha ADMIN vale para ele.
+ */
 function permissoesDe(perfil) {
   const perfis = carregarPerfis();
   const nome = String(perfil || '').toUpperCase().trim();
-  /*
-   * O ADMIN ve e pode TUDO, qualquer que seja a linha dele na tabela PERFIS
-   * (4.2.2). Banco que veio de versao antiga podia ter a linha ADMIN sem as
-   * colunas novas marcadas (TELA_NOBREAKS, TELA_LIMPEZA, TELA_QUADRO,
-   * TELA_ESTOQUE, PODE_GERIR_FILIAIS...) e o administrador nao via os
-   * paineis nem a tela de Filiais. Os paineis seguem o estado de cada filial
-   * (painelVisivel): desativado some ate para ele.
-   */
-  if (nome === 'ADMIN') {
-    const base = perfis.ADMIN || PERFIL_MINIMO;
-    return { escopo: 'TODOS', telas: TELAS.map(function (t) { return t.id; }),
-             podes: CAPACIDADES.slice(), descricao: base.descricao || 'Administrador', id: base.id };
-  }
-  const p = perfis[nome] || perfis[PERFIL_PADRAO_NOVO_USUARIO] || PERFIL_MINIMO;
-  /*
-   * Quem ve o Calendario ve o Plano de Acao (4.2.2): o coordenador precisa
-   * concluir as acoes dele, e a tela so mostra a cada um as acoes em que e
-   * responsavel. Banco antigo podia ter a linha COORDENADOR sem TELA_ACOES.
-   */
-  if (p.telas.indexOf('calendario') !== -1 && p.telas.indexOf('acoes') === -1) {
-    return { escopo: p.escopo, telas: p.telas.concat(['acoes']), podes: p.podes, descricao: p.descricao, id: p.id };
-  }
-  return p;
+  const base = perfis[nome] || perfis[PERFIL_PADRAO_NOVO_USUARIO] || PERFIL_MINIMO;
+  const niveis = {};
+  TELAS.forEach(function (t) { niveis[t.id] = (base.niveis || {})[t.id] || NIVEL_OCULTO; });
+  if (nome === 'ADMIN') niveis[TELA_TRAVADA_ADMIN] = NIVEL_EDITAR;
+  return { escopo: base.escopo || 'TODOS', niveis: niveis,
+           descricao: base.descricao || (nome === 'ADMIN' ? 'Administrador' : ''), id: base.id };
+}
+
+/*
+ * AJUSTE DESTA PESSOA (ACESSOS.AJUSTES): {"estoque":"VER","limpeza":"OCULTO"}
+ * por tela, nas mesmas tres faixas. Tela fora do JSON = igual ao nivel.
+ * Coluna AJUSTES vazia (cadastro de antes de 8.12) = o ajuste antigo por
+ * modulo (ACESSOS.MODULOS) convertido; "{}" = nenhum ajuste.
+ */
+function lerAjustesPessoa(textoAjustes, textoModulosAntigo, perfil) {
+  const bruto = String(textoAjustes == null ? '' : textoAjustes).trim();
+  if (!bruto) return ajustesDoModeloAntigo_(textoModulosAntigo, perfil);
+  let obj = {};
+  try { obj = JSON.parse(bruto) || {}; } catch (e) { obj = {}; }
+  const saida = {};
+  Object.keys(obj).forEach(function (id) {
+    const faixa = faixaDoTexto_(obj[id]);
+    if (telaPorId_(id) && faixa) saida[id] = faixa;
+  });
+  return saida;
+}
+
+/* O texto gravado em ACESSOS.AJUSTES (sempre um JSON: "{}" quer dizer "nenhum ajuste"). */
+function textoDosAjustes(ajustes) {
+  const limpo = {};
+  TELAS.forEach(function (t) {
+    const f = faixaDoTexto_((ajustes || {})[t.id]);
+    if (f) limpo[t.id] = f;
+  });
+  return JSON.stringify(limpo);
+}
+
+/*
+ * O ajuste antigo por MODULO (NAO/VER/EDITAR) vira ajuste por TELA, em cada
+ * tela do modulo: NAO -> Oculto, EDITAR -> Ver e editar, VER -> Ver. Nos
+ * modulos em que o modelo antigo nao tinha o que "editar" (Calendario,
+ * Assiduidade, Apresentacao, Quadro, Jovem Aprendiz), VER so ligava o modulo
+ * e o que a pessoa podia fazer vinha do nivel: ali cada tela fica com o que
+ * o nivel antigo dava a ela com a tela liberada (com a capacidade que grava
+ * = Ver e editar; sem = Ver). No modelo antigo o ajuste nao valia para o ADMIN.
+ */
+function ajustesDoModeloAntigo_(textoModulos, perfil) {
+  let obj = {};
+  try { obj = JSON.parse(String(textoModulos || '{}')) || {}; } catch (e) { obj = {}; }
+  const saida = {};
+  const nome = String(perfil || '').toUpperCase().trim();
+  if (nome === 'ADMIN' || !obj || typeof obj !== 'object') return saida;
+  let linhaNivel;
+  Object.keys(obj).forEach(function (m) {
+    const modo = String(obj[m] || '').toUpperCase().trim();
+    if (!MODULOS_ANTIGOS[m] || ['NAO', 'VER', 'EDITAR'].indexOf(modo) === -1) return;
+    TELAS.filter(function (t) { return t.modulo === m; }).forEach(function (t) {
+      if (modo === 'NAO') { saida[t.id] = NIVEL_OCULTO; return; }
+      if (MODULOS_ANTIGOS[m].length) { saida[t.id] = modo === 'EDITAR' ? NIVEL_EDITAR : NIVEL_VER; return; }
+      if (linhaNivel === undefined) linhaNivel = linhaCruaDoNivel_(nome);
+      const linha = Object.assign({}, linhaNivel || { PERFIL: nome });
+      linha['TELA_' + t.id.toUpperCase()] = 'SIM';
+      saida[t.id] = nivelAntigo_(t.id, linha) === NIVEL_EDITAR ? NIVEL_EDITAR : NIVEL_VER;
+    });
+  });
+  return saida;
+}
+
+/* A linha crua do nivel na tabela PERFIS (com as colunas PODE_ antigas), ou null. */
+function linhaCruaDoNivel_(perfil) {
+  return listar('PERFIS').filter(function (l) { return String(l.PERFIL || '').toUpperCase().trim() === perfil; })[0] || null;
+}
+
+/*
+ * As permissoes de UMA PESSOA: o nivel, o ajuste dela por cima, e a trava do
+ * ADMIN por ultimo. E o que fica em usuario.permissoes; o painel da filial
+ * entra na hora da pergunta (nivelNaTela), porque depende da filial em uso.
+ */
+function permissoesDaPessoa(perfil, ajustes) {
+  const nivel = permissoesDe(perfil);
+  const niveis = {};
+  TELAS.forEach(function (t) {
+    niveis[t.id] = (ajustes && ajustes[t.id]) || nivel.niveis[t.id] || NIVEL_OCULTO;
+  });
+  if (String(perfil || '').toUpperCase().trim() === 'ADMIN') niveis[TELA_TRAVADA_ADMIN] = NIVEL_EDITAR;
+  return comCamposAntigos_({ escopo: nivel.escopo, niveis: niveis, descricao: nivel.descricao, id: nivel.id });
 }
 
 /* --- As perguntas que o resto do sistema faz --- */
 
 /*
- * Abrir uma tela exige DUAS coisas: o nivel da pessoa liberar a tela e o
- * painel dela estar ligado na filial em uso (ativo — ou oculto, para o
- * administrador). O modulo Configuracao nao e painel: existe em toda filial.
+ * A FAIXA EFETIVA de uma pessoa numa tela, na filial em uso. E A FUNCAO que
+ * decide: menu, abrir tela, gravar, bolinha, atalhos, links de e-mail e a
+ * reserva por POST passam todos por aqui.
+ *   1. painel da filial (Desativado / fora da filial: ninguem; Oculto: so o administrador);
+ *   2. ajuste da pessoa, senao o nivel (ja juntos em usuario.permissoes);
+ *   3. trava do ADMIN (ja aplicada em usuario.permissoes).
  */
-function podeAbrir(usuario, idTela) {
-  if (usuario.permissoes.telas.indexOf(idTela) === -1) return false;
-  const tela = TELAS.filter(function (t) { return t.id === idTela; })[0];
-  if (!tela) return false;
-  // Tela que exige capacidade (Configuracao, Pessoas, Filiais, Relatos): sem
-  // ela o menu mostrava o cartao e a tela abria direto num erro.
-  if (tela.exige && !podeFazer(usuario, tela.exige)) return false;
-  return painelVisivel(usuario, tela.modulo);
+function nivelNaTela(usuario, idTela) {
+  const tela = telaPorId_(idTela);
+  if (!tela || !usuario || !usuario.permissoes) return NIVEL_OCULTO;
+  const nivel = nivelNaMatriz(usuario, idTela);
+  if (nivel === NIVEL_OCULTO) return NIVEL_OCULTO;
+  if (!painelVisivel(usuario, tela.modulo)) return NIVEL_OCULTO;
+  return nivel;
 }
 
+/* A faixa da pessoa na matriz (nivel + ajuste + trava), sem olhar o painel da filial. */
+function nivelNaMatriz(usuario, idTela) {
+  const n = usuario && usuario.permissoes && usuario.permissoes.niveis && usuario.permissoes.niveis[idTela];
+  return PESO_NIVEL[n] !== undefined ? n : NIVEL_OCULTO;
+}
+
+function podeVer(usuario, idTela) { return nivelNaTela(usuario, idTela) !== NIVEL_OCULTO; }
+function podeEditar(usuario, idTela) { return nivelNaTela(usuario, idTela) === NIVEL_EDITAR; }
+
+/* Abrir/ler uma tela. A frase diz a causa, na ordem em que se decide: o painel da filial, depois a matriz (nivel/ajuste). */
+function exigirVer(usuario, idTela) {
+  if (podeVer(usuario, idTela)) return;
+  const tela = telaPorId_(idTela);
+  if (tela && !painelVisivel(usuario, tela.modulo)) {
+    throw new Error('Este painel não está ligado na filial ' + filialAtual().nome + '.');
+  }
+  throw new Error('Seu acesso (' + usuario.perfil + ') não inclui a tela "' + (tela ? tela.nome : idTela) + '".');
+}
+
+/* Gravar numa tela: so com Ver e editar. */
+function exigirEditar(usuario, idTela) {
+  exigirVer(usuario, idTela);
+  if (!podeEditar(usuario, idTela)) {
+    throw new Error('Seu acesso a "' + telaPorId_(idTela).nome + '" é só para ver: gravar precisa de “Ver e editar”.');
+  }
+}
+
+/*
+ * A PORTA DAS ACOES (executarAcao). `tela` e uma tela ou uma lista (basta
+ * uma delas); `leitura: true` pede so Ver; o resto pede Ver e editar.
+ * `livre: true` e acao da propria pessoa, fora de qualquer menu (relatar
+ * erro, trocar o proprio PIN, a bolinha do menu, atualizar a copia dos dados).
+ * Acao sem tela e sem livre nao passa: e erro de cadastro, nao brecha.
+ */
+function exigirAcao_(usuario, nome, acao) {
+  if (acao.livre === true && !acao.tela) return;
+  const telas = [].concat(acao.tela || []).filter(function (t) { return !!telaPorId_(t); });
+  if (!telas.length) throw new Error('A ação "' + nome + '" não diz de qual tela é. Avise o administrador do sistema.');
+  const precisa = acao.leitura === true ? NIVEL_VER : NIVEL_EDITAR;
+  if (telas.some(function (t) { return PESO_NIVEL[nivelNaTela(usuario, t)] >= PESO_NIVEL[precisa]; })) return;
+  // A recusa explica pela primeira tela que a pessoa enxerga (ou pela primeira da lista).
+  const alvo = telas.filter(function (t) { return podeVer(usuario, t); })[0] || telas[0];
+  if (precisa === NIVEL_VER) exigirVer(usuario, alvo);
+  exigirEditar(usuario, alvo);
+  throw new Error('Seu acesso não permite esta ação.');    // nao chega aqui; fica de rede
+}
+
+/*
+ * COMPATIBILIDADE (implantacao pela metade) — calcos finos, todos tirados
+ * da matriz. Um arquivo .gs da entrega anterior, colado junto com este,
+ * ainda pergunta por capacidade (podeFazer), por modulo (modoEfetivo) ou
+ * le permissoes.telas/podes: a resposta vem das tres faixas. Pode = a
+ * pessoa tem Ver e editar numa tela onde aquela capacidade gravava.
+ * Nenhum arquivo desta versao usa isto (testes/perfis.js confere); a
+ * faixa "Atualizacao incompleta" pede o arquivo que falta.
+ */
+function comCamposAntigos_(p) {
+  p.telas = TELAS.filter(function (t) { return p.niveis[t.id] && p.niveis[t.id] !== NIVEL_OCULTO; })
+    .map(function (t) { return t.id; });
+  p.podes = CAPACIDADES.filter(function (c) {
+    if (c === 'VER_INDIVIDUAL') return p.telas.indexOf('assiduidade') !== -1;
+    return Object.keys(ESCRITA_ANTIGA).some(function (t) {
+      return (ESCRITA_ANTIGA[t].indexOf(c) !== -1 || EXIGIA_ANTIGA[t] === c) && p.niveis[t] === NIVEL_EDITAR;
+    });
+  });
+  return p;
+}
 function podeFazer(usuario, capacidade) {
-  return usuario.permissoes.podes.indexOf(String(capacidade).toUpperCase()) !== -1;
+  const cap = String(capacidade || '').toUpperCase();
+  if (cap === 'VER_INDIVIDUAL') return podeVer(usuario, 'assiduidade');
+  return Object.keys(ESCRITA_ANTIGA).some(function (t) {
+    return (ESCRITA_ANTIGA[t].indexOf(cap) !== -1 || EXIGIA_ANTIGA[t] === cap) && podeEditar(usuario, t);
+  });
+}
+function exigirCapacidade(usuario, capacidade) {
+  if (!podeFazer(usuario, capacidade)) throw new Error('Seu acesso (' + usuario.perfil + ') não permite esta ação.');
+}
+function exigirTela(usuario, idTela) { exigirVer(usuario, idTela); }
+const MODULOS_AJUSTAVEIS = MODULOS_ANTIGOS;
+function modoEfetivo(permissoes, idModulo) {
+  const niveis = TELAS.filter(function (t) { return t.modulo === idModulo; })
+    .map(function (t) { return (permissoes && permissoes.niveis && permissoes.niveis[t.id]) || NIVEL_OCULTO; });
+  if (niveis.indexOf(NIVEL_EDITAR) !== -1) return 'EDITAR';
+  return niveis.indexOf(NIVEL_VER) !== -1 ? 'VER' : 'NAO';
+}
+function lerModulosPessoa(texto) {
+  let obj = {};
+  try { obj = (typeof texto === 'object' && texto) ? texto : (JSON.parse(String(texto || '{}')) || {}); } catch (e) { obj = {}; }
+  const saida = {};
+  Object.keys(obj).forEach(function (m) {
+    const modo = String(obj[m] || '').toUpperCase().trim();
+    if (MODULOS_ANTIGOS[m] && ['NAO', 'VER', 'EDITAR'].indexOf(modo) !== -1) saida[m] = modo;
+  });
+  return saida;
+}
+function aplicarModulosDaPessoa(base, ajustesModulo) {
+  const niveis = Object.assign({}, (base && base.niveis) || {});
+  const de = { NAO: NIVEL_OCULTO, VER: NIVEL_VER, EDITAR: NIVEL_EDITAR };
+  Object.keys(lerModulosPessoa(ajustesModulo || {})).forEach(function (m) {
+    TELAS.forEach(function (t) { if (t.modulo === m) niveis[t.id] = de[String(ajustesModulo[m]).toUpperCase()]; });
+  });
+  return comCamposAntigos_({ escopo: (base && base.escopo) || 'TODOS', niveis: niveis,
+                             descricao: base && base.descricao, id: base && base.id });
+}
+function exigirModuloDaAcao_(usuario, acao) {
+  const lista = [].concat((acao && acao.modulo) || []);
+  if (!lista.length) return;
+  if (lista.some(function (m) { return TELAS.some(function (t) { return t.modulo === m && podeVer(usuario, t.id); }); })) return;
+  const t = TELAS.filter(function (x) { return x.modulo === lista[0]; })[0];
+  exigirVer(usuario, t ? t.id : lista[0]);
 }
 
 /**
@@ -279,40 +480,37 @@ function turnoDoEscopo(usuario) {
   return (e.tipo === 'TODOS') ? null : (e.turno || null);
 }
 
+/* O menu: as telas que nao estao Ocultas para a pessoa nesta filial, com a faixa de cada uma. */
 function telasDe(usuario) {
-  return TELAS.filter(function (t) { return podeAbrir(usuario, t.id); })
-              .map(function (t) { return { id: t.id, nome: t.nome, cor: t.cor, modulo: t.modulo }; });
+  return TELAS.map(function (t) { return { t: t, nivel: nivelNaTela(usuario, t.id) }; })
+    .filter(function (x) { return x.nivel !== NIVEL_OCULTO; })
+    .map(function (x) { return { id: x.t.id, nome: x.t.nome, cor: x.t.cor, modulo: x.t.modulo, nivel: x.nivel }; });
 }
 
-/* O estado do painel vai junto para a tela marcar o que esta oculto (so o administrador o recebe). */
-
-/** Modulos que a pessoa enxerga: os que tem ao menos uma tela liberada. */
+/** Modulos que a pessoa enxerga: os que tem ao menos uma tela em Ver ou Ver e editar. */
 function modulosDe(usuario) {
   const telas = telasDe(usuario);
   return MODULOS.filter(function (m) {
     return telas.some(function (t) { return t.modulo === m.id; });
   }).map(function (m) {
+    // O estado do painel vai junto para a tela marcar o que esta oculto (so o administrador o recebe).
     return { id: m.id, nome: m.nome, frase: m.frase, acao: m.acao, icone: m.icone, cor: m.cor,
              oculto: m.id !== 'config' && estadoDoPainel(m.id) === PAINEL_OCULTO,
              telas: telas.filter(function (t) { return t.modulo === m.id; }).map(function (t) { return t.id; }) };
   });
 }
 
-function exigirTela(usuario, idTela) {
-  // A tela fora do nivel, ou sem a capacidade que ela exige (Configuracao, Pessoas, Filiais, Relatos): e o nivel, nao o painel.
-  const tela = TELAS.filter(function (t) { return t.id === idTela; })[0];
-  if (usuario.permissoes.telas.indexOf(idTela) === -1 || (tela && tela.exige && !podeFazer(usuario, tela.exige))) {
-    throw new Error('Seu perfil (' + usuario.perfil + ') nao tem acesso a tela "' + idTela + '".');
-  }
-  if (!podeAbrir(usuario, idTela)) {
-    throw new Error('Este painel não está ligado na filial ' + filialAtual().nome + '.');
-  }
+/* O retrato do menu que vai com cada tela: "id:FAIXA,..." (a tela compara com o menu que tem). */
+function marcaDoMenu(usuario) {
+  return telasDe(usuario).map(function (t) { return t.id + ':' + t.nivel; }).join(',');
 }
 
-function exigirCapacidade(usuario, capacidade) {
-  if (!podeFazer(usuario, capacidade)) {
-    throw new Error('Seu perfil (' + usuario.perfil + ') nao pode executar esta acao.');
-  }
+/* Para a chave dos caches (tela e bolinha): o escopo e a faixa de cada tela — tudo o que muda o que a pessoa ve ou pode. */
+function marcaDasPermissoes(usuario) {
+  const p = (usuario && usuario.permissoes) || {};
+  return (p.escopo || '') + ':' + TELAS.map(function (t) {
+    return String((p.niveis || {})[t.id] || '-').charAt(0);
+  }).join('');
 }
 
 function descreverEscopo(usuario) {

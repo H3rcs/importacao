@@ -61,7 +61,7 @@ function dadosLimpeza(usuario, params) {
     estoque: dadosDoEstoque_(ESTOQUES.LP, usuario, params || {}),
     zonas: zonasLimpeza_(),
     listas: { origens: LP_ORIGENS, criticidades: LP_CRITICIDADES },
-    permissoes: { gerir: podeFazer(usuario, 'GERIR_LIMPEZA') }
+    permissoes: { gerir: podeEditar(usuario, 'limpeza') }
   };
 }
 
@@ -180,7 +180,6 @@ function acaoSalvarZona(usuario, params) {
  * estoque agora e controlado por entradas e saidas.
  */
 function acaoImportarLimpeza(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_LIMPEZA');
   const link = String(params.link || '').trim();
   if (!link) throw new Error('Cole o link da planilha antiga.');
   let arq;

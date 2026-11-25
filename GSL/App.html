@@ -1455,10 +1455,14 @@ function pintarBolinhas() {
 }
 
 /* Por tras e calada: sem canal (reserva por POST) os numeros vem dentro da pagina, e erro aqui nao vira aviso. */
+/*
+ * A chamada traz tambem o MENU de agora: e por ela que quem ja estava dentro
+ * ve a matriz nova (um menu que sumiu, uma tela que virou so leitura) ao
+ * voltar ao menu — por isso vai mesmo para quem nao tem plano nenhum.
+ */
 async function atualizarPendencias() {
   if (PENDENCIAS_PEDIDO === FILIAL || PENDENCIAS_SEM_PORTA || CANAL_BARRADO || !SESSAO ||
       typeof google === 'undefined' || !google.script) return;
-  if (!(SESSAO.telas || []).some((t) => BOLINHA_DA_TELA[t.id])) return;   // nenhum plano no menu desta pessoa
   const filial = FILIAL;
   PENDENCIAS_PEDIDO = filial;
   try {
@@ -1494,6 +1498,8 @@ function aplicarMenu(m, pedido, aviso) {
   if (Array.isArray(m.filiais)) atualizarFiliais(m.filiais);
   if (!Array.isArray(m.telas) || !Array.isArray(m.modulos)) return false;
   if (JSON.stringify([m.telas, m.modulos]) === JSON.stringify([SESSAO.telas, SESSAO.modulos])) return false;
+  // A faixa da tela aberta mudou (Ver <-> Ver e editar): ela e pedida de novo e repinta com os botoes certos.
+  const faixaAntes = nivelDoMenu(paginaAtual);
   SESSAO.telas = m.telas; SESSAO.modulos = m.modulos;
   const vivas = {};
   m.telas.forEach((t) => { vivas[t.id] = true; });
@@ -1504,6 +1510,10 @@ function aplicarMenu(m, pedido, aviso) {
   else {
     montarMenu(m.telas);
     document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === paginaAtual));
+    if (faixaAntes && nivelDoMenu(paginaAtual) !== faixaAntes) {
+      const p = ACESSO_DA_TELA[paginaAtual];
+      if (!p || p.nivel !== nivelDoMenu(paginaAtual)) { fecharJanela(); esquecerTela(paginaAtual); abrir(paginaAtual, paramsAtual); }
+    }
   }
   return true;
 }
@@ -1542,12 +1552,16 @@ function filialDesligada(filiais, motivo) {
  * menu novo sem a tela, que nao sabe a causa, usa o aviso neutro. false: e
  * outra recusa (a mensagem do servidor, como sempre).
  */
-const RECUSA_DE_PAINEL = /painel não está ligado|não tem acesso ao módulo/i;
+const RECUSA_DE_PAINEL = /painel não está ligado|não tem acesso ao módulo|não inclui a tela|é só para ver/i;
 const AVISO_PAINEL_SAIU = 'Este painel foi desligado nesta filial.';
 const AVISO_SEM_ACESSO = 'Este painel não está mais liberado para você nesta filial.';
+const AVISO_SO_VER = 'Seu acesso a esta tela agora é só para ver: nada foi gravado.';
 const avisoDaRecusa = (msg) => {
   const m = String(msg || '');
-  return /painel não está ligado/i.test(m) ? AVISO_PAINEL_SAIU : /não tem acesso ao módulo/i.test(m) ? AVISO_SEM_ACESSO : m;
+  // "Seu acesso (NIVEL) não inclui a tela X." ja diz a causa (a matriz, nao o painel): vai como o servidor disse.
+  return /painel não está ligado/i.test(m) ? AVISO_PAINEL_SAIU
+    : /não tem acesso ao módulo/i.test(m) ? AVISO_SEM_ACESSO
+    : /é só para ver/i.test(m) ? AVISO_SO_VER : m;
 };
 function voltarAoMenuComAviso(aviso) { fecharJanela(); abrirModulos(); avisar(aviso || AVISO_SEM_ACESSO, true); }
 
@@ -1555,6 +1569,23 @@ async function painelSaiu(e, idTela) {
   const msg = String((e && e.message) || e || '');
   if (!RECUSA_DE_PAINEL.test(msg)) return false;
   esquecerTela(idTela);
+  /*
+   * A matriz mudou com a pessoa dentro e a tela ficou "Ver": o menu e a tela
+   * sao relidos (a tela volta sem os botoes de gravar) e o aviso diz por que
+   * nada foi gravado. A tela que sumiu do menu leva de volta a ele, como sempre.
+   */
+  if (/é só para ver/i.test(msg)) {
+    try {
+      const pedido = ++MENU_PEDIDOS;
+      const s = await chamarJSON('abrirFilial', ctx());
+      if (s && s.ok && s.entrada === 'APP') aplicarMenu({ filial: s.filial.codigo, telas: s.telas, modulos: s.modulos, filiais: s.filiais }, pedido);
+    } catch (x) { /* sem o menu novo, a tela relida ja mostra a faixa certa */ }
+    if (paginaAtual === idTela && (SESSAO.telas || []).some((t) => t.id === idTela)) {
+      fecharJanela(); esquecerTela(idTela); abrir(idTela, paramsAtual);
+    }
+    avisar(AVISO_SO_VER, true);
+    return true;
+  }
   try {
     const pedido = ++MENU_PEDIDOS;
     const s = await chamarJSON('abrirFilial', ctx());
@@ -1774,9 +1805,40 @@ const TELAS_PINTA = {
  * confirmava os dados — que e a "sensacao de lentidao" relatada: nao era
  * demora, era a animacao de entrada rodando duas vezes.
  */
+/*
+ * O QUE A PESSOA PODE EM CADA TELA — so o que o servidor disse (r.pode, que
+ * vem junto com os dados de cada tela): nivel OCULTO/VER/EDITAR e editar.
+ * Todo botao ou campo que grava depende de podeEditar(tela); com "Ver" a tela
+ * abre so para leitura (e o servidor recusa qualquer gravacao do mesmo jeito).
+ * Nunca pelo nome do nivel nem por capacidade.
+ */
+const ACESSO_DA_TELA = {};
+function podeEditar(idTela) {
+  const p = ACESSO_DA_TELA[idTela || paginaAtual];
+  return !!(p && p.editar);
+}
+/* A faixa de um menu para esta pessoa, pelo menu que o servidor mandou ('' = nao esta no menu). */
+function nivelDoMenu(idTela) {
+  const t = ((SESSAO && SESSAO.telas) || []).find((x) => x.id === idTela);
+  return t ? (t.nivel || 'VER') : '';
+}
+/* Botao de uma tela que grava em OUTRA (ex.: a Assiduidade levando a Configuracao): so com Ver e editar na outra. */
+const editaMenu = (idTela) => nivelDoMenu(idTela) === 'EDITAR';
+/*
+ * A tela chegou com outro retrato do menu (r.menu: cada tela e a faixa dela)
+ * que o menu desta pagina — a matriz mudou com a pessoa dentro: o menu e
+ * relido (cartao que sumiu, tela que virou so leitura).
+ */
+const marcaDoMenuLocal = () => ((SESSAO && SESSAO.telas) || []).map((t) => t.id + ':' + (t.nivel || '')).join(',');
+function conferirFaixaDoMenu(idTela, r) {
+  if (r && typeof r.menu === 'string' && SESSAO && r.menu !== marcaDoMenuLocal()) atualizarPendencias();
+}
+
 function pintar(idTela, r, silencioso) {
   DADOS = r.dados;
   paginaAtual = idTela;
+  ACESSO_DA_TELA[idTela] = r.pode || null;
+  conferirFaixaDoMenu(idTela, r);
   if (ACAO_DO_LINK && ACAO_DO_LINK.tela !== idTela) ACAO_DO_LINK = null;     // a pessoa foi para outra tela antes de o plano do link abrir
   document.querySelectorAll('.item-menu').forEach((b) => b.classList.toggle('ativo', b.dataset.pagina === idTela));
   el('titulo-pagina').textContent = r.titulo;
@@ -2007,21 +2069,17 @@ function gerarProximoMes() {
 function restaurarPerfis() {
   abrirJanela('Restaurar níveis de acesso', `
     <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">
-      Reescreve os niveis padrao (Admin, Gerente, Coordenador, Consulta) para o correto:
-      o <b>Coordenador</b> volta a so entregar — sem validar, sem ver assiduidade nem configuracao.
-      As pessoas continuam nos seus niveis; so a definicao de cada nivel volta ao certo.
+      Volta a grade dos níveis padrão (Admin, Gerente, Coordenador, Supervisor, Consulta) ao que vem de fábrica:
+      cada menu com <b>Oculto</b>, <b>Ver</b> ou <b>Ver e editar</b> como na instalação, e o alcance de cada nível.
+      As pessoas continuam nos seus níveis, com os ajustes de cada uma; os níveis que você criou não mudam.
     </p>`, `
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="confirmarRestauro()">Restaurar</button>`);
 }
 
-async function confirmarRestauro() {
-  try {
-    const r = await executarAcaoSrv('restaurarPerfis', {});
-    fecharJanela();
-    avisar('Níveis restaurados — Coordenador agora e escopo ' + (r.coordenadorEscopo || '?') +
-           '. Peca para o coordenador recarregar.');
-  } catch (e) { avisar(e.message || e, true); }
+/* Pelo agir(): a resposta traz o menu novo e todas as telas sao relidas (invalidarTudo). */
+function confirmarRestauro() {
+  agir('restaurarPerfis', {}, 'Níveis de acesso restaurados ao padrão').catch(() => {});
 }
 
 async function diagnosticarAcesso() {
@@ -2248,7 +2306,9 @@ function pintarCalendario(r) {
       </div>
       ${d.mesPassado ? '<p class="dica" style="margin:-4px 0 12px">Mês encerrado — esta é a foto final. Se ficou algo pendente e você quer tirá-lo das contagens, use <b>Encerrar mês passado</b>.</p>' : ''}
       ${tiraDeTurnos(d.atividades)}
-      <p class="dica" style="margin:-4px 0 12px">Clique em <b>Abrir</b> na atividade para anexar entrega, remarcar, dar feedback, aprovar, reprovar ou cancelar.</p>
+      <p class="dica" style="margin:-4px 0 12px">${p.entregar || p.validar
+        ? 'Clique em <b>Abrir</b> na atividade para anexar entrega, remarcar, dar feedback, aprovar, reprovar ou cancelar.'
+        : 'Clique em <b>Abrir</b> para ver a atividade e a entrega. Seu acesso ao Calendário é só para ver.'}</p>
       <div style="overflow-x:auto">
         <table class="tabela-gestao"><thead><tr>
           <th></th><th>ID</th><th>Sem.</th><th>Prazo</th><th>Atividade</th><th>Turno</th>
@@ -2359,8 +2419,10 @@ function podeEntregarNa_(a, p) {
 
 /* Remover anexo: quem entrega ali, e de atividade aprovada so quem valida. */
 function podeRemoverAnexo_(a, p) {
-  return podeEntregarNa_(a, p) && (a.status !== 'Aprovada' || !!p.validar);
+  return podeEntregarNa_(a, p) && (a.status !== 'Aprovada' || !p.turnoEntrega);   // aprovada: so a gestao (alcance: operacao inteira)
 }
+/* Ninguem valida a propria entrega: quem mandou arquivo para a atividade nao aprova nem reprova (o servidor confere). */
+const entreguePorMim = (a, p) => (a.entreguePor || []).indexOf(String((p && p.email) || meuEmail())) !== -1;
 
 function abrirAtividade(id) {
   const d = DADOS, p = d.permissoes;
@@ -2395,6 +2457,7 @@ function abrirAtividade(id) {
   // Ja decidida (aprovada, reprovada ou cancelada): mostra o veredito, nao os
   // botoes de decidir de novo. So oferece "Reabrir" para desfazer.
   const jaDecidida = a.validacao === 'Aprovado' || a.validacao === 'Reprovado' || a.validacao === 'Cancelada';
+  const entregueMinha = entreguePorMim(a, p);
 
   // A caixa de feedback comeca VAZIA. Vinha preenchida com o MOTIVO da linha
   // — a nota de remarcacao ou o motivo da reprovacao anterior — e aprovar
@@ -2411,10 +2474,12 @@ function abrirAtividade(id) {
     <div class="campo" style="border-top:1px solid var(--linha);padding-top:16px">
       <label>Validação do gerente</label>
       ${a.motivo ? `<p class="dica" style="margin:0 0 8px">Histórico: ${esc(a.motivo)}</p>` : ''}
-      <textarea id="a-motivo" placeholder="Feedback ou motivo (obrigatório para reprovar)"></textarea>
+      ${entregueMinha ? `<p class="dica" style="margin:0 0 8px">Você enviou arquivo para esta atividade: a validação fica com outra pessoa —
+        ninguém valida a própria entrega.</p>` : `
+      <textarea id="a-motivo" placeholder="Feedback ou motivo (obrigatório para reprovar)"></textarea>`}
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="botao" style="background:var(--verde)" onclick="validar(${jsArg(a.id)},'Aprovado')">Aprovar</button>
-        <button class="botao perigo" onclick="validar(${jsArg(a.id)},'Reprovado')">Reprovar</button>
+        ${entregueMinha ? '' : `<button class="botao" style="background:var(--verde)" onclick="validar(${jsArg(a.id)},'Aprovado')">Aprovar</button>
+        <button class="botao perigo" onclick="validar(${jsArg(a.id)},'Reprovado')">Reprovar</button>`}
         <button class="botao secundario" onclick="cancelarAtividade(${jsArg(a.id)})">Cancelar atividade</button>
       </div>
     </div>`) : (a.motivo ? `<div class="campo"><label>Retorno da gerência</label>
@@ -2713,7 +2778,7 @@ function pintarAssiduidade(r) {
                 ? 'Tentei importar a competencia <strong>' + esc(d.competencia) + '</strong> automaticamente, mas deu erro:<br><span style="color:var(--alerta)">' + esc(d.erroImport) + '</span><br><br>Confira em Configuracao se o link e a aba da folha estao certos (a aba costuma ser <b>FOLHA DE PONTO</b>).'
                 : 'A competencia <strong>' + esc(d.competencia) + '</strong> está cadastrada, mas a folha ainda nao foi lida.')}
         </p>
-        ${d.podeGerir ? (d.semRH
+        ${editaMenu('config') ? (d.semRH
           ? `<button class="botao" onclick="abrir('config')">Ir para Configuração</button>`
           : `<button class="botao" onclick="importar(${jsArg(d.arquivo.id)})">Importar agora</button>
              <button class="botao secundario" onclick="previa(${jsArg(d.arquivo.id)})">Pré-visualizar</button>`)
@@ -2811,7 +2876,7 @@ function avisoNaoDefinidos(d) {
   return `<div class="cartao" style="margin-bottom:14px;border-left:4px solid var(--alerta)">
     <div class="cartao-titulo linha-titulo">
       <span>${n.lancamentos} lançamento(s) com codigo fora da legenda</span>
-      ${DADOS.podeGerir ? `<button class="icone-botao" onclick="abrir('config')">Cadastrar no DE-PARA</button>` : ''}
+      ${editaMenu('config') ? `<button class="icone-botao" onclick="abrir('config')">Cadastrar no DE-PARA</button>` : ''}
     </div>
     <p class="dica" style="margin:0">
       Ficaram de fora dos gráficos e das contagens, de propósito — entrar como categoria
@@ -3406,7 +3471,7 @@ async function verDiagnosticoRH() {
           <b>${esc(e.competencia)}</b> — ${esc(e.quando)}<br>${esc(e.erro)}</div>`).join('')}`
         : '<p class="dica" style="margin-top:14px">Nenhum erro de importação registrado.</p>'}`,
       `<button class="botao secundario" onclick="fecharJanela()">Fechar</button>
-       ${DADOS.podeGerir ? `<button class="botao" onclick="fecharJanela();atualizarRH()">↻ Reimportar agora</button>` : ''}`);
+       ${editaMenu('assiduidade') || editaMenu('config') ? `<button class="botao" onclick="fecharJanela();atualizarRH()">↻ Reimportar agora</button>` : ''}`);
   } catch (e) { avisar(e.message || e, true); }
 }
 
@@ -3682,20 +3747,25 @@ function pintarAbaCfg(d) {
   }
 }
 
+/* Um parametro: campo que grava ao sair dele — ou so o valor, com a Configuracao em "Ver". */
 const campoParam = (p) => `
   <div class="campo"><label>${esc(p.descricao || p.chave)}</label>
-    <input id="par-${p.id}" value="${esc(p.valor)}"
-           onchange="agir('salvarParametro',{id:${jsArg(p.id)},valor:this.value},'Parâmetro salvo')">
+    ${podeEditar('config') ? `<input id="par-${p.id}" value="${esc(p.valor)}"
+           onchange="agir('salvarParametro',{id:${jsArg(p.id)},valor:this.value},'Parâmetro salvo')">`
+      : `<input id="par-${p.id}" value="${esc(p.valor)}" readonly>`}
     <p class="dica mono" style="margin-top:4px">${esc(p.chave)}</p></div>`;
+/* A Configuracao em "Ver" (so leitura): a faixa no alto de cada aba. */
+const avisoSoVer = (nome) => `<div class="aviso-so-ver" role="note">Seu acesso a <b>${esc(nome)}</b> é só para ver: os botões de gravar não aparecem.</div>`;
 
 /* ---- Aba 1: de onde vêm os dados de assiduidade ---- */
 function cfgRH(d) {
   const pRh = (d.parametros || []).filter((p) => p.grupo === 'rh');
-  return `
+  const ed = podeEditar('config');
+  return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo linha-titulo">
         <span>Competências do RH — uma planilha por mês</span>
-        <button class="icone-botao" onclick="formArquivoRH()">Cadastrar competência</button>
+        ${ed ? '<button class="icone-botao" onclick="formArquivoRH()">Cadastrar competência</button>' : ''}
       </div>
       <p class="dica" style="margin:-4px 0 12px">A competência marcada como <strong>Aberta</strong>
          é relida automaticamente todo dia às ${esc(valorPar(d, 'HORA_ATUALIZACAO_RH') || '10')}h,
@@ -3712,13 +3782,13 @@ function cfgRH(d) {
               : '<span class="etiqueta aprovada">Fechada</span>'}</td>
           <td class="numero">${esc(a.linhas)}</td>
           <td class="meta-atividade">${esc(a.ultimaImportacao)}</td>
-          <td><button class="icone-botao" onclick="formArquivoRH(${jsArg(a.id)})">Editar</button>
+          <td>${ed ? `<button class="icone-botao" onclick="formArquivoRH(${jsArg(a.id)})">Editar</button>
               <button class="icone-botao" onclick="previa(${jsArg(a.id)})">Conferir</button>
-              <button class="icone-botao" onclick="importar(${jsArg(a.id)})">Importar</button></td>
+              <button class="icone-botao" onclick="importar(${jsArg(a.id)})">Importar</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="6" class="vazio">Nenhuma competência cadastrada.</td></tr>'}</tbody></table>
       </div>
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-        <button class="botao" onclick="atualizarRH()">↻ Atualizar agora</button>
+        ${ed ? '<button class="botao" onclick="atualizarRH()">↻ Atualizar agora</button>' : ''}
         <button class="botao secundario" onclick="verDiagnosticoRH()">Diagnóstico da base</button>
       </div>
     </div>
@@ -3726,7 +3796,7 @@ function cfgRH(d) {
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo linha-titulo">
         <span>DE-PARA — o que cada código da folha significa</span>
-        <button class="icone-botao" onclick="formDePara()">Novo código</button>
+        ${ed ? '<button class="icone-botao" onclick="formDePara()">Novo código</button>' : ''}
       </div>
       <p class="dica" style="margin:-4px 0 12px">
         Esta tabela decide o BI inteiro: a <b>categoria</b> define se o dia conta como
@@ -3742,14 +3812,14 @@ function cfgRH(d) {
           <td>${esc(c.descricao)}</td>
           <td>${esc(c.categoria)}</td>
           <td>${c.ausencia ? '<span class="etiqueta atrasada">sim</span>' : '—'}</td>
-          <td><button class="icone-botao" onclick="formDePara(${jsArg(c.id)})">Editar</button>
-              <button class="icone-botao perigo" onclick="agir('excluirDePara',{id:${jsArg(c.id)}},'Código removido')">Remover</button></td>
+          <td>${ed ? `<button class="icone-botao" onclick="formDePara(${jsArg(c.id)})">Editar</button>
+              <button class="icone-botao perigo" onclick="agir('excluirDePara',{id:${jsArg(c.id)}},'Código removido')">Remover</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="5" class="vazio">Nenhum código cadastrado.</td></tr>'}</tbody></table>
       </div>
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
         <button class="botao secundario" onclick="verCodigosPendentes()">Códigos fora da legenda</button>
-        <button class="botao secundario" onclick="confirmarRestaurarDePara()">Restaurar tabela padrão</button>
-        <button class="botao secundario" onclick="confirmarReclassificar()">Reclassificar a base</button>
+        ${ed ? `<button class="botao secundario" onclick="confirmarRestaurarDePara()">Restaurar tabela padrão</button>
+        <button class="botao secundario" onclick="confirmarReclassificar()">Reclassificar a base</button>` : ''}
       </div>
       <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
          tradução em toda a folha já importada e refaz os painéis.</p>
@@ -3766,11 +3836,12 @@ function cfgRH(d) {
 /* ---- Aba 2: o que nasce em cada mês do calendário ---- */
 function cfgCalendario(d) {
   const pCal = (d.parametros || []).filter((p) => p.grupo === 'calendario' || p.grupo === 'avisos');
-  return `
+  const ed = podeEditar('config');
+  return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo linha-titulo">
         <span>Rotinas — o que é gerado todo mês</span>
-        <button class="icone-botao" onclick="formRotina()">Nova rotina</button>
+        ${ed ? '<button class="icone-botao" onclick="formRotina()">Nova rotina</button>' : ''}
       </div>
       <div style="overflow-x:auto">
       <table><thead><tr><th>Sigla</th><th>Atividade</th><th>Quando</th><th>Por turno</th><th>Ativa</th><th></th></tr></thead>
@@ -3781,11 +3852,11 @@ function cfgCalendario(d) {
         <td>${t.ativo ? '<span class="selo-entrega">ativa</span>' : pendentesDe(t)
           ? `<span class="pendente-entrega rot-ainda">parada · ${pendentesDe(t)} ainda no calendário</span>`
           : '<span class="pendente-entrega">parada</span>'}</td>
-        <td><div class="rot-botoes">
+        <td>${ed ? `<div class="rot-botoes">
           <button class="icone-botao" onclick="formRotina(${jsArg(t.id)})">Editar</button>
           <button class="icone-botao" onclick="alternarRotina(${jsArg(t.id)})">${t.ativo ? 'Desativar' : 'Ativar'}</button>
           ${!t.ativo && pendentesDe(t) ? `<button class="icone-botao" onclick="tirarDoCalendario(${jsArg(t.id)})">Tirar do calendário (${pendentesDe(t)})</button>` : ''}
-          <button class="icone-botao perigo" onclick="removerRotina(${jsArg(t.id)})">Remover</button></div></td></tr>`).join('') ||
+          <button class="icone-botao perigo" onclick="removerRotina(${jsArg(t.id)})">Remover</button></div>` : ''}</td></tr>`).join('') ||
         '<tr><td colspan="6" class="vazio">Nenhuma rotina cadastrada.</td></tr>'}
       </tbody></table></div>
       ${blocoOrfas(d.orfas || [])}
@@ -3797,9 +3868,9 @@ function cfgCalendario(d) {
         <div class="cartao-titulo">Setores do CD</div>
         <p class="dica" style="margin:-4px 0 10px">São as opções do campo “setor” das rotinas que exigem setor (como a Vistoria).</p>
         ${d.setores.map((s) => `<div class="anexo"><span class="anexo-nome">${esc(s.setor)}</span>
-          <button class="icone-botao perigo" onclick="agir('excluirSetor',{id:${jsArg(s.id)}},'Setor removido')">Remover</button></div>`).join('')}
-        <div class="campo" style="margin-top:12px"><input id="novo-setor" placeholder="Novo setor"></div>
-        <button class="botao secundario" onclick="agir('salvarSetor',{setor:val('novo-setor'),ativo:true},'Setor adicionado')">Adicionar</button>
+          ${ed ? `<button class="icone-botao perigo" onclick="agir('excluirSetor',{id:${jsArg(s.id)}},'Setor removido')">Remover</button>` : ''}</div>`).join('')}
+        ${ed ? `<div class="campo" style="margin-top:12px"><input id="novo-setor" placeholder="Novo setor"></div>
+        <button class="botao secundario" onclick="agir('salvarSetor',{setor:val('novo-setor'),ativo:true},'Setor adicionado')">Adicionar</button>` : ''}
       </div>
       <div class="cartao">
         <div class="cartao-titulo">Prazos e avisos</div>
@@ -3821,7 +3892,8 @@ function cfgCalendario(d) {
  * tem tres portas: o botao, a tecla Enter e a saida do campo.
  */
 function cfgApresentacao(d) {
-  const linha = (a) => `
+  const ed = podeEditar('config');
+  const linha = (a) => ed ? `
     <div class="linha-apres">
       <div class="apres-turno">Turno ${esc(a.turno)}</div>
       <input id="ap-${esc(a.turno)}" class="apres-link" value="${esc(a.link)}"
@@ -3831,8 +3903,14 @@ function cfgApresentacao(d) {
       <button class="botao" onclick="salvarApresentacao(${jsArg(a.turno)}, ${jsArg(a.id)})">Salvar link</button>
       ${a.link ? `<button class="icone-botao" title="Abrir a apresentação em outra aba"
              onclick="window.open(${jsArg(a.link)},'_blank')">Abrir</button>` : ''}
+    </div>` : `
+    <div class="linha-apres">
+      <div class="apres-turno">Turno ${esc(a.turno)}</div>
+      <input id="ap-${esc(a.turno)}" class="apres-link" value="${esc(a.link)}" readonly>
+      ${a.link ? `<button class="icone-botao" title="Abrir a apresentação em outra aba"
+             onclick="window.open(${jsArg(a.link)},'_blank')">Abrir</button>` : ''}
     </div>`;
-  return `
+  return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao">
       <div class="cartao-titulo">Apresentações da reunião — um link por turno</div>
       <p class="dica" style="margin:-4px 0 16px">Abra a apresentação do turno no Google, copie o endereço da
@@ -3881,7 +3959,8 @@ function salvarApresentacaoSeMudou(turno, id, original) {
 /* ---- Aba 4: manutenção ---- */
 function cfgSistema(d) {
   const pSis = (d.parametros || []).filter((p) => p.grupo === 'sistema');
-  return `
+  const ed = podeEditar('config');
+  return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Estado do sistema</div>
       <table><tbody>
@@ -3897,11 +3976,10 @@ function cfgSistema(d) {
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Manutenção</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="botao secundario" onclick="agir('ligarGatilhos',{},'Rotinas automáticas ligadas')">Ligar rotinas automáticas</button>
+        ${ed ? `<button class="botao secundario" onclick="agir('ligarGatilhos',{},'Rotinas automáticas ligadas')">Ligar rotinas automáticas</button>
         <button class="botao secundario" onclick="agir('corrigirFuso',{},'Fuso alinhado')">Corrigir fuso</button>
         <button class="botao secundario" onclick="agir('enviarDigesto',{},'Digesto enviado')">Enviar digesto agora</button>
-        <button class="botao secundario" onclick="gerarProximoMes()">Gerar próximo mês</button>
-        <button class="botao secundario" onclick="restaurarPerfis()">Restaurar níveis de acesso</button>
+        <button class="botao secundario" onclick="gerarProximoMes()">Gerar próximo mês</button>` : ''}
         <button class="botao secundario" onclick="janelaAutorizarEmail()">E-mail não chega?</button>
         <button class="botao secundario" onclick="alternarModoLeve()">${document.documentElement.classList.contains('modo-leve') ? '⚡ Modo leve: LIGADO' : '⚡ Modo leve: desligado'}</button>
         ${d.pastaAnexos ? `<button class="botao secundario" onclick="window.open(${jsArg(d.pastaAnexos)},'_blank')">📁 Abrir pasta das entregas</button>` : ''}
@@ -3944,7 +4022,7 @@ function blocoOrfas(orfas) {
   return `<div class="rot-orfas"><p class="rot-orfas-titulo">Atividades de rotinas removidas</p>
     ${orfas.map((o) => `<div class="rot-orfa">
       <span><b class="mono">${esc(o.sigla)}</b> — ${o.pendentes.total} ${o.pendentes.total === 1 ? 'pendente' : 'pendentes'} de hoje em diante</span>
-      <button class="icone-botao" onclick="tirarOrfa(${jsArg(o.sigla)})">Tirar do calendário</button></div>`).join('')}</div>`;
+      ${podeEditar('config') ? `<button class="icone-botao" onclick="tirarOrfa(${jsArg(o.sigla)})">Tirar do calendário</button>` : ''}</div>`).join('')}</div>`;
 }
 
 function formArquivoRH(id) {
@@ -4359,23 +4437,35 @@ function confirmarReclassificar() {
    as MESMAS pessoas, em dois cadastros que nao conversavam. Dava para
    ter o Gerente cadastrado como COORDENADOR e ninguem percebia.
    ==================================================== */
-let ABA_PESSOAS = 'pessoas';   // pessoas | niveis
+let ABA_PESSOAS = 'pessoas';   // pessoas | ajustes | niveis
+
+/*
+ * AS TRES FAIXAS DE CADA MENU (8.12). Oculto: o menu nao existe para a
+ * pessoa. Ver: abre e le tudo (exportar inclusive), sem gravar. Ver e editar:
+ * grava tudo o que a tela oferece. O nivel da a faixa de cada menu (aba
+ * Niveis de acesso); o ajuste da pessoa, se houver, vale por cima (aba
+ * Ajustes por pessoa). Antes de tudo vale o painel na filial.
+ */
+const NOME_FAIXA = { OCULTO: 'Oculto', VER: 'Ver', EDITAR: 'Ver e editar' };
+const FAIXAS = ['OCULTO', 'VER', 'EDITAR'];
+const NOME_ESCOPO = { TODOS: 'Operação inteira', TURNO: 'O próprio turno', PROPRIAS: 'Somente as suas' };
+const seloFaixa = (f, extra) => `<span class="nv-selo nv-${String(f || 'OCULTO').toLowerCase()}">${esc(NOME_FAIXA[f] || 'Oculto')}${extra || ''}</span>`;
 
 function pintarAcessos(r) { pintarPessoas(r); }
 
 function pintarPessoas(r) {
   const d = r.dados;
+  const ed = podeEditar('acessos');
   const semNivel = (d.pessoas || []).filter((p) => p.semNivel && p.ativo !== false).length;
   el('subtitulo-pagina').textContent = semNivel
     ? `${semNivel} pessoa(s) sem nível de acesso definido`
-    : 'Quem entra no sistema, em quais filiais, e o que cada nível enxerga';
-  el('acoes-topo').innerHTML =
-    `<button class="botao" onclick="formUsuario()">Cadastrar pessoa</button>`;
+    : 'Quem entra no sistema, em quais filiais, e o que cada nível vê em cada menu';
+  el('acoes-topo').innerHTML = ed ? `<button class="botao" onclick="formUsuario()">Cadastrar pessoa</button>` : '';
 
-  const abas = [['pessoas', 'Pessoas'], ['modulos', 'Módulos por pessoa'], ['niveis', 'Níveis de acesso']];
-  el('pagina').innerHTML = `
+  const abas = [['pessoas', 'Pessoas'], ['ajustes', 'Ajustes por pessoa'], ['niveis', 'Níveis de acesso']];
+  el('pagina').innerHTML = `${ed ? '' : avisoSoVer('Pessoas e acessos')}
     <div class="abas">
-      ${abas.map(([id, nome]) => `<button class="aba ${ABA_PESSOAS === id ? 'ativa' : ''}"
+      ${abas.map(([id, nome]) => `<button class="aba ${ABA_PESSOAS === id ? 'ativa' : ''}" data-aba="${id}"
         onclick="trocarAbaPessoas(${jsArg(id)})">${nome}</button>`).join('')}
     </div>
     <div id="conteudo-pessoas"></div>`;
@@ -4384,9 +4474,7 @@ function pintarPessoas(r) {
 
 function trocarAbaPessoas(aba) {
   ABA_PESSOAS = aba;
-  const botoes = document.querySelectorAll('.abas .aba');
-  botoes.forEach((b) => b.classList.remove('ativa'));
-  const i = ['pessoas', 'modulos', 'niveis'].indexOf(aba); if (botoes[i]) botoes[i].classList.add('ativa');
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
   pintarAbaPessoas(DADOS);
 }
 
@@ -4394,60 +4482,106 @@ function pintarAbaPessoas(d) {
   const alvo = el('conteudo-pessoas');
   if (!alvo) return;
   alvo.innerHTML = ABA_PESSOAS === 'niveis' ? blocoNiveis(d)
-    : ABA_PESSOAS === 'modulos' ? blocoModulosPessoa(d) : blocoPessoas(d);
+    : ABA_PESSOAS === 'ajustes' ? blocoAjustesPessoas(d) : blocoPessoas(d);
 }
 
-/*
- * MODULOS POR PESSOA — por cima do nivel.
- * Cada celula mostra o que a pessoa ve de fato naquele modulo. "Padrão"
- * segue o nivel dela; as outras opcoes valem so para ela.
- */
-const NOMES_MODO = { NAO: 'Sem acesso', VER: 'Ver', EDITAR: 'Ver e editar' };
-function opcoesModulo(p, m, curto) {
-  const atual = (p.modulos || {})[m.id] || '';
-  const padrao = (p.padrao || {})[m.id] || 'NAO';
-  const rotulo = curto ? ('Nível: ' + NOMES_MODO[padrao].toLowerCase()) : ('Padrão do nível (' + NOMES_MODO[padrao] + ')');
-  return `<option value="PADRAO" ${!atual ? 'selected' : ''}>${rotulo}</option>` +
-    ['NAO', 'VER'].concat(m.editavel ? ['EDITAR'] : [])
-      .map((k) => `<option value="${k}" ${atual === k ? 'selected' : ''}>${NOMES_MODO[k]}</option>`).join('');
+/* Os menus, um por linha, agrupados por modulo (o servidor manda a ordem). */
+const linhasDeMenus = (d, linha) => (d.modulos || []).map((m) => `
+  <tr class="nv-grupo"><th colspan="99">${esc(m.nome)}</th></tr>
+  ${m.telas.map((t) => linha(t, m)).join('')}`).join('');
+
+/* A faixa que fica valendo para a pessoa num menu: o ajuste dela, senao o nivel (com a trava do ADMIN). */
+function faixaDaPessoa(p, idTela) {
+  if (p.perfil === 'ADMIN' && idTela === 'acessos') return 'EDITAR';
+  return (p.ajustes || {})[idTela] || (p.doNivel || {})[idTela] || 'OCULTO';
 }
 
-function blocoModulosPessoa(d) {
-  const mods = d.modulosAjustaveis || [];
+/* --- Aba "Ajustes por pessoa": quem tem ajuste e onde, ao lado do nivel --- */
+function blocoAjustesPessoas(d) {
+  const ed = podeEditar('acessos');
   const ativos = (d.pessoas || []).filter((p) => p.ativo && !p.semNivel);
-  const cor = { NAO: 'var(--tinta-fraca)', VER: 'var(--azul-vivo)', EDITAR: 'var(--verde)' };
+  const nomeTela = {};
+  (d.telas || []).forEach((t) => { nomeTela[t.id] = t.nome; });
   return `
     <div class="cartao">
-      <div class="cartao-titulo linha-titulo"><span>Quem vê cada módulo</span>
-        <span class="campo-busca"><input id="busca-modpes" placeholder="Buscar pessoa" oninput="filtrarModulosPessoa()"></span></div>
-      <p class="dica" style="margin:-4px 0 12px">O ponto de partida é o <b>nível</b> da pessoa. Aqui você abre ou fecha um
-        módulo só para ela, sem mudar o nível. <b>Ver e editar</b> libera lançar e cadastrar (Nobreaks, Limpeza e Estoque);
-        nos outros módulos, o que a pessoa pode fazer continua vindo do nível. Configuração segue sempre o nível.</p>
-      <div class="pn-tabela-rolagem"><table id="tabela-modpes">
-        <thead><tr><th>Pessoa</th>${mods.map((m) => `<th>${esc(m.nome)}</th>`).join('')}</tr></thead>
-        <tbody>${ativos.map((p) => `<tr data-busca="${esc((p.nome + ' ' + p.email + ' ' + p.perfil).toLowerCase())}">
-          <td><strong>${esc(p.nome || p.email)}</strong><div class="lp-sub">${esc(p.perfil)}${p.turno ? ' · turno ' + esc(p.turno) : ''}</div></td>
-          ${mods.map((m) => p.perfil === 'ADMIN'
-            ? `<td><span class="pn-chip ok">tudo</span></td>`
-            : `<td style="min-width:128px;padding-right:6px">
-                <select title="${esc(m.nome)}: ${NOMES_MODO[p.efetivo[m.id]]}" style="width:100%;font-size:12px;padding:6px 6px;border-left:4px solid ${cor[p.efetivo[m.id]]};${(p.modulos || {})[m.id] ? 'font-weight:700' : ''}"
-                  onchange="agir('definirModuloPessoa',{id:${jsArg(p.id)},modulo:${jsArg(m.id)},modo:this.value},'Acesso atualizado').catch(()=>{})">
-                  ${opcoesModulo(p, m, true)}</select></td>`).join('')}
-        </tr>`).join('') || `<tr><td colspan="${mods.length + 1}" class="vazio">Ninguém cadastrado ainda.</td></tr>`}</tbody>
+      <div class="cartao-titulo linha-titulo"><span>Ajuste desta pessoa — por cima do nível</span>
+        <span class="campo-busca"><input id="busca-ajpes" placeholder="Buscar pessoa" oninput="filtrarAjustesPessoas()"></span></div>
+      <p class="dica" style="margin:-4px 0 12px">O ponto de partida é o <b>nível</b> da pessoa (aba Níveis de acesso).
+        Aqui você muda um menu só para ela, sem mexer no nível: <b>Oculto</b>, <b>Ver</b> ou <b>Ver e editar</b>.
+        <b>Igual ao nível</b> tira o ajuste. Vale na hora, também para quem já está dentro.</p>
+      <div class="pn-tabela-rolagem"><table id="tabela-ajpes">
+        <thead><tr><th>Pessoa</th><th>Nível</th><th>Ajustes desta pessoa</th><th></th></tr></thead>
+        <tbody>${ativos.map((p) => {
+          const ajustes = Object.keys(p.ajustes || {});
+          return `<tr data-busca="${esc((p.nome + ' ' + p.email + ' ' + p.perfil).toLowerCase())}" data-email="${esc(p.email)}">
+          <td><strong>${esc(p.nome || p.email)}</strong><div class="lp-sub">${esc(p.email)}${p.turno ? ' · turno ' + esc(p.turno) : ''}</div></td>
+          <td><span class="selo-entrega">${esc(p.perfil)}</span></td>
+          <td>${ajustes.length ? ajustes.map((t) => `<span class="nv-ajuste">${esc(nomeTela[t] || t)}: ${seloFaixa(p.ajustes[t])}
+              <span class="lp-sub">(nível: ${esc(NOME_FAIXA[(p.doNivel || {})[t]] || 'Oculto')})</span></span>`).join(' ')
+            : '<span class="lp-sub">Igual ao nível em todos os menus</span>'}</td>
+          <td><button class="icone-botao" onclick="janelaAjustes(${jsArg(p.id)})">${ed ? 'Ajustar' : 'Ver por menu'}</button></td>
+        </tr>`;
+        }).join('') || '<tr><td colspan="4" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody>
       </table></div>
-      <div class="pn-legenda" style="margin-top:10px">
-        <span><i style="background:var(--verde)"></i>vê e edita</span><span><i style="background:var(--azul-vivo)"></i>só vê</span>
-        <span><i style="background:var(--tinta-fraca)"></i>sem acesso</span><span><b>negrito</b> = ajuste só desta pessoa</span>
-      </div>
-      <p class="dica">O módulo também precisa estar ligado na filial (Configuração › Filiais e painéis). O nível ADMIN vê todos os módulos ligados na filial (os ocultos com a etiqueta oculto).</p>
+      <p class="dica">Antes do nível e do ajuste vale o painel na filial (Configuração › Filiais e painéis):
+        painel <b>Desativado</b> ou <b>Não usar nesta filial</b> some para todos; <b>Oculto</b>, só o administrador vê.</p>
     </div>`;
 }
 
-function filtrarModulosPessoa() {
-  const t = String(val('busca-modpes') || '').toLowerCase().trim();
-  document.querySelectorAll('#tabela-modpes tbody tr').forEach((tr) => {
+function filtrarAjustesPessoas() {
+  const t = String(val('busca-ajpes') || '').toLowerCase().trim();
+  document.querySelectorAll('#tabela-ajpes tbody tr').forEach((tr) => {
     tr.style.display = (!t || (tr.dataset.busca || '').indexOf(t) !== -1) ? '' : 'none';
   });
+}
+
+/*
+ * A grade de UMA pessoa: menu · do nivel · ajuste desta pessoa · fica valendo.
+ * imediato: cada troca grava na hora (definirAjustePessoa); senao os
+ * seletores sao lidos no Salvar do cadastro (salvarUsuario).
+ */
+function gradeDaPessoa(d, p, imediato) {
+  const ed = podeEditar('acessos');
+  const soDoAdmin = d.soDoAdmin || [];
+  const linha = (t) => {
+    const travada = p.perfil === 'ADMIN' && t.id === 'acessos';
+    const presa = travada || !ed || soDoAdmin.indexOf(t.id) !== -1 || (p.perfil === 'ADMIN' && !d.souAdmin);
+    const atual = (p.ajustes || {})[t.id] || '';
+    const doNivel = (p.doNivel || {})[t.id] || 'OCULTO';
+    const titulo = travada ? 'No nível ADMIN, Pessoas e acessos é sempre “Ver e editar” — assim ninguém se tranca do lado de fora.'
+      : (soDoAdmin.indexOf(t.id) !== -1 || (p.perfil === 'ADMIN' && !d.souAdmin)) ? 'Só um administrador muda este acesso.' : '';
+    return `<tr>
+      <td>${esc(t.nome)}</td>
+      <td>${seloFaixa(doNivel)}</td>
+      <td>${presa ? `<span title="${esc(titulo)}">${atual ? seloFaixa(atual) : '<span class="lp-sub">Igual ao nível</span>'}${travada ? ' <span class="nv-trava">&#128274; trava do ADMIN</span>' : ''}</span>`
+        : `<select class="aj-celula" data-tela="${esc(t.id)}" aria-label="Ajuste de ${esc(p.nome || p.email)} em ${esc(t.nome)}"
+            ${imediato ? `onchange="agir('definirAjustePessoa',{id:${jsArg(p.id)},tela:${jsArg(t.id)},nivel:this.value},${jsArg('Acesso de ' + (p.nome || p.email) + ' atualizado')}).catch(()=>{})"` : 'onchange="previaAjuste(this)"'}>
+            <option value="PADRAO" ${!atual ? 'selected' : ''}>Igual ao nível</option>
+            ${FAIXAS.map((f) => `<option value="${f}" ${atual === f ? 'selected' : ''}>${NOME_FAIXA[f]}</option>`).join('')}
+          </select>`}</td>
+      <td class="aj-fica" data-nivel="${esc(doNivel)}">${seloFaixa(faixaDaPessoa(p, t.id))}</td>
+    </tr>`;
+  };
+  return `<div class="pn-tabela-rolagem"><table class="nv-tabela aj-tabela">
+    <thead><tr><th>Menu</th><th>Do nível ${esc(p.perfil || '')}</th><th>Ajuste desta pessoa</th><th>Fica valendo</th></tr></thead>
+    <tbody>${linhasDeMenus(d, linha)}</tbody></table></div>`;
+}
+
+/* No cadastro (antes do Salvar), a coluna "Fica valendo" acompanha o seletor. */
+function previaAjuste(sel) {
+  const td = sel.closest('tr') && sel.closest('tr').querySelector('.aj-fica');
+  if (td) td.innerHTML = seloFaixa(sel.value === 'PADRAO' ? td.dataset.nivel : sel.value);
+}
+
+function janelaAjustes(id) {
+  const d = DADOS;
+  const p = (d.pessoas || []).find((x) => x.id === id);
+  if (!p) return;
+  abrirJanela('Acesso de ' + (p.nome || p.email), `
+    <p class="dica" style="margin:0 0 12px">Nível <b>${esc(p.perfil)}</b>. ${podeEditar('acessos')
+      ? 'Cada troca vale na hora. <b>Igual ao nível</b> tira o ajuste desta pessoa naquele menu.'
+      : 'Seu acesso a Pessoas e acessos é só para ver.'}</p>
+    ${gradeDaPessoa(d, p, true)}`, `<button class="botao" onclick="fecharJanela()">Fechar</button>`);
 }
 
 /* Texto curto das filiais de uma pessoa: vazio = só a principal. */
@@ -4464,6 +4598,7 @@ function filiaisDaPessoa(p, d) {
 }
 
 function blocoPessoas(d) {
+  const ed = podeEditar('acessos');
   const situacao = (p) => {
     if (!p.ativo) return '<span class="etiqueta cancelada">desativado</span>';
     if (p.semNivel) return '<span class="etiqueta aguardando">sem nível</span>';
@@ -4491,16 +4626,17 @@ function blocoPessoas(d) {
           <td class="mono">${esc(p.email)}</td>
           <td>${p.turno ? '<strong>' + esc(p.turno) + '</strong>' : '<span class="pendente-entrega">sem turno</span>'}</td>
           ${variasFiliais ? `<td>${esc(filiaisDaPessoa(p, d))}</td>` : ''}
-          <td>${p.semNivel ? '—' : `<span class="selo-entrega">${esc(p.perfil)}</span>`}</td>
+          <td>${p.semNivel ? '—' : `<span class="selo-entrega">${esc(p.perfil)}</span>${Object.keys(p.ajustes || {}).length
+            ? ` <span class="lp-sub" title="Esta pessoa tem ajuste em algum menu (aba Ajustes por pessoa)">+ ajuste</span>` : ''}`}</td>
           <td>${situacao(p)}</td>
           <td>${p.temPin ? '<span class="selo-entrega">criado</span>' : '<span class="pendente-entrega">cria no 1º acesso</span>'}</td>
-          <td><button class="icone-botao" onclick="formUsuario(${jsArg(p.id)})">Editar</button>
+          <td>${ed ? `<button class="icone-botao" onclick="formUsuario(${jsArg(p.id)})">Editar</button>
               ${p.email !== d.eu ? `<button class="icone-botao" title="${p.temPin
                   ? 'Apaga o PIN e gera um código para a pessoa criar outro'
                   : 'Gera um código para a pessoa criar o PIN sem precisar do e-mail'}"
                 onclick="gerarCodigoAcesso(${jsArg(p.id)}, ${jsArg(p.nome || p.email)}, ${p.temPin ? 'true' : 'false'})">${p.temPin ? 'Zerar PIN' : 'Código de acesso'}</button>` : ''}
               ${p.email === d.eu ? '' :
-                `<button class="icone-botao" onclick="agir('alternarAtivo',{id:${jsArg(p.id)}},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}</td>
+                `<button class="icone-botao" onclick="agir('alternarAtivo',{id:${jsArg(p.id)}},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="9" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
       <p class="dica">O <b>turno</b> liga a pessoa às atividades: o coordenador do turno A recebe
          o digesto do A e aparece como responsável nas atividades do A — dentro de cada filial.</p>
@@ -4522,6 +4658,10 @@ function formUsuario(id) {
   const todas = u ? (u.filiais === '*' || u.filiais === 'TODAS') : false;
   const principal = (filiais.find((f) => f.principal) || {}).codigo;
   const marcadaFilial = (f) => todas || atuais.indexOf(f.codigo) !== -1 || (!atuais.length && !todas && f.codigo === principal);
+  // O nivel escolhido no seletor: a coluna "Do nivel" da grade de ajuste e a do nivel que esta marcado.
+  const nivelDe = (perfil) => ((d.perfis || []).find((x) => x.perfil === perfil) || {}).niveis || {};
+  const perfilInicial = u ? u.perfil : 'COORDENADOR';
+  const pessoaGrade = Object.assign({ perfil: perfilInicial, ajustes: {}, nome: '' }, u || {}, { doNivel: nivelDe(perfilInicial) });
 
   abrirJanela(u ? ('Editar ' + (u.nome || u.email)) : 'Cadastrar pessoa', `
     ${u ? '' : `<p class="dica" style="margin:0 0 14px">A pessoa entra direto com a conta Google dela —
@@ -4537,8 +4677,8 @@ function formUsuario(id) {
         ${u ? 'readonly' : ''}></div>
     <div class="campo-duplo">
       <div class="campo"><label>Nível de acesso</label>
-        <select id="u-perfil">
-          ${(d.niveis || []).map((n) => `<option ${u && u.perfil === n ? 'selected' : (!u && n === 'COORDENADOR' ? 'selected' : '')}>${esc(n)}</option>`).join('')}
+        <select id="u-perfil" onchange="trocarNivelDoForm(this.value)">
+          ${(d.niveis || []).map((n) => `<option ${n === perfilInicial ? 'selected' : ''}>${esc(n)}</option>`).join('')}
         </select></div>
       <div class="campo"><label>Turno</label>
         <select id="u-turno"><option value="">—</option>
@@ -4555,20 +4695,27 @@ function formUsuario(id) {
       </div>
       <p class="dica">O nível ADMIN vê todas as filiais sempre.</p>
     </div>` : ''}
-    ${(d.modulosAjustaveis || []).length && (!u || u.perfil !== 'ADMIN') ? `
-    <div class="campo"><label>Módulos desta pessoa</label>
-      <div class="lista-marcadores">
-        ${d.modulosAjustaveis.map((m) => `<div class="pn-linha" style="justify-content:space-between;align-items:center">
-          <span class="marcador" style="font-weight:600">${esc(m.nome)}</span>
-          <select class="u-mod" data-modulo="${m.id}" style="width:auto;min-width:210px">
-            ${opcoesModulo(u || { modulos: {}, padrao: {} }, m).replace('Padrão do nível (Sem acesso)', 'Padrão do nível')}</select></div>`).join('')}
-      </div>
-      <p class="dica">“Padrão do nível” segue o nível escolhido acima. As outras opções valem só para esta pessoa.</p>
-    </div>` : ''}
+    <div class="campo"><label>Acesso por menu — ajuste desta pessoa</label>
+      <p class="dica" style="margin:0 0 8px">“Igual ao nível” segue o nível escolhido acima. As outras opções valem só para esta pessoa.</p>
+      <div id="u-grade">${gradeDaPessoa(d, pessoaGrade, false)}</div>
+    </div>
     <label class="marcador"><input type="checkbox" id="u-ativo" ${!u || u.ativo ? 'checked' : ''}> Acesso liberado</label>`, `
     ${u && u.email !== d.eu ? `<button class="botao perigo" onclick="agir('excluirUsuario',{id:${jsArg(id)},email:${jsArg(u.email)}},'Pessoa removida')">Remover</button>` : ''}
     <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
     <button class="botao" onclick="salvarUsuario(${jsArg(id || '')})">Salvar</button>`);
+}
+
+/* Trocou o nivel no cadastro: a coluna "Do nivel" e o "Fica valendo" passam a ser do nivel novo (os ajustes escolhidos ficam). */
+function trocarNivelDoForm(perfil) {
+  const n = ((DADOS.perfis || []).find((x) => x.perfil === perfil) || {}).niveis || {};
+  document.querySelectorAll('#u-grade tbody tr').forEach((tr) => {
+    const sel = tr.querySelector('.aj-celula'), fica = tr.querySelector('.aj-fica');
+    if (!sel || !fica) return;
+    const doNivel = (perfil === 'ADMIN' && sel.dataset.tela === 'acessos') ? 'EDITAR' : (n[sel.dataset.tela] || 'OCULTO');
+    fica.dataset.nivel = doNivel;
+    tr.children[1].innerHTML = seloFaixa(doNivel);
+    previaAjuste(sel);
+  });
 }
 
 function salvarUsuario(id) {
@@ -4584,45 +4731,71 @@ function salvarUsuario(id) {
     perfil: val('u-perfil'), turno: val('u-turno'), ativo: marcado('u-ativo') };
   if (el('u-todas')) params.filiais = filiais;
   else if (id) params.filiais = ((DADOS.pessoas || []).find((x) => x.id === id) || {}).filiais || '';
-  const seletores = document.querySelectorAll('.u-mod');
+  // So os menus que tem seletor (a tela nao manda o que nao pode mudar): "Igual ao nivel" vai como PADRAO.
+  const seletores = document.querySelectorAll('#u-grade .aj-celula');
   if (seletores.length) {
-    params.modulos = {};
-    seletores.forEach((s) => { if (s.value !== 'PADRAO') params.modulos[s.dataset.modulo] = s.value; });
+    params.ajustes = {};
+    seletores.forEach((s) => { params.ajustes[s.dataset.tela] = s.value; });
   }
   agir('salvarUsuario', params, 'Pessoa salva').catch(() => {});
 }
 
-/* --- A matriz de permissões, agora numa aba própria --- */
+/*
+ * --- A MATRIZ: menus (linhas, agrupados por modulo) x niveis (colunas) ---
+ * Cada celula e um seletor de tres opcoes; a troca vale na hora, inclusive
+ * para quem ja esta dentro (o menu dele acompanha no proximo clique).
+ */
 function blocoNiveis(d) {
-  const cabecalho = d.telas.map((t) => `<th class="numero">${esc(t.nome)}</th>`).join('') +
-                    d.capacidades.map((c) => `<th class="numero">${esc(c.replace(/_/g, ' '))}</th>`).join('');
+  const ed = podeEditar('acessos');
+  const soDoAdmin = d.soDoAdmin || [];
+  const perfis = d.perfis || [];
+  const celula = (p, t) => {
+    const f = (p.niveis || {})[t.id] || 'OCULTO';
+    const trava = (p.travas || {})[t.id];
+    const soAdmin = (p.perfil === 'ADMIN' && !d.souAdmin) || soDoAdmin.indexOf(t.id) !== -1;
+    if (trava) return `<td class="nv-cel"><span class="nv-fixa" title="${esc(trava)}">${seloFaixa(f, ' &#128274;')}</span></td>`;
+    if (!ed || soAdmin) {
+      return `<td class="nv-cel"><span title="${soAdmin && ed ? 'Só um administrador muda esta célula.' : ''}">${seloFaixa(f)}</span></td>`;
+    }
+    return `<td class="nv-cel"><select class="nv-celula nv-${f.toLowerCase()}" data-perfil="${esc(p.perfil)}" data-tela="${esc(t.id)}"
+        aria-label="${esc(p.perfil)} em ${esc(t.nome)}"
+        onchange="agir('alterarPermissao',{id:${jsArg(p.id)},coluna:${jsArg('TELA_' + t.id.toUpperCase())},valor:this.value},${jsArg(p.perfil + ': ' + t.nome + ' atualizado')}).catch(()=>{})">
+        ${FAIXAS.map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${NOME_FAIXA[x]}</option>`).join('')}</select></td>`;
+  };
+  const linha = (t) => `<tr data-tela="${esc(t.id)}"><td class="nv-menu">${esc(t.nome)}${t.soLeitura
+      ? ' <span class="lp-sub" title="Esta tela não tem gravação: Ver e Ver e editar dão o mesmo">só leitura</span>' : ''}</td>
+    ${perfis.map((p) => celula(p, t)).join('')}</tr>`;
+  const alcance = (p) => {
+    const soAdmin = p.perfil === 'ADMIN' && !d.souAdmin;
+    if (!ed || soAdmin) return `<td class="nv-cel">${esc(NOME_ESCOPO[p.escopo] || p.escopo)}</td>`;
+    return `<td class="nv-cel"><select class="nv-escopo" data-perfil="${esc(p.perfil)}"
+      onchange="agir('alterarPermissao',{id:${jsArg(p.id)},coluna:'ESCOPO',valor:this.value},${jsArg('Alcance de ' + p.perfil + ' atualizado')}).catch(()=>{})">
+      ${(d.escopos || ['TODOS', 'TURNO', 'PROPRIAS']).map((e) => `<option value="${e}" ${p.escopo === e ? 'selected' : ''}>${NOME_ESCOPO[e] || e}</option>`).join('')}
+      </select></td>`;
+  };
   return `
     <div class="cartao">
-      <div class="cartao-titulo">Níveis de acesso</div>
-      <p class="dica" style="margin:-4px 0 12px">Clique numa célula para ligar ou desligar.
-         O <b>alcance</b> decide o quanto o nível enxerga: a operação inteira, o próprio turno,
-         ou só as atividades em que a pessoa é responsável. No Plano de Ação (do Calendário e da Limpeza)
-         cada pessoa vê só as ações em que está citada, qualquer que seja o nível.</p>
-      <div style="overflow-x:auto"><table>
-        <thead><tr><th>Nível</th><th>Alcance</th>${cabecalho}</tr></thead>
-        <tbody>${d.perfis.map((p) => `<tr>
-          <td><strong>${esc(p.perfil)}</strong><div class="meta-atividade">${esc(p.descricao)}</div></td>
-          <td><select onchange="agir('alterarPermissao',{id:${jsArg(p.id)},coluna:'ESCOPO',valor:this.value},'Alcance alterado')">
-            ${(d.escopos || ['TODOS', 'TURNO', 'PROPRIAS']).map((e) => `<option value="${e}" ${p.escopo === e ? 'selected' : ''}>${
-              e === 'TODOS' ? 'Operação inteira' : e === 'TURNO' ? 'O próprio turno' : 'Somente as suas'}</option>`).join('')}
-          </select></td>
-          ${d.telas.map((t) => celula(p, 'TELA_' + t.id.toUpperCase(), p.telas.indexOf(t.id) !== -1)).join('')}
-          ${d.capacidades.map((c) => celula(p, 'PODE_' + c, p.podes.indexOf(c) !== -1)).join('')}
-        </tr>`).join('')}</tbody></table></div>
-      <p class="dica">Se você bagunçar a matriz, <b>Configuracao &rsaquo; Sistema &rsaquo;
-         Restaurar niveis de acesso</b> devolve tudo ao padrão sem mexer nas pessoas.</p>
+      <div class="cartao-titulo linha-titulo"><span>Níveis de acesso — o que cada nível vê em cada menu</span>
+        ${ed && d.souAdmin ? '<button class="icone-botao" onclick="restaurarPerfis()">Restaurar o padrão</button>' : ''}</div>
+      <p class="dica" style="margin:-4px 0 12px">Cada menu tem três faixas:
+        <b>Oculto</b> — o menu não existe para o nível (sem cartão, sem item, sem link);
+        <b>Ver</b> — abre e lê tudo o que a tela mostra, exportar inclusive, sem gravar nada;
+        <b>Ver e editar</b> — grava tudo o que a tela oferece.
+        Vale na hora, também para quem já está dentro. O <b>alcance</b> decide quanto dado o nível enxerga.</p>
+      <div class="pn-tabela-rolagem"><table class="nv-tabela" id="tabela-niveis">
+        <thead><tr><th>Menu</th>${perfis.map((p) => `<th class="nv-cel"><strong>${esc(p.perfil)}</strong>
+          <div class="meta-atividade">${esc(p.descricao || '')}</div></th>`).join('')}</tr></thead>
+        <tbody>
+          <tr class="nv-alcance"><td class="nv-menu"><b>Alcance</b></td>${perfis.map(alcance).join('')}</tr>
+          ${linhasDeMenus(d, linha)}
+        </tbody></table></div>
+      <p class="dica">A ordem é sempre esta: primeiro o <b>painel na filial</b> (Configuração › Filiais e painéis —
+        Desativado ou Não usar nesta filial some para todos; Oculto, só o administrador vê), depois o <b>ajuste da pessoa</b>
+        (aba Ajustes por pessoa), senão a <b>faixa do nível</b> aqui. No nível ADMIN, Pessoas e acessos é sempre
+        Ver e editar (&#128274;), para ninguém se trancar do lado de fora.
+        No Plano de Ação (do Calendário e da Limpeza) cada pessoa vê só as ações em que está citada, qualquer que seja o nível.</p>
     </div>`;
 }
-
-const celula = (p, coluna, ligado) => `<td class="numero">
-  <button class="celula-permissao ${ligado ? 'ligada' : ''}"
-    onclick="agir('alterarPermissao',{id:${jsArg(p.id)},coluna:${jsArg(coluna)},valor:${!ligado}},'Permissão alterada')"
-    title="${ligado ? 'Clique para desligar' : 'Clique para ligar'}">${ligado ? 'sim' : '—'}</button></td>`;
 
 
 /* ================= PECAS ================= */
@@ -4873,7 +5046,7 @@ function pintarAcoes(r) {
     `${c.abertas} em aberto · ${c.atrasadas} atrasada(s) · ${c.minhas} sua(s)`;
   el('acoes-topo').innerHTML = p.gerir
     ? `<button class="botao" onclick="formAcao()">+ Nova ação</button>` : '';
-  el('pagina').innerHTML = planoHtml(d);
+  el('pagina').innerHTML = (p.editar ? '' : avisoSoVer('Plano de Ação')) + planoHtml(d);
   abrirAcaoDoLink();
 }
 
@@ -4906,10 +5079,14 @@ const comentariosEscritos = (a) => (a.comentarios || []).filter((c) => !c.automa
 const meuEmail = () => String((SESSAO && SESSAO.usuario && SESSAO.usuario.email) || '').toLowerCase();
 const ehMeu = (c) => String(c.autor || '').toLowerCase() === meuEmail();
 
-/* Responsavel pela acao ou gestao do plano: comenta e muda a situacao. */
-const cuidaDaAcao = (a, p) => (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1 || !!p.gerir;
+/*
+ * Responsavel pela acao ou gestao do plano: comenta e muda a situacao. Tudo
+ * so com "Ver e editar" na tela do plano (p.editar, do servidor): com "Ver"
+ * a pessoa le a acao e o historico, sem gravar nada — nem sendo a responsavel.
+ */
+const cuidaDaAcao = (a, p) => !!p.editar && ((a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1 || !!p.gerir);
 /* Comentam: quem cuida da acao e quem foi marcado num comentario dela — nunca na cancelada. */
-const podeComentarAcao = (a, p) => a.situacao !== 'CANCELADA' && (cuidaDaAcao(a, p) || (a.marcadosEmails || []).indexOf(p.email) !== -1);
+const podeComentarAcao = (a, p) => !!p.editar && a.situacao !== 'CANCELADA' && (cuidaDaAcao(a, p) || (a.marcadosEmails || []).indexOf(p.email) !== -1);
 
 /*
  * "NOVO" NESTE APARELHO. O que o aparelho ja abriu fica no localStorage so
@@ -5322,7 +5499,7 @@ const seloFotos = (n, onclick) => n
 /* Uma ação. O prazo vem antes da descrição: é o que decide a urgência. */
 function cartaoAcao(a, p) {
   const minha = (a.responsaveisEmails || [a.responsavelEmail]).indexOf(p.email) !== -1;
-  const podeConcluir = a.situacao === 'PENDENTE' && (minha || p.gerir);
+  const podeConcluir = !!p.editar && a.situacao === 'PENDENTE' && (minha || p.gerir);
   const podeComentar = podeComentarAcao(a, p);
   const escritos = comentariosEscritos(a).length;
   const onde = [a.zona, a.local].filter(Boolean).join(' · ');
@@ -5456,7 +5633,9 @@ function formAcao(id) {
   const a = id ? planoAcaoPorId(id) : null;
   const ex = PLANO.extras ? PLANO.extras() : null;
   // Responsavel que ja estava na acao e saiu da lista (perdeu o acesso): continua marcado.
-  const pessoas = (d.pessoas || []).slice();
+  // Responsavel novo: so quem tem "Ver e editar" no plano (o responsavel conclui; com "Ver" nao conseguiria).
+  const jaEram = (a && a.responsaveisEmails) || [];
+  const pessoas = (d.pessoas || []).filter((p) => p.edita !== false || jaEram.indexOf(p.email) !== -1);
   ((a && a.responsaveisEmails) || []).forEach((e) => {
     if (!pessoas.some((p) => p.email === e)) pessoas.push({ email: e, nome: e, turno: '', papel: 'sem acesso a esta tela' });
   });
@@ -5902,7 +6081,7 @@ async function visorRemover() {
    =================================================== */
 
 function pintarRelatos(r) {
-  el('pagina').innerHTML = `<div class="cartao">${blocoFeedback(r.dados || {})}</div>`;
+  el('pagina').innerHTML = `${podeEditar('relatos') ? '' : avisoSoVer('Relatos de erro')}<div class="cartao">${blocoFeedback(r.dados || {})}</div>`;
 }
 
 /* --- Relatos de erro da plataforma --- */
@@ -5928,7 +6107,7 @@ function blocoFeedback(d) {
             <span><b>Quando:</b> ${esc((f.quando || '').slice(0, 16).replace('T', ' '))}</span>
           </div>
           ${f.resposta ? `<div class="acao-conclusao">Resposta: ${esc(f.resposta)}</div>` : ''}
-          ${f.situacao === 'ABERTO' ? `
+          ${f.situacao === 'ABERTO' && podeEditar('relatos') ? `
             <div class="acao-botoes">
               <button class="botao" onclick="formResolverFeedback(${jsArg(f.id)})">Marcar como resolvido</button>
             </div>` : ''}

@@ -344,7 +344,6 @@ function coordenadoresPorTurno() {
  * geracao sempre roda (e idempotente) e o recado diz o que aconteceu.
  */
 function acaoGerarMes(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const competencia = competenciaNormal_(params.competencia);
   if (!competencia) throw new Error('Competência invalida.');
   const r = gerarCompetencia(competencia, usuario.email);
@@ -860,7 +859,7 @@ function dadosCalendario(usuario, params) {
    */
   let avisoGeracao = '';
   let gerou = false;
-  if (dPed && !encerrado && podeFazer(usuario, 'PROGRAMAR') && !mesGerado_(competencia)) {
+  if (dPed && !encerrado && podeEditar(usuario, 'calendario') && !mesGerado_(competencia)) {
     try {
       gerou = gerarCompetencia(competencia, usuario.email, true).criadas > 0;
     } catch (e) {
@@ -914,14 +913,19 @@ function dadosCalendario(usuario, params) {
     equipe: pessoasDaFilial().filter(function (p) { return marcado(p.ATIVO) && String(p.TURNO || '').trim(); })
                              .map(function (p) { return { turno: String(p.TURNO).toUpperCase().trim(), nome: String(p.NOME || '').trim() }; }),
     validacoes: VALIDACOES,
+    /*
+     * Tudo o que grava no Calendario e "Ver e editar" na tela (matriz de
+     * permissoes). As chaves continuam separadas so porque a tela as le assim.
+     */
     permissoes: {
-      entregar: podeEntregar_(usuario),
-      // Turno em que a pessoa pode entregar ('' = qualquer um). A tela
-      // esconde o envio nas atividades dos outros turnos; o servidor barra.
+      entregar: podeEditar(usuario, 'calendario'),
+      // Turno em que a pessoa pode entregar ('' = qualquer um): o ESCOPO do
+      // nivel. A tela esconde o envio nas atividades dos outros turnos; o servidor barra.
       turnoEntrega: turnoDeEntrega_(usuario),
-      validar: podeFazer(usuario, 'VALIDAR'),
-      programar: podeFazer(usuario, 'PROGRAMAR'),
-      editar: podeFazer(usuario, 'EDITAR')
+      validar: podeEditar(usuario, 'calendario'),
+      programar: podeEditar(usuario, 'calendario'),
+      editar: podeEditar(usuario, 'calendario'),
+      email: String(usuario.email || '').toLowerCase().trim()
     }
   };
 }
@@ -950,7 +954,7 @@ function linhaAndamento(lista) {
 function garantirCompetencia(competencia, usuario) {
   if (!competenciaNormal_(competencia)) return false;
   if (mesGerado_(competencia)) return false;
-  if (!podeFazer(usuario, 'PROGRAMAR')) return false;   // coordenador espera o gerente abrir
+  if (!podeEditar(usuario, 'calendario')) return false;   // so le o Calendario: espera quem edita abrir
   try { return !gerarCompetencia(competencia, usuario.email, true).jaGerado; }
   catch (e) { return false; }
 }
@@ -1018,7 +1022,6 @@ function mesesEncerrados(lista) {
  * Uma leitura e uma escrita (atualizarVarios), dentro da trava.
  */
 function acaoCancelarCompetencia(usuario, params) {
-  exigirCapacidade(usuario, 'VALIDAR');
   const competencia = competenciaNormal_(params.competencia);
   if (!competencia) throw new Error('Competência invalida.');
   const motivo = String(params.motivo || '').trim() || 'Mes encerrado pela gestao.';
@@ -1053,7 +1056,6 @@ function acaoCancelarCompetencia(usuario, params) {
  * calculado pelo prazo. E o "restaurar" que faltava.
  */
 function acaoReativarAtividade(usuario, params) {
-  exigirCapacidade(usuario, 'VALIDAR');
   comTrava(function () {
     const a = obter('ATIVIDADES', params.id);
     if (!a) throw new Error('Atividade não encontrada.');
@@ -1188,6 +1190,7 @@ function hidratar(r) {
     anexoUrl: urlDeAnexo(r.ANEXOS),
     entregue: !!entregue,
     entregueEm: entregue,
+    entreguePor: entregadoresDe_(r),   // quem mandou arquivo: nao valida a propria entrega
     // Dia da PRIMEIRA entrega (ENTREGUE_EM nao e mais sobrescrito): e o que
     // a pontualidade dos insights compara com o prazo.
     entregueNum: entregue ? diaNumDoCarimbo(r.ENTREGUE_EM) : null,
@@ -1357,26 +1360,16 @@ function dentroDoEscopo(a, escopo) {
 /* ------------------------------------------------------------------ */
 
 /*
- * Entregar = ENTREGAR ou ANEXAR. E exatamente quem a tela deixa ver o
- * botao de envio: o coordenador (ENTREGAR) e a gerencia (ANEXAR — o
- * gerente anexa, por exemplo, a ata da reuniao "Todos"). Antes o servidor
- * nao conferia nada: um perfil CONSULTA, sem o botao, entregava chamando
- * a acao direto e a atividade virava "Aguard. valid.".
+ * Quem entrega, valida, remarca e programa: quem tem "Ver e editar" no
+ * Calendario — a porta (executarAcao) confere. Aqui ficam so as regras do
+ * negocio: o ALCANCE do escopo (abaixo) e "ninguem valida a propria entrega"
+ * (acaoValidar).
  */
-function podeEntregar_(usuario) {
-  return podeFazer(usuario, 'ENTREGAR') || podeFazer(usuario, 'ANEXAR');
-}
 
-function exigirPodeEntregar_(usuario) {
-  if (!podeEntregar_(usuario)) {
-    throw new Error('Seu perfil (' + usuario.perfil + ') nao pode entregar atividade.');
-  }
-}
-
-/* Turno em que a pessoa pode gravar; '' = qualquer turno. */
+/* Turno em que a pessoa pode gravar; '' = qualquer turno (escopo TODOS). */
 function turnoDeEntrega_(usuario) {
   const e = escopoDe(usuario);
-  if (e.tipo === 'TODOS' || podeFazer(usuario, 'VALIDAR')) return '';
+  if (e.tipo === 'TODOS') return '';
   return String(e.turno || '').toUpperCase().trim();
 }
 
@@ -1385,14 +1378,14 @@ function turnoDeEntrega_(usuario) {
  * e levou junto a guarda de GRAVACAO: o coordenador B entregava a
  * atividade do turno A e removia anexo de atividade ja aprovada dele.
  * Ver continua liberado; gravar volta a respeitar o turno:
- *   - gestao (escopo TODOS ou quem valida): qualquer atividade;
+ *   - gestao (escopo TODOS): qualquer atividade;
  *   - turno "Todos": qualquer um que entrega;
  *   - coordenador: as do proprio turno. Turno em branco no cadastro nao
  *     tranca ninguem (o diagnostico de acesso aponta o problema).
  */
 function podeGravarNaAtividade_(usuario, registro) {
   const e = escopoDe(usuario);
-  if (e.tipo === 'TODOS' || podeFazer(usuario, 'VALIDAR')) return true;
+  if (e.tipo === 'TODOS') return true;
   const turno = String(registro.TURNO || '').toUpperCase().trim();
   if (!turno || turno === 'TODOS') return true;
   const meu = String(e.turno || '').toUpperCase().trim();
@@ -1480,8 +1473,12 @@ function comCampos_(registro, campos) {
  *   - entrega depois de REPROVADA volta para "Aguard. valid.": antes a
  *     correcao ficava "Reprovada", fora da fila da gerencia e do briefing.
  */
-function camposDaEntrega_(atual) {
+function camposDaEntrega_(atual, email) {
   const campos = {};
+  // Quem entregou (todos os que mandaram arquivo): "ninguem valida a propria entrega" (acaoValidar).
+  const quem = String(email || '').toLowerCase().trim();
+  const ja = entregadoresDe_(atual);
+  if (quem && ja.indexOf(quem) === -1) campos.ENTREGUE_POR = ja.concat([quem]).join(',');
   const jaEntregue = String(atual.ENTREGUE_EM || '').trim();
   if (!jaEntregue) campos.ENTREGUE_EM = agoraTexto();
   const validacao = String(atual.VALIDACAO || '').trim();
@@ -1491,9 +1488,14 @@ function camposDaEntrega_(atual) {
   return campos;
 }
 
+/* Os e-mails de quem mandou arquivo para a atividade (coluna ENTREGUE_POR). */
+function entregadoresDe_(registro) {
+  return String((registro && registro.ENTREGUE_POR) || '').toLowerCase().split(/[,;\s]+/)
+    .filter(function (e) { return e.indexOf('@') !== -1; });
+}
+
 /** Coordenador anexa a entrega. Carimba a hora e avisa a gestao. */
 function acaoEntregar(usuario, params) {
-  exigirPodeEntregar_(usuario);
   const antes = obter('ATIVIDADES', params.id);
   if (!antes) throw new Error('Atividade não encontrada.');
   garantirAlcanceEscrita_(usuario, antes);
@@ -1503,7 +1505,7 @@ function acaoEntregar(usuario, params) {
   const feito = comTrava(function () {
     const atual = obter('ATIVIDADES', params.id);
     if (!atual) throw new Error('Atividade não encontrada.');
-    const campos = camposDaEntrega_(atual);
+    const campos = camposDaEntrega_(atual, usuario.email);
     atualizar('ATIVIDADES', params.id, campos, usuario.email);
     return { depois: comCampos_(atual, campos), avisar: !!campos.ENTREGUE_EM || campos.VALIDACAO === '' };
   });
@@ -1538,6 +1540,15 @@ function acaoValidar(usuario, params) {
   const depois = comTrava(function () {
     const antes = obter('ATIVIDADES', params.id);
     if (!antes) throw new Error('Atividade não encontrada.');
+    /*
+     * NINGUEM VALIDA A PROPRIA ENTREGA: quem mandou arquivo para a atividade
+     * nao a aprova nem a reprova — outra pessoa com "Ver e editar" no
+     * Calendario valida. Reabrir e cancelar continuam valendo.
+     */
+    if ((validacao === 'Aprovado' || validacao === 'Reprovado') &&
+        entregadoresDe_(antes).indexOf(String(usuario.email || '').toLowerCase().trim()) !== -1) {
+      throw new Error('Você enviou arquivo para esta atividade: a validação fica com outra pessoa — ninguém valida a própria entrega.');
+    }
     const campos = {
       VALIDACAO: validacao,
       // vazio = reabrir: limpa a validacao e o motivo dela; notas de
@@ -1746,21 +1757,18 @@ function acaoDetalhesAtividade(usuario, params) {
 
 /*
  * Remover anexo: do proprio turno (ou gestao) e nunca de atividade ja
- * APROVADA — a menos que quem remove seja quem valida. Antes qualquer
+ * APROVADA — a menos que quem remove seja da gestao (escopo TODOS). Antes qualquer
  * coordenador tirava a evidencia de uma entrega aprovada de outro turno.
  * Conferir e remover na mesma trava: a linha conferida e a gravada.
  */
 function acaoRemoverAnexoAtividade(usuario, params) {
-  // Mesma regra de quem entrega (ENTREGAR ou ANEXAR) — a tela ja oferecia o
-  // Remover por essa regra, e a porta exigia so ANEXAR.
-  exigirPodeEntregar_(usuario);
   return comTrava(function () {
     const registro = obter('ATIVIDADES', params.id);
     if (!registro) throw new Error('Atividade não encontrada.');
     garantirAlcanceEscrita_(usuario, registro);
     const validacao = String(registro.VALIDACAO || '').trim();
-    if (validacao === 'Aprovado' && !podeFazer(usuario, 'VALIDAR')) {
-      throw new Error('Esta atividade ja foi aprovada: so a gerencia pode remover anexo dela.');
+    if (validacao === 'Aprovado' && escopoDe(usuario).tipo !== 'TODOS') {
+      throw new Error('Esta atividade ja foi aprovada: so a gestao (alcance: operacao inteira) pode remover anexo dela.');
     }
     const r = removerAnexo(usuario, 'ATIVIDADES', params.id, params.idArquivo);
     /*

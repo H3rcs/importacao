@@ -195,6 +195,9 @@ caso('executarAcaoETela: grava e devolve a tela ja com a gravacao; acao proibida
   afirmar(x.r && x.r.ok !== false, 'gravou');
   const a = x.tela.dados.lista.find((y) => y.id === id);
   afirmar(a && a.comentarios.length === 1 && a.comentarios[0].texto === 'Primeiro', 'a tela que voltou ja tem o comentario');
+  // a coordenadora com o Plano de Acao so em "Ver" (ajuste dela): excluir e recusado pela porta, com a frase da porta
+  const regCoord = ctx(m).listar('ACESSOS').find((x) => String(x.EMAIL).toLowerCase() === COORD);
+  acao(m, entrar(m, DONO, '4321'), 'definirAjustePessoa', { id: regCoord.ID, tela: 'acoes', nivel: 'VER' });
   const c = entrar(m, COORD, '1234');
   const erro = chamar(m, COORD, 'executarAcaoETela', { t: c.t, f: c.f }, 'excluirAcao', { id: id }, 'acoes', {});
   afirmar(!erro.ok && /n[aã]o pode|permiss|acesso/i.test(erro.erro.message), 'proibida: ' + (erro.erro && erro.erro.message));
@@ -459,7 +462,9 @@ caso('colagem pela metade: com qualquer um dos .gs desta entrega na versao anter
 caso('colagem pela metade (19/10): um .gs da entrega anterior por vez — a faixa diz qual falta, as telas abrem e nada e destruido (paineis da filial, marcacao sem a coluna)', () => {
   const fs = require('fs'), os = require('os'), { execSync } = require('child_process');
   const ANTES = '2b60bb2';   // a ultima entrega antes de 19/10 (Ferias refeita)
-  const arquivos = ['Acoes.gs', 'Auth.gs', 'Banco.gs', 'Calendario.gs', 'Codigo.gs', 'Config.gs', 'Emails.gs', 'Filiais.gs', 'Instalacao.gs', 'Permissoes.gs'];
+  // Permissoes.gs saiu da lista na matriz de tres faixas (8.12): ele E o modelo de acesso — o de antes nao serve
+  // a matriz nova (os outros .gs de antes ainda funcionam com ele, pelos calcos de compatibilidade).
+  const arquivos = ['Acoes.gs', 'Auth.gs', 'Banco.gs', 'Calendario.gs', 'Codigo.gs', 'Config.gs', 'Emails.gs', 'Filiais.gs', 'Instalacao.gs'];
   let velhos = {};
   try {
     for (const f of arquivos) velhos[f] = execSync('git show ' + ANTES + ':GSL/' + f, { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString();

@@ -122,6 +122,7 @@ function calcularUsuarioAtual() {
     turno: String(registro.TURNO || '').toUpperCase().trim(),
     filiais: String(registro.FILIAIS || '').trim(),
     modulos: String(registro.MODULOS || '').trim(),
+    ajustes: String(registro.AJUSTES || '').trim(),
     situacao: situacao || 'ATIVO',
     cadastrado: true
   });
@@ -142,14 +143,16 @@ function nomeDaPessoa(email, nomeAcesso) {
   }).join(' ').trim();
 }
 
+/*
+ * O usuario com as permissoes de verdade: o nivel na matriz, o ajuste desta
+ * pessoa por menu por cima, e a trava do ADMIN (permissoesDaPessoa). O painel
+ * da filial entra na pergunta (nivelNaTela), porque depende da filial em uso.
+ */
 function montarUsuario(base) {
-  const nivel = permissoesDe(base.perfil);
-  // O ADMIN ve tudo sempre; nos demais vale o ajuste por modulo da pessoa.
-  const ajustes = String(base.perfil || '').toUpperCase() === 'ADMIN' ? {} : lerModulosPessoa(base.modulos);
-  base.permissoes = aplicarModulosDaPessoa(nivel, ajustes);
-  // Entra na chave do cache de tela: duas pessoas do mesmo nivel com
-  // ajustes diferentes nao podem dividir o mesmo payload.
-  base.chaveModulos = Object.keys(ajustes).sort().map(function (k) { return k + ':' + ajustes[k]; }).join(',');
+  base.ajustesPorTela = lerAjustesPessoa(base.ajustes, base.modulos, base.perfil);
+  base.permissoes = permissoesDaPessoa(base.perfil, base.ajustesPorTela);
+  // Entra na chave do cache de tela e da bolinha: o que muda o que a pessoa ve ou pode.
+  base.chaveModulos = marcaDasPermissoes(base);
   return base;
 }
 
@@ -225,7 +228,7 @@ function cadastrosDeAcesso_() {
         ID: l.ID,
         EMAIL: String(l.EMAIL || '').toLowerCase().trim(),
         NOME: l.NOME, PAPEL: l.PAPEL, PERFIL: l.PERFIL, TURNO: l.TURNO,
-        ATIVO: l.ATIVO, SITUACAO: l.SITUACAO, FILIAIS: l.FILIAIS, MODULOS: l.MODULOS
+        ATIVO: l.ATIVO, SITUACAO: l.SITUACAO, FILIAIS: l.FILIAIS, MODULOS: l.MODULOS, AJUSTES: l.AJUSTES
       };
     });
   });
@@ -247,7 +250,7 @@ function listarPessoas() {
       semNivel: !perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO,
       turno: String(l.TURNO || '').toUpperCase().trim(),
       filiais: String(l.FILIAIS || '').toUpperCase().trim(),
-      modulos: lerModulosPessoa(l.MODULOS),
+      ajustes: lerAjustesPessoa(l.AJUSTES, l.MODULOS, perfil),
       ativo: marcado(l.ATIVO),
       situacao: situacao,
       observacao: String(l.OBSERVACAO || ''),
@@ -274,14 +277,48 @@ function protegerAdmin_(usuario, perfilAlvo, perfilNovo) {
   }
 }
 
+/*
+ * Pessoas e acessos e Filiais e paineis sao as telas que dao acesso: so um
+ * administrador as mexe no acesso de alguem (na matriz de um nivel ou no
+ * ajuste de uma pessoa). Sem isto, quem cuida das pessoas se dava Filiais e
+ * paineis (ou Ver e editar em Pessoas a outro nivel) e passava a mandar no
+ * que nao era dele. E regra de quem ESCREVE na matriz; o que estiver nela vale.
+ */
+const TELAS_SO_DO_ADMIN = ['acessos', 'filiais'];
+function protegerTelasDoAdmin_(usuario, telas) {
+  if (String(usuario.perfil || '').toUpperCase() === 'ADMIN') return;
+  if ([].concat(telas || []).some(function (t) { return TELAS_SO_DO_ADMIN.indexOf(t) !== -1; })) {
+    throw new Error('Só um administrador muda o acesso a Pessoas e acessos e a Filiais e painéis.');
+  }
+}
+
+/*
+ * O ajuste pedido pela tela: { tela: 'OCULTO'|'VER'|'EDITAR'|'PADRAO' }.
+ * Devolve o ajuste novo (so as telas com faixa) e as telas que mudaram.
+ */
+function ajustesDoPedido_(atuais, pedido) {
+  const novos = Object.assign({}, atuais || {});
+  const mudaram = [];
+  Object.keys(pedido || {}).forEach(function (id) {
+    if (!telaPorId_(id)) throw new Error('Menu desconhecido: ' + id + '.');
+    const bruto = String(pedido[id] || '').toUpperCase().trim();
+    const faixa = faixaDoTexto_(bruto);
+    if (!faixa && bruto !== 'PADRAO' && bruto !== '') throw new Error('Opção inválida para ' + telaPorId_(id).nome + '.');
+    const antes = novos[id] || '';
+    if (faixa) novos[id] = faixa; else delete novos[id];
+    if ((novos[id] || '') !== antes) mudaram.push(id);
+  });
+  return { ajustes: novos, mudaram: mudaram };
+}
+
 /* --- Administracao de pessoas, chamada pela tela --- */
 
 /*
  * Cadastrar = liberar. Nao existe mais pedido nem fila: o administrador
  * cadastra a pessoa, escolhe o nivel e as filiais, e ela ja entra.
+ * `ajustes` (opcional): o ajuste desta pessoa por menu, por cima do nivel.
  */
 function acaoSalvarUsuario(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const campos = {
     EMAIL: String(params.email || '').toLowerCase().trim(),
     NOME: String(params.nome || '').trim(),
@@ -291,10 +328,6 @@ function acaoSalvarUsuario(usuario, params) {
     FILIAIS: String(params.filiais || '').toUpperCase().replace(/\s+/g, ''),
     ATIVO: params.ativo === false ? 'NAO' : 'SIM'
   };
-  if (params.modulos && typeof params.modulos === 'object') {
-    campos.MODULOS = JSON.stringify(lerModulosPessoa(JSON.stringify(params.modulos)));
-    if (campos.MODULOS === '{}') campos.MODULOS = '';
-  }
   if (!campos.EMAIL || campos.EMAIL.indexOf('@') === -1) throw new Error('Informe um e-mail válido.');
   if (!campos.NOME) throw new Error('Informe o nome da pessoa — é ele que aparece no sistema.');
   if (!campos.PERFIL || campos.PERFIL === PERFIL_PADRAO_NOVO_USUARIO) throw new Error('Escolha o nível de acesso.');
@@ -302,20 +335,28 @@ function acaoSalvarUsuario(usuario, params) {
   campos.DECIDIDO_EM = agoraTexto();
   campos.DECIDIDO_POR = usuario.email;
 
+  const alvo = params.id ? obter('ACESSOS', params.id) : null;
+  if (params.ajustes && typeof params.ajustes === 'object') {
+    const atuais = alvo ? lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL) : {};
+    const pedido = ajustesDoPedido_(atuais, params.ajustes);
+    protegerTelasDoAdmin_(usuario, pedido.mudaram);
+    campos.AJUSTES = textoDosAjustes(pedido.ajustes);
+  }
+
   if (params.id) {
-    const alvo = obter('ACESSOS', params.id);
     protegerAdmin_(usuario, alvo && alvo.PERFIL, campos.PERFIL);
     const proprio = !!alvo && String(alvo.EMAIL || '').toLowerCase() === usuario.email;
     if (proprio && campos.ATIVO === 'NAO') throw new Error('Você não pode desativar o próprio acesso.');
     const r = atualizar('ACESSOS', params.id, campos, usuario.email);
     limparCache('ACESSOS');
-    r.menuMudou = proprio;   // o proprio nivel, filiais ou modulos: a resposta leva o menu novo (executarAcaoETela)
+    r.menuMudou = proprio;   // o proprio nivel, filiais ou ajustes: a resposta leva o menu novo (executarAcaoETela)
     return r;
   }
 
   protegerAdmin_(usuario, '', campos.PERFIL);
   const jaExiste = buscarAcesso(campos.EMAIL);
   if (jaExiste) throw new Error('Esse e-mail já está cadastrado.');
+  if (!campos.AJUSTES) campos.AJUSTES = '{}';
   const id = inserir('ACESSOS', campos, usuario.email);
   limparCache('ACESSOS');
   const resposta = { ok: true, id: id };
@@ -325,29 +366,51 @@ function acaoSalvarUsuario(usuario, params) {
 }
 
 /*
- * Muda UM modulo de UMA pessoa — o clique na tabela "Modulos por pessoa".
- * modo: PADRAO (volta a seguir o nivel) · NAO · VER · EDITAR
+ * AJUSTE DESTA PESSOA num menu — o seletor da aba "Ajustes por pessoa".
+ * nivel: PADRAO (igual ao nivel) · OCULTO · VER · EDITAR
  */
-function acaoDefinirModuloPessoa(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
+function acaoDefinirAjustePessoa(usuario, params) {
   const alvo = obter('ACESSOS', params.id);
   if (!alvo) throw new Error('Pessoa não encontrada.');
-  const modulo = String(params.modulo || '');
-  if (!MODULOS_AJUSTAVEIS[modulo]) throw new Error('Este módulo segue sempre o nível de acesso.');
-  const modo = String(params.modo || '').toUpperCase().trim();
-  const atuais = lerModulosPessoa(alvo.MODULOS);
-  if (modo === 'PADRAO' || !modo) delete atuais[modulo];
-  else if (MODOS_MODULO.indexOf(modo) !== -1) atuais[modulo] = modo;
-  else throw new Error('Opção inválida.');
-  atualizar('ACESSOS', params.id, { MODULOS: Object.keys(atuais).length ? JSON.stringify(atuais) : '' }, usuario.email);
+  protegerAdmin_(usuario, alvo.PERFIL, '');
+  const tela = String(params.tela || '');
+  if (!telaPorId_(tela)) throw new Error('Menu desconhecido: ' + tela + '.');
+  const pedido = {};
+  pedido[tela] = params.nivel;
+  const r = ajustesDoPedido_(lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL), pedido);
+  protegerTelasDoAdmin_(usuario, r.mudaram);
+  atualizar('ACESSOS', params.id, { AJUSTES: textoDosAjustes(r.ajustes) }, usuario.email);
   limparCache('ACESSOS');
-  // O proprio modulo: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
+  // O proprio acesso: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
+  return { ok: true, menuMudou: String(alvo.EMAIL || '').toLowerCase() === usuario.email };
+}
+
+/*
+ * COMPATIBILIDADE: a tela de antes (Modulos por pessoa) mudava um MODULO
+ * inteiro — PADRAO · NAO · VER · EDITAR. Vira o ajuste das telas daquele
+ * modulo (NAO = Oculto, VER = Ver, EDITAR = Ver e editar, PADRAO = igual ao nivel).
+ */
+function acaoDefinirModuloPessoa(usuario, params) {
+  const modulo = String(params.modulo || '');
+  const telas = TELAS.filter(function (t) { return t.modulo === modulo; });
+  if (!telas.length) throw new Error('Módulo desconhecido: ' + modulo + '.');
+  const modo = String(params.modo || '').toUpperCase().trim();
+  const faixa = { NAO: NIVEL_OCULTO, VER: NIVEL_VER, EDITAR: NIVEL_EDITAR, PADRAO: 'PADRAO', '': 'PADRAO' }[modo];
+  if (!faixa) throw new Error('Opção inválida.');
+  const alvo = obter('ACESSOS', params.id);
+  if (!alvo) throw new Error('Pessoa não encontrada.');
+  protegerAdmin_(usuario, alvo.PERFIL, '');
+  const pedido = {};
+  telas.forEach(function (t) { pedido[t.id] = faixa; });
+  const r = ajustesDoPedido_(lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL), pedido);
+  protegerTelasDoAdmin_(usuario, r.mudaram);
+  atualizar('ACESSOS', params.id, { AJUSTES: textoDosAjustes(r.ajustes) }, usuario.email);
+  limparCache('ACESSOS');
   return { ok: true, menuMudou: String(alvo.EMAIL || '').toLowerCase() === usuario.email };
 }
 
 /** Liga/desliga o acesso sem apagar a pessoa. */
 function acaoAlternarAtivo(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const alvo = obter('ACESSOS', params.id);
   if (!alvo) throw new Error('Pessoa não encontrada.');
   protegerAdmin_(usuario, alvo.PERFIL, '');
@@ -365,7 +428,6 @@ function acaoAlternarAtivo(usuario, params) {
 }
 
 function acaoExcluirUsuario(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   if (String(params.email || '').toLowerCase() === usuario.email) {
     throw new Error('Você não pode remover o próprio acesso.');
   }
@@ -379,20 +441,43 @@ function acaoExcluirUsuario(usuario, params) {
   return r;
 }
 
-/** Liga ou desliga uma celula da matriz de permissoes, pela tela. */
+/*
+ * UMA CELULA DA MATRIZ, pela tela "Niveis de acesso":
+ *   coluna TELA_<id> + valor OCULTO | VER | EDITAR, ou coluna ESCOPO + TODOS | TURNO | PROPRIAS.
+ * Vale na hora para quem ja esta dentro: o proximo pedido de cada pessoa ja
+ * le a matriz nova, e a resposta de quem mudou leva o menu novo (invalidarTudo).
+ */
 function acaoAlterarPermissao(usuario, params) {
-  const coluna = String(params.coluna || '').toUpperCase();
-  if (coluna.indexOf('TELA_') !== 0 && coluna.indexOf('PODE_') !== 0 && coluna !== 'ESCOPO') {
-    throw new Error('Coluna de permissão invalida.');
-  }
+  const coluna = String(params.coluna || '').toUpperCase().trim();
   const linha = obter('PERFIS', params.id);
   if (!linha) throw new Error('Nível não encontrado.');
-  if (String(usuario.perfil || '').toUpperCase() !== 'ADMIN' &&
-      (String(linha.PERFIL || '').toUpperCase().trim() === 'ADMIN' || coluna.indexOf('PODE_GERIR_') === 0)) {
-    throw new Error('Só um administrador mexe no nível ADMIN e nas permissões de gerir acessos e filiais.');
+  const perfil = String(linha.PERFIL || '').toUpperCase().trim();
+  if (String(usuario.perfil || '').toUpperCase() !== 'ADMIN' && perfil === 'ADMIN') {
+    throw new Error('Só um administrador mexe no nível ADMIN.');
   }
   const campos = {};
-  campos[coluna] = (coluna === 'ESCOPO') ? params.valor : (params.valor ? 'SIM' : 'NAO');
+  if (coluna === 'ESCOPO') {
+    const escopo = String(params.valor || '').toUpperCase().trim();
+    if (ESCOPOS.indexOf(escopo) === -1) throw new Error('Alcance inválido.');
+    campos.ESCOPO = escopo;
+  } else {
+    const tela = coluna.indexOf('TELA_') === 0 ? telaPorId_(coluna.substring(5).toLowerCase()) : null;
+    if (!tela) throw new Error('Coluna de permissão inválida.');
+    const faixa = faixaDoTexto_(params.valor);
+    if (!faixa) throw new Error('Escolha Oculto, Ver ou Ver e editar.');
+    if (perfil === 'ADMIN' && tela.id === TELA_TRAVADA_ADMIN && faixa !== NIVEL_EDITAR) throw new Error(MOTIVO_TRAVA_ADMIN);
+    protegerTelasDoAdmin_(usuario, [tela.id]);
+    campos[coluna] = faixa;
+    /*
+     * Linha ainda no modelo antigo (SIM/NAO): as outras telas vao gravadas
+     * ja convertidas junto — senao a conversao das outras celulas mudaria
+     * de base no meio do caminho.
+     */
+    if (linhaNoModeloAntigo_(linha)) {
+      const niveis = niveisDaLinha_(linha);
+      TELAS.forEach(function (t) { if (t.id !== tela.id) campos['TELA_' + t.id.toUpperCase()] = niveis[t.id]; });
+    }
+  }
   const r = atualizar('PERFIS', params.id, campos, usuario.email);
   r.invalidarTudo = true;
   return r;
@@ -1004,7 +1089,6 @@ function manterSessao(ctx) {
  * um PIN novo e esse codigo — ou pede o codigo por e-mail na propria tela.
  */
 function acaoZerarPin(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const alvo = obter('ACESSOS', params.id);
   if (!alvo) throw new Error('Pessoa não encontrada.');
   const perfilAlvo = String(alvo.PERFIL || '').toUpperCase().trim();

@@ -24,7 +24,6 @@ const BUILD_CONFIG = '2026.10.19';   // carimbo da entrega — ver APP.build no 
  * junto com o que era a tela de Acessos.
  */
 function dadosConfig(usuario) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
 
   const parametros = listar('PARAMETROS').map(function (p) {
     return { id: p.ID, chave: String(p.CHAVE || '').toUpperCase().trim(),
@@ -363,7 +362,6 @@ function recadoDaRotina_(antes, depois, nota) {
  * a linha quando ela nao existe.
  */
 function acaoSalvarParametro(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const valor = String(params.valor == null ? '' : params.valor).trim();
   const chave = String(params.chave || '').toUpperCase().trim();
 
@@ -394,6 +392,5 @@ function acaoSalvarParametro(usuario, params) {
 }
 
 function acaoCorrigirFuso(usuario) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   return corrigirFuso();
 }

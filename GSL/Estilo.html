@@ -1564,6 +1564,37 @@ tr:last-child td { border-bottom: 0; }
   font-family: 'Archivo', sans-serif; letter-spacing: .03em; color: var(--tinta);
 }
 
+/* Tela aberta so para ler (faixa "Ver" na matriz de acesso): um estado, nao um erro. */
+.aviso-so-ver {
+  border-radius: 10px; padding: 9px 14px; margin-bottom: 14px;
+  font-size: 12.5px; line-height: 1.6; color: var(--tinta-media);
+  border-left: 4px solid var(--azul-vivo); background: var(--azul-tenue);
+}
+
+/* MATRIZ DE ACESSO (Pessoas e acessos): as tres faixas, cada uma com a sua cor. */
+.nv-selo {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; white-space: nowrap;
+}
+.nv-selo.nv-oculto { color: var(--tinta-fraca); background: transparent; border: 1px dashed var(--linha-forte); }
+.nv-selo.nv-ver { color: var(--azul-vivo); background: var(--azul-tenue); }
+.nv-selo.nv-editar { color: var(--verde); background: var(--verde-tenue); }
+.nv-tabela { min-width: 100%; }
+.nv-tabela th.nv-cel, .nv-tabela td.nv-cel { text-align: center; min-width: 118px; }
+.nv-tabela td.nv-menu { white-space: nowrap; font-weight: 600; }
+.nv-tabela tr.nv-grupo th {
+  text-align: left; padding-top: 14px; font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--tinta-fraca);
+}
+.nv-tabela tr.nv-alcance td { border-bottom: 2px solid var(--linha-forte); }
+select.nv-celula { width: 100%; font-size: 12px; padding: 6px; font-weight: 700; border-left-width: 4px; border-left-style: solid; }
+select.nv-celula.nv-oculto { border-left-color: var(--tinta-fraca); color: var(--tinta-fraca); }
+select.nv-celula.nv-ver { border-left-color: var(--azul-vivo); }
+select.nv-celula.nv-editar { border-left-color: var(--verde); }
+.nv-fixa { cursor: help; }
+.nv-trava { font-size: 11px; color: var(--tinta-fraca); white-space: nowrap; }
+.nv-ajuste { display: inline-block; margin: 2px 8px 2px 0; }
+
 /* Faixa de andamento — a linha logo abaixo do titulo da aba do mes. */
 .faixa-andamento {
   border-radius: 10px; padding: 9px 14px; margin-bottom: 14px;

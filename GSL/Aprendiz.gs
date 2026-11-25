@@ -127,7 +127,7 @@ function dadosAprendiz(usuario) {
   const id = idPlanilhaAprendiz_();
   const base = {
     configurado: !!id,
-    podeConfigurar: podeFazer(usuario, 'PROGRAMAR'),
+    podeConfigurar: podeEditar(usuario, 'aprendiz'),
     hoje: paraISO(hoje()),
     filial: filialAtual().nome
   };
@@ -537,7 +537,6 @@ function painelDoAprendiz_(item, bloco, linhas, tz) {
 
 /** Liga (ou troca) a planilha do Jovem Aprendiz desta filial. */
 function acaoSalvarFonteAprendiz(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const link = String(params.link || '').trim();
   if (!link) throw new Error('Cole o link da planilha do Jovem Aprendiz.');
   const m = link.match(/\/d\/([\w-]{20,})/);

@@ -124,8 +124,8 @@ function dadosNobreaks(usuario) {
       porDia: num_(parametro('NOBREAK_LEITURAS_DIA', 3)) || 3
     },
     permissoes: {
-      lancar: podeFazer(usuario, 'LANCAR_NOBREAK'),
-      cadastrar: podeFazer(usuario, 'PROGRAMAR') && podeFazer(usuario, 'LANCAR_NOBREAK')
+      lancar: podeEditar(usuario, 'nobreaks'),
+      cadastrar: podeEditar(usuario, 'nobreaks')
     }
   };
 }
@@ -287,7 +287,6 @@ function acaoExcluirLeitura(usuario, params) {
 /* --- Cadastro dos equipamentos --- */
 
 function acaoSalvarNobreak(usuario, params) {
-  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const campos = {
     CODIGO: codigoLimpo_(params.codigo),
     MODELO: String(params.modelo || '').trim(),
@@ -324,7 +323,6 @@ function acaoSalvarNobreak(usuario, params) {
 }
 
 function acaoExcluirNobreak(usuario, params) {
-  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const e = obter('NB_EQUIPAMENTOS', params.id);
   if (!e) throw new Error('Nobreak não encontrado.');
   const temLeitura = listar('NB_LEITURAS').some(function (l) { return String(l.NOBREAK || '').trim() === String(e.CODIGO).trim(); });
@@ -343,7 +341,6 @@ function acaoExcluirNobreak(usuario, params) {
  * nao e duplicada. A linha de EXEMPLO da planilha e ignorada.
  */
 function acaoImportarNobreaks(usuario, params) {
-  exigirCapacidade(usuario, 'LANCAR_NOBREAK');   // modulo em VER nao cadastra
   const link = String(params.link || '').trim();
   if (!link) throw new Error('Cole o link da planilha antiga.');
   let arq;

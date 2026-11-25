@@ -119,7 +119,7 @@ function dadosQuadro(usuario) {
   const pf = parametrosFeriasQ_();
   const base = {
     configurado: !!id,
-    podeConfigurar: podeFazer(usuario, 'PROGRAMAR'),
+    podeConfigurar: podeEditar(usuario, 'quadro'),
     filial: filialAtual().nome,
     parametrosFerias: pf
   };
@@ -1183,7 +1183,6 @@ function acaoSalvarFonteQuadro(usuario, params) {
  * antes de gravar; "padrao: true" volta todos ao padrao (valor vazio).
  */
 function acaoSalvarParametrosFerias(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   params = params || {};
   const valores = {};
   if (!params.padrao) {
@@ -1224,7 +1223,6 @@ function acaoSalvarParametrosFerias(usuario, params) {
  */
 function acaoProgramarFerias(usuario, params) {
   exigirPorta_();
-  exigirCapacidade(usuario, 'PROGRAMAR');
   if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
   params = params || {};
   const inicio = isoValidoQ_(params.inicio);
@@ -1255,7 +1253,6 @@ function acaoProgramarFerias(usuario, params) {
 /* Confirmar saida: a programacao vira CUMPRIDA (quem e quando ficam na linha). So a partir do dia do inicio. */
 function acaoConfirmarFerias(usuario, params) {
   exigirPorta_();
-  exigirCapacidade(usuario, 'PROGRAMAR');
   if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
   const id = String((params || {}).id || '').trim();
   return comTrava(function () {
@@ -1274,7 +1271,6 @@ function acaoConfirmarFerias(usuario, params) {
  */
 function acaoCancelarProgramacaoFerias(usuario, params) {
   exigirPorta_();
-  exigirCapacidade(usuario, 'PROGRAMAR');
   if (!ESQUEMA.FERIAS_PROG) throw new Error(FERIAS_PROG_INCOMPLETA);
   const id = String((params || {}).id || '').trim();
   return comTrava(function () {

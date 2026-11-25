@@ -450,7 +450,7 @@ function montarSessaoNaFilial_(usuario, codigo) {
     app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_(), gravarPelaPagina: true }),
     usuario: {
       nome: usuario.nome, email: usuario.email, papel: usuario.papel || '', perfil: usuario.perfil,
-      turno: usuario.turno, escopo: descreverEscopo(usuario), podes: usuario.permissoes.podes
+      turno: usuario.turno, escopo: descreverEscopo(usuario)
     },
     admin: ehAdministrador(usuario),
     filial: { codigo: filial.codigo, nome: filial.nome, cidade: filial.cidade, principal: filial.principal },
@@ -533,173 +533,182 @@ function include(nome) {
 const INCLUDES_OPCIONAIS = ['Aprendiz'];
 
 /**
- * Catalogo de acoes de escrita. Cada uma declara a capacidade exigida.
- * Nenhuma funcao de escrita e alcancavel sem passar por aqui.
+ * CATALOGO DE ACOES — a unica porta de gravacao (e das leituras sob demanda).
+ *
+ * Cada acao diz de qual TELA ela e. executarAcao confere na matriz de
+ * permissoes (exigirAcao_, Permissoes.gs) antes de chamar a funcao:
+ *   tela: 'x'            -> precisa de "Ver e editar" na tela x;
+ *   tela: ['x', 'y']     -> "Ver e editar" em qualquer uma delas (a acao mora nas duas);
+ *   leitura: true        -> so le (abrir foto, historico, ficha, exportar): basta "Ver";
+ *   livre: true          -> da propria pessoa, fora de qualquer menu (relatar erro,
+ *                           trocar o proprio PIN, a bolinha do menu, atualizar a copia).
+ * Nenhuma outra conferencia decide quem pode: dentro das funcoes ficam so as
+ * regras do negocio (alcance do escopo, so os citados veem a acao do plano, o
+ * responsavel conclui a dele, ninguem valida a propria entrega...).
+ * Acao nova sem `tela` (e sem `livre`) e recusada aqui e reprova o teste
+ * testes/perfis.js — nao existe acao fora da matriz.
  */
 const ACOES = {
   // calendario — o ciclo de entrega e validacao
-  entregar:            { capacidade: 'ENTREGAR',      funcao: 'acaoEntregar', modulo: 'calendario' },
-  validar:             { capacidade: 'VALIDAR',       funcao: 'acaoValidar', modulo: 'calendario' },
-  definirSetor:        { capacidade: 'PROGRAMAR',     funcao: 'acaoDefinirSetor', modulo: 'calendario' },
-  remarcar:            { capacidade: 'PROGRAMAR',     funcao: 'acaoRemarcar', modulo: 'calendario' },
-  agendarTreinamento:  { capacidade: 'PROGRAMAR',     funcao: 'acaoAgendarTreinamento', modulo: 'calendario' },
-  removerAnexo:        { capacidade: null,            funcao: 'acaoRemoverAnexoAtividade', modulo: 'calendario' },
-  detalhesAtividade:   { capacidade: null,            funcao: 'acaoDetalhesAtividade', modulo: 'calendario' },
-  iniciarEntrega:      { capacidade: null,            funcao: 'acaoIniciarEntrega', modulo: 'calendario' },
-  receberParte:        { capacidade: null,            funcao: 'acaoReceberParte', modulo: 'calendario' },
-  finalizarEntrega:    { capacidade: null,            funcao: 'acaoFinalizarEntrega', modulo: 'calendario' },
-  criarAtividade:      { capacidade: 'PROGRAMAR',     funcao: 'acaoCriarAtividade', modulo: 'calendario' },
-  cancelarAtividade:   { capacidade: 'VALIDAR',       funcao: 'acaoCancelarAtividade', modulo: 'calendario' },
-  cancelarCompetencia: { capacidade: 'VALIDAR',       funcao: 'acaoCancelarCompetencia', modulo: 'calendario' },
-  reativarAtividade:   { capacidade: 'VALIDAR',       funcao: 'acaoReativarAtividade', modulo: 'calendario' },
-  diagnosticoAcesso:   { capacidade: null,            funcao: 'acaoDiagnosticoAcesso' },
-  diagnosticoIdentidade: { capacidade: null,          funcao: 'acaoDiagnosticoIdentidade' },
-  gerarMes:            { capacidade: 'PROGRAMAR',     funcao: 'acaoGerarMes', modulo: ['calendario', 'config'] },
-  restaurarPerfis:     { capacidade: 'GERIR_ACESSOS', funcao: 'acaoRestaurarPerfis' },
+  entregar:            { tela: 'calendario', funcao: 'acaoEntregar' },
+  validar:             { tela: 'calendario', funcao: 'acaoValidar' },
+  definirSetor:        { tela: 'calendario', funcao: 'acaoDefinirSetor' },
+  remarcar:            { tela: 'calendario', funcao: 'acaoRemarcar' },
+  agendarTreinamento:  { tela: 'calendario', funcao: 'acaoAgendarTreinamento' },
+  removerAnexo:        { tela: 'calendario', funcao: 'acaoRemoverAnexoAtividade' },
+  detalhesAtividade:   { tela: 'calendario', leitura: true, funcao: 'acaoDetalhesAtividade' },
+  iniciarEntrega:      { tela: 'calendario', funcao: 'acaoIniciarEntrega' },
+  receberParte:        { tela: 'calendario', funcao: 'acaoReceberParte' },
+  finalizarEntrega:    { tela: 'calendario', funcao: 'acaoFinalizarEntrega' },
+  criarAtividade:      { tela: 'calendario', funcao: 'acaoCriarAtividade' },
+  cancelarAtividade:   { tela: 'calendario', funcao: 'acaoCancelarAtividade' },
+  cancelarCompetencia: { tela: 'calendario', funcao: 'acaoCancelarCompetencia' },
+  reativarAtividade:   { tela: 'calendario', funcao: 'acaoReativarAtividade' },
+  diagnosticoAcesso:   { tela: 'calendario', leitura: true, funcao: 'acaoDiagnosticoAcesso' },
+  diagnosticoIdentidade: { tela: 'acessos', leitura: true, funcao: 'acaoDiagnosticoIdentidade' },
 
   /*
-   * PLANO DE ACAO.
-   * Concluir tem capacidade null de proposito: quem conclui e o
-   * RESPONSAVEL pela acao, e isso a propria funcao confere. Exigir
-   * GERIR_ACOES aqui trancaria o coordenador fora da acao dele.
+   * PLANO DE ACAO. Com "Ver e editar" no Plano de Acao: criar, editar,
+   * reabrir, cancelar e excluir as acoes que a pessoa ve (so as em que esta
+   * citada); concluir e comentar seguem a regra do plano (Acoes.gs): o
+   * responsavel conclui a dele, comenta quem ve a acao.
    */
-  salvarAcao:          { capacidade: 'GERIR_ACOES',   funcao: 'acaoSalvarAcao', modulo: 'calendario' },
-  concluirAcao:        { capacidade: null,            funcao: 'acaoConcluirAcao', modulo: 'calendario' },
-  // Comentar: o responsavel (ou a gestao) registra o andamento; quem foi marcado num comentario responde — ver Acoes.gs.
-  comentarAcao:        { capacidade: null,            funcao: 'acaoComentarAcao', modulo: 'calendario' },
-  reabrirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoReabrirAcao', modulo: 'calendario' },
-  cancelarAcao:        { capacidade: 'GERIR_ACOES',   funcao: 'acaoCancelarAcao', modulo: 'calendario' },
-  excluirAcao:         { capacidade: 'GERIR_ACOES',   funcao: 'acaoExcluirAcao', modulo: 'calendario' },
-  // Fotos (4.2.2): ver confere se a pessoa enxerga a acao; tirar e da gestao.
-  fotoAcao:            { capacidade: null,            funcao: 'acaoFotoAcao', modulo: 'calendario' },
-  removerFotoAcao:     { capacidade: 'GERIR_ACOES',   funcao: 'acaoRemoverFotoAcao', modulo: 'calendario' },
+  salvarAcao:          { tela: 'acoes', funcao: 'acaoSalvarAcao' },
+  concluirAcao:        { tela: 'acoes', funcao: 'acaoConcluirAcao' },
+  comentarAcao:        { tela: 'acoes', funcao: 'acaoComentarAcao' },
+  reabrirAcao:         { tela: 'acoes', funcao: 'acaoReabrirAcao' },
+  cancelarAcao:        { tela: 'acoes', funcao: 'acaoCancelarAcao' },
+  excluirAcao:         { tela: 'acoes', funcao: 'acaoExcluirAcao' },
+  // Fotos (4.2.2): ver confere se a pessoa enxerga a acao (so leitura); tirar e gravar.
+  fotoAcao:            { tela: 'acoes', leitura: true, funcao: 'acaoFotoAcao' },
+  removerFotoAcao:     { tela: 'acoes', funcao: 'acaoRemoverFotoAcao' },
   // Foto HEIC (iPhone) que o navegador nao abre: o servidor converte na hora da escolha (os dois planos usam),
-  // so para quem pode anexar a foto onde ela vai — a funcao confere (exigirQuemAnexaFoto_, no Acoes.gs).
-  converterFoto:       { capacidade: null,            funcao: 'acaoConverterFoto', modulo: ['calendario', 'limpeza'] },
+  // so para quem pode anexar a foto onde ela vai — a funcao confere o plano do pedido (exigirQuemAnexaFoto_, no Acoes.gs).
+  converterFoto:       { tela: ['acoes', 'limpeza'], funcao: 'acaoConverterFoto' },
 
   // Conversas saiu na 4.2 (projeto para depois). As mensagens antigas
   // continuam na aba MENSAGENS; so nao ha mais tela nem acao para elas.
 
   /*
-   * Feedback e capacidade null porque quem esta travado num erro e
-   * justamente quem tem menos permissao para contornar sozinho.
+   * Relatar erro e livre porque quem esta travado num erro e justamente
+   * quem tem menos acesso para contornar sozinho.
    */
-  enviarFeedback:      { capacidade: null,            funcao: 'acaoEnviarFeedback' },
+  enviarFeedback:      { livre: true, funcao: 'acaoEnviarFeedback' },
   // Cada pessoa troca o proprio PIN (confere o atual).
-  trocarMeuPin:        { capacidade: null,            funcao: 'acaoTrocarMeuPin' },
-  resolverFeedback:    { capacidade: 'GERIR_ACESSOS', funcao: 'acaoResolverFeedback' },
+  trocarMeuPin:        { livre: true, funcao: 'acaoTrocarMeuPin' },
+  resolverFeedback:    { tela: 'relatos', funcao: 'acaoResolverFeedback' },
 
   // configuracao
-  salvarSetor:         { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarSetor' },
-  excluirSetor:        { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirSetor' },
+  salvarSetor:         { tela: 'config', funcao: 'acaoSalvarSetor' },
+  excluirSetor:        { tela: 'config', funcao: 'acaoExcluirSetor' },
   // Rotinas (19/10): gravar, desativar/ativar e remover acertam tambem as atividades ja geradas do calendario.
-  salvarRotina:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarRotina', modulo: ['calendario', 'config'] },
-  alternarRotina:      { capacidade: 'PROGRAMAR',     funcao: 'acaoAlternarRotina', modulo: ['calendario', 'config'] },
-  excluirRotina:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirRotina', modulo: ['calendario', 'config'] },
+  salvarRotina:        { tela: 'config', funcao: 'acaoSalvarRotina' },
+  alternarRotina:      { tela: 'config', funcao: 'acaoAlternarRotina' },
+  excluirRotina:       { tela: 'config', funcao: 'acaoExcluirRotina' },
   // Rotina removida pela versao anterior: as pendentes que ficaram no calendario saem (Configuracao > Calendario).
-  limparSiglaOrfa:     { capacidade: 'PROGRAMAR',     funcao: 'acaoLimparSiglaOrfa', modulo: ['calendario', 'config'] },
-  salvarParametro:     { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarParametro' },
-  corrigirFuso:        { capacidade: 'GERIR_ACESSOS', funcao: 'acaoCorrigirFuso' },
-  ligarGatilhos:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoLigarGatilhos' },
+  limparSiglaOrfa:     { tela: 'config', funcao: 'acaoLimparSiglaOrfa' },
+  gerarMes:            { tela: 'config', funcao: 'acaoGerarMes' },
+  salvarParametro:     { tela: 'config', funcao: 'acaoSalvarParametro' },
+  corrigirFuso:        { tela: 'config', funcao: 'acaoCorrigirFuso' },
+  ligarGatilhos:       { tela: 'config', funcao: 'acaoLigarGatilhos' },
+  enviarDigesto:       { tela: 'config', funcao: 'acaoEnviarDigesto' },
 
-  // GSL-DADOS
-  salvarArquivoRH:     { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarArquivoRH', modulo: ['assiduidade', 'config'] },
-  excluirArquivoRH:    { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirArquivoRH', modulo: ['assiduidade', 'config'] },
-  previewImportacao:   { capacidade: 'PROGRAMAR',     funcao: 'acaoPreviewImportacao', modulo: ['assiduidade', 'config'] },
-  importarCompetencia: { capacidade: 'PROGRAMAR',     funcao: 'acaoImportarCompetencia', modulo: ['assiduidade', 'config'] },
-  codigosPendentes:    { capacidade: 'PROGRAMAR',     funcao: 'acaoCodigosPendentes', modulo: ['assiduidade', 'config'] },
-  salvarDePara:        { capacidade: 'PROGRAMAR',     funcao: 'acaoSalvarDePara', modulo: ['assiduidade', 'config'] },
-  excluirDePara:       { capacidade: 'PROGRAMAR',     funcao: 'acaoExcluirDePara', modulo: ['assiduidade', 'config'] },
-  reclassificar:       { capacidade: 'PROGRAMAR',     funcao: 'acaoReclassificar', modulo: ['assiduidade', 'config'] },
-  fichaColaborador:    { capacidade: 'VER_INDIVIDUAL', funcao: 'acaoFichaColaborador', modulo: 'assiduidade' },
-  // A aba COLABORADORES le do AGR_COLAB sob demanda — a lista nao cabia
-  // no payload do painel (limite de 50 mil caracteres por celula) e era
-  // por isso que a aba nao carregava.
-  colaboradores:       { capacidade: 'VER_INDIVIDUAL', funcao: 'acaoColaboradores', modulo: 'assiduidade' },
-  periodo:             { capacidade: null,            funcao: 'acaoPeriodo', modulo: 'assiduidade' },
-  atualizarRH:         { capacidade: 'PROGRAMAR',     funcao: 'acaoAtualizarRH', modulo: ['assiduidade', 'config'] },
-  diagnosticoRH:       { capacidade: null,            funcao: 'acaoDiagnosticoRH', modulo: ['assiduidade', 'config'] },
-  restaurarDePara:     { capacidade: 'PROGRAMAR',     funcao: 'acaoRestaurarDePara', modulo: ['assiduidade', 'config'] },
+  // GSL-DADOS (Configuracao > Fontes do RH; a Assiduidade tem o "Atualizar" e o diagnostico)
+  salvarArquivoRH:     { tela: 'config', funcao: 'acaoSalvarArquivoRH' },
+  excluirArquivoRH:    { tela: 'config', funcao: 'acaoExcluirArquivoRH' },
+  previewImportacao:   { tela: 'config', funcao: 'acaoPreviewImportacao' },
+  importarCompetencia: { tela: 'config', funcao: 'acaoImportarCompetencia' },
+  codigosPendentes:    { tela: 'config', leitura: true, funcao: 'acaoCodigosPendentes' },
+  salvarDePara:        { tela: 'config', funcao: 'acaoSalvarDePara' },
+  excluirDePara:       { tela: 'config', funcao: 'acaoExcluirDePara' },
+  reclassificar:       { tela: 'config', funcao: 'acaoReclassificar' },
+  restaurarDePara:     { tela: 'config', funcao: 'acaoRestaurarDePara' },
+  atualizarRH:         { tela: ['assiduidade', 'config'], funcao: 'acaoAtualizarRH' },
   // Tira da base as competencias sem cadastro (sobras de renomear/excluir antigos).
-  limparOrfasRH:       { capacidade: 'PROGRAMAR',     funcao: 'acaoLimparOrfasRH', modulo: ['assiduidade', 'config'] },
+  limparOrfasRH:       { tela: ['assiduidade', 'config'], funcao: 'acaoLimparOrfasRH' },
+  diagnosticoRH:       { tela: ['assiduidade', 'config'], leitura: true, funcao: 'acaoDiagnosticoRH' },
+  // A aba COLABORADORES le do AGR_COLAB sob demanda — a lista nao cabia
+  // no payload do painel (limite de 50 mil caracteres por celula).
+  fichaColaborador:    { tela: 'assiduidade', leitura: true, funcao: 'acaoFichaColaborador' },
+  colaboradores:       { tela: 'assiduidade', leitura: true, funcao: 'acaoColaboradores' },
+  periodo:             { tela: 'assiduidade', leitura: true, funcao: 'acaoPeriodo' },
 
-  // pessoas e acessos
-  salvarUsuario:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoSalvarUsuario' },
-  excluirUsuario:      { capacidade: 'GERIR_ACESSOS', funcao: 'acaoExcluirUsuario' },
-  alterarPermissao:    { capacidade: 'GERIR_ACESSOS', funcao: 'acaoAlterarPermissao' },
-  alternarAtivo:       { capacidade: 'GERIR_ACESSOS', funcao: 'acaoAlternarAtivo' },
-  definirModuloPessoa: { capacidade: 'GERIR_ACESSOS', funcao: 'acaoDefinirModuloPessoa' },
-  salvarPessoasFilial: { capacidade: 'GERIR_FILIAIS', funcao: 'acaoSalvarPessoasDaFilial' },
+  // pessoas e acessos (a matriz de niveis, as pessoas e o ajuste de cada uma)
+  salvarUsuario:       { tela: 'acessos', funcao: 'acaoSalvarUsuario' },
+  excluirUsuario:      { tela: 'acessos', funcao: 'acaoExcluirUsuario' },
+  alterarPermissao:    { tela: 'acessos', funcao: 'acaoAlterarPermissao' },
+  alternarAtivo:       { tela: 'acessos', funcao: 'acaoAlternarAtivo' },
+  definirAjustePessoa: { tela: 'acessos', funcao: 'acaoDefinirAjustePessoa' },
+  // Compatibilidade (tela de antes, "Modulos por pessoa"): o ajuste de um modulo inteiro, nas mesmas faixas.
+  definirModuloPessoa: { tela: 'acessos', funcao: 'acaoDefinirModuloPessoa' },
+  restaurarPerfis:     { tela: 'acessos', funcao: 'acaoRestaurarPerfis' },
+  zerarPin:            { tela: 'acessos', funcao: 'acaoZerarPin' },
 
   // estoque de TI
-  salvarItemEstoque:   { capacidade: 'GERIR_ESTOQUE',      funcao: 'acaoSalvarItemEstoque', modulo: 'estoque' },
-  excluirItemEstoque:  { capacidade: 'GERIR_ESTOQUE',      funcao: 'acaoExcluirItemEstoque', modulo: 'estoque' },
-  importarItensEstoque:{ capacidade: 'GERIR_ESTOQUE',      funcao: 'acaoImportarItensEstoque', modulo: 'estoque' },
-  movimentarEstoque:   { capacidade: 'MOVIMENTAR_ESTOQUE', funcao: 'acaoMovimentarEstoque', modulo: 'estoque' },
-  estornarMovimento:   { capacidade: 'GERIR_ESTOQUE',      funcao: 'acaoEstornarMovimento', modulo: 'estoque' },
-  inventarioEstoque:   { capacidade: 'GERIR_ESTOQUE',      funcao: 'acaoInventarioEstoque', modulo: 'estoque' },
+  salvarItemEstoque:   { tela: 'estoque', funcao: 'acaoSalvarItemEstoque' },
+  excluirItemEstoque:  { tela: 'estoque', funcao: 'acaoExcluirItemEstoque' },
+  importarItensEstoque:{ tela: 'estoque', funcao: 'acaoImportarItensEstoque' },
+  movimentarEstoque:   { tela: 'estoque', funcao: 'acaoMovimentarEstoque' },
+  estornarMovimento:   { tela: 'estoque', funcao: 'acaoEstornarMovimento' },
+  inventarioEstoque:   { tela: 'estoque', funcao: 'acaoInventarioEstoque' },
   // leitura sob demanda: historico completo de um item (a tela leva so ~90 dias)
-  historicoItemEstoque:{ capacidade: null,                 funcao: 'acaoHistoricoItemEstoque', modulo: 'estoque' },
+  historicoItemEstoque:{ tela: 'estoque', leitura: true, funcao: 'acaoHistoricoItemEstoque' },
 
   // filiais e paineis
-  salvarFilial:        { capacidade: 'GERIR_FILIAIS', funcao: 'acaoSalvarFilial' },
-  alterarPainel:       { capacidade: 'GERIR_FILIAIS', funcao: 'acaoAlterarPainel' },
-  alternarFilial:      { capacidade: 'GERIR_FILIAIS', funcao: 'acaoAlternarFilial' },
+  salvarFilial:        { tela: 'filiais', funcao: 'acaoSalvarFilial' },
+  alterarPainel:       { tela: 'filiais', funcao: 'acaoAlterarPainel' },
+  alternarFilial:      { tela: 'filiais', funcao: 'acaoAlternarFilial' },
+  salvarPessoasFilial: { tela: 'filiais', funcao: 'acaoSalvarPessoasDaFilial' },
 
   // nobreaks
-  lancarLeituras:      { capacidade: 'LANCAR_NOBREAK', funcao: 'acaoLancarLeituras', modulo: 'nobreaks' },
-  salvarLeitura:       { capacidade: 'LANCAR_NOBREAK', funcao: 'acaoSalvarLeitura', modulo: 'nobreaks' },
-  excluirLeitura:      { capacidade: 'LANCAR_NOBREAK', funcao: 'acaoExcluirLeitura', modulo: 'nobreaks' },
-  semanaNobreak:       { capacidade: null,             funcao: 'acaoSemanaNobreak', modulo: 'nobreaks' },
-  salvarNobreak:       { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarNobreak', modulo: 'nobreaks' },
-  excluirNobreak:      { capacidade: 'PROGRAMAR',      funcao: 'acaoExcluirNobreak', modulo: 'nobreaks' },
-  importarNobreaks:    { capacidade: 'PROGRAMAR',      funcao: 'acaoImportarNobreaks', modulo: 'nobreaks' },
+  lancarLeituras:      { tela: 'nobreaks', funcao: 'acaoLancarLeituras' },
+  salvarLeitura:       { tela: 'nobreaks', funcao: 'acaoSalvarLeitura' },
+  excluirLeitura:      { tela: 'nobreaks', funcao: 'acaoExcluirLeitura' },
+  semanaNobreak:       { tela: 'nobreaks', leitura: true, funcao: 'acaoSemanaNobreak' },
+  salvarNobreak:       { tela: 'nobreaks', funcao: 'acaoSalvarNobreak' },
+  excluirNobreak:      { tela: 'nobreaks', funcao: 'acaoExcluirNobreak' },
+  importarNobreaks:    { tela: 'nobreaks', funcao: 'acaoImportarNobreaks' },
 
   /*
    * LIMPEZA (4.2.2) — o Plano de Acao no mesmo modelo do Calendario e o
-   * estoque no mesmo modelo do de TI. Concluir, comentar e ver foto tem
-   * capacidade null pelo mesmo motivo do Plano de Acao: o RESPONSAVEL pela
-   * acao conclui a dele, e a propria funcao confere isso.
+   * estoque no mesmo modelo do de TI. Ver foto e historico sao leitura.
    */
-  salvarAcaoLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarAcaoLimpeza', modulo: 'limpeza' },
-  concluirAcaoLimpeza: { capacidade: null,             funcao: 'acaoConcluirAcaoLimpeza', modulo: 'limpeza' },
-  comentarAcaoLimpeza: { capacidade: null,             funcao: 'acaoComentarAcaoLimpeza', modulo: 'limpeza' },
-  reabrirAcaoLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoReabrirAcaoLimpeza', modulo: 'limpeza' },
-  cancelarAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoCancelarAcaoLimpeza', modulo: 'limpeza' },
-  excluirAcaoLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirAcaoLimpeza', modulo: 'limpeza' },
-  fotoAcaoLimpeza:     { capacidade: null,             funcao: 'acaoFotoAcaoLimpeza', modulo: 'limpeza' },
-  removerFotoAcaoLimpeza: { capacidade: 'GERIR_LIMPEZA', funcao: 'acaoRemoverFotoAcaoLimpeza', modulo: 'limpeza' },
-  salvarItemLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarItemLimpeza', modulo: 'limpeza' },
-  excluirItemLimpeza:  { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoExcluirItemLimpeza', modulo: 'limpeza' },
-  importarItensLimpeza:{ capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarItensLimpeza', modulo: 'limpeza' },
-  movimentarLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoMovimentarLimpeza', modulo: 'limpeza' },
-  estornarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoEstornarLimpeza', modulo: 'limpeza' },
-  inventarioLimpeza:   { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoInventarioLimpeza', modulo: 'limpeza' },
-  historicoItemLimpeza:{ capacidade: null,             funcao: 'acaoHistoricoItemLimpeza', modulo: 'limpeza' },
-  salvarZona:          { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoSalvarZona', modulo: 'limpeza' },
-  importarLimpeza:     { capacidade: 'GERIR_LIMPEZA',  funcao: 'acaoImportarLimpeza', modulo: 'limpeza' },
+  salvarAcaoLimpeza:   { tela: 'limpeza', funcao: 'acaoSalvarAcaoLimpeza' },
+  concluirAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoConcluirAcaoLimpeza' },
+  comentarAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoComentarAcaoLimpeza' },
+  reabrirAcaoLimpeza:  { tela: 'limpeza', funcao: 'acaoReabrirAcaoLimpeza' },
+  cancelarAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoCancelarAcaoLimpeza' },
+  excluirAcaoLimpeza:  { tela: 'limpeza', funcao: 'acaoExcluirAcaoLimpeza' },
+  fotoAcaoLimpeza:     { tela: 'limpeza', leitura: true, funcao: 'acaoFotoAcaoLimpeza' },
+  removerFotoAcaoLimpeza: { tela: 'limpeza', funcao: 'acaoRemoverFotoAcaoLimpeza' },
+  salvarItemLimpeza:   { tela: 'limpeza', funcao: 'acaoSalvarItemLimpeza' },
+  excluirItemLimpeza:  { tela: 'limpeza', funcao: 'acaoExcluirItemLimpeza' },
+  importarItensLimpeza:{ tela: 'limpeza', funcao: 'acaoImportarItensLimpeza' },
+  movimentarLimpeza:   { tela: 'limpeza', funcao: 'acaoMovimentarLimpeza' },
+  estornarLimpeza:     { tela: 'limpeza', funcao: 'acaoEstornarLimpeza' },
+  inventarioLimpeza:   { tela: 'limpeza', funcao: 'acaoInventarioLimpeza' },
+  historicoItemLimpeza:{ tela: 'limpeza', leitura: true, funcao: 'acaoHistoricoItemLimpeza' },
+  salvarZona:          { tela: 'limpeza', funcao: 'acaoSalvarZona' },
+  importarLimpeza:     { tela: 'limpeza', funcao: 'acaoImportarLimpeza' },
 
-  // jovem aprendiz (Portal RH Aprendiz — Aprendiz.gs)
-  salvarFonteAprendiz: { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteAprendiz', modulo: ['aprendiz', 'config'] },
-  atualizarAprendiz:   { capacidade: null,             funcao: 'acaoAtualizarAprendiz', modulo: 'aprendiz' },
+  // jovem aprendiz (Portal RH Aprendiz — Aprendiz.gs). Atualizar so rele a planilha: leitura.
+  salvarFonteAprendiz: { tela: 'aprendiz', funcao: 'acaoSalvarFonteAprendiz' },
+  atualizarAprendiz:   { tela: 'aprendiz', leitura: true, funcao: 'acaoAtualizarAprendiz' },
 
-  // quadro do CD
-  salvarFonteQuadro:   { capacidade: 'PROGRAMAR',      funcao: 'acaoSalvarFonteQuadro', modulo: ['quadro', 'config'] },
-  salvarParametrosFerias: { capacidade: 'PROGRAMAR',   funcao: 'acaoSalvarParametrosFerias', modulo: ['quadro', 'config'] },
+  // quadro do CD. Atualizar so rele a planilha: leitura.
+  salvarFonteQuadro:   { tela: 'quadro', funcao: 'acaoSalvarFonteQuadro' },
+  salvarParametrosFerias: { tela: 'quadro', funcao: 'acaoSalvarParametrosFerias' },
   // Programacao das ferias (21/10): a data escolhida para cada periodo fica no banco da filial (FERIAS_PROG).
-  programarFerias:     { capacidade: 'PROGRAMAR',      funcao: 'acaoProgramarFerias', modulo: ['quadro', 'config'] },
-  confirmarFerias:     { capacidade: 'PROGRAMAR',      funcao: 'acaoConfirmarFerias', modulo: ['quadro', 'config'] },
-  cancelarProgramacaoFerias: { capacidade: 'PROGRAMAR', funcao: 'acaoCancelarProgramacaoFerias', modulo: ['quadro', 'config'] },
-  atualizarQuadro:     { capacidade: null,             funcao: 'acaoAtualizarQuadro', modulo: 'quadro' },
+  programarFerias:     { tela: 'quadro', funcao: 'acaoProgramarFerias' },
+  confirmarFerias:     { tela: 'quadro', funcao: 'acaoConfirmarFerias' },
+  cancelarProgramacaoFerias: { tela: 'quadro', funcao: 'acaoCancelarProgramacaoFerias' },
+  atualizarQuadro:     { tela: 'quadro', leitura: true, funcao: 'acaoAtualizarQuadro' },
 
-  // entrada (4.2)
-  zerarPin:            { capacidade: 'GERIR_ACESSOS', funcao: 'acaoZerarPin' },
-
-  // gerais
-  // Bolinha do menu (acoes em aberto por modulo): so leitura; a funcao so conta o que a pessoa enxerga.
-  pendencias:          { capacidade: null,            funcao: 'acaoPendencias' },
-  atualizarDados:      { capacidade: null,            funcao: 'acaoAtualizarDados' },
-  enviarDigesto:       { capacidade: 'PROGRAMAR',     funcao: 'acaoEnviarDigesto' }
+  // gerais, da propria pessoa
+  // Bolinha do menu (acoes em aberto por modulo): so leitura; so conta o que a pessoa ve (nivelNaTela).
+  pendencias:          { livre: true, funcao: 'acaoPendencias' },
+  // "Atualizar dados" (barra lateral): joga fora as copias e rele a planilha; nao muda dado de ninguem.
+  atualizarDados:      { livre: true, funcao: 'acaoAtualizarDados' }
 };
 
 /*
@@ -756,10 +765,10 @@ function carregarTela(ctx, idTela, params) {
   const codigoFilial = contextoDaChamada_(ctx);
   const usuario = usuarioAtual();
   entrarNaFilial(usuario, codigoFilial);
-  exigirTela(usuario, idTela);
-
-  const tela = TELAS.filter(function (t) { return t.id === idTela; })[0];
+  const tela = telaPorId_(idTela);
   if (!tela) throw new Error('Tela desconhecida: ' + idTela);
+  // A matriz (painel da filial -> ajuste da pessoa -> nivel): Oculto nao abre, nem pelo link direto.
+  exigirVer(usuario, idTela);
 
   /*
    * CACHE DE TELA NO SERVIDOR.
@@ -790,7 +799,14 @@ function carregarTela(ctx, idTela, params) {
     tela: tela.id,
     titulo: tela.nome,
     escopo: descreverEscopo(usuario),
-    podes: usuario.permissoes.podes,
+    /*
+     * O que a pessoa pode NESTA tela, com os dados: a tela so mostra botao
+     * e campo de gravar com pode.editar (Ver e editar). Com Ver, ela abre so
+     * para leitura — e o servidor recusa qualquer gravacao do mesmo jeito.
+     */
+    pode: { nivel: nivelNaTela(usuario, idTela), ver: true, editar: podeEditar(usuario, idTela) },
+    // O retrato do menu (cada tela e a faixa dela): a tela confere com o menu que tem e, se mudou, rele o menu.
+    menu: marcaDoMenu(usuario),
     dados: executor(usuario, params || {})
   });
 
@@ -883,43 +899,18 @@ function executarAcao(ctx, nomeAcao, params) {
   const codigoFilial = contextoDaChamada_(ctx);
   const usuario = usuarioAtual();
   entrarNaFilial(usuario, codigoFilial);
-  const acao = ACOES[nomeAcao];
+  const acao = Object.prototype.hasOwnProperty.call(ACOES, nomeAcao) ? ACOES[nomeAcao] : null;
   // Quase sempre e implantacao pela metade: a tela nova chama uma acao que o Codigo.gs antigo nao tem.
   if (!acao) throw new Error('Ação desconhecida: ' + nomeAcao + '. O Codigo.gs publicado está numa versão anterior às telas — ' +
     'cole todos os arquivos desta versão no Apps Script e crie uma "Nova versão" da implantação.');
-  if (acao.capacidade) exigirCapacidade(usuario, acao.capacidade);
-  exigirModuloDaAcao_(usuario, acao);
+  // A MATRIZ decide, e so ela: painel da filial -> ajuste da pessoa -> nivel (Permissoes.gs).
+  exigirAcao_(usuario, nomeAcao, acao);
 
   const executor = globalThis[acao.funcao];
   if (typeof executor !== 'function') {
     throw new Error('A ação "' + nomeAcao + '" aponta para ' + acao.funcao + ', que nao existe.');
   }
   return JSON.stringify(executor(usuario, params || {}) || { ok: true });
-}
-
-/*
- * A PORTA CONFERE O MODULO, NAO SO A CAPACIDADE.
- *
- * Capacidade diz O QUE a pessoa pode fazer; o modulo diz ONDE. Sem esta
- * conferencia, quem estava com "Sem acesso" num modulo (ajuste por pessoa)
- * ou numa filial com o painel desativado continuava lendo e gravando nele
- * chamando a acao direto — a tela sumia, a porta ficava aberta.
- * `modulo` pode ser um id ou uma lista (basta enxergar um deles).
- * A frase diz a causa: nenhum painel da acao ligado na filial (a tela volta ao
- * menu com "painel desligado") ou o nivel / o ajuste da pessoa (Sem acesso).
- */
-function exigirModuloDaAcao_(usuario, acao) {
-  if (!acao.modulo) return;
-  const lista = [].concat(acao.modulo);
-  const telas = telasDe(usuario);
-  const ve = lista.some(function (m) { return telas.some(function (t) { return t.modulo === m; }); });
-  if (!ve) {
-    if (!lista.some(function (m) { return painelVisivel(usuario, m); })) {
-      throw new Error('Este painel não está ligado na filial ' + filialAtual().nome + '.');
-    }
-    const nome = (MODULOS.filter(function (m) { return m.id === lista[0]; })[0] || {}).nome || lista[0];
-    throw new Error('Você não tem acesso ao módulo ' + nome + ' na filial ' + filialAtual().nome + '.');
-  }
 }
 
 /* --- Acoes gerais --- */
@@ -961,41 +952,55 @@ function acaoEnviarDigesto(usuario) {
  * usuario"). Eram as mesmas pessoas em dois cadastros que nao
  * conversavam — dava para ter o Gerente cadastrado como COORDENADOR sem
  * ninguem notar, e era exatamente o que estava acontecendo.
+ *
+ * A matriz vai inteira: os menus agrupados por modulo (linhas), os niveis
+ * (colunas) com a faixa de cada celula, e para cada pessoa a faixa do nivel,
+ * o ajuste dela e o que fica valendo (efetivo, sem o painel da filial).
  */
 function dadosPessoas(usuario) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const perfis = carregarPerfis();
   const pessoas = listarPessoas();
-
-  // Para a tabela "Modulos por pessoa": o que cada um ve de fato, ja com
-  // o nivel e o ajuste dele.
   pessoas.forEach(function (p) {
-    const nivel = permissoesDe(p.perfil);
-    const perm = p.perfil === 'ADMIN' ? nivel : aplicarModulosDaPessoa(nivel, p.modulos);
-    p.efetivo = {};
-    p.padrao = {};
-    Object.keys(MODULOS_AJUSTAVEIS).forEach(function (m) {
-      p.efetivo[m] = modoEfetivo(perm, m);
-      p.padrao[m] = modoEfetivo(nivel, m);
-    });
+    const doNivel = p.semNivel ? null : permissoesDe(p.perfil).niveis;
+    const efetivo = p.semNivel ? null : permissoesDaPessoa(p.perfil, p.ajustes).niveis;
+    p.doNivel = doNivel || {};
+    p.efetivo = efetivo || {};
+    delete p.modulos;
   });
+  // Telas sem nenhuma gravacao no catalogo: ali "Ver e editar" e o mesmo que "Ver" (a grade avisa).
+  const comGravacao = {};
+  Object.keys(ACOES).forEach(function (n) {
+    const a = ACOES[n];
+    if (a.leitura === true || a.livre === true) return;
+    [].concat(a.tela || []).forEach(function (t) { comGravacao[t] = true; });
+  });
+  const nomes = Object.keys(perfis).filter(function (n) { return n !== PERFIL_PADRAO_NOVO_USUARIO; });
+  // ADMIN primeiro, os outros na ordem do nome.
+  nomes.sort(function (a, b) { return a === 'ADMIN' ? -1 : (b === 'ADMIN' ? 1 : a.localeCompare(b)); });
   return {
     pessoas: pessoas,
-    modulosAjustaveis: MODULOS.filter(function (m) { return MODULOS_AJUSTAVEIS[m.id]; }).map(function (m) {
-      return { id: m.id, nome: m.nome, editavel: MODULOS_AJUSTAVEIS[m.id].length > 0 };
-    }),
     filiais: listarFiliais().map(function (f) {
       return { codigo: f.codigo, nome: f.nome, principal: f.principal, ativa: f.ativa };
     }),
-    niveis: Object.keys(perfis).filter(function (n) { return n !== PERFIL_PADRAO_NOVO_USUARIO; }).sort(),
-    telas: TELAS.map(function (t) { return { id: t.id, nome: t.nome }; }),
-    capacidades: CAPACIDADES,
-    perfis: Object.keys(perfis).map(function (nome) {
+    niveis: nomes,
+    modulos: MODULOS.map(function (m) {
+      return { id: m.id, nome: m.nome, telas: TELAS.filter(function (t) { return t.modulo === m.id; }).map(function (t) {
+        return { id: t.id, nome: t.nome, soLeitura: !comGravacao[t.id] };
+      }) };
+    }).filter(function (m) { return m.telas.length; }),
+    telas: TELAS.map(function (t) { return { id: t.id, nome: t.nome, modulo: t.modulo }; }),
+    faixas: NIVEIS_TELA.map(function (f) { return { id: f, nome: NOMES_NIVEL[f] }; }),
+    perfis: nomes.map(function (nome) {
+      const travas = {};
+      if (nome === 'ADMIN') travas[TELA_TRAVADA_ADMIN] = MOTIVO_TRAVA_ADMIN;
       return {
         id: perfis[nome].id, perfil: nome, escopo: perfis[nome].escopo,
-        descricao: perfis[nome].descricao, telas: perfis[nome].telas, podes: perfis[nome].podes
+        descricao: perfis[nome].descricao, niveis: permissoesDe(nome).niveis, travas: travas
       };
     }),
+    // So o administrador mexe no nivel ADMIN e no acesso a Pessoas e acessos / Filiais e paineis (Auth.gs).
+    soDoAdmin: String(usuario.perfil || '').toUpperCase() === 'ADMIN' ? [] : TELAS_SO_DO_ADMIN,
+    souAdmin: String(usuario.perfil || '').toUpperCase() === 'ADMIN',
     turnos: ['ADM', 'A', 'B', 'C', 'J', 'BC'],
     escopos: ESCOPOS,
     eu: usuario.email
@@ -1021,8 +1026,11 @@ function arquivoDoGsl_(idArquivo) {
 
 /** Download de anexo: o front pede, o servidor devolve os bytes. */
 function obterAnexo(ctx, idArquivo) {
-  contextoDaChamada_(ctx);
-  usuarioAtual();  // exige sessao valida
+  const filial = contextoDaChamada_(ctx);
+  const usuario = usuarioAtual();  // exige sessao valida
+  entrarNaFilial(usuario, filial);
+  // Os anexos sao das entregas do Calendario: baixar e ler a tela, entao segue a matriz dela (Ver basta).
+  exigirVer(usuario, 'calendario');
   // So arquivo que mora dentro da pasta do GSL. Antes, qualquer ID do Drive
   // do dono (que e quem executa o script) saia por aqui.
   if (!arquivoDoGsl_(idArquivo)) throw new Error('Este arquivo não é um anexo do GSL.');
@@ -1181,7 +1189,6 @@ function listarFeedback() {
 }
 
 function acaoResolverFeedback(usuario, params) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   const id = String(params.id || '').trim();
   const registro = obter('FEEDBACK', id);
   if (!registro) throw new Error('Relato não encontrado.');
@@ -1208,6 +1215,5 @@ function acaoResolverFeedback(usuario, params) {
 
 /* Tela Configuracao › Relatos de erro. */
 function dadosRelatos(usuario) {
-  exigirCapacidade(usuario, 'GERIR_ACESSOS');
   return { feedbacks: listarFeedback(), podeVerFeedback: true };
 }

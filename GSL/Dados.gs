@@ -95,7 +95,6 @@ function dadosAssiduidade(usuario, params) {
 }
 
 function dadosAssiduidadeBase_(usuario, params) {
-  exigirTela(usuario, 'assiduidade');
 
   const arquivos = arquivosOrdenados_();
   if (!arquivos.length) return { semRH: true };
@@ -266,7 +265,7 @@ function semDados_(usuario, arquivos, arq, comp, erroImport) {
     // O seletor tambem vai aqui: sem ele, a tela "sem dados" era um beco
     // sem saida — ninguem conseguia voltar ao mes anterior.
     competencias: listaDeCompetencias_(arquivos),
-    podeGerir: podeFazer(usuario, 'PROGRAMAR')
+    podeGerir: podeEditar(usuario, 'assiduidade')
   };
 }
 
@@ -290,7 +289,7 @@ function montarPainel_(usuario, arquivos, arq, comp, painelLinha, aviso) {
     aviso: aviso || '',
     arquivo: { id: arq.ID, situacao: arq.SITUACAO,
                ultimaImportacao: String(arq.ULTIMA_IMPORTACAO || '') },
-    podeGerir: podeFazer(usuario, 'PROGRAMAR'),
+    podeGerir: podeEditar(usuario, 'assiduidade'),
     mostraIndividual: podeVerIndividual_(usuario),
     escopo: descreverEscopo(usuario),
     competencias: listaDeCompetencias_(arquivos),
@@ -319,7 +318,7 @@ function montarPainel_(usuario, arquivos, arq, comp, painelLinha, aviso) {
 
 /** Quem pode ver nome e numero individual de colaborador. */
 function podeVerIndividual_(usuario) {
-  return podeFazer(usuario, 'VER_INDIVIDUAL');
+  return podeVer(usuario, 'assiduidade');   // Ver a Assiduidade = ler tudo o que ela mostra (nomes inclusive)
 }
 
 /*
@@ -622,9 +621,8 @@ function trechos_(linhas, folga) {
  * informacao.
  */
 function acaoColaboradores(usuario, params) {
-  exigirTela(usuario, 'assiduidade');
   /*
-   * A porta (ACOES) ja exige VER_INDIVIDUAL. Esta e a segunda chave, para o
+   * A porta (ACOES) ja exige Ver na Assiduidade. Esta e a segunda chave, para o
    * dia em que alguem chamar a funcao por outro caminho: tudo aqui e nome e
    * numero de pessoa.
    */
@@ -798,7 +796,6 @@ function isoDaFato_(v) {
 }
 
 function acaoPeriodo(usuario, params) {
-  exigirTela(usuario, 'assiduidade');
   const de = String((params && params.de) || '').slice(0, 10);
   const ate = String((params && params.ate) || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
@@ -1045,7 +1042,6 @@ function categoriasDeAusencia_() {
 }
 
 function acaoFichaColaborador(usuario, params) {
-  exigirTela(usuario, 'assiduidade');
   if (!podeVerIndividual_(usuario)) {
     throw new Error('Seu nível de acesso vê apenas os números agregados.');
   }
@@ -1197,7 +1193,6 @@ function acaoFichaColaborador(usuario, params) {
    ========================================================================== */
 
 function acaoPreviewImportacao(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const arq = obter('ARQUIVOS_RH', params.id);
   if (!arq) throw new Error('Arquivo não encontrado.');
 
@@ -1274,7 +1269,6 @@ function avisosDeRejeitadas_(rejeitadas) {
 }
 
 function acaoImportarCompetencia(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const arq = obter('ARQUIVOS_RH', params.id);
   if (!arq) throw new Error('Arquivo não encontrado.');
   const r = importarArquivoRH_(arq, usuario.email);
@@ -2489,7 +2483,6 @@ function atualizarCompetenciaAbertaDaFilial_() {
 
 /** Botao "Atualizar agora": mesma rotina do gatilho, disparada por gente. */
 function acaoAtualizarRH(usuario) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const r = atualizarCompetenciaAberta();
 
   if (r.pulou) throw new Error(r.pulou + ' Marque uma em Configuração › Fontes do RH.');
@@ -2524,7 +2517,6 @@ function acaoAtualizarRH(usuario) {
 /* ------------------------------------------------------------------ */
 
 function acaoDiagnosticoRH(usuario) {
-  exigirTela(usuario, 'assiduidade');
 
   // So as tres colunas que a conta usa — a FATO inteira nao cabe em memoria barata.
   const col = lerColunasFato_(['DATA', 'COMPETENCIA', 'AUSENCIA']);
@@ -2587,7 +2579,7 @@ function acaoDiagnosticoRH(usuario) {
     }),
     arquivos: arquivos,
     orfas: orfas,
-    podeLimpar: podeFazer(usuario, 'PROGRAMAR'),
+    podeLimpar: podeEditar(usuario, 'assiduidade') || podeEditar(usuario, 'config'),   // as telas do limparOrfasRH
     agrColab: lerAgr_().length,
     colaboradores: listar('COLABORADORES').length,
     ultimosErros: ultimosErrosDeImportacao_()
@@ -2629,7 +2621,6 @@ function ultimosErrosDeImportacao_() {
 
 /* Tira da base as competencias sem cadastro (o botao do Diagnostico). */
 function acaoLimparOrfasRH(usuario) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const validas = competenciasCadastradas_();
   const col = lerColunasFato_(['COMPETENCIA']);
   const naFato = {};
@@ -2696,7 +2687,6 @@ function competenciaDigitada_(valor) {
 }
 
 function acaoSalvarArquivoRH(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const comp = competenciaDigitada_(params.competencia);
   if (!comp) {
     throw new Error('Competência inválida: "' + String(params.competencia || '') +
@@ -2743,7 +2733,6 @@ function acaoSalvarArquivoRH(usuario, params) {
 }
 
 function acaoExcluirArquivoRH(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   return comTrava(function () {
     const arq = obter('ARQUIVOS_RH', params.id);
     if (!arq) throw new Error('Competência não encontrada.');
@@ -2767,7 +2756,6 @@ function acaoExcluirArquivoRH(usuario, params) {
 
 /** Codigos que apareceram na folha e ainda nao estao no DE-PARA. */
 function acaoCodigosPendentes(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const mapa = lerDePara_();
   const col = lerColunasFato_(['CODIGO', 'CATEGORIA']);
   const vistos = {}, jaNaLegenda = {};
@@ -2792,7 +2780,6 @@ function acaoCodigosPendentes(usuario, params) {
 }
 
 function acaoSalvarDePara(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const campos = {
     CODIGO: codigo_(params.codigo),
     DESCRICAO: String(params.descricao || '').trim(),
@@ -2817,7 +2804,6 @@ function acaoSalvarDePara(usuario, params) {
 }
 
 function acaoExcluirDePara(usuario, params) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   return excluir('DE_PARA', params.id, usuario.email);
 }
 
@@ -2835,7 +2821,6 @@ function acaoExcluirDePara(usuario, params) {
  *   3. se alguma falhar, a resposta diz qual e por que.
  */
 function acaoReclassificar(usuario) {
-  exigirCapacidade(usuario, 'PROGRAMAR');
   const mapa = lerDePara_();
   const validas = competenciasCadastradas_();
 

@@ -102,7 +102,7 @@ function dadosInicio(usuario) {
     },
     porMes: andamentoPorMes(paraOsMeses_(todas)),
     porTurno: TURNOS.map(function (t) { return resumoTurno(doMesAtual_(todas), t); }),
-    insights: podeFazer(usuario, 'VER_INDIVIDUAL') ? gerarInsights(todas, lidas.janela, aguardandoTodas) : [],
+    insights: gerarInsights(todas, lidas.janela, aguardandoTodas),   // Ver a Central = ler tudo o que ela mostra
     atalhos: telasDe(usuario).filter(function (t) { return t.id !== 'inicio'; })
   };
 }

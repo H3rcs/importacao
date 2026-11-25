@@ -904,12 +904,17 @@ function acaoMoverPessoaCarga(usuario, params) {
   return { ok: true, equipe: cgEquipe_(), g: cgGeracao_() };
 }
 
-/* LIMPAR A ALOCACAO (troca de turno). params: { equipe } — so as pessoas daquele turno; vazio = todo mundo. */
+/*
+ * LIMPAR A ALOCACAO (troca de turno). params: { turno } (A, B, C ou ADM, pelo turno do Quadro: "1° TURNO" e
+ * "1º TURNO" sao o A) ou { equipe } (o texto exato) — vazio = todo mundo.
+ */
 function acaoLimparAlocacaoCarga(usuario, params) {
-  const so = cgTexto_(params && params.equipe, 30);
+  const turno = String((params && params.turno) || '').toUpperCase();
+  if (turno && ['A', 'B', 'C', 'ADM'].indexOf(turno) === -1) throw new Error('Turno inválido.');
+  const so = turno ? (turno === 'ADM' ? 'ADM' : 'turno ' + turno) : cgTexto_(params && params.equipe, 30);
   let n = 0;
   comTrava(function () {
-    const alvo = listar('CARGA_EQUIPE').filter(function (r) { return !so || String(r.EQUIPE || '') === so; });
+    const alvo = listar('CARGA_EQUIPE').filter(function (r) { return turno ? cgTurnoDaEquipe_(r.EQUIPE) === turno : (!so || String(r.EQUIPE || '') === so); });
     n = alvo.length;
     if (n) atualizarVarios('CARGA_EQUIPE', alvo.map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; }), usuario.email);
   });

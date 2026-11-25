@@ -199,6 +199,17 @@ const ESQUEMA = {
    */
   CARGA_SEQUENCIA: ['CARGA', 'POSICAO', 'NOME', 'H24', 'ENTROU_EM', 'SAIU_EM'],
   CARGA_PRESENCA:  ['DATA', 'PESSOA', 'NOME', 'EQUIPE', 'STATUS', 'OBSERVACAO', 'POR_NOME'],
+  /*
+   * BOXES E CARREGAMENTO (8.15): o controle das docas no lugar da planilha do setor de carregamento.
+   * CARGA_BOXES: so os boxes com bloqueio (ESTADO LIVRE · BLOQUEADO, OBSERVACAO = o motivo).
+   * CARGA_CARREGAMENTO: uma linha por carga no carregamento. ETAPA: FILA (patio) · BOX · CARREGANDO ·
+   * CARREGADA (libera o box; fica de historico). TIPO_VEICULO: LEVE · VUC · MEDIO · TOCO · TRUCK · CARRETA ·
+   * OUTRO. SITUACAO: da lista CARGA_SITUACOES_BOX. CHEGADA, NO_BOX_EM e CARREGADA_EM em aaaa-mm-ddThh:mm:ss;
+   * PREVISAO hh:mm; HISTORICO: JSON [[quando, quem, o que]], os ultimos 40.
+   */
+  CARGA_BOXES:     ['NUMERO', 'ESTADO', 'OBSERVACAO'],
+  CARGA_CARREGAMENTO: ['CARGA', 'COMPLEMENTO', 'PRIORIDADE', 'BOX', 'VEICULO', 'TIPO_VEICULO', 'MOTORISTA', 'SITUACAO', 'ETAPA',
+                    'CHEGADA', 'NO_BOX_EM', 'PREVISAO', 'CARREGADA_EM', 'CARREGADA_POR', 'OBSERVACAO', 'HISTORICO'],
   CARGA_PASSAGEM:  ['DATA', 'TURNO_SAI', 'TURNO_ENTRA', 'RESUMO', 'CONFIRMADO_POR', 'CONFIRMADO_NOME', 'CONFIRMADO_EM',
                     'CIENTE_POR', 'CIENTE_NOME', 'CIENTE_EM', 'OBSERVACAO'],
 
@@ -356,7 +367,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.15';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) · 8.15: Situacao de Carga fase 2 (CARGA_SEQUENCIA, CARGA_PRESENCA, CARGA_PASSAGEM, CARGA_EQUIPE.RUA, check-outs; paleteiras seguem os separadores) (a proxima e 8.16: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.15';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) · 8.15: Situacao de Carga fase 2 (CARGA_SEQUENCIA, CARGA_PRESENCA, CARGA_PASSAGEM, CARGA_BOXES, CARGA_CARREGAMENTO, CARGA_EQUIPE.RUA, check-outs; paleteiras seguem os separadores) (a proxima e 8.16: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -535,6 +546,11 @@ function migrarPareceres_() {
  * Parametros que versoes novas acrescentam. [chave, descricao, valor inicial]
  * Criados so onde faltam — o valor de quem ja configurou nunca e tocado.
  */
+/* A lista de situacoes do carregamento (a mesma do Carga.gs, CG_SITUACOES_PADRAO): o valor inicial do parametro. */
+const CG_SITUACOES_PADRAO_TXT = 'AMANHA CEDO; BOX ALTERADO; CARREGA PELA MANHA; CARREGANDO; CARREGAR AMANHÃ; CARREGAR SÓ À NOITE; CARREGAR SÓ À TARDE; ' +
+  'CARRO COM DEFEITO; CARRO NA OFICINA; CARRO NO PATIO; CARRO PINTANDO; FALTA LIGAR; JÁ NO BOX; MARCOU E NAO VEIO; MOTORISTA A CAMINHO; ' +
+  'MOTORISTA AGENDADO; MOTORISTA NAO ATENDE; MOTORRISTA CHEGOU ATRASADO; NAO CONSIGO CONTATO; NÃO ESCALADO; PRIORIDADE ALTERADA; ' +
+  'SEM ESCALAR; SEM O NUMERO DO MOTORISTA; SEM PREVISÃO; VEM NA MADRUGADA';
 const PARAMETROS_NOVOS = [
   ['APRESENTACAO_A', 'Link do Google Apresentacoes do turno A'],
   ['APRESENTACAO_B', 'Link do Google Apresentacoes do turno B'],
@@ -553,8 +569,9 @@ const PARAMETROS_NOVOS = [
   ['CARGA_TURNO_A', 'Situação de Carga: horário do Turno A (1º turno), como 06:50-16:14', '06:50-16:14'],
   ['CARGA_TURNO_B', 'Situação de Carga: horário do Turno B (2º turno), como 16:04-01:01 (passa da meia-noite)', '16:04-01:01'],
   ['CARGA_TURNO_C', 'Situação de Carga: horário do Turno C (3º turno), como 23:00-07:00 (passa da meia-noite)', '23:00-07:00'],
-  ['CARGA_PLANILHA_BOXES', 'Situação de Carga: link da planilha de controle dos boxes (abas "Controle" e "Situação dos BOXs") — o GSL só lê, nunca grava'],
   ['CARGA_BOXES', 'Situação de Carga: quantos boxes (docas) o CD tem', '26'],
+  ['CARGA_BOX_PERMANENCIA_MIN', 'Situação de Carga: minutos que um veículo pode ficar encostado no box antes do alerta', '120'],
+  ['CARGA_SITUACOES_BOX', 'Situação de Carga: as situações do carregamento (separadas por ponto e vírgula)', CG_SITUACOES_PADRAO_TXT],
   ['CARGA_FLOWRACK_RUAS', 'Situação de Carga: ruas de cada andar do flowrack do Nobre (um número para todos, ou térreo,1º,2º,3º,4º como 6,6,6,6,6)', '6'],
   ['CARGA_SEQ_EM_CURSO', 'Situação de Carga: quantas cargas do começo da sequência devem estar em andamento ao mesmo tempo', '5']
 ];

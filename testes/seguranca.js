@@ -112,12 +112,13 @@ const bloqueadas = [
   ['acaoLimparAlocacaoCarga', FALSO, {}], ['acaoEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', numero: 1, estado: 'MANUTENCAO' }],
   ['acaoQuantidadeEquipamentoCarga', FALSO, { tipo: 'PALETEIRA', quantidade: 0 }], ['semearEquipamentosCarga_'], ['cgCargasDe_', { CARGAS: 'DRIVE:x' }],
   // 8.15: Situacao de Carga fase 2 — historico, sequencia, falta, boxes (planilha de fora), passagem, ajustes e a migracao
-  ['acaoSnapshotCarga', FALSO, { id: 'x', com: 'atual' }], ['acaoBoxesCarga', FALSO, { forcar: true }],
+  ['acaoSnapshotCarga', FALSO, { id: 'x', com: 'atual' }], ['acaoBoxCarga', FALSO, { numero: 1, estado: 'BLOQUEADO' }],
+  ['acaoCarregamentoCarga', FALSO, { op: 'salvar', carga: '762480', box: 1 }], ['acaoImportarBoxesCarga', FALSO, { link: LINK_APZ }],
   ['acaoSequenciaCarga', FALSO, { op: 'mover', carga: '762480', para: 1 }],
   ['acaoPresencaCarga', FALSO, { pessoa: { k: 'C123', nome: 'x' }, falta: true }],
   ['acaoPassagemCarga', FALSO, { op: 'confirmar', sai: 'A', entra: 'B' }],
-  ['acaoSalvarFonteBoxesCarga', FALSO, { link: LINK_APZ }], ['acaoParametrosCarga', FALSO, { boxes: 30 }],
-  ['migrarCarga815_'], ['cgLerPlanilhaBoxes_', LINK_APZ.split('/')[5]], ['cgBoxesDaTela_', [], true], ['cgSalvarParametro_', 'CARGA_BOXES', '1', 'x'],
+  ['acaoParametrosCarga', FALSO, { boxes: 30 }],
+  ['migrarCarga815_'], ['cgLerPlanilhaBoxes_', LINK_APZ.split('/')[5]], ['cgPatioDaTela_', []], ['cgSalvarParametro_', 'CARGA_BOXES', '1', 'x'],
   ['cgMesclarSequencia_', [], '2026-11-25T08:00:00', 'x'], ['cgFaltas_', [], '2026-11-25T08:00:00', true]
 ];
 const emailsAntesDosAtaques = m.emails.length;

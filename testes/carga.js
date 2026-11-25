@@ -290,12 +290,12 @@ async function rodar() {
     afirmar(chk.length === 12 && chk.every((e) => e.estado === 'LIVRE' && e.id), 'check-outs ' + chk.length);
     afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 59, 'gravados na planilha');
     afirmar(d.turnos.map((t) => t.texto).join(' ') === '06:50–16:14 16:04–01:01 23:00–07:00' && d.turnoAgora.ativos.join() === 'B', 'turnos ' + JSON.stringify(d.turnoAgora));
-    afirmar(d.sequencia && !d.sequencia.usada && !d.sequencia.itens.length && d.boxes && !d.boxes.ligado && d.boxes.n === 26, 'fase 2 vazia');
+    afirmar(d.sequencia && !d.sequencia.usada && !d.sequencia.itens.length && d.patio && d.patio.n === 26 && d.patio.contagem.livres === 26, 'fase 2 vazia');
     afirmar(d.flowrack.ruas.join() === '6,6,6,6,6' && Array.isArray(d.faltas) && Array.isArray(d.envios), 'flowrack/faltas');
     ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM'].forEach((t) => afirmar(Array.isArray(ctx(m).listar(t)), 'tabela ' + t));
     afirmar(d.podeEditar && !d.snapshot && d.depositos.length === 6 && d.andares.length === 5, 'tela vazia');
     const par = ctx(m).listar('PARAMETROS').map((p) => p.CHAVE);
-    afirmar(['CARGA_EQUILIBRIO_PP', 'CARGA_ATENCAO_PP', 'CARGA_PESO_24H', 'CARGA_TURNO_A', 'CARGA_TURNO_B', 'CARGA_TURNO_C', 'CARGA_PLANILHA_BOXES',
+    afirmar(['CARGA_EQUILIBRIO_PP', 'CARGA_ATENCAO_PP', 'CARGA_PESO_24H', 'CARGA_TURNO_A', 'CARGA_TURNO_B', 'CARGA_TURNO_C', 'CARGA_BOX_PERMANENCIA_MIN', 'CARGA_SITUACOES_BOX',
       'CARGA_BOXES', 'CARGA_FLOWRACK_RUAS', 'CARGA_SEQ_EM_CURSO'].every((k) => par.indexOf(k) !== -1), 'parametros');
     const ger = entrar(m, GERENTE, '5555');
     afirmar(tela(m, ger).podeEditar, 'gerente edita');
@@ -324,7 +324,7 @@ async function rodar() {
     const m = mundo();
     const c = ctx(m);
     const banco = m.planilhas.get(c.prop('ID_BANCO', ''));
-    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM'].forEach((t) => { banco.abas = banco.abas.filter((a) => a.nome !== t); });
+    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM', 'CARGA_BOXES', 'CARGA_CARREGAMENTO'].forEach((t) => { banco.abas = banco.abas.filter((a) => a.nome !== t); });
     // banco da 8.14: sem a coluna RUA, sem check-outs, paleteiras marcadas em uso a mao
     const eq = banco.abas.find((a) => a.nome === 'CARGA_EQUIPE');
     const iRua = eq.dados[0].indexOf('RUA');
@@ -339,7 +339,7 @@ async function rodar() {
     ctx(m).atualizar('CARGA_EQUIPAMENTOS', linhas[2].ID, { ESTADO: 'MANUTENCAO', DEPOSITO: '', OBSERVACAO: 'roda' }, 'teste');
     const par = banco.abas.find((a) => a.nome === 'PARAMETROS');
     const iChave = par.dados[0].indexOf('CHAVE');
-    par.dados = par.dados.filter((l, i) => !i || !(l && /^CARGA_(TURNO|PLANILHA|BOXES|FLOWRACK|SEQ)/.test(String(l[iChave]))));
+    par.dados = par.dados.filter((l, i) => !i || !(l && /^CARGA_(TURNO|BOX|SITUACOES|FLOWRACK|SEQ)/.test(String(l[iChave]))));
     m.props.script.VERSAO_ESQUEMA = '8.14';
     m.cache.clear();
     const s = entrar(m, DONO, '4321');
@@ -349,7 +349,7 @@ async function rodar() {
     afirmar(!pal.some((r) => r.ESTADO === 'USO') && pal.filter((r) => r.ESTADO === 'MANUTENCAO').length === 1 && pal.find((r) => r.ESTADO === 'MANUTENCAO').OBSERVACAO === 'roda', 'paleteiras ' + JSON.stringify(pal.map((r) => r.ESTADO)));
     afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT').length === 12, 'check-outs semeados');
     afirmar(banco.abas.find((a) => a.nome === 'CARGA_EQUIPE').dados[0].indexOf('RUA') !== -1, 'coluna RUA');
-    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
+    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM', 'CARGA_BOXES', 'CARGA_CARREGAMENTO'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
     afirmar(ctx(m).parametro('CARGA_TURNO_B', '') === '16:04-01:01' && ctx(m).parametro('CARGA_BOXES', '') === '26', 'parametros');
     afirmar(d.equipamentos.filter((e) => e.tipo === 'CHECKOUT').length === 12 && d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.estado === 'MANUTENCAO').length === 1, 'tela');
     // abrir de novo nao migra outra vez (nada duplica)
@@ -536,9 +536,9 @@ async function rodar() {
     const m = mundo();
     const con = entrar(m, CONSULTA, '7777');
     afirmar(acao(m, con, 'geracaoCarga', {}).g, 'geracao para quem ve');
-    afirmar(acao(m, con, 'boxesCarga', {}).boxes && /não existe mais/.test(erroDe(() => acao(m, con, 'snapshotCarga', { id: 'x' }))), 'leituras para quem ve');
+    afirmar(tela(m, con).patio.mapa.length === 26 && /não existe mais/.test(erroDe(() => acao(m, con, 'snapshotCarga', { id: 'x' }))), 'leituras para quem ve');
     ['enviarSituacaoCarga', 'moverPessoaCarga', 'equipamentoCarga', 'quantidadeEquipamentoCarga', 'limparAlocacaoCarga', 'excluirSituacaoCarga',
-      'sequenciaCarga', 'presencaCarga', 'passagemCarga', 'salvarFonteBoxesCarga', 'parametrosCarga'].forEach((n) => {
+      'sequenciaCarga', 'presencaCarga', 'passagemCarga', 'carregamentoCarga', 'boxCarga', 'importarBoxesCarga', 'parametrosCarga'].forEach((n) => {
       afirmar(/só para ver/.test(erroDe(() => acao(m, con, n, {}))), n + ' recusado');
     });
     const adm = entrar(m, DONO, '4321');
@@ -759,16 +759,117 @@ async function rodar() {
     afirmar(/no Drive/.test(erroDe(() => acao(m, s, 'snapshotCarga', { id: id1 }))), 'arquivo apagado');
   });
 
-  /* A planilha dos boxes: Controle + Situacao dos BOXs, com o que a de verdade tem (linhas vazias, coluna sem nome). */
-  function planilhaBoxes(m, opcoes) {
-    opcoes = opcoes || {};
+  await caso('pátio e boxes (nativo): registrar (número curto, tipo do veículo pelo relatório), box, chegou, carregando, carregada libera o box, reabrir, excluir; histórico; ao vivo', () => {
+    const m = mundo(); const s = entrar(m, COORD, '1234');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { h24: true, d: { GRANDEZA: ['0/10', '0/10'] } }, '900002': { GRANDEZA: ['X', 'X'] },
+      '900003': { box: '12', d: { GRANDEZA: ['3/10', '0/10'] } } }));
+    let d = tela(m, s);
+    afirmar(d.patio.n === 26 && d.patio.mapa.length === 26 && d.patio.mapa.every((b) => b.estado === 'LIVRE') && d.patio.semRegistro.length === 3 && d.patio.semRegistro[0].n === '900001',
+      'patio vazio ' + JSON.stringify(d.patio.contagem));
+    afirmar(d.patio.situacoes.length === 25 && d.patio.situacoes.indexOf('MARCOU E NAO VEIO') !== -1 && d.patio.tipos.join() === 'LEVE,VUC,MEDIO,TOCO,TRUCK,CARRETA,OUTRO', 'listas');
+    const g0 = acao(m, s, 'geracaoCarga', {}).g;
+    // numero curto (como no quadro antigo): 002 = 900002; tipo pelo veiculo do relatorio (MEDIO)
+    let r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '002', box: 7, veiculo: 'abc1d23', motorista: 'Motorista Teste B', previsao: '16:30' });
+    afirmar(/Carga 900002 no box 7 \(002 = 900002\)/.test(r.recado) && r.g !== g0, r.recado);
+    const id2 = r.id;
+    let b7 = r.patio.mapa[6];
+    afirmar(b7.estado === 'RESERVADO' && b7.itens[0].n === '900002' && b7.itens[0].tipo === 'MEDIO' && b7.itens[0].veiculo === 'ABC1D23' && b7.itens[0].pdf.estado === 'pronta', 'box 7 reservado ' + JSON.stringify(b7.itens[0]).slice(0, 200));
+    afirmar(/já está no box 7/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900002' }))), 'duplicada');
+    afirmar(/Box de 1 a 26/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', box: 27 }))), 'box 27');
+    afirmar(/Situação "TANTO FAZ" não está na lista/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', situacao: 'tanto faz' }))), 'situacao fora da lista');
+    afirmar(/Previsão: escreva/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', previsao: 'logo' }))), 'previsao');
+    afirmar(/Informe o número/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '' }))), 'sem numero');
+    // o carro chegou: o box fica ocupado com o veiculo encostado
+    m.desvioRelogio += 60000;
+    r = acao(m, s, 'carregamentoCarga', { op: 'chegou', id: id2 });
+    b7 = r.patio.mapa[6];
+    afirmar(/chegou ao box 7 às \d\d:\d\d/.test(r.recado) && b7.estado === 'OCUPADO' && b7.itens[0].situacao === 'JÁ NO BOX' && b7.noBox && b7.noBox === b7.itens[0].chegada, r.recado + ' ' + JSON.stringify(b7).slice(0, 200));
+    // a 900001 (24 h) entra no patio com "marcou e nao veio": alerta de prioridade
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', tipo: 'TRUCK', situacao: 'marcou e não veio', prioridade: '1' });
+    const id1 = r.id;
+    afirmar(r.patio.fila.length === 1 && r.patio.fila[0].n === '900001' && r.patio.fila[0].situacao === 'MARCOU E NAO VEIO' && r.patio.fila[0].etapa === 'FILA', 'fila ' + JSON.stringify(r.patio.fila[0]).slice(0, 200));
+    afirmar(r.patio.alertas.some((a) => a.tipo === 'prioridadeRisco' && a.carga === '900001' && a.grav === 'alerta'), 'prioridade com risco');
+    // arrastar para o box 3; depois de volta ao patio
+    r = acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
+    afirmar(r.patio.mapa[2].estado === 'RESERVADO' && !r.patio.fila.length, 'no box 3');
+    afirmar(/Ponha a carga/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 0 }) && acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 }))), 'carregando sem box');
+    acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
+    r = acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 });
+    afirmar(r.patio.mapa[2].estado === 'CARREGANDO' && r.patio.mapa[2].itens[0].chegada && r.patio.mapa[2].itens[0].situacao === 'CARREGANDO', 'carregando');
+    // carregada: libera o box, fica nas carregadas de hoje; reabrir volta ao box
+    r = acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 });
+    afirmar(/box 7 liberado/.test(r.recado) && r.patio.mapa[6].estado === 'LIVRE' && r.patio.carregadas[0].n === '900002' && r.patio.carregadas[0].carregadaPor === COORD, r.recado);
+    afirmar(/já está carregada/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 }))), 'carregada duas vezes');
+    r = acao(m, s, 'carregamentoCarga', { op: 'reabrir', id: id2 });
+    afirmar(r.patio.mapa[6].estado === 'OCUPADO' && !r.patio.carregadas.length, 'reaberta no box 7');
+    acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 });
+    const hist = ctx(m).cgCarregamentos_().find((x) => x.id === id2).hist.map((h) => h[2]);
+    afirmar(hist.join(' | ') === 'registrou no box 7 | chegou (box 7) | carregada (box 7 liberado) | reabriu | carregada (box 7 liberado)' && ctx(m).cgCarregamentos_()[0].hist[0][1] === 'Maria Souza', 'historico ' + hist.join(' | '));
+    // situacao e excluir
+    r = acao(m, s, 'carregamentoCarga', { op: 'situacao', id: id1, situacao: 'Carro com defeito' });
+    afirmar(r.patio.mapa[2].itens[0].situacao === 'CARRO COM DEFEITO' && r.patio.mapa[2].itens[0].situacaoCat === 'risco', 'situacao');
+    r = acao(m, s, 'carregamentoCarga', { op: 'excluir', id: id1 });
+    afirmar(r.patio.mapa[2].estado === 'LIVRE' && /tirada do pátio/.test(r.recado), 'excluida');
+    afirmar(/não existe mais/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'chegou', id: id1 }))), 'id excluido');
+    // a carga que nao esta no relatorio entra (com aviso), e o numero curto que nao casa e recusado
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '765432', veiculo: 'VUC 2700' });
+    afirmar(/não está na situação de carga/.test(r.recado) && r.patio.fila.find((x) => x.n === '765432').tipo === 'VUC', 'fora do pdf ' + r.recado);
+    afirmar(/Nenhuma carga da situação de carga termina em 777/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '777' }))), 'curto sem par');
+    ctx(m).descarregarLog();
+    afirmar(ctx(m).listar('LOG').some((l) => l.TABELA === 'CARGA_CARREGAMENTO'), 'no LOG');
+  });
+
+  await caso('pátio: cruzamento com o PDF (pronta sem veículo no box, veículo encostado com a carga longe, box diferente, permanência acima do limite, carga que saiu do relatório) e box bloqueado', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { h24: true, d: { GRANDEZA: ['X', 'X'] } }, '900002': { box: '5', d: { GRANDEZA: ['1/10', '0/10'] } },
+      '900003': { box: '4', d: { GRANDEZA: ['X', 'X'] } }, '900004': { box: '6', d: { GRANDEZA: ['X', 'X'] } } }));
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900002', box: 9, chegada: '17:00' });
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900003', box: 4 });
+    const id4 = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900004', box: 6, chegada: '17:30' }).id;
+    acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id4 });
+    const p = tela(m, s).patio;
+    const tipos = p.alertas.map((a) => a.tipo + ':' + a.carga).sort().join(' ');
+    afirmar(tipos === 'boxDiferente:900002 boxLonge:900002 prontaSemBox:900001 prontaSemBox:900003', 'alertas ' + tipos);
+    afirmar(p.alertas[0].tipo === 'prontaSemBox' && p.alertas[0].carga === '900001' && p.alertas[0].grav === 'alerta' && /nem registro no pátio/.test(p.alertas[0].texto), 'a de 24 h primeiro ' + p.alertas[0].texto);
+    afirmar(p.mapa[8].estado === 'OCUPADO' && p.mapa[8].noBoxMin >= 60 && p.mapa[8].noBoxMin <= 61 && p.mapa[5].estado === 'CARREGANDO', 'chegada pela hora: ' + p.mapa[8].noBoxMin);
+    // a permanencia (limite 120 min): 2 h depois
+    m.desvioRelogio += 90 * 60000;
+    const s2 = entrar(m, GERENTE, '5555');
+    const p2 = ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_());
+    const perm = p2.alertas.filter((a) => a.tipo === 'permanencia');
+    afirmar(perm.length === 1 && perm[0].carga === '900002' && perm[0].min >= 150 && perm[0].min <= 152 && /encostado há 2 h 3\d \(limite 2 h\)/.test(perm[0].texto), 'permanencia ' + JSON.stringify(perm));
+    acao(m, s2, 'parametrosCarga', { permanencia: 200 });
+    afirmar(!ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_()).alertas.some((a) => a.tipo === 'permanencia'), 'limite editado');
+    // a carga sai do relatorio sem estar carregada
+    acao(m, s2, 'enviarSituacaoCarga', envio('2026-11-25T16:00:00', { '900001': { GRANDEZA: ['X', 'X'] } }));
+    const p3 = tela(m, s2).patio;
+    afirmar(p3.alertas.filter((a) => a.tipo === 'foraDoPdf').map((a) => a.carga).sort().join() === '900002,900003,900004', 'fora do pdf');
+    // bloquear: box com carga nao bloqueia; vazio bloqueia e nao recebe carga
+    afirmar(/tem carga/.test(erroDe(() => acao(m, s2, 'boxCarga', { numero: 9, estado: 'BLOQUEADO' }))), 'box com carga');
+    let r = acao(m, s2, 'boxCarga', { numero: 2, estado: 'BLOQUEADO', obs: 'porta quebrada' });
+    afirmar(r.patio.mapa[1].estado === 'BLOQUEADO' && r.patio.mapa[1].obs === 'porta quebrada' && /Box 2 bloqueado/.test(r.recado), 'bloqueado');
+    afirmar(/box 2 está bloqueado \(porta quebrada\)/.test(erroDe(() => acao(m, s2, 'carregamentoCarga', { op: 'salvar', carga: '900001', box: 2 }))), 'nao recebe');
+    r = acao(m, s2, 'boxCarga', { numero: 2, estado: 'LIVRE' });
+    afirmar(r.patio.mapa[1].estado === 'LIVRE' && !r.patio.mapa[1].obs, 'liberado');
+    // quantidade de boxes
+    acao(m, s2, 'parametrosCarga', { boxes: 30 });
+    afirmar(tela(m, s2).patio.mapa.length === 30, '30 boxes');
+    afirmar(/de 1 a 99/.test(erroDe(() => acao(m, s2, 'parametrosCarga', { boxes: 0 }))), 'boxes 0');
+    // tipos de veiculo pelo texto do relatorio
+    const t = (x) => ctx(m).cgTipoDoVeiculo_(x);
+    afirmar(t('VUC 2700') === 'VUC' && t('MEDIO - DEP') === 'MEDIO' && t('3/4') === 'MEDIO' && t('TOCO - DEP') === 'TOCO' && t('BI-TRUCK') === 'TRUCK' && t('CARRETA LS') === 'CARRETA' &&
+      t('LEVE') === 'LEVE' && t('FIORINO') === 'LEVE' && t('XYZ') === 'OUTRO' && t('') === '', 'tipos');
+  });
+
+  /* A planilha antiga dos boxes: Controle + Situacao dos BOXs, com o que a de verdade tem (linhas vazias, coluna sem nome). */
+  function planilhaBoxes(m) {
     const controle = [
       ['CARGA', 'COMPLEMENTO', 'PRIORIDADE', 'BOX', 'CARRO', 'DESCRIÇÃO', 'MOTORISTA', 'CARREGADA?', 'OBSERVAÇÃO', '', 'HORÁRIO CHEGADA'],
-      ['900001', '', '1', '5', 'TRUCK', 'ROTA TESTE NORTE', 'MOTORISTA TESTE A', 'NÃO', 'MARCOU E NAO VEIO', '', '05:40'],
+      ['900001', '', '1', '5', 'TRUCK', 'ROTA TESTE NORTE', 'MOTORISTA TESTE A', 'NÃO', 'MARCOU E NAO VEIO', '', ''],
       ['002', '', '', '3', 'VUC', 'ROTA TESTE SUL', 'MOTORISTA TESTE B', '', 'MOTORISTA A CAMINHO', '', ''],
       ['', '', '', '', '', '', '', '', '', '', ''],
       ['900004', 'COMPL', '', '7', 'TRUCK', 'ROTA TESTE LESTE', 'MOTORISTA TESTE C', '', 'JÁ NO BOX', '', '06:10'],
-      ['900005', '', 'ALTA', '3', 'TOCO', 'ROTA TESTE OESTE', 'MOTORISTA TESTE D', '', 'Carro com defeito', '', '']
+      ['900005', '', 'ALTA', '3', 'TOCO', 'ROTA TESTE OESTE', 'MOTORISTA TESTE D', 'SIM', 'Carro com defeito', '', '']
     ];
     const boxes = [26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
     const sit = [['SITUAÇÃO DOS BOXS'], [], [],
@@ -787,43 +888,31 @@ async function rodar() {
     return 'https://docs.google.com/spreadsheets/d/' + p.id + '/edit';
   }
 
-  await caso('boxes: lê a planilha (tolerante), cruza com o PDF (pronta sem box, box ocupado longe de pronto, box diferente, prioridade com risco), cópia curta, nunca grava', () => {
+  await caso('importar da planilha antiga (uma vez): Controle e quadro dos boxes viram o pátio, a carregada não entra, o que já está no GSL fica; a planilha não é tocada', () => {
     const m = mundo(); const s = entrar(m, GERENTE, '5555');
     acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T08:00:00', {
       '900001': { h24: true, d: { GRANDEZA: ['0/10', '0/10'] } }, '900002': { GRANDEZA: ['X', 'X'] }, '900003': { box: '12', d: { GRANDEZA: ['3/10', '0/10'] } },
       '900004': { box: '7', d: { GRANDEZA: ['X', 'X'] } }, '900005': { GRANDEZA: ['1/10', '0/10'] }, '900010': { box: '12', d: { GRANDEZA: ['9/10', '9/10'] } } }));
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900003', box: 1 });       // ja esta no GSL: fica como esta
     const link = planilhaBoxes(m);
     const id = link.split('/')[5];
     const antes = JSON.stringify(m.planilhas.get(id).abas.map((a) => a.dados));
-    afirmar(/não parece de uma planilha/.test(erroDe(() => acao(m, s, 'salvarFonteBoxesCarga', { link: 'http://exemplo.com' }))), 'link ruim');
-    let r = acao(m, s, 'salvarFonteBoxesCarga', { link });
-    afirmar(/Boxes ligados à planilha "Controle de Boxes \(teste\)" \(4 linhas no Controle, 26 boxes\)/.test(r.recado), r.recado);
-    const b = tela(m, s).boxes;
-    afirmar(b.ligado && b.n === 26 && b.mapa.length === 26 && b.abas.controle === 'Controle' && b.abas.situacao === 'Situação dos BOXs' && !b.avisos.length, 'lido ' + JSON.stringify(b.avisos));
-    const box = (n) => b.mapa.find((x) => x.numero === n);
-    afirmar(box(7).estado === 'OCUPADO' && box(7).veiculo === 'TRUCK' && box(7).cargas[0].n === '900004' && box(7).obs === 'JÁ NO BOX' && box(7).obsCat === 'ok' && box(7).chegada === '06:10', 'box 7 ' + JSON.stringify(box(7)));
-    afirmar(box(12).cargas.map((x) => x.n).join() === '900003,900010' && box(1).estado === 'LIVRE' && box(20).cargas[0].fora, 'box 12/1/20');
-    afirmar(b.ocupados === 3 && b.livres === 23, 'contagem ' + b.ocupados + '/' + b.livres);
-    const tipos = b.alertas.map((x) => x.tipo + ':' + x.carga).sort().join(' ');
-    afirmar(tipos === 'boxDiferente:900001 boxLonge:900003 foraDoPdf:999 prioridadeRisco:900001 prioridadeRisco:900005 prontaSemBox:900002', 'alertas ' + tipos);
-    afirmar(b.alertas[0].grav === 'alerta' && b.alertas[0].carga === '900001', 'a 24 h com risco primeiro ' + JSON.stringify(b.alertas[0]));
-    afirmar(b.porCarga['900002'].obs === 'MOTORISTA A CAMINHO' && b.porCarga['900005'].obsCat === 'risco' && b.porCarga['900001'].motorista === 'MOTORISTA TESTE A', 'por carga');
+    afirmar(/Cole o link/.test(erroDe(() => acao(m, s, 'importarBoxesCarga', { link: 'http://exemplo.com' }))), 'link ruim');
+    let r = acao(m, s, 'importarBoxesCarga', { link });
+    afirmar(/4 cargas importadas da planilha "Controle de Boxes \(teste\)" \(2 já estavam no GSL ou sem número\)\. A planilha não foi alterada\./.test(r.recado), r.recado);
+    const por = {};
+    ctx(m).cgCarregamentos_().forEach((x) => { por[x.n] = x; });
+    afirmar(!por['900005'] && por['900003'].box === 1, 'carregada nao entra; a do GSL fica');
+    afirmar(por['900001'].box === 5 && por['900001'].situacao === 'MARCOU E NAO VEIO' && por['900001'].tipo === 'TRUCK' && por['900001'].motorista === 'MOTORISTA TESTE A' && por['900001'].etapa === 'BOX' && !por['900001'].noBox, '900001 ' + JSON.stringify(por['900001']).slice(0, 200));
+    afirmar(por['900002'].box === 3 && por['900002'].tipo === 'VUC' && por['900002'].situacao === 'MOTORISTA A CAMINHO', '002 = 900002');
+    afirmar(por['900004'].box === 7 && por['900004'].noBox === '2026-11-25T06:10:00' && por['900004'].chegada === '2026-11-25T06:10:00' && por['900004'].situacao === 'JÁ NO BOX', '900004 no box desde 06:10');
+    afirmar(por['900010'].box === 12 && por['900010'].noBox && por['900010'].tipo === 'TRUCK', '900010 do quadro (BI-TRUCK, ocupado)');
     afirmar(JSON.stringify(m.planilhas.get(id).abas.map((a) => a.dados)) === antes, 'a planilha deles nao foi tocada');
-    // copia de 90 s: mudou na planilha, a tela so ve quando pedem "Atualizar boxes" (ou passa o tempo)
-    const sit = m.planilhas.get(id).abas.find((a) => a.nome === 'Situação dos BOXs');
-    sit.dados[5][sit.dados[4].indexOf('12')] = 'Livre';
-    afirmar(acao(m, s, 'boxesCarga', {}).boxes.mapa.find((x) => x.numero === 12).estado === 'OCUPADO', 'copia guardada');
-    afirmar(acao(m, s, 'boxesCarga', { forcar: true }).boxes.mapa.find((x) => x.numero === 12).estado === 'LIVRE', 'lido de novo');
-    // quantidade de boxes configuravel
-    acao(m, s, 'parametrosCarga', { boxes: 30 });
-    afirmar(tela(m, s).boxes.mapa.length === 30, '30 boxes');
-    afirmar(/de 1 a 99/.test(erroDe(() => acao(m, s, 'parametrosCarga', { boxes: 0 }))), 'boxes 0');
-    // desligar
-    r = acao(m, s, 'salvarFonteBoxesCarga', { link: '' });
-    afirmar(!tela(m, s).boxes.ligado, 'desligado');
+    r = acao(m, s, 'importarBoxesCarga', { link });
+    afirmar(/^0 cargas importadas/.test(r.recado), 'de novo nao duplica: ' + r.recado);
   });
 
-  await caso('boxes, leitura tolerante: cabeçalho fora da 1ª linha, colunas em outra ordem, nomes sem acento ou minúsculos, abas com outro nome; faltando aba, o aviso', () => {
+  await caso('planilha antiga, leitura tolerante: cabeçalho fora da 1ª linha, colunas em outra ordem, nomes sem acento ou minúsculos, abas com outro nome; faltando aba, o aviso', () => {
     const m = mundo(); const c = ctx(m);
     const r = c.cgInterpretarBoxes_([
       { nome: 'Resumo', valores: [['qualquer coisa'], ['1', '2']] },
@@ -838,9 +927,8 @@ async function rodar() {
     const sem = c.cgInterpretarBoxes_([{ nome: 'Plan1', valores: [['nada aqui']] }]);
     afirmar(sem.avisos.length === 2 && /Controle/.test(sem.avisos[0]) && /Situação dos BOXs/.test(sem.avisos[1]), 'avisos ' + JSON.stringify(sem.avisos));
     // numero curto que casa com duas cargas: nao chuta
-    const x = c.cgCruzarBoxes_({ controle: [], boxes: [{ numero: 1, estado: 'OCUPADO', veiculo: '', cargas: ['154'] }] },
-      [{ n: '763154', nm: 'A', s: { GRANDEZA: ['X', 'X'] } }, { n: '764154', nm: 'B', s: { GRANDEZA: ['X', 'X'] } }], 2);
-    afirmar(x.mapa[0].cargas[0].ambigua.join() === '763154,764154' && x.alertas.some((a) => a.tipo === 'ambigua'), 'ambigua ' + JSON.stringify(x.mapa[0]));
+    const amb = c.cgResolverCarga_('154', [{ n: '763154' }, { n: '764154' }]);
+    afirmar(!amb.n && amb.ambigua.join() === '763154,764154' && /pode ser 763154 ou 764154/.test(amb.erro), 'ambigua ' + JSON.stringify(amb));
     afirmar(['MARCOU E NAO VEIO', 'Marcou e não veio', 'CARRO NA OFICINA', 'SEM PREVISÃO'].every((o) => c.cgCategoriaObs_(o) === 'risco') &&
       c.cgCategoriaObs_('CARREGAR SÓ À NOITE') === 'espera' && c.cgCategoriaObs_('JÁ NO BOX') === 'ok' && c.cgCategoriaObs_('outra coisa') === 'outra' && c.cgCategoriaObs_('') === '', 'categorias');
   });

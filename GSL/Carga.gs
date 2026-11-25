@@ -34,7 +34,7 @@
  * FASE 2 (8.15), no fim deste arquivo: o historico de cada envio (cgSnapshotDaTela_ e a comparacao
  * entre dois envios), a SEQUENCIA das cargas (CARGA_SEQUENCIA), os TURNOS pelo horario (parametros
  * CARGA_TURNO_A/B/C) e a FALTA do dia (CARGA_PRESENCA), as paleteiras e os check-outs que acompanham
- * separadores e conferentes, o STATUS DOS BOXES (a planilha de controle das docas, so lida), o modelo do
+ * separadores e conferentes, os BOXES E O CARREGAMENTO (o controle das docas, no lugar da planilha), o modelo do
  * FLOWRACK (ruas por andar) e a PASSAGEM DE TURNO (CARGA_PASSAGEM).
  */
 
@@ -480,7 +480,8 @@ function cgMaterializar_(tipo, quem) {
 /* GERACAO (a tela pergunta de tempos em tempos)                        */
 /* ------------------------------------------------------------------ */
 
-const CG_TABELAS_VIVAS = ['CARGA_SNAPSHOTS', 'CARGA_EQUIPE', 'CARGA_EQUIPAMENTOS', 'CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM'];
+const CG_TABELAS_VIVAS = ['CARGA_SNAPSHOTS', 'CARGA_EQUIPE', 'CARGA_EQUIPAMENTOS', 'CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM',
+  'CARGA_BOXES', 'CARGA_CARREGAMENTO'];
 function cgGeracao_() {
   return CG_TABELAS_VIVAS.map(function (t) { return geracaoTabela(t); }).join('.');
 }
@@ -523,10 +524,10 @@ function dadosCarga(usuario, params) {
     envios: cgListaEnvios_(snaps),
     passagens: cgPassagens_(),
     sequencia: null,
-    boxes: null,
+    patio: null,
     voce: { email: usuario.email, nome: String(usuario.nome || usuario.email || '') }
   };
-  if (!ultimo) { base.sequencia = cgSequenciaDaTela_([]); base.boxes = cgBoxesDaTela_([], false); return base; }
+  if (!ultimo) { base.sequencia = cgSequenciaDaTela_([]); base.patio = cgPatioDaTela_([]); return base; }
 
   const depositos = cgJson_(ultimo.DEPOSITOS, null) || CG_DEPOSITOS.map(function (d) { return { id: d.id, nome: d.nome }; });
   const cargas = cgCargasDe_(ultimo);
@@ -552,7 +553,7 @@ function dadosCarga(usuario, params) {
   base.indicadores = cgIndicadores_(recentes, cargas, depositos, resumo, contagem);
   base.indicadores.equilibrio = cgEquilibrio_(cargas, depositos, contagem, cgLimitesEquilibrio_());
   base.sequencia = cgSequenciaDaTela_(cargas);
-  base.boxes = cgBoxesDaTela_(cargas, false);
+  base.patio = cgPatioDaTela_(cargas);
   return base;
 }
 
@@ -1480,7 +1481,7 @@ function cgRuasFlowrack_(texto) {
 /* PARAMETROS DA CARGA (tela, para quem edita)                         */
 /* ------------------------------------------------------------------ */
 
-/* params: { turnos: { A, B, C }, boxes, ruas, emCurso } — so o que vier. */
+/* params: { turnos: { A, B, C }, boxes, permanencia, ruas, emCurso } — so o que vier. */
 function acaoParametrosCarga(usuario, params) {
   const p = params || {};
   const gravar = [];
@@ -1502,6 +1503,11 @@ function acaoParametrosCarga(usuario, params) {
     if (!r) throw new Error('Ruas do flowrack: um número de 1 a 20 (o mesmo para todos os andares) ou cinco, do térreo ao 4º (ex.: 6,6,6,8,8).');
     gravar.push(['CARGA_FLOWRACK_RUAS', r.every(function (x) { return x === r[0]; }) ? String(r[0]) : r.join(',')]);
   }
+  if (p.permanencia != null && p.permanencia !== '') {
+    const n = cgInteiro_(p.permanencia, 10, 1440, 0);
+    if (!n) throw new Error('Tempo no box antes do alerta: de 10 a 1440 minutos.');
+    gravar.push(['CARGA_BOX_PERMANENCIA_MIN', String(n)]);
+  }
   if (p.emCurso != null && p.emCurso !== '') {
     const n = cgInteiro_(p.emCurso, 1, 30, 0);
     if (!n) throw new Error('Cargas em andamento ao mesmo tempo: de 1 a 30.');
@@ -1513,11 +1519,22 @@ function acaoParametrosCarga(usuario, params) {
 }
 
 /* ------------------------------------------------------------------ */
-/* STATUS DOS BOXES (a planilha de controle das docas — so leitura)    */
+/* BOXES E CARREGAMENTO — o controle das docas dentro do GSL           */
 /* ------------------------------------------------------------------ */
 
-const CG_BOXES_CACHE_S = 90;
-/* As observacoes da planilha: ok (carro la ou chegando), espera (combinado para depois) e risco (pode nao vir). */
+/*
+ * Pedido da gerencia (25/11): o setor de carregamento deixa a planilha de controle dos boxes e passa a
+ * controlar as docas aqui. CARGA_CARREGAMENTO: uma linha por carga no carregamento, com o box, o veiculo
+ * (placa ou numero e o tipo, que vira o desenho), o motorista, a situacao (a lista do parametro
+ * CARGA_SITUACOES_BOX, a mesma das observacoes da planilha antiga), a chegada, a previsao e o historico.
+ * ETAPA: FILA (no patio, sem box) · BOX (box reservado; com CHEGADA e NO_BOX_EM, o veiculo esta encostado)
+ * · CARREGANDO · CARREGADA (libera o box; a linha fica de historico). CARGA_BOXES: so os boxes bloqueados
+ * (ou com observacao); o box sem linha e livre. Cada mudanca muda a geracao: todo mundo ve na hora.
+ * Cruzamento com o PDF: carga pronta sem veiculo no box, veiculo no box com a carga longe de pronta,
+ * box diferente do relatorio, prioridade com situacao de risco, veiculo no box ha mais de
+ * CARGA_BOX_PERMANENCIA_MIN minutos e carga que ja saiu do relatorio sem estar carregada.
+ * A planilha antiga so e lida (Importar da planilha antiga, uma vez); o GSL nunca grava nela.
+ */
 const CG_OBS_CATEGORIA = {
   ok: ['JA NO BOX', 'CARREGANDO', 'MOTORISTA A CAMINHO', 'CARRO NO PATIO', 'MOTORISTA AGENDADO'],
   espera: ['AMANHA CEDO', 'CARREGA PELA MANHA', 'CARREGAR AMANHA', 'CARREGAR SO A NOITE', 'CARREGAR SO A TARDE', 'VEM NA MADRUGADA',
@@ -1525,6 +1542,15 @@ const CG_OBS_CATEGORIA = {
   risco: ['MARCOU E NAO VEIO', 'CARRO COM DEFEITO', 'CARRO NA OFICINA', 'MOTORISTA NAO ATENDE', 'NAO CONSIGO CONTATO', 'NAO ESCALADO',
     'SEM ESCALAR', 'SEM O NUMERO DO MOTORISTA', 'SEM PREVISAO']
 };
+/* A lista da planilha deles, como eles escrevem (o parametro CARGA_SITUACOES_BOX comeca com ela). */
+const CG_SITUACOES_PADRAO = ['AMANHA CEDO', 'BOX ALTERADO', 'CARREGA PELA MANHA', 'CARREGANDO', 'CARREGAR AMANHÃ', 'CARREGAR SÓ À NOITE',
+  'CARREGAR SÓ À TARDE', 'CARRO COM DEFEITO', 'CARRO NA OFICINA', 'CARRO NO PATIO', 'CARRO PINTANDO', 'FALTA LIGAR', 'JÁ NO BOX',
+  'MARCOU E NAO VEIO', 'MOTORISTA A CAMINHO', 'MOTORISTA AGENDADO', 'MOTORISTA NAO ATENDE', 'MOTORRISTA CHEGOU ATRASADO',
+  'NAO CONSIGO CONTATO', 'NÃO ESCALADO', 'PRIORIDADE ALTERADA', 'SEM ESCALAR', 'SEM O NUMERO DO MOTORISTA', 'SEM PREVISÃO', 'VEM NA MADRUGADA'];
+const CG_ETAPAS = ['FILA', 'BOX', 'CARREGANDO', 'CARREGADA'];
+/* Tipos de veiculo (cada um tem o seu desenho na tela). */
+const CG_TIPOS_VEICULO = ['LEVE', 'VUC', 'MEDIO', 'TOCO', 'TRUCK', 'CARRETA', 'OUTRO'];
+
 function cgObsNorm_(obs) { return cgNorm_(obs).replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
 function cgCategoriaObs_(obs) {
   const t = cgObsNorm_(obs);
@@ -1533,15 +1559,391 @@ function cgCategoriaObs_(obs) {
   ['risco', 'ok', 'espera'].some(function (k) { if (CG_OBS_CATEGORIA[k].indexOf(t) !== -1) { cat = k; return true; } return false; });
   return cat;
 }
-function cgIdPlanilhaBoxes_() {
-  const bruto = String(parametro('CARGA_PLANILHA_BOXES', '') || '').trim();
-  if (!bruto) return '';
-  const m = bruto.match(/\/d\/([\w-]{20,})/);
-  if (m) return m[1];
-  return /^[\w-]{20,}$/.test(bruto) ? bruto : '';
-}
 function cgNBoxes_() { return cgInteiro_(parametro('CARGA_BOXES', ''), 1, 99, 26); }
+function cgPermanenciaMin_() { return cgInteiro_(parametro('CARGA_BOX_PERMANENCIA_MIN', ''), 10, 1440, 120); }
+/* A lista de situacoes (parametro, uma por linha ou separadas por ;) mais as que os botoes usam. */
+function cgSituacoesBox_() {
+  const bruto = String(parametro('CARGA_SITUACOES_BOX', '') || '');
+  const lista = bruto ? bruto.split(/[;\n]+/).map(function (x) { return cgTexto_(x, 40).toUpperCase(); }).filter(Boolean) : CG_SITUACOES_PADRAO.slice();
+  ['JÁ NO BOX', 'CARREGANDO', 'CARRO NO PATIO', 'MARCOU E NAO VEIO'].forEach(function (x) {
+    if (!lista.some(function (y) { return cgObsNorm_(y) === cgObsNorm_(x); })) lista.push(x);
+  });
+  return lista;
+}
+/* A situacao como esta na lista (sem diferenca de acento e maiuscula), ou '' se nao esta. */
+function cgSituacaoDaLista_(texto, lista) {
+  const t = cgObsNorm_(texto);
+  if (!t) return '';
+  return (lista || cgSituacoesBox_()).filter(function (x) { return cgObsNorm_(x) === t; })[0] || '';
+}
+/* "VUC 2700", "MEDIO - DEP", "3/4", "TOCO", "TRUCK", "BI-TRUCK", "CARRETA", "LEVE"... -> o tipo do desenho */
+function cgTipoDoVeiculo_(texto) {
+  const t = cgNorm_(texto);
+  if (!t) return '';
+  if (/CARRETA|SEMI ?REBOQUE|BITREM|RODOTREM|CAVALO/.test(t)) return 'CARRETA';
+  if (/TRUCK|TRUCAD/.test(t)) return 'TRUCK';
+  if (/TOCO/.test(t)) return 'TOCO';
+  if (/\bVUC\b/.test(t)) return 'VUC';
+  if (/3\/4|TRES QUARTOS|MEDIO/.test(t)) return 'MEDIO';
+  if (/LEVE|UTILIT|VAN\b|FIORINO|PICK|SAVEIRO|KOMBI|STRADA|MONTANA|HR\b/.test(t)) return 'LEVE';
+  return 'OUTRO';
+}
+/* O tipo so quando o texto diz qual (uma placa diz "OUTRO": ai vale o tipo do relatorio). */
+function cgTipoConhecido_(texto) { const t = cgTipoDoVeiculo_(texto); return t === 'OUTRO' ? '' : t; }
+/* "05:40" -> o ISO de hoje (ou de ontem, se a hora ainda nao chegou: o carro chegou de madrugada). */
+function cgHoraParaIso_(hora, agoraIso) {
+  const m = /^(\d{1,2})[:h](\d{2})$/.exec(String(hora || '').trim());
+  if (!m || +m[1] > 23 || +m[2] > 59) return '';
+  const hh = ('0' + m[1]).slice(-2) + ':' + m[2];
+  let dia = String(agoraIso).slice(0, 10);
+  if (hh > String(agoraIso).slice(11, 16)) dia = cgDiaMais_(dia, -1);
+  return dia + 'T' + hh + ':00';
+}
 
+function cgCarregamentos_() {
+  return listar('CARGA_CARREGAMENTO').map(function (r) {
+    return { id: r.ID, linha: r._linha, n: String(r.CARGA || ''), comp: String(r.COMPLEMENTO || ''), prio: String(r.PRIORIDADE || ''),
+      box: Number(r.BOX) || 0, veiculo: String(r.VEICULO || ''), tipo: String(r.TIPO_VEICULO || ''), motorista: String(r.MOTORISTA || ''),
+      situacao: String(r.SITUACAO || ''), situacaoCat: cgCategoriaObs_(r.SITUACAO), etapa: CG_ETAPAS.indexOf(String(r.ETAPA)) !== -1 ? String(r.ETAPA) : 'FILA',
+      chegada: cgIso_(r.CHEGADA), noBox: cgIso_(r.NO_BOX_EM), previsao: String(r.PREVISAO || ''), carregadaEm: cgIso_(r.CARREGADA_EM),
+      carregadaPor: String(r.CARREGADA_POR || ''), obs: String(r.OBSERVACAO || ''), hist: cgJson_(r.HISTORICO, []) || [],
+      por: String(r.ATUALIZADO_POR || ''), em: String(r.ATUALIZADO_EM || '') };
+  }).filter(function (x) { return x.n; });
+}
+function cgBoxesGravados_() {
+  const saida = {};
+  listar('CARGA_BOXES').forEach(function (r) {
+    const n = Number(r.NUMERO);
+    if (n >= 1) saida[n] = { id: r.ID, linha: r._linha, estado: String(r.ESTADO) === 'BLOQUEADO' ? 'BLOQUEADO' : 'LIVRE', obs: String(r.OBSERVACAO || '') };
+  });
+  return saida;
+}
+
+/* Andamento de uma carga do PDF (para o box): % geral, % da separacao e da conferencia, gargalo. */
+function cgAndamentoCarga_(c) {
+  const e = cgEstadoCarga_(c);
+  const lado = function (k) {
+    let n = 0, soma = 0;
+    Object.keys(c.s || {}).forEach(function (d) {
+      const p = cgPartes_((c.s[d] || [])[k]);
+      if (p.nada || p.vazia) return;
+      n++; soma += p.x ? 1 : p.a / p.b;
+    });
+    return n ? Math.round(soma / n * 1000) / 10 : null;
+  };
+  return { n: c.n, nm: c.nm, h: c.h ? 1 : 0, bx: c.bx || '', v: c.v || '', estado: e.estado, pct: e.pct, sep: lado(0), conf: lado(1), gargalo: e.gargalo, gargaloPct: e.gargaloPct };
+}
+
+/*
+ * PURA: o patio. carregamentos (cgCarregamentos_), boxes gravados, cargas do ultimo PDF, n de boxes,
+ * limite de permanencia (min) e agora -> { mapa, fila, carregadas, semRegistro, alertas, porCarga, ... }.
+ */
+function cgPatio_(carregamentos, gravados, cargas, nBoxes, permanencia, agora) {
+  const porN = {};
+  cargas.forEach(function (c) { porN[c.n] = c; });
+  const minAgora = cgMin_(agora);
+  const comAndamento = function (x) {
+    const c = porN[x.n];
+    const o = Object.assign({}, x, { pdf: c ? cgAndamentoCarga_(c) : null });
+    delete o.linha;
+    o.noBoxMin = x.noBox && x.etapa !== 'CARREGADA' ? Math.max(0, minAgora - cgMin_(x.noBox)) : null;
+    if (!o.tipo) o.tipo = cgTipoConhecido_(x.veiculo) || (c ? cgTipoConhecido_(c.v) : '') || 'OUTRO';
+    return o;
+  };
+  const abertos = carregamentos.filter(function (x) { return x.etapa !== 'CARREGADA'; }).map(comAndamento);
+  const carregadas = carregamentos.filter(function (x) { return x.etapa === 'CARREGADA' && x.carregadaEm && minAgora - cgMin_(x.carregadaEm) <= 24 * 60; })
+    .map(comAndamento).sort(function (a, b) { return b.carregadaEm.localeCompare(a.carregadaEm); });
+  const mapa = [];
+  for (let i = 1; i <= nBoxes; i++) {
+    const g = gravados[i] || { estado: 'LIVRE', obs: '' };
+    const itens = abertos.filter(function (x) { return x.box === i; });
+    let estado = 'LIVRE';
+    if (g.estado === 'BLOQUEADO') estado = 'BLOQUEADO';
+    else if (itens.some(function (x) { return x.etapa === 'CARREGANDO'; })) estado = 'CARREGANDO';
+    else if (itens.some(function (x) { return x.noBox; })) estado = 'OCUPADO';
+    else if (itens.length) estado = 'RESERVADO';
+    const noBox = itens.filter(function (x) { return x.noBox; }).map(function (x) { return x.noBox; }).sort()[0] || '';
+    mapa.push({ numero: i, estado: estado, obs: g.obs, itens: itens, noBox: noBox, noBoxMin: noBox ? Math.max(0, minAgora - cgMin_(noBox)) : null });
+  }
+  const fila = abertos.filter(function (x) { return !x.box || x.box > nBoxes; }).sort(function (a, b) {
+    const ha = (a.pdf && a.pdf.h) || a.prio ? 1 : 0, hb = (b.pdf && b.pdf.h) || b.prio ? 1 : 0;
+    return (hb - ha) || ((b.pdf ? b.pdf.pct : -1) - (a.pdf ? a.pdf.pct : -1)) || a.n.localeCompare(b.n);
+  });
+  const registradas = {};
+  carregamentos.forEach(function (x) { if (x.etapa !== 'CARREGADA' || (x.carregadaEm && minAgora - cgMin_(x.carregadaEm) <= 48 * 60)) registradas[x.n] = x; });
+  const semRegistro = cargas.filter(function (c) { return !registradas[c.n]; }).map(cgAndamentoCarga_)
+    .sort(function (a, b) { return (b.h - a.h) || ((b.estado === 'pronta') - (a.estado === 'pronta')) || (b.pct - a.pct) || a.n.localeCompare(b.n); });
+  const porCarga = {};
+  abertos.concat(carregadas).forEach(function (x) {
+    if (porCarga[x.n] && porCarga[x.n].etapa !== 'CARREGADA') return;
+    porCarga[x.n] = { id: x.id, box: x.box, etapa: x.etapa, situacao: x.situacao, situacaoCat: x.situacaoCat, veiculo: x.veiculo, tipo: x.tipo,
+      chegada: x.chegada, noBox: x.noBox, carregadaEm: x.carregadaEm };
+  });
+  // alertas
+  const alertas = [];
+  abertos.forEach(function (x) {
+    const p = x.pdf;
+    if (x.noBox && p && p.estado !== 'pronta' && p.pct < 50) {
+      alertas.push({ tipo: 'boxLonge', grav: 'atencao', box: x.box, carga: x.n, h: p.h,
+        texto: 'Box ' + x.box + ': o veículo está encostado e a carga ' + x.n + ' está em ' + Math.round(p.pct) + '%' + (p.gargalo ? ' (gargalo: ' + cgNomeDep_(p.gargalo) + ')' : '') + '.' });
+    }
+    if (p && p.bx && x.box && Number(p.bx) !== x.box) {
+      alertas.push({ tipo: 'boxDiferente', grav: 'atencao', box: x.box, carga: x.n, h: p.h, texto: 'Carga ' + x.n + ': box ' + p.bx + ' no relatório e ' + x.box + ' no pátio.' });
+    }
+    if (((p && p.h) || x.prio) && x.situacaoCat === 'risco') {
+      alertas.push({ tipo: 'prioridadeRisco', grav: 'alerta', box: x.box, carga: x.n, h: p ? p.h : 0,
+        texto: 'Carga ' + x.n + (p && p.h ? ' (24 h)' : ' (prioridade ' + x.prio + ')') + ': ' + x.situacao + '.' });
+    }
+    if (x.noBoxMin != null && x.noBoxMin > permanencia) {
+      alertas.push({ tipo: 'permanencia', grav: 'atencao', box: x.box, carga: x.n, h: p ? p.h : 0, min: x.noBoxMin,
+        texto: 'Box ' + x.box + ': veículo da carga ' + x.n + ' encostado há ' + cgDuracaoTxt_(x.noBoxMin) + ' (limite ' + cgDuracaoTxt_(permanencia) + ').' });
+    }
+    if (!p && cargas.length) {
+      alertas.push({ tipo: 'foraDoPdf', grav: 'info', box: x.box, carga: x.n, h: 0, texto: 'Carga ' + x.n + ' não está mais na situação de carga: já foi carregada?' });
+    }
+  });
+  cargas.forEach(function (c) {
+    const a = cgAndamentoCarga_(c);
+    if (a.estado !== 'pronta') return;
+    const x = porCarga[c.n];
+    if (x && (x.etapa === 'CARREGADA' || x.etapa === 'CARREGANDO' || (x.box && x.noBox))) return;
+    alertas.push({ tipo: 'prontaSemBox', grav: c.h ? 'alerta' : 'atencao', box: x ? x.box : 0, carga: c.n, h: c.h ? 1 : 0,
+      texto: 'Carga ' + c.n + (c.h ? ' (24 h)' : '') + ' está pronta e não tem veículo no box' + (x && x.situacao ? ' — ' + x.situacao : (x ? '' : ' (nem registro no pátio)')) + '.' });
+  });
+  const peso = { alerta: 0, atencao: 1, info: 2 };
+  alertas.sort(function (a, b) { return (peso[a.grav] - peso[b.grav]) || ((b.h || 0) - (a.h || 0)) || String(a.carga).localeCompare(String(b.carga)); });
+  return { n: nBoxes, permanenciaMin: permanencia, mapa: mapa, fila: fila, carregadas: carregadas.slice(0, 60), semRegistro: semRegistro.slice(0, 200),
+    alertas: alertas.slice(0, 120), porCarga: porCarga,
+    contagem: { livres: mapa.filter(function (b) { return b.estado === 'LIVRE'; }).length, reservados: mapa.filter(function (b) { return b.estado === 'RESERVADO'; }).length,
+      ocupados: mapa.filter(function (b) { return b.estado === 'OCUPADO' || b.estado === 'CARREGANDO'; }).length,
+      bloqueados: mapa.filter(function (b) { return b.estado === 'BLOQUEADO'; }).length, fila: fila.length, carregadasHoje: carregadas.length } };
+}
+function cgDuracaoTxt_(min) { min = Math.round(min); return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + ('0' + (min % 60)).slice(-2) : ''); }
+function cgPatioDaTela_(cargas) {
+  const p = cgPatio_(cgCarregamentos_(), cgBoxesGravados_(), cargas || [], cgNBoxes_(), cgPermanenciaMin_(), cgAgoraIso_());
+  p.situacoes = cgSituacoesBox_();
+  p.tipos = CG_TIPOS_VEICULO;
+  return p;
+}
+function cgCargasDoUltimo_() { const u = cgSnapshots_()[0]; return u ? cgCargasDe_(u) : []; }
+
+/* O numero da carga: completo, ou o curto (3 digitos, como no quadro dos boxes) que so uma carga do PDF termina. */
+function cgResolverCarga_(texto, cargas) {
+  const num = String(texto || '').replace(/\D+/g, '');
+  if (!num || num.length < 2) return { n: '', erro: 'Informe o número da carga.' };
+  if (cargas.some(function (c) { return c.n === num; })) return { n: num };
+  if (num.length <= 5) {
+    const m = cargas.filter(function (c) { return c.n.length > num.length && c.n.slice(-num.length) === num; });
+    if (m.length === 1) return { n: m[0].n, curto: num };
+    if (m.length > 1) return { n: '', erro: '"' + num + '" pode ser ' + m.map(function (c) { return c.n; }).join(' ou ') + ': digite o número inteiro.', ambigua: m.map(function (c) { return c.n; }) };
+    if (num.length < 4) return { n: '', erro: 'Nenhuma carga da situação de carga termina em ' + num + ': digite o número inteiro.' };
+  }
+  return /^\d{4,10}$/.test(num) ? { n: num, fora: true } : { n: '', erro: 'Número da carga inválido.' };
+}
+function cgHist_(x, quem, texto, agora) {
+  const h = (x && x.hist ? x.hist.slice() : []);
+  h.push([agora, quem, texto]);
+  return JSON.stringify(h.slice(-40));
+}
+
+/*
+ * CARREGAMENTO. params: { op, id, ... }
+ *   salvar      { id?, carga, complemento, prioridade, box, veiculo, tipo, motorista, situacao, chegada (hh:mm), previsao (hh:mm), observacao }
+ *   box         { id, box }        0 = de volta ao patio (fila)
+ *   chegou      { id }             o veiculo chegou (no box, se ja tem box; senao, no patio)
+ *   carregando  { id }             comecou a carregar (precisa de box)
+ *   carregada   { id }             terminou: libera o box, fica no historico
+ *   situacao    { id, situacao }
+ *   reabrir     { id }             desfaz o "carregada"
+ *   excluir     { id }
+ */
+function acaoCarregamentoCarga(usuario, params) {
+  const p = params || {};
+  const op = String(p.op || '');
+  if (['salvar', 'box', 'chegou', 'carregando', 'carregada', 'situacao', 'reabrir', 'excluir'].indexOf(op) === -1) throw new Error('Operação desconhecida no carregamento.');
+  const quem = usuario.email, nomeQuem = cgTexto_(usuario.nome || quem, 60);
+  let recado = '', idFinal = String(p.id || '');
+  comTrava(function () {
+    const agora = cgAgoraIso_();
+    const todos = cgCarregamentos_();
+    const nBoxes = cgNBoxes_(), gravados = cgBoxesGravados_();
+    const atual = idFinal ? todos.filter(function (x) { return x.id === idFinal; })[0] : null;
+    if (op !== 'salvar' && !atual) throw new Error('Este carregamento não existe mais. Atualize a tela.');
+    const conferirBox = function (b) {
+      if (!b) return 0;
+      if (!(b >= 1 && b <= nBoxes && Math.floor(b) === b)) throw new Error('Box de 1 a ' + nBoxes + '.');
+      if (gravados[b] && gravados[b].estado === 'BLOQUEADO') throw new Error('O box ' + b + ' está bloqueado' + (gravados[b].obs ? ' (' + gravados[b].obs + ')' : '') + '.');
+      return b;
+    };
+    const gravar = function (campos, texto) {
+      campos.HISTORICO = cgHist_(atual, nomeQuem, texto, agora);
+      atualizar('CARGA_CARREGAMENTO', atual.id, campos, quem);
+    };
+    if (op === 'salvar') {
+      const cargas = cgCargasDoUltimo_();
+      const r = cgResolverCarga_(p.carga, cargas);
+      if (!r.n) throw new Error(r.erro);
+      const outro = todos.filter(function (x) { return x.n === r.n && x.etapa !== 'CARREGADA' && x.id !== idFinal; })[0];
+      if (outro) throw new Error('A carga ' + r.n + ' já está ' + (outro.box ? 'no box ' + outro.box : 'no pátio') + '.');
+      const box = conferirBox(Number(p.box) || 0);
+      const lista = cgSituacoesBox_();
+      const situacao = p.situacao ? cgSituacaoDaLista_(p.situacao, lista) : '';
+      if (p.situacao && !situacao) throw new Error('Situação "' + cgTexto_(p.situacao, 40).toUpperCase() + '" não está na lista (Configuração › Outros parâmetros › CARGA_SITUACOES_BOX).');
+      const tipo = String(p.tipo || '').toUpperCase();
+      if (tipo && CG_TIPOS_VEICULO.indexOf(tipo) === -1) throw new Error('Tipo de veículo desconhecido.');
+      const prev = String(p.previsao || '').trim();
+      if (prev && !/^([01]?\d|2[0-3])[:h][0-5]\d$/.test(prev)) throw new Error('Previsão: escreva a hora como 14:30.');
+      let chegada = '';
+      if (p.chegada) { chegada = cgHoraParaIso_(p.chegada, agora); if (!chegada) throw new Error('Chegada: escreva a hora como 05:40.'); }
+      const c = cargas.filter(function (x) { return x.n === r.n; })[0];
+      const campos = { CARGA: r.n, COMPLEMENTO: cgTexto_(p.complemento, 40), PRIORIDADE: cgTexto_(p.prioridade, 20), BOX: box ? String(box) : '',
+        VEICULO: cgTexto_(p.veiculo, 30).toUpperCase(), TIPO_VEICULO: tipo || cgTipoConhecido_(p.veiculo) || (c ? cgTipoConhecido_(c.v) : '') || '',
+        MOTORISTA: cgTexto_(p.motorista, 60), SITUACAO: situacao, PREVISAO: prev ? prev.replace('h', ':').replace(/^(\d):/, '0$1:') : '', OBSERVACAO: cgTexto_(p.observacao, 300) };
+      if (atual) {
+        if (atual.etapa === 'FILA' && box) campos.ETAPA = 'BOX';
+        if (!box && atual.etapa !== 'CARREGADA') { campos.ETAPA = 'FILA'; campos.NO_BOX_EM = ''; }
+        if (box && atual.box !== box && atual.noBox) campos.NO_BOX_EM = agora;
+        if (chegada && !atual.chegada) { campos.CHEGADA = chegada; if (box && !atual.noBox) campos.NO_BOX_EM = chegada; }
+        gravar(campos, 'editou' + (box !== atual.box ? ' · box ' + (box || 'pátio') : '') + (situacao && situacao !== atual.situacao ? ' · ' + situacao : ''));
+        recado = 'Carga ' + r.n + ' atualizada.';
+      } else {
+        campos.ETAPA = box ? 'BOX' : 'FILA';
+        if (chegada) { campos.CHEGADA = chegada; if (box) campos.NO_BOX_EM = chegada; }
+        campos.HISTORICO = cgHist_(null, nomeQuem, 'registrou' + (box ? ' no box ' + box : ' no pátio'), agora);
+        idFinal = inserir('CARGA_CARREGAMENTO', campos, quem);
+        recado = 'Carga ' + r.n + (box ? ' no box ' + box : ' no pátio') + (r.curto ? ' (' + r.curto + ' = ' + r.n + ')' : '') + (r.fora ? ' — não está na situação de carga' : '') + '.';
+      }
+      return;
+    }
+    if (op === 'box') {
+      const box = conferirBox(Number(p.box) || 0);
+      if (atual.etapa === 'CARREGADA') throw new Error('A carga ' + atual.n + ' já foi carregada.');
+      if (box === atual.box) return;
+      const campos = { BOX: box ? String(box) : '' };
+      if (!box) { campos.ETAPA = 'FILA'; campos.NO_BOX_EM = ''; }
+      else { if (atual.etapa === 'FILA') campos.ETAPA = 'BOX'; campos.NO_BOX_EM = atual.chegada ? agora : ''; }
+      gravar(campos, box ? 'box ' + box : 'voltou ao pátio');
+      recado = 'Carga ' + atual.n + (box ? ' no box ' + box : ' de volta ao pátio') + '.';
+    } else if (op === 'chegou') {
+      const campos = {};
+      if (!atual.chegada) campos.CHEGADA = agora;
+      if (atual.box && !atual.noBox) campos.NO_BOX_EM = agora;
+      campos.SITUACAO = cgSituacaoDaLista_(atual.box ? 'JÁ NO BOX' : 'CARRO NO PATIO') || (atual.box ? 'JÁ NO BOX' : 'CARRO NO PATIO');
+      gravar(campos, 'chegou' + (atual.box ? ' (box ' + atual.box + ')' : ' (pátio)'));
+      recado = 'Veículo da carga ' + atual.n + ' chegou' + (atual.box ? ' ao box ' + atual.box : ' (no pátio)') + ' às ' + agora.slice(11, 16) + '.';
+    } else if (op === 'carregando') {
+      if (!atual.box) throw new Error('Ponha a carga ' + atual.n + ' num box antes de carregar.');
+      gravar({ ETAPA: 'CARREGANDO', SITUACAO: cgSituacaoDaLista_('CARREGANDO') || 'CARREGANDO', CHEGADA: atual.chegada || agora, NO_BOX_EM: atual.noBox || agora }, 'carregando');
+      recado = 'Carga ' + atual.n + ' carregando no box ' + atual.box + '.';
+    } else if (op === 'carregada') {
+      if (atual.etapa === 'CARREGADA') throw new Error('A carga ' + atual.n + ' já está carregada.');
+      gravar({ ETAPA: 'CARREGADA', CARREGADA_EM: agora, CARREGADA_POR: quem }, 'carregada' + (atual.box ? ' (box ' + atual.box + ' liberado)' : ''));
+      recado = 'Carga ' + atual.n + ' carregada' + (atual.box ? ': box ' + atual.box + ' liberado' : '') + '.';
+    } else if (op === 'situacao') {
+      const s = cgSituacaoDaLista_(p.situacao);
+      if (p.situacao && !s) throw new Error('Situação fora da lista.');
+      gravar({ SITUACAO: s }, s ? 'situação: ' + s : 'tirou a situação');
+      recado = 'Carga ' + atual.n + ': ' + (s || 'sem situação') + '.';
+    } else if (op === 'reabrir') {
+      if (atual.etapa !== 'CARREGADA') throw new Error('A carga ' + atual.n + ' não está carregada.');
+      if (todos.some(function (x) { return x.n === atual.n && x.etapa !== 'CARREGADA'; })) throw new Error('A carga ' + atual.n + ' já está aberta de novo no pátio.');
+      const box = atual.box && !(gravados[atual.box] && gravados[atual.box].estado === 'BLOQUEADO') ? atual.box : 0;
+      gravar({ ETAPA: box ? 'BOX' : 'FILA', BOX: box ? String(box) : '', CARREGADA_EM: '', CARREGADA_POR: '' }, 'reabriu');
+      recado = 'Carga ' + atual.n + ' reaberta' + (box ? ' no box ' + box : ' no pátio') + '.';
+    } else {
+      excluir('CARGA_CARREGAMENTO', atual.id, quem);
+      recado = 'Carga ' + atual.n + ' tirada do pátio.';
+    }
+  });
+  esquecerLeituras();
+  return { ok: true, id: idFinal, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(), recado: recado };
+}
+
+/* BLOQUEAR / LIBERAR UM BOX. params: { numero, estado: 'BLOQUEADO' | 'LIVRE', obs } */
+function acaoBoxCarga(usuario, params) {
+  const p = params || {};
+  const n = cgNBoxes_(), numero = Number(p.numero);
+  if (!(numero >= 1 && numero <= n && Math.floor(numero) === numero)) throw new Error('Box de 1 a ' + n + '.');
+  const estado = String(p.estado || '').toUpperCase() === 'BLOQUEADO' ? 'BLOQUEADO' : 'LIVRE';
+  const obs = cgTexto_(p.obs, 120);
+  comTrava(function () {
+    if (estado === 'BLOQUEADO' && cgCarregamentos_().some(function (x) { return x.box === numero && x.etapa !== 'CARREGADA'; })) {
+      throw new Error('O box ' + numero + ' tem carga: tire as cargas dele (de volta ao pátio) antes de bloquear.');
+    }
+    const g = cgBoxesGravados_()[numero];
+    const campos = { NUMERO: String(numero), ESTADO: estado, OBSERVACAO: estado === 'BLOQUEADO' ? obs : '' };
+    if (g) atualizar('CARGA_BOXES', g.id, campos, usuario.email); else inserir('CARGA_BOXES', campos, usuario.email);
+  });
+  esquecerLeituras();
+  return { ok: true, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(),
+    recado: 'Box ' + numero + (estado === 'BLOQUEADO' ? ' bloqueado' + (obs ? ' (' + obs + ')' : '') : ' liberado') + '.' };
+}
+
+/*
+ * IMPORTAR DA PLANILHA ANTIGA (uma vez, para comecar com o estado de hoje). params: { link }.
+ * So LE a planilha (abas Controle e Situacao dos BOXs). Cada linha do Controle vira um carregamento
+ * (a carga que ja esta aberta no GSL fica como esta; a CARREGADA = SIM nao entra); a carga que so
+ * aparece no quadro dos boxes entra no box dela. Numero curto casa com a carga do PDF que termina nele.
+ */
+function acaoImportarBoxesCarga(usuario, params) {
+  const link = String((params && params.link) || '').trim();
+  const m = link.match(/\/d\/([\w-]{20,})/);
+  const id = m ? m[1] : (/^[\w-]{20,}$/.test(link) ? link : '');
+  if (!id) throw new Error('Cole o link da planilha antiga dos boxes (uma planilha do Google).');
+  exigirPorta_();
+  let lido;
+  try { lido = cgLerPlanilhaBoxes_(id); }
+  catch (e) { throw new Error('Não consegui abrir a planilha. A conta dona do GSL precisa ter acesso a ela (só leitura basta).'); }
+  if (!lido.abas.controle && !lido.abas.situacao) throw new Error('A planilha "' + lido.fonte.nome + '" não tem a aba Controle (CARGA, BOX...) nem a Situação dos BOXs.');
+  const quem = usuario.email, nomeQuem = cgTexto_(usuario.nome || quem, 60);
+  let novos = 0, pulados = 0;
+  comTrava(function () {
+    const agora = cgAgoraIso_();
+    const cargas = cgCargasDoUltimo_(), nBoxes = cgNBoxes_(), lista = cgSituacoesBox_();
+    const abertas = {};
+    cgCarregamentos_().forEach(function (x) { if (x.etapa !== 'CARREGADA') abertas[x.n] = true; });
+    const boxDoQuadro = {};
+    (lido.boxes || []).forEach(function (b) { b.cargas.forEach(function (curto) { const r = cgResolverCarga_(curto, cargas); if (r.n) boxDoQuadro[r.n] = { box: b.numero, ocupado: b.estado === 'OCUPADO', veiculo: b.veiculo }; }); });
+    const linhas = [];
+    const novo = function (n, campos) {
+      if (abertas[n]) { pulados++; return; }
+      abertas[n] = true;
+      linhas.push(campos); novos++;
+    };
+    (lido.controle || []).forEach(function (r) {
+      if (r.carregadaSim) return;
+      const res = cgResolverCarga_(r.carga, cargas);
+      if (!res.n) { pulados++; return; }
+      const q = boxDoQuadro[res.n];
+      let box = Number(r.box) || (q ? q.box : 0);
+      if (!(box >= 1 && box <= nBoxes)) box = 0;
+      const situacao = cgSituacaoDaLista_(r.obs, lista);
+      const noBox = box && ((q && q.ocupado) || ['JA NO BOX', 'CARREGANDO'].indexOf(cgObsNorm_(r.obs)) !== -1);
+      const chegada = cgHoraParaIso_(r.chegada, agora) || (noBox ? agora : '');
+      const c = cargas.filter(function (x) { return x.n === res.n; })[0];
+      novo(res.n, { CARGA: res.n, COMPLEMENTO: cgTexto_(r.complemento, 40), PRIORIDADE: cgTexto_(r.prioridade, 20), BOX: box ? String(box) : '',
+        VEICULO: cgTexto_(r.carro, 30).toUpperCase(), TIPO_VEICULO: cgTipoConhecido_(r.carro) || (q ? cgTipoConhecido_(q.veiculo) : '') || (c ? cgTipoConhecido_(c.v) : ''),
+        MOTORISTA: cgTexto_(r.motorista, 60), SITUACAO: situacao,
+        ETAPA: cgObsNorm_(r.obs) === 'CARREGANDO' && box ? 'CARREGANDO' : (box ? 'BOX' : 'FILA'),
+        CHEGADA: chegada, NO_BOX_EM: noBox ? chegada : '', OBSERVACAO: situacao ? '' : cgTexto_(r.obs, 300),
+        HISTORICO: cgHist_(null, nomeQuem, 'importou da planilha antiga (linha ' + r.linha + ')', agora) });
+    });
+    Object.keys(boxDoQuadro).forEach(function (n) {
+      const q = boxDoQuadro[n];
+      if (!(q.box >= 1 && q.box <= nBoxes)) return;
+      const c = cargas.filter(function (x) { return x.n === n; })[0];
+      novo(n, { CARGA: n, BOX: String(q.box), VEICULO: '', TIPO_VEICULO: cgTipoConhecido_(q.veiculo) || (c ? cgTipoConhecido_(c.v) : ''), ETAPA: 'BOX',
+        CHEGADA: q.ocupado ? agora : '', NO_BOX_EM: q.ocupado ? agora : '', SITUACAO: q.ocupado ? (cgSituacaoDaLista_('JÁ NO BOX', lista) || '') : '',
+        HISTORICO: cgHist_(null, nomeQuem, 'importou do quadro dos boxes da planilha antiga', agora) });
+    });
+    if (linhas.length) inserirVarios('CARGA_CARREGAMENTO', linhas, quem);
+  });
+  esquecerLeituras();
+  return { ok: true, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(),
+    recado: novos + (novos === 1 ? ' carga importada' : ' cargas importadas') + ' da planilha "' + lido.fonte.nome + '"' + (pulados ? ' (' + pulados + ' já estavam no GSL ou sem número)' : '') + '. A planilha não foi alterada.' };
+}
+
+/* ---- planilha antiga dos boxes (so para Importar) ---- */
 /* A planilha inteira (texto como aparece na tela), aba por aba. */
 function cgLerPlanilhaBoxes_(id) {
   exigirPorta_();
@@ -1647,135 +2049,6 @@ function cgInterpretarBoxes_(abas) {
     });
   } else saida.avisos.push('Não achei a aba "Situação dos BOXs" (a linha com os números dos boxes).');
   return saida;
-}
-
-/*
- * PURA: a planilha cruzada com a situacao de carga. Numero curto ("154") casa com a carga do relatorio
- * que termina nele (763154) quando so uma termina assim. Devolve o mapa dos boxes 1..n, os alertas e o que
- * a planilha diz de cada carga do relatorio (porCarga).
- */
-function cgCruzarBoxes_(lido, cargas, nBoxes) {
-  const porN = {};
-  cargas.forEach(function (c) { porN[c.n] = c; });
-  const ambiguas = {};
-  const casar = function (num) {
-    num = String(num || '').replace(/\D+/g, '');
-    if (!num) return null;
-    if (porN[num]) return porN[num];
-    if (num.length <= 5) {
-      const m = cargas.filter(function (c) { return c.n.length > num.length && c.n.slice(-num.length) === num; });
-      if (m.length === 1) return m[0];
-      if (m.length > 1) ambiguas[num] = m.map(function (c) { return c.n; });
-    }
-    return null;
-  };
-  const resumoCarga = function (c) { const e = cgEstadoCarga_(c); return { n: c.n, nm: c.nm, h: c.h ? 1 : 0, bx: c.bx || '', v: c.v || '', estado: e.estado, pct: e.pct, gargalo: e.gargalo }; };
-  const porCarga = {}, alertas = [];
-  (lido.controle || []).forEach(function (r) {
-    const c = casar(r.carga);
-    if (!c || porCarga[c.n]) return;
-    porCarga[c.n] = { box: r.box, obs: r.obs, obsCat: r.obsCat, carro: r.carro, motorista: r.motorista, chegada: r.chegada,
-      prioridade: r.prioridade, carregada: !!r.carregadaSim, descricao: r.descricao, complemento: r.complemento, linha: r.linha };
-  });
-  const boxDaCarga = {};
-  const mapa = [];
-  const lidos = {};
-  (lido.boxes || []).forEach(function (b) { lidos[b.numero] = b; });
-  for (let i = 1; i <= nBoxes; i++) {
-    const b = lidos[i] || { numero: i, estado: '', veiculo: '', cargas: [] };
-    const item = { numero: i, estado: b.estado, veiculo: b.veiculo, cargas: [], obs: '', obsCat: '', chegada: '', motorista: '', lido: !!lidos[i] };
-    b.cargas.forEach(function (curto) {
-      const c = casar(curto);
-      if (c) { item.cargas.push(Object.assign({ curto: curto }, resumoCarga(c))); boxDaCarga[c.n] = i; }
-      else item.cargas.push({ curto: curto, n: '', fora: true, ambigua: ambiguas[curto] || null });
-    });
-    // a planilha de controle tambem diz o box: a carga que esta la e nao esta na linha do box entra
-    if (b.estado === 'OCUPADO') {
-      Object.keys(porCarga).forEach(function (n) {
-        if (Number(porCarga[n].box) === i && !boxDaCarga[n] && !item.cargas.some(function (x) { return x.n === n; }) &&
-          ['JA NO BOX', 'CARREGANDO'].indexOf(cgObsNorm_(porCarga[n].obs)) !== -1) {
-          item.cargas.push(Object.assign({ curto: n.slice(-3), daControle: true }, resumoCarga(porN[n])));
-        }
-      });
-    }
-    const info = item.cargas.map(function (x) { return x.n && porCarga[x.n]; }).filter(Boolean)[0];
-    if (info) { item.obs = info.obs; item.obsCat = info.obsCat; item.chegada = info.chegada; item.motorista = info.motorista; if (!item.veiculo) item.veiculo = info.carro; }
-    mapa.push(item);
-    if (item.estado === 'OCUPADO') {
-      item.cargas.forEach(function (x) {
-        if (x.n && x.estado !== 'pronta' && x.pct != null && x.pct < 50) {
-          alertas.push({ tipo: 'boxLonge', grav: 'atencao', box: i, carga: x.n, h: x.h,
-            texto: 'Box ' + i + ' ocupado com a carga ' + x.n + ', que está em ' + Math.round(x.pct) + '%' + (x.gargalo ? ' (gargalo: ' + cgNomeDep_(x.gargalo) + ')' : '') + '.' });
-        }
-        if (x.fora && !x.ambigua) alertas.push({ tipo: 'foraDoPdf', grav: 'info', box: i, carga: x.curto, texto: 'Box ' + i + ': a carga ' + x.curto + ' não está na situação de carga (já saiu?).' });
-        if (x.ambigua) alertas.push({ tipo: 'ambigua', grav: 'info', box: i, carga: x.curto, texto: 'Box ' + i + ': "' + x.curto + '" pode ser ' + x.ambigua.join(' ou ') + '.' });
-      });
-    }
-  }
-  const ocupado = {};
-  mapa.forEach(function (b) { if (b.estado === 'OCUPADO') b.cargas.forEach(function (x) { if (x.n) ocupado[x.n] = b.numero; }); });
-  cargas.forEach(function (c) {
-    const info = porCarga[c.n] || null, e = cgEstadoCarga_(c);
-    const boxPlan = (info && info.box) || (boxDaCarga[c.n] ? String(boxDaCarga[c.n]) : '');
-    if (c.bx && boxPlan && Number(c.bx) !== Number(boxPlan)) {
-      alertas.push({ tipo: 'boxDiferente', grav: 'atencao', carga: c.n, h: c.h ? 1 : 0, box: Number(boxPlan),
-        texto: 'Carga ' + c.n + ': box ' + c.bx + ' no relatório e ' + boxPlan + ' na planilha.' });
-    }
-    const noBox = !!ocupado[c.n] || !!(info && (info.carregada || ['JA NO BOX', 'CARREGANDO'].indexOf(cgObsNorm_(info.obs)) !== -1));
-    if (e.estado === 'pronta' && !noBox && (info || (lido.boxes || []).length)) {
-      alertas.push({ tipo: 'prontaSemBox', grav: c.h ? 'alerta' : 'atencao', carga: c.n, h: c.h ? 1 : 0,
-        texto: 'Carga ' + c.n + (c.h ? ' (24 h)' : '') + ' está pronta e o carro não está no box' + (info && info.obs ? ' — ' + info.obs : '') + '.' });
-    }
-    if ((c.h || (info && info.prioridade)) && info && info.obsCat === 'risco' && e.estado !== 'sem') {
-      alertas.push({ tipo: 'prioridadeRisco', grav: 'alerta', carga: c.n, h: c.h ? 1 : 0,
-        texto: 'Carga ' + c.n + (c.h ? ' (24 h)' : ' (prioridade ' + info.prioridade + ')') + ': ' + info.obs + '.' });
-    }
-  });
-  const peso = { alerta: 0, atencao: 1, info: 2 };
-  alertas.sort(function (a, b) { return (peso[a.grav] - peso[b.grav]) || ((b.h || 0) - (a.h || 0)) || String(a.carga).localeCompare(String(b.carga)); });
-  return { mapa: mapa, alertas: alertas.slice(0, 80), porCarga: porCarga,
-    ocupados: mapa.filter(function (b) { return b.estado === 'OCUPADO'; }).length, livres: mapa.filter(function (b) { return b.estado === 'LIVRE'; }).length };
-}
-
-/* Para a tela: ligado? a leitura (copia de 90 s) cruzada com as cargas do ultimo envio. */
-function cgBoxesDaTela_(cargas, forcar) {
-  const id = cgIdPlanilhaBoxes_();
-  const base = { ligado: !!id, n: cgNBoxes_(), link: id ? 'https://docs.google.com/spreadsheets/d/' + id + '/edit' : '' };
-  if (!id) return base;
-  const chave = chaveNoEspaco('cgboxes|' + id);
-  let lido = null;
-  if (!forcar) { const g = lerTextoCache(chave); if (g) { try { lido = JSON.parse(g); } catch (e) { lido = null; } } }
-  if (!lido) {
-    try { lido = cgLerPlanilhaBoxes_(id); lido.lidoEm = cgAgoraIso_(); gravarTextoCache(chave, JSON.stringify(lido), CG_BOXES_CACHE_S); }
-    catch (e) { base.erro = 'Não consegui ler a planilha dos boxes: ' + (e.message || e) + '. Confira o link e se a conta dona do GSL tem acesso a ela.'; return base; }
-  }
-  return Object.assign(base, { fonte: lido.fonte || null, lidoEm: lido.lidoEm || '', abas: lido.abas, avisos: lido.avisos || [],
-    controle: (lido.controle || []).length }, cgCruzarBoxes_(lido, cargas || [], base.n));
-}
-
-/* LIGAR (ou trocar, ou desligar com o link vazio) a planilha dos boxes. params: { link } */
-function acaoSalvarFonteBoxesCarga(usuario, params) {
-  const link = String((params && params.link) || '').trim();
-  if (!link) {
-    comTrava(function () { cgSalvarParametro_('CARGA_PLANILHA_BOXES', '', usuario.email); });
-    return { ok: true, recado: 'Planilha dos boxes desligada.', invalidarTudo: true };
-  }
-  const m = link.match(/\/d\/([\w-]{20,})/);
-  const id = m ? m[1] : (/^[\w-]{20,}$/.test(link) ? link : '');
-  if (!id) throw new Error('Esse link não parece de uma planilha do Google.');
-  exigirPorta_();
-  let lido;
-  try { lido = cgLerPlanilhaBoxes_(id); }
-  catch (e) { throw new Error('Não consegui abrir a planilha. A conta dona do GSL precisa ter acesso a ela (só leitura basta).'); }
-  if (!lido.abas.controle && !lido.abas.situacao) throw new Error('A planilha "' + lido.fonte.nome + '" não tem a aba Controle (CARGA, BOX...) nem a Situação dos BOXs.');
-  try { CacheService.getScriptCache().remove(chaveNoEspaco('cgboxes|' + id)); } catch (e) {}
-  comTrava(function () { cgSalvarParametro_('CARGA_PLANILHA_BOXES', 'https://docs.google.com/spreadsheets/d/' + id + '/edit', usuario.email); });
-  return { ok: true, invalidarTudo: true, recado: 'Boxes ligados à planilha "' + lido.fonte.nome + '" (' + lido.controle.length + ' linhas no Controle, ' + lido.boxes.length + ' boxes).' };
-}
-/* LER OS BOXES (de novo, com forcar). params: { forcar } */
-function acaoBoxesCarga(usuario, params) {
-  const ult = cgSnapshots_()[0];
-  return { ok: true, boxes: cgBoxesDaTela_(ult ? cgCargasDe_(ult) : [], !!(params && params.forcar)) };
 }
 
 /* ------------------------------------------------------------------ */

@@ -863,13 +863,14 @@ const ACOES = {
   equipamentoCarga:    { tela: 'carga', funcao: 'acaoEquipamentoCarga' },
   quantidadeEquipamentoCarga: { tela: 'carga', funcao: 'acaoQuantidadeEquipamentoCarga' },
   // situacao de carga, fase 2 (8.15): historico (abrir um envio e comparar), sequencia, falta do dia,
-  // boxes (a planilha das docas, so lida: ler de novo e leitura), passagem de turno e os ajustes da tela.
+  // boxes e carregamento (o controle das docas; a planilha antiga so e lida no Importar), passagem de turno e os ajustes.
   snapshotCarga:       { tela: 'carga', leitura: true, funcao: 'acaoSnapshotCarga' },
-  boxesCarga:          { tela: 'carga', leitura: true, funcao: 'acaoBoxesCarga' },
   sequenciaCarga:      { tela: 'carga', funcao: 'acaoSequenciaCarga' },
   presencaCarga:       { tela: 'carga', funcao: 'acaoPresencaCarga' },
   passagemCarga:       { tela: 'carga', funcao: 'acaoPassagemCarga' },
-  salvarFonteBoxesCarga: { tela: 'carga', funcao: 'acaoSalvarFonteBoxesCarga' },
+  carregamentoCarga:   { tela: 'carga', funcao: 'acaoCarregamentoCarga' },
+  boxCarga:            { tela: 'carga', funcao: 'acaoBoxCarga' },
+  importarBoxesCarga:  { tela: 'carga', funcao: 'acaoImportarBoxesCarga' },
   parametrosCarga:     { tela: 'carga', funcao: 'acaoParametrosCarga' },
 
   // gerais, da propria pessoa

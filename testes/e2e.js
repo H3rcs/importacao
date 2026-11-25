@@ -441,11 +441,18 @@ function quadroDeTeste(s) {
   });
   return 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit';
 }
-async function foto(aba, nome) {
+async function foto(aba, nome, maxAltura) {
   const dir = process.env.GSL_FOTOS;
   if (!dir) return;
   require('fs').mkdirSync(dir, { recursive: true });
-  await aba.page.screenshot({ path: path.join(dir, nome + '.png'), fullPage: true });
+  // A pagina rola dentro da moldura: a foto aumenta a janela ate caber tudo e depois volta.
+  const vp = aba.page.viewportSize();
+  const f = await frame(aba);
+  const altura = await f.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+  await aba.page.setViewportSize({ width: vp.width, height: Math.min(maxAltura || 9000, Math.max(vp.height, altura)) });
+  await aba.page.waitForTimeout(250);
+  await aba.page.screenshot({ path: path.join(dir, nome + '.png') });
+  await aba.page.setViewportSize(vp);
 }
 async function esperarCarga(f) {
   await f.waitForSelector('#cg', { timeout: 20000 });
@@ -4721,7 +4728,7 @@ async function rodar() {
     const f = await frame(aba);
     const cartao = await f.evaluate(() => (SESSAO.modulos || []).map((m) => m.id).join());
     afirmar(/carga/.test(cartao), 'modulo no menu: ' + cartao);
-    await f.evaluate(() => { localStorage.removeItem('gsl_carga_aba'); abrir('carga'); });
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
     await esperarCarga(f);
     afirmar(/Nenhuma situação de carga enviada ainda/.test(await f.textContent('.cg-hero')), 'tela vazia');
     const previa = await enviarPdfPelaTela(f, PDF_REAL, 47);
@@ -4777,12 +4784,14 @@ async function rodar() {
     await f.evaluate(() => { cgModoTv(); aplicarTema('claro'); });
     await aba.page.setViewportSize({ width: 390, height: 844 });
     await f.click('.cg-aba[data-aba="cargas"]');
+    await f.evaluate(() => window.scrollTo(0, 0));
     await aba.page.waitForTimeout(300);
     const vaza = await f.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     afirmar(vaza <= 1, 'celular sem rolagem lateral: ' + vaza);
-    await foto(aba, 'carga-celular-cargas');
+    await foto(aba, 'carga-celular-cargas', 2400);
     await f.click('.cg-aba[data-aba="supervisao"]');
-    await foto(aba, 'carga-celular-supervisao');
+    await f.evaluate(() => window.scrollTo(0, 0));
+    await foto(aba, 'carga-celular-supervisao', 2400);
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await contexto.close(); await s.fechar();
   });
@@ -4803,7 +4812,7 @@ async function rodar() {
       await entrar(aba, email, pin, primeira);
       await esperarTela(aba, ['aplicacao']);
       const f = await frame(aba);
-      await f.evaluate(() => { localStorage.setItem('gsl_carga_aba', 'equipe'); abrir('carga'); });
+      await f.evaluate(() => { CG.aba = 'equipe'; abrir('carga'); });
       await esperarCarga(f);
       await f.evaluate(() => { CG_VIVO.intervalo = 1200; });
       return { aba, f, contexto };
@@ -4811,6 +4820,7 @@ async function rodar() {
     const A = await abrirCarga(DONO, DONO, '4321');
     const B = await abrirCarga(GERENTE, GERENTE, '5555', true);
     const zonaG = '.cg-quadro-dep .cg-zona[data-dep="GRANDEZA"][data-papel="SEPARADOR"]';
+    await A.f.waitForSelector('.cg-pool .cg-boneco', { timeout: 10000 }).catch(async () => { throw new Error('pool vazio: ' + (await A.f.evaluate(() => (document.getElementById('cg-corpo') || document.body).innerText.slice(0, 400)))); });
     const k = await A.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
     await A.f.dragAndDrop('.cg-pool .cg-boneco[data-k="' + k + '"]', zonaG);
     await A.f.waitForSelector(zonaG + ' .cg-boneco[data-k="' + k + '"]', { timeout: 5000 });
@@ -4858,7 +4868,7 @@ async function rodar() {
     await entrar(aba, CONSULTA, '7777', true);
     await esperarTela(aba, ['aplicacao']);
     const f = await frame(aba);
-    await f.evaluate(() => { localStorage.setItem('gsl_carga_aba', 'geral'); abrir('carga'); });
+    await f.evaluate(() => { CG.aba = 'geral'; abrir('carga'); });
     await esperarCarga(f);
     const x = await f.evaluate(() => ({ envio: !!document.querySelector('.cg-btn-primario'), arrasta: document.querySelectorAll('[draggable="true"]').length,
       pal: Array.from(document.querySelectorAll('.cg-equip')).every((b) => b.disabled) }));
@@ -4876,7 +4886,7 @@ async function rodar() {
     afirmar(await esperarTela(aba, ['aplicacao', 'falha']) === 'aplicacao', 'entrou');
     const f = await frame(aba);
     afirmar(require('fs').existsSync(path.join(aba.pasta, 'vendor', 'pdfjs-3.11.174', 'pdf.min.js')), 'pdf.js na pasta');
-    await f.evaluate(() => { localStorage.removeItem('gsl_carga_aba'); abrir('carga'); });
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
     await esperarCarga(f);
     await enviarPdfPelaTela(f, PDF_REAL, 47);
     const fonte = await f.evaluate(() => Array.from(document.scripts).map((x) => x.src).filter((x) => /pdf\.min\.js/.test(x)).join());

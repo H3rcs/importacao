@@ -1022,7 +1022,7 @@ function cgDepositoHtml(id) {
       ${indicadores}
       ${cgEquipeDepHtml(dep)}
       ${dep.equip === 'PALETEIRA' ? cgPaleteirasDepHtml(id) : (dep.equip === 'CARRINHO' ? cgCarrinhosHtml() : '')}
-      ${r && paradas.length ? `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Por terminar — a mais parada primeiro</h3></header><ul class="cg-lista">${paradas.slice(0, 8).map((p) => `<li class="cg-item">
+      ${r && paradas.length && d.indicadores && d.indicadores.envios > 1 ? `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Por terminar — a mais parada primeiro</h3></header><ul class="cg-lista">${paradas.slice(0, 8).map((p) => `<li class="cg-item">
         <span class="cg-item-nro">${esc(p.n)}${p.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
         <span class="cg-item-nome">${esc(p.nm || '—')}<small>${cgCelHtml(p.s[0], 'sep')} ${cgCelHtml(p.s[1], 'conf')} · na fila há ${cgDuracao(p.fila)}</small></span>
         <span class="cg-item-tempo ${p.parada >= 60 ? 'alerta' : ''}">${p.parada ? 'parada ' + cgDuracao(p.parada) : 'mudou agora'}</span></li>`).join('')}</ul></section>` : ''}

@@ -377,8 +377,8 @@ function aplicarModoLeve(ligado) {
   document.documentElement.classList.toggle('modo-leve', !!ligado);
   const b = el('modo-leve-alternar');
   if (b) b.title = ligado
-    ? 'Modo leve LIGADO — fundo animado desligado. Clique para voltar as animacoes.'
-    : 'Modo leve desligado. Clique para desligar o fundo animado e ganhar fluidez.';
+    ? 'Modo leve LIGADO — animações desligadas. Clique para voltar as animações.'
+    : 'Modo leve desligado. Clique para desligar as animações e ganhar fluidez.';
   gravarLocal(CHAVE_LEVE, ligado ? '1' : '0');
 }
 function alternarModoLeve() {
@@ -1015,7 +1015,7 @@ function mostrarEscolhaFilial(filiais, usuario) {
   el('grade-filiais').innerHTML = FILIAIS_DISPONIVEIS.map((f) => `
     <a class="holocard azul cartao-filial ${f.codigo === ultima ? 'ultima' : ''}"
        href="#" onclick="return escolherFilial(${jsArg(f.codigo)})">
-      <div class="holo-icone">\u{1F3E2}</div>
+      <div class="holo-icone">${ICONES.filial}</div>
       <div class="holo-titulo">${esc(f.nome)}</div>
       <div class="holo-frase">${esc(f.cidade || '')}${f.cidade ? ' · ' : ''}${(f.paineis || []).length} painel(is)</div>
       <div class="holo-frase pequena">${esc((f.paineis || []).join(' · '))}</div>
@@ -1487,10 +1487,22 @@ setTimeout(function () {
  */
 let moduloAtual = null;
 
+/* 25/11 (redesenho): icones de linha (SVG, cor do texto) no lugar dos emojis — leitura igual em
+   qualquer Windows e no tema escuro. Sem xmlns: dentro do HTML o navegador ja sabe que e SVG. */
+const svgIcone = (d) => '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + d + '</svg>';
 const ICONES = {
-  calendario: '\u{1F4C5}', pessoas: '\u{1F465}', tela: '\u{1F4FD}', engrenagem: '\u2699',
-  bateria: '\u{1F50B}', limpeza: '\u{1F9F9}', grafico: '\u{1F4CA}', computador: '\u{1F5A5}', aprendiz: '\u{1F393}',
-  carga: '\u{1F69A}'
+  calendario: svgIcone('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h2M14 14h2M8 17.5h2"/>'),
+  pessoas: svgIcone('<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M15.5 5.3a3.3 3.3 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2"/>'),
+  tela: svgIcone('<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M12 16.5V20M8 20h8M10 7.8v5.4l4.4-2.7z"/>'),
+  engrenagem: svgIcone('<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>'),
+  bateria: svgIcone('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10.5v3M11.5 9l-2 3.2h3l-2 2.8"/>'),
+  limpeza: svgIcone('<path d="M14.5 3.5l-4 8.5"/><path d="M6.5 12h8.5l1.5 8.5H5z"/><path d="M8.5 16.5v4M12 16.5v4"/>'),
+  grafico: svgIcone('<path d="M3.5 20.5h17"/><rect x="5" y="11" width="3.2" height="7" rx=".8"/><rect x="10.4" y="6.5" width="3.2" height="11.5" rx=".8"/><rect x="15.8" y="13.5" width="3.2" height="4.5" rx=".8"/>'),
+  computador: svgIcone('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  aprendiz: svgIcone('<path d="M2.5 9L12 4.5 21.5 9 12 13.5z"/><path d="M6.5 11v4.5c1.6 1.6 3.4 2.4 5.5 2.4s3.9-.8 5.5-2.4V11M21.5 9v5"/>'),
+  carga: svgIcone('<path d="M2.5 6.5h11v10h-11z"/><path d="M13.5 10h4l3 3.5v3h-7"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>'),
+  filial: svgIcone('<path d="M3.5 20.5h17M5 20.5V8.5l7-4.5 7 4.5v12"/><path d="M9.5 20.5v-5h5v5M8.5 11h1.5M14 11h1.5"/>')
 };
 
 function montarMenu(telas) {
@@ -1543,6 +1555,7 @@ function abrirModulos() {
   el('subtitulo-pagina').textContent = ((SESSAO.filial && SESSAO.filial.nome) || 'GSL') + ' \u00b7 ' + SESSAO.usuario.nome;
   el('acoes-topo').innerHTML = '';
   el('pagina').classList.remove('sem-entrada');
+  el('pagina').setAttribute('data-tela', 'modulos');
   paginaAnterior = 'modulos';
 
   const mods = (SESSAO.modulos || []).filter((m) => m.id !== 'config');   // config mora na barra lateral
@@ -2016,6 +2029,7 @@ function pintar(idTela, r, silencioso) {
 
   const pagina = el('pagina');
   pagina.classList.toggle('sem-entrada', !!silencioso);
+  pagina.setAttribute('data-tela', idTela);          // 25/11: o estilo de cada tela (ex.: as de Configuracao) se prende aqui
 
   // O "modo filtrando" e so do calendario: nao pode vazar para outra tela.
   if (idTela !== 'calendario') pagina.classList.remove('filtrando');
@@ -3958,7 +3972,7 @@ function cfgRH(d) {
               <button class="icone-botao" onclick="importar(${jsArg(a.id)})">Importar</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="6" class="vazio">Nenhuma competência cadastrada.</td></tr>'}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <div class="cartao-rodape">
         ${ed ? '<button class="botao" onclick="atualizarRH()">↻ Atualizar agora</button>' : ''}
         <button class="botao secundario" onclick="verDiagnosticoRH()">Diagnóstico da base</button>
       </div>
@@ -3987,13 +4001,13 @@ function cfgRH(d) {
               <button class="icone-botao perigo" onclick="agir('excluirDePara',{id:${jsArg(c.id)}},'Código removido')">Remover</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="5" class="vazio">Nenhum código cadastrado.</td></tr>'}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
+         tradução em toda a folha já importada e refaz os painéis.</p>
+      <div class="cartao-rodape">
         <button class="botao secundario" onclick="verCodigosPendentes()">Códigos fora da legenda</button>
         ${ed ? `<button class="botao secundario" onclick="confirmarRestaurarDePara()">Restaurar tabela padrão</button>
         <button class="botao secundario" onclick="confirmarReclassificar()">Reclassificar a base</button>` : ''}
       </div>
-      <p class="dica">Depois de mexer no DE-PARA, use <b>Reclassificar a base</b>: ele reaplica a
-         tradução em toda a folha já importada e refaz os painéis.</p>
     </div>
 
     <div class="cartao">
@@ -4134,7 +4148,7 @@ function cfgSistema(d) {
   return `${ed ? '' : avisoSoVer('Configuração')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Estado do sistema</div>
-      <table><tbody>
+      <table class="tabela-chave"><tbody>
         <tr><td>Fuso em uso</td><td><strong>${esc(d.fuso.atual)}</strong></td></tr>
         <tr><td>Hora do sistema</td><td><strong>${esc(d.fuso.hora)}</strong></td></tr>
         <tr><td>Rotinas automáticas</td><td>${seloRotinas(d.sistema.rotinas)}</td></tr>
@@ -4146,7 +4160,7 @@ function cfgSistema(d) {
 
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Manutenção</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="cfg-botoes">
         ${ed ? `<button class="botao secundario" onclick="agir('ligarGatilhos',{},'Rotinas automáticas ligadas')">Ligar rotinas automáticas</button>
         <button class="botao secundario" onclick="agir('corrigirFuso',{},'Fuso alinhado')">Corrigir fuso</button>
         <button class="botao secundario" onclick="agir('enviarDigesto',{},'Digesto enviado')">Enviar digesto agora</button>
@@ -4155,7 +4169,7 @@ function cfgSistema(d) {
         <button class="botao secundario" onclick="alternarModoLeve()">${document.documentElement.classList.contains('modo-leve') ? '⚡ Modo leve: LIGADO' : '⚡ Modo leve: desligado'}</button>
         ${d.pastaAnexos ? `<button class="botao secundario" onclick="window.open(${jsArg(d.pastaAnexos)},'_blank')">📁 Abrir pasta das entregas</button>` : ''}
       </div>
-      <p class="dica"><b>Modo leve</b>: desliga o fundo animado e os desfoques, mantendo cores e
+      <p class="dica"><b>Modo leve</b>: desliga as animações de entrada e as transições, mantendo cores e
       layout. O app liga sozinho quando percebe que a maquina nao está dando conta dos quadros;
       este botão serve para forçar ou desfazer, e vale so neste computador.</p>
     </div>
@@ -4788,12 +4802,12 @@ function blocoPessoas(d) {
          de fora da Bartofil, e quem está aqui entra direto com a conta dele. Para liberar alguém,
          <b>Cadastrar pessoa</b>.</p>
       <div style="overflow-x:auto"><table id="tabela-pessoas">
-        <thead><tr><th>Nome</th><th>Função</th><th>E-mail</th><th>Turno</th>
+        <thead><tr><th>Pessoa</th><th>E-mail</th><th>Turno</th>
           ${variasFiliais ? '<th>Filiais</th>' : ''}<th>Nível</th><th>Situação</th><th>PIN</th><th></th></tr></thead>
         <tbody>${(d.pessoas || []).map((p) => `<tr
             data-busca="${esc((p.nome + ' ' + p.email + ' ' + p.turno + ' ' + p.perfil + ' ' + filiaisDaPessoa(p, d)).toLowerCase())}">
-          <td><strong>${esc(p.nome || '—')}</strong></td>
-          <td>${esc(p.papel || '—')}</td>
+          <td><div class="pessoa-celula"><span class="pessoa-iniciais" aria-hidden="true">${esc(iniciaisDe(p.nome || p.email))}</span>
+            <span><strong>${esc(p.nome || '—')}</strong><span class="lp-sub">${esc(p.papel || '—')}</span></span></div></td>
           <td class="mono">${esc(p.email)}</td>
           <td>${p.turno ? '<strong>' + esc(p.turno) + '</strong>' : '<span class="pendente-entrega">sem turno</span>'}</td>
           ${variasFiliais ? `<td>${esc(filiaisDaPessoa(p, d))}</td>` : ''}
@@ -4808,10 +4822,16 @@ function blocoPessoas(d) {
                 onclick="gerarCodigoAcesso(${jsArg(p.id)}, ${jsArg(p.nome || p.email)}, ${p.temPin ? 'true' : 'false'})">${p.temPin ? 'Zerar PIN' : 'Código de acesso'}</button>` : ''}
               ${p.email === d.eu ? '' :
                 `<button class="icone-botao" onclick="agir('alternarAtivo',{id:${jsArg(p.id)}},'Acesso alterado')">${p.ativo ? 'Desativar' : 'Reativar'}</button>`}` : ''}</td>
-        </tr>`).join('') || '<tr><td colspan="9" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
+        </tr>`).join('') || '<tr><td colspan="8" class="vazio">Ninguém cadastrado ainda.</td></tr>'}</tbody></table></div>
       <p class="dica">O <b>turno</b> liga a pessoa às atividades: o coordenador do turno A recebe
          o digesto do A e aparece como responsável nas atividades do A — dentro de cada filial.</p>
     </div>`;
+}
+
+/* As iniciais do nome (o "avatar" da tabela de pessoas): "Maria Souza" -> "MS". */
+function iniciaisDe(nome) {
+  const partes = String(nome || '').replace(/@.*$/, '').split(/[\s.]+/).filter(Boolean);
+  return ((partes[0] || '?')[0] + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase();
 }
 
 function filtrarPessoas() {
@@ -7047,14 +7067,20 @@ async function visorRemover() {
    =================================================== */
 
 function pintarRelatos(r) {
-  el('pagina').innerHTML = `${podeEditar('relatos') ? '' : avisoSoVer('Relatos de erro')}<div class="cartao">${blocoFeedback(r.dados || {})}</div>`;
+  el('pagina').innerHTML = `${podeEditar('relatos') ? '' : avisoSoVer('Relatos de erro')}${blocoFeedback(r.dados || {})}`;
 }
 
 /* --- Relatos de erro da plataforma --- */
 
 function blocoFeedback(d) {
   const lista = d.feedbacks || [];
+  const abertos = lista.filter((f) => f.situacao === 'ABERTO').length;
   return `
+    <div class="grade grade-kpi relatos-numeros">
+      <div class="cartao kpi alerta"><div class="kpi-valor">${abertos}</div><div class="kpi-rotulo">Em aberto</div></div>
+      <div class="cartao kpi verde"><div class="kpi-valor">${lista.length - abertos}</div><div class="kpi-rotulo">Resolvidos</div></div>
+      <div class="cartao kpi"><div class="kpi-valor">${lista.length}</div><div class="kpi-rotulo">Relatos no total</div></div>
+    </div>
     <div class="cartao">
       <div class="cartao-titulo">${lista.length} relato(s)</div>
       <p class="dica" style="margin:-4px 0 12px">Chega pelo botão flutuante do canto da tela.

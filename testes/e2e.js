@@ -5197,6 +5197,264 @@ async function rodar() {
     await fecharLocal(aba); await s.fechar();
   });
 
+
+  /*
+   * SITUACAO DE CARGA, FASE 2 (8.15). Um CD no meio da passagem do turno A para o B (16:08): o PDF real
+   * pela tela e um segundo envio pelo servidor (o historico), gente alocada (paleteiras faltando no Blocado),
+   * o flowrack com pessoas por rua, uma falta, a sequencia reorganizada e o patio com veiculos nos boxes.
+   */
+  const AGORA_F2 = '2026-11-25T16:08:00-03:00';
+  function telaCargaServidor(s, conta, email, pin) {
+    const e = criarPin(s, conta, email, pin);
+    return () => JSON.parse(s.chamar(conta, 'carregarTela', { t: e.token, f: e.filial.codigo }, 'carga', {}).valor).dados;
+  }
+  /* O que a tela tem depois do PDF real: segundo envio, equipe, paleteiras, falta, sequencia e patio. */
+  function montarCdFase2(s) {
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    const ler = telaCargaServidor(s, DONO, DONO, '4321');
+    let d = ler();
+    const cargas = d.snapshot.cargas;
+    // segundo envio (11:30): metade do que faltava andou
+    const anda = (v) => { const m = /^(\d+)\/(\d+)$/.exec(v || ''); if (!m) return v; const a = Math.min(+m[2], +m[1] + Math.ceil((+m[2] - +m[1]) / 2)); return a === +m[2] ? 'X' : a + '/' + m[2]; };
+    dono('enviarSituacaoCarga', { emitidoEm: '2026-11-25T11:30:00', arquivo: 'situacao-1130.pdf', paginas: 2, depositos: d.snapshot.depositos,
+      cargas: cargas.map((c, i) => { const s2 = {}; Object.keys(c.s).forEach((k) => { s2[k] = i % 3 ? c.s[k].map(anda) : c.s[k]; }); return { nro: c.n, nome: c.nm, veiculo: c.v, box: c.bx, h24: !!c.h, d: s2 }; }) });
+    d = ler();
+    const p = d.pessoas;
+    const doTurno = (t) => p.filter((x) => x.equipe === t);
+    const A = doTurno('1° TURNO'), B = doTurno('2° TURNO');
+    const mover = (x, dep, papel, andar, rua) => dono('moverPessoaCarga', { pessoa: x, destino: { dep, papel, andar, rua } });
+    let a = 0, b = 0;
+    const umA = () => A[a++], umB = () => B[b++];
+    [['GRANDEZA', 4], ['NOBRE_GRANDEZA', 2], ['PESAVEIS', 2], ['BLOCADO', 3], ['MIUDEZA', 3]].forEach(([dep, n]) => { for (let i = 0; i < n; i++) mover(i % 2 ? umB() : umA(), dep, 'SEPARADOR'); });
+    [['GRANDEZA', 1], ['MIUDEZA', 1], ['NOBRE', 2], ['BLOCADO', 1]].forEach(([dep, n]) => { for (let i = 0; i < n; i++) mover(umA(), dep, 'CONFERENTE'); });
+    mover(umA(), 'NOBRE', 'SEPARADOR', 4, 1); mover(umB(), 'NOBRE', 'SEPARADOR', 3, 2); mover(umA(), 'NOBRE', 'SEPARADOR', 3, 2);
+    mover(umA(), 'NOBRE', 'SEPARADOR', 2); mover(umB(), 'NOBRE', 'SEPARADOR', 0, 5); mover(umA(), 'NOBRE', 'SEPARADOR', 1, 3);
+    dono('equipamentoCarga', { tipo: 'PALETEIRA', numero: 4, estado: 'MANUTENCAO', obs: 'roda' });
+    dono('equipamentoCarga', { tipo: 'PALETEIRA', numero: 9, estado: 'MANUTENCAO', obs: 'garfo' });
+    dono('equipamentoCarga', { tipo: 'CHECKOUT', numero: 2, estado: 'MANUTENCAO', obs: 'leitor' });
+    const faltou = umB();
+    dono('presencaCarga', { pessoa: faltou, falta: true });
+    // sequencia: a 5a carga para o topo e a de 24 h para o topo
+    const n = cargas.map((c) => c.n);
+    dono('sequenciaCarga', { op: 'mover', carga: n[4], para: 1 });
+    dono('sequenciaCarga', { op: 'mover', carga: n[10], para: 3 });
+    // patio
+    const reg = (x) => dono('carregamentoCarga', Object.assign({ op: 'salvar' }, x)).id;
+    // o box de cada uma e o do relatorio (quando esta livre): o patio confere com a situacao de carga
+    const usado = { 9: 1, 18: 1, 25: 1 };
+    const boxDe = (i, padrao) => { const b = Number(cargas[i].bx); const x = b >= 1 && b <= 24 && !usado[b] ? b : padrao; usado[x] = 1; return x; };
+    const bx = { carregando: boxDe(0, 3), ocupado: boxDe(1, 7), reservado: boxDe(2, 12), carreta: boxDe(6, 15), toco: boxDe(7, 20), outro: boxDe(8, 21), carregada: boxDe(9, 1) };
+    const c0 = reg({ carga: n[0], box: bx.carregando, veiculo: 'TESTE01', tipo: 'TOCO', motorista: 'Motorista Teste 1', chegada: '15:10' });
+    dono('carregamentoCarga', { op: 'carregando', id: c0 });
+    reg({ carga: n[1], box: bx.ocupado, veiculo: 'TESTE02', tipo: 'TRUCK', motorista: 'Motorista Teste 2', chegada: '13:30', situacao: 'JÁ NO BOX' });
+    reg({ carga: n[2], box: bx.reservado, veiculo: 'TESTE03', tipo: 'VUC', previsao: '16:40', situacao: 'MOTORISTA A CAMINHO' });
+    reg({ carga: n[3], prioridade: '1', tipo: 'MEDIO', situacao: 'MARCOU E NAO VEIO' });
+    const c4 = reg({ carga: n[5], tipo: 'LEVE', veiculo: 'TESTE05', previsao: '17:30', situacao: 'MOTORISTA AGENDADO' });
+    reg({ carga: n[6], box: bx.carreta, veiculo: 'TESTE06', tipo: 'CARRETA', chegada: '15:50', motorista: 'Motorista Teste 6' });
+    reg({ carga: n[7], box: bx.toco, veiculo: 'TESTE07', tipo: 'TOCO', chegada: '16:00', situacao: 'JÁ NO BOX' });
+    reg({ carga: n[8], box: bx.outro, veiculo: 'TESTE08', tipo: 'OUTRO', previsao: '18:00', situacao: 'CARREGAR SÓ À NOITE' });
+    const c8 = reg({ carga: n[9], box: bx.carregada, veiculo: 'TESTE09', tipo: 'TRUCK', chegada: '14:00' });
+    dono('carregamentoCarga', { op: 'carregada', id: c8 });
+    dono('boxCarga', { numero: 25, estado: 'BLOQUEADO', obs: 'porta com defeito' });
+    return { dono, ler, n, faltou, c4, bx };
+  }
+  async function semRolagemLateral(f, rotulo) {
+    const v = await f.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    afirmar(v <= 1, rotulo + ': rolagem lateral de ' + v + ' px');
+  }
+  async function fotosDaFase2(aba, f, prefixo, celular) {
+    const abas = ['sequencia', 'todos', 'boxes', 'turnos', 'NOBRE', 'equipe', 'geral', 'historico'];
+    for (const id of abas) {
+      await f.evaluate((x) => { cgIrAba(x); window.scrollTo(0, 0); }, id);
+      await aba.page.waitForTimeout(250);
+      if (celular) await semRolagemLateral(f, prefixo + ' ' + id);
+      await foto(aba, prefixo + '-' + id.toLowerCase(), celular ? 3200 : 4200);
+    }
+  }
+
+  await cenario('situacao de carga fase 2: sequencia, todos os depositos, boxes e patio, turnos e passagem, flowrack, historico — telas, interacoes e fotos (claro, escuro, celular, TV)', async () => {
+    const s = await subir({ agora: AGORA_F2 }); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321')('salvarFonteQuadro', { link: quadroDeTeste(s) });
+    const contexto = await navegador.newContext({ viewport: { width: 1440, height: 1000 } });
+    await contexto.clock.install({ time: new Date(AGORA_F2) });
+    await cdnjsLocal(contexto);
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    await enviarPdfPelaTela(f, PDF_REAL, 47);
+    const cd = montarCdFase2(s);
+    await f.evaluate(() => { esquecerTela('carga'); abrir('carga'); });
+    await f.waitForFunction(() => CG.dados && CG.dados.patio && CG.dados.patio.contagem.carregadasHoje === 1, null, { timeout: 15000 });
+    // as abas novas
+    const abas = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-aba')).map((b) => b.dataset.aba).join());
+    afirmar(abas === 'cargas,sequencia,geral,todos,supervisao,GRANDEZA,MIUDEZA,BLOCADO,PESAVEIS,NOBRE,NOBRE_GRANDEZA,boxes,equipe,turnos,historico', 'abas: ' + abas);
+    // SEQUENCIA: a fila reorganizada, conferida pela situacao
+    await f.click('.cg-aba[data-aba="sequencia"]');
+    let ordem = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-seq-item')).map((x) => x.dataset.n));
+    afirmar(ordem.length === 47 && ordem[0] === cd.n[4] && ordem[2] === cd.n[10], 'sequencia: ' + ordem.slice(0, 4));
+    afirmar(await f.$('.cg-seq-item .cg-seq-flag') && /devem estar em andamento/.test(await f.textContent('.cg-seq-cab')), 'marcas da conferencia');
+    // arrastar a 6a para antes da 2a (o servidor grava; a posicao dela vira 2)
+    await f.dragAndDrop('.cg-seq-item[data-n="' + ordem[5] + '"] .cg-seq-pos', '.cg-seq-item[data-n="' + ordem[1] + '"] .cg-seq-l1', { targetPosition: { x: 4, y: 2 } });
+    await f.waitForFunction((n) => document.querySelectorAll('.cg-seq-item')[1].dataset.n === n && !CG.pendentes, ordem[5], { timeout: 8000 });
+    afirmar(cd.ler().sequencia.itens[1].n === ordem[5], 'sequencia gravada: ' + cd.ler().sequencia.itens.slice(0, 3).map((x) => x.n));
+    // botoes de celular: descer a primeira
+    await f.click('.cg-seq-item[data-n="' + ordem[0] + '"] button[aria-label="Descer uma"]');
+    await f.waitForFunction((n) => document.querySelectorAll('.cg-seq-item')[1].dataset.n === n && !CG.pendentes, ordem[0], { timeout: 8000 });
+    // TODOS OS DEPOSITOS: seis colunas; arrastar alguem entre dois depositos
+    await f.click('.cg-aba[data-aba="todos"]');
+    afirmar(await f.evaluate(() => document.querySelectorAll('.cg-todos-col').length) === 6, 'seis colunas');
+    const k = await f.evaluate(() => document.querySelector('.cg-todos-col[data-dep="MIUDEZA"] .cg-zona.sep .cg-boneco').dataset.k);
+    await f.dragAndDrop('.cg-todos-col[data-dep="MIUDEZA"] .cg-boneco[data-k="' + k + '"]', '.cg-todos-col[data-dep="BLOCADO"] .cg-zona.sep');
+    await f.waitForSelector('.cg-todos-col[data-dep="BLOCADO"] .cg-boneco[data-k="' + k + '"]', { timeout: 8000 }).catch(async (e) => {
+      throw new Error(e.message.split('\n')[0] + ' | ' + JSON.stringify(await f.evaluate((x) => ({ eq: CG.dados.equipe.filter((p) => p.k === x), recado: (document.getElementById('recado') || {}).textContent, erros: 0 }), k)) + ' ' + aba.erros.join(' | '));
+    });
+    afirmar(cd.ler().equipe.find((x) => x.k === k).dep === 'BLOCADO', 'gravou na Blocado');
+    // paleteiras: 12 com 2 em manutencao = 10 para 12 separadores (o que chegou por ultimo fica sem)
+    const alertaPal = await f.textContent('.cg-eq-tiras');
+    afirmar(/faltam 2/.test(alertaPal), 'paleteiras faltando: ' + alertaPal);
+    // disponiveis: o turno agora (A + B, na passagem) e a falta em vermelho
+    const pool = (await f.textContent('.cg-pool')).replace(/\s+/g, ' ');
+    afirmar(/No turno agora · A \+ B/.test(pool) && /Passagem de turno: A sai às 16:14/.test(pool) && /1 falta hoje/.test(pool), 'pool: ' + pool.slice(0, 300));
+    afirmar(await f.$('.cg-pool .cg-boneco.faltou[data-k="' + cd.faltou.k + '"]'), 'quem faltou aparece em vermelho');
+    // faltou pelo toque: a pessoa some da coluna e fica vermelha nos disponiveis
+    const k2 = await f.evaluate(() => document.querySelector('.cg-todos-col[data-dep="GRANDEZA"] .cg-zona.sep .cg-boneco').dataset.k);
+    await f.click('.cg-todos-col[data-dep="GRANDEZA"] .cg-boneco[data-k="' + k2 + '"]');
+    await f.click('.cg-opcao.faltou');
+    await f.waitForSelector('.cg-pool .cg-boneco.faltou[data-k="' + k2 + '"]', { timeout: 8000 });
+    afirmar(cd.ler().faltas.filter((x) => x.ativa).length === 2, 'falta gravada');
+    // BOXES E PATIO
+    await f.click('.cg-aba[data-aba="boxes"]');
+    const docas = await f.evaluate(() => { const o = {}; document.querySelectorAll('.cg-doca').forEach((x) => { o[x.dataset.box] = x.querySelector('.cg-doca-est').textContent; }); return o; });
+    const B = cd.bx;
+    afirmar(Object.keys(docas).length === 26 && docas[B.carregando] === 'Carregando' && docas[B.ocupado] === 'Ocupado' && docas[B.reservado] === 'Reservado' && docas[B.carreta] === 'Ocupado' &&
+      docas[25] === 'Bloqueado' && docas[B.carregada] === 'Livre', 'docas: ' + JSON.stringify(docas) + ' ' + JSON.stringify(B));
+    afirmar(await f.evaluate((b) => document.querySelectorAll('.cg-doca[data-box="' + b + '"] .cg-veic').length, B.carreta) === 1, 'carreta desenhada');
+    const al = await f.evaluate(() => cgAlertasPatio().map((a) => a.texto).join(' | '));
+    afirmar(new RegExp('Box ' + B.ocupado + ': veículo da carga .* encostado há 2 h').test(al) && /MARCOU E NAO VEIO/.test(al), 'alertas do patio: ' + al.slice(0, 400));
+    // arrastar o veiculo da fila para o box 9 e marcar "Chegou" no box 12
+    // o arrasto do Playwright nao rola a pagina no meio: a janela alta deixa a fila e o box 9 na tela
+    await aba.page.setViewportSize({ width: 1440, height: 2600 });
+    await f.dragAndDrop('.cg-carreg[data-id="' + cd.c4 + '"]', '.cg-doca[data-box="9"]');
+    await f.waitForFunction(() => document.querySelector('.cg-doca[data-box="9"] .cg-doca-est').textContent === 'Reservado' && !CG.pendentes, null, { timeout: 8000 });
+    afirmar(cd.ler().patio.mapa[8].itens[0].id === cd.c4, 'box 9 no servidor');
+    await f.click('.cg-doca[data-box="' + B.reservado + '"] .cg-doca-acoes button:has-text("Chegou")');
+    await f.waitForFunction((b) => document.querySelector('.cg-doca[data-box="' + b + '"] .cg-doca-est').textContent === 'Ocupado', B.reservado, { timeout: 8000 });
+    // registrar pelo formulario (numero curto do relatorio + tipo pelo desenho)
+    await aba.page.setViewportSize({ width: 1440, height: 1000 });
+    await f.click('.cg-patio-botoes .cg-btn-primario');
+    await f.fill('#cgf-carga', cd.n[11]);
+    await f.selectOption('#cgf-box', '18');
+    await f.fill('#cgf-veiculo', 'TESTE11');
+    await f.click('.cg-tipo:has-text("Truck")');
+    await f.press('#cgf-veiculo', 'Enter');
+    await f.waitForFunction(() => document.querySelector('.cg-doca[data-box="18"] .cg-doca-est').textContent === 'Reservado', null, { timeout: 8000 });
+    // TURNOS: passagem A -> B por confirmar; confirmar
+    await f.click('.cg-aba[data-aba="turnos"]');
+    afirmar(/Passagem do turno A para o B/.test(await f.textContent('.cg-passagem')) && /por confirmar/.test(await f.textContent('.cg-passagem')), 'passagem por confirmar');
+    await foto(aba, 'carga2-desktop-turnos-por-confirmar');
+    await f.fill('#cg-pas-obs', 'Box 25 com a porta com defeito.');
+    await f.click('.cg-passagem .cg-btn-primario');
+    await f.waitForFunction(() => /aguardando ciente/.test(document.querySelector('.cg-passagem').textContent), null, { timeout: 8000 });
+    // NOBRE: o predio do flowrack (5 andares, 6 ruas)
+    await f.click('.cg-aba[data-aba="NOBRE"]');
+    const fr = await f.evaluate(() => ({ andares: document.querySelectorAll('.cg-fr-andar').length, ruas: document.querySelectorAll('.cg-fr-rua').length,
+      r32: document.querySelectorAll('.cg-fr-andar[data-andar="3"] .cg-fr-rua[data-rua="2"] .cg-boneco').length }));
+    afirmar(fr.andares === 5 && fr.ruas === 30 && fr.r32 === 2, 'flowrack ' + JSON.stringify(fr));
+    // HISTORICO: abrir o envio das 08:48 (so leitura) e o que andou ate agora
+    await f.click('.cg-aba[data-aba="historico"]');
+    await f.click('.cg-env-tr:nth-child(3) .cg-btn-claro');
+    await f.waitForSelector('.cg-faixa-hist', { timeout: 8000 });
+    afirmar(/Situação de 25\/11\/2026 08:48 — histórico/.test(await f.textContent('.cg-faixa-hist')) && !(await f.$('.cg-btn-primario >> text=Enviar situação')), 'faixa do historico');
+    await f.click('.cg-aba[data-aba="geral"]');
+    await foto(aba, 'carga2-desktop-historico-aberto');
+    await f.click('.cg-faixa-hist .cg-btn-claro');
+    await f.waitForSelector('#cg-comparacao', { timeout: 8000 });
+    afirmar(/O que andou de 25\/11\/2026 08:48 até 25\/11\/2026 11:30/.test(await f.textContent('#cg-comparacao')), 'comparacao');
+    await foto(aba, 'carga2-desktop-historico-comparacao');
+    await f.click('.cg-faixa-hist .cg-btn-primario');
+    await f.waitForFunction(() => !CG.hist && !document.querySelector('.cg-faixa-hist'), null, { timeout: 5000 });
+    // fotos: claro, escuro, celular (claro e escuro) e TV
+    await fotosDaFase2(aba, f, 'carga2-desktop');
+    await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
+    await fotosDaFase2(aba, f, 'carga2-desktop-escuro');
+    await aba.page.setViewportSize({ width: 390, height: 844 });
+    await fotosDaFase2(aba, f, 'carga2-celular-escuro', true);
+    await f.evaluate(() => { aplicarTema('claro'); cgDesenhar(); });
+    await fotosDaFase2(aba, f, 'carga2-celular', true);
+    await aba.page.setViewportSize({ width: 1920, height: 1080 });
+    await f.evaluate(() => { cgIrAba('todos'); cgModoTv(); });
+    await aba.page.waitForTimeout(300);
+    await foto(aba, 'carga2-tv-todos');
+    await f.evaluate(() => cgIrAba('boxes'));
+    await foto(aba, 'carga2-tv-boxes');
+    await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
+    await foto(aba, 'carga2-tv-boxes-escuro');
+    await f.evaluate(() => { cgModoTv(); aplicarTema('claro'); });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await contexto.close(); await s.fechar();
+  });
+
+  /* Duas telas: o que uma mexe (sequencia, patio, falta, passagem) aparece na outra; quem so ve nao mexe. */
+  await cenario('situacao de carga fase 2: ao vivo — sequencia, patio, falta e "Ciente" da passagem de um navegador aparecem no outro; quem so ve nao mexe', async () => {
+    const s = await subir({ agora: AGORA_F2 }); instalarComPessoas(s);
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Consulta');
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFonteQuadro', { link: quadroDeTeste(s) });
+    const cargas = {};
+    for (let i = 0; i < 8; i++) cargas['76300' + i] = { GRANDEZA: [i + '/8', '0/8'] };
+    const DEPS2 = ['GRANDEZA', 'MIUDEZA', 'BLOCADO', 'PESAVEIS', 'NOBRE', 'NOBRE_GRANDEZA'];
+    dono('enviarSituacaoCarga', { emitidoEm: '2026-11-25T15:00:00', arquivo: 't.pdf', paginas: 1, depositos: DEPS2.map((id) => ({ id })),
+      cargas: Object.keys(cargas).map((nro, i) => { const d = {}; DEPS2.forEach((id) => { d[id] = cargas[nro][id] || ['-', '-']; }); return { nro, nome: 'ROTA TESTE ' + i, veiculo: i % 2 ? 'TRUCK' : 'VUC 2700', box: String(i + 1), h24: i === 6, d }; }) });
+    const abrirCarga = async (conta, email, pin, primeira, aba0) => {
+      const contexto = await navegador.newContext({ viewport: { width: 1440, height: 1000 } });
+      await contexto.clock.install({ time: new Date(AGORA_F2) });
+      const aba = await abrirAba(s, conta, { contexto });
+      await entrar(aba, email, pin, primeira);
+      await esperarTela(aba, ['aplicacao']);
+      const f = await frame(aba);
+      await f.evaluate((x) => { CG.aba = x; abrir('carga'); }, aba0);
+      await esperarCarga(f);
+      await f.evaluate(() => { CG_VIVO.intervalo = 1200; });
+      return { aba, f, contexto };
+    };
+    const A = await abrirCarga(DONO, DONO, '4321', false, 'sequencia');
+    const B = await abrirCarga(GERENTE, GERENTE, '5555', true, 'sequencia');
+    // A: a 763006 (24 h) para o topo pelo botao; B ve
+    await A.f.click('.cg-seq-acoes .cg-btn-claro:has-text("Trazer prioridades")');
+    await A.f.click('#janela-rodape .botao:has-text("Confirmar")');
+    await B.f.waitForFunction(() => document.querySelector('.cg-seq-item') && document.querySelector('.cg-seq-item').dataset.n === '763006', null, { timeout: 15000 });
+    // B: registra uma carga no box 4 pelo formulario; A ve o box reservado
+    await B.f.evaluate(() => cgIrAba('boxes'));
+    await A.f.evaluate(() => cgIrAba('boxes'));
+    await B.f.click('.cg-doca[data-box="4"] .cg-doca-num');
+    await B.f.click('.cg-opcao:has-text("Registrar carga neste box")');
+    await B.f.fill('#cgf-carga', '003');
+    await B.f.click('#cgf-salvar');
+    await A.f.waitForFunction(() => { const d = document.querySelector('.cg-doca[data-box="4"]'); return d && /763003/.test(d.textContent) && /Reservado/.test(d.textContent); }, null, { timeout: 15000 });
+    // A: passagem A -> B confirmada; B marca ciente; A ve "ciente"
+    await A.f.evaluate(() => cgIrAba('turnos'));
+    await B.f.evaluate(() => cgIrAba('turnos'));
+    await A.f.click('.cg-passagem .cg-btn-primario');
+    await B.f.waitForSelector('.cg-passagem .cg-btn-primario:has-text("Ciente")', { timeout: 15000 });
+    await B.f.click('.cg-passagem .cg-btn-primario:has-text("Ciente")');
+    await A.f.waitForFunction(() => /Ciente.*João Lima/.test(document.querySelector('.cg-passagem').textContent), null, { timeout: 15000 });
+    // quem so ve: nada de alca, botoes de mover, formulario, Faltou ou passagem
+    const C = await abrirCarga(CONSULTA, CONSULTA, '7777', true, 'sequencia');
+    const so = await C.f.evaluate(async () => {
+      const r = { alca: document.querySelectorAll('.cg-seq-alca, .cg-seq-botoes').length };
+      cgIrAba('boxes'); r.patio = document.querySelectorAll('.cg-patio-botoes, .cg-doca-acoes, [draggable="true"]').length;
+      cgIrAba('turnos'); r.turnos = document.querySelectorAll('.cg-passagem .cg-btn, .cg-ajustes').length;
+      cgIrAba('todos'); r.arrasta = document.querySelectorAll('[draggable="true"]').length;
+      return r;
+    });
+    afirmar(!so.alca && !so.patio && !so.turnos && !so.arrasta, 'so ver: ' + JSON.stringify(so));
+    afirmar(!A.aba.erros.length && !B.aba.erros.length && !C.aba.erros.length, 'erros: ' + A.aba.erros.concat(B.aba.erros, C.aba.erros).join(' | '));
+    await A.contexto.close(); await B.contexto.close(); await C.contexto.close(); await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

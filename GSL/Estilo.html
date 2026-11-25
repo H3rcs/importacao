@@ -543,7 +543,6 @@ td.celula-medidor { min-width: 110px; }
 .espera-cartao.largo { max-width: 980px; }
 .espera-cartao h1 { font-size: 22px; color: var(--titulo); }
 .espera-cartao .logo-completa { width: 168px; height: 57px; margin-bottom: 2px; }
-[data-tema="escuro"] .espera-cartao .logo-completa { filter: brightness(0) invert(1); opacity: .92; }
 
 /* A faixa da marca (so na entrada). */
 .espera-marca { display: none; }
@@ -1722,8 +1721,17 @@ div.vazio { border: 1px dashed var(--linha-forte); border-radius: 12px; backgrou
   .item-menu { min-height: 36px; padding: 7px 12px; }
   .campo-duplo { grid-template-columns: 1fr; }
   .janela { max-height: 94vh; }
-  .grade-modulos { grid-template-columns: 1fr; }
-  .holocard { min-height: 0; padding: 18px; }
+  .grade-modulos { grid-template-columns: 1fr; gap: 10px; }
+  /* No celular o cartao do modulo vira uma linha: icone a esquerda, nome e frase a direita. */
+  .holocard { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 14px; row-gap: 3px; align-items: start; min-height: 0; padding: 15px 16px; }
+  .holo-icone { grid-row: 1 / span 2; width: 44px; height: 44px; margin: 0; border-radius: 12px; }
+  .holo-icone svg { width: 22px; height: 22px; }
+  .holo-titulo, .holo-frase { grid-column: 2; margin: 0; }
+  .holo-titulo { font-size: 16px; }
+  .holo-frase { font-size: 12.5px; line-height: 1.5; }
+  .holo-pendencia { display: contents; }
+  .holo-rodape { display: none; }
+  .holo-bolinha { top: 6px; left: 44px; }
   .cartao { padding: 16px; }
   .cartao-titulo { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
   .abas { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }

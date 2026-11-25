@@ -7,21 +7,23 @@
    acompanham o tema; o azul do portal continua.
    ===================================================================== */
 .apz {
-  --apz-azul: #0d47a1; --apz-azul-2: #1565c0; --apz-aba: #0a3880; --apz-aba-borda: #082d68;
-  --apz-serie: #1565c0;
+  /* 25/11 (redesenho): o azul do portal passa a ser o azul Bartofil do GSL. */
+  --apz-azul: #111785; --apz-azul-2: #1e27a8; --apz-aba: #0d126b; --apz-aba-borda: #0a0e55;
+  --apz-serie: #1e27a8;
   --apz-cartao: #ffffff; --apz-suave: #f8f9fa; --apz-borda: #e9ecef;
-  --apz-tinta: #212529; --apz-tinta-media: #6c757d; --apz-titulo: #1a237e;
+  --apz-tinta: #1b1b33; --apz-tinta-media: #5d627a; --apz-titulo: #111785;
   --apz-sombra: 0 4px 12px rgba(0, 0, 0, .05);
   color: var(--apz-tinta);
 }
 [data-tema="escuro"] .apz {
-  --apz-serie: #5b96e8;
+  --apz-azul: #9aa8ff;
+  --apz-serie: #7f95ff;
   --apz-cartao: var(--vidro-alto); --apz-suave: rgba(255, 255, 255, .04); --apz-borda: var(--linha-forte);
   --apz-tinta: var(--tinta); --apz-tinta-media: var(--tinta-media); --apz-titulo: #9DB4FF;
   --apz-sombra: var(--sombra);
 }
 .apz-topo {
-  background: var(--apz-azul); color: #fff; padding: 1rem 1.5rem; border-radius: 14px 14px 0 0;
+  background: linear-gradient(110deg, #0d126b 0%, #111785 45%, #1e27a8 100%); color: #fff; padding: 1rem 1.5rem; border-radius: 14px 14px 0 0;
   display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
 }

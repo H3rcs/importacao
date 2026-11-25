@@ -538,6 +538,10 @@ const SESSAO_RENOVAR_MS = 5 * 60 * 1000;
 const SESSAO_OCIOSA_MS = 60 * 60 * 1000;
 const PIN_TENTATIVAS = 5;
 const PIN_BLOQUEIO_SEG = 10 * 60;
+// 25/11: teto por dia. Com a versao da pasta compartilhada o /exec fica aberto a "Qualquer pessoa":
+// 5 erros a cada 10 min deixariam alguem varrer os PINs de 4 numeros em poucos dias. Com 20 por dia,
+// sao anos. O administrador destrava na hora (zerar o PIN); acertar o PIN tambem zera a conta.
+const PIN_ERROS_DIA = 20;
 const CODIGO_EMAIL_SEG = 15 * 60;      // codigo de primeiro acesso mandado por e-mail
 const CODIGO_ADMIN_SEG = 6 * 3600;     // codigo entregue pelo administrador (limite do cache)
 const CODIGO_REENVIO_MS = 60 * 1000;   // no maximo um e-mail de codigo por minuto
@@ -788,18 +792,42 @@ function registroDeAcesso_(email) {
   })[0] || null;
 }
 
+function chaveErrosDia_(email) { return 'PIN_ERROS_DIA_' + email.replace(/[^a-z0-9]/g, '_'); }
+function hojePin_() { return Utilities.formatDate(new Date(), fuso(), 'yyyy-MM-dd'); }
+function errosPinHoje_(email) {
+  try {
+    const v = JSON.parse(PropertiesService.getScriptProperties().getProperty(chaveErrosDia_(email)) || '{}');
+    return v && v.d === hojePin_() ? Number(v.n || 0) : 0;
+  } catch (e) { return 0; }
+}
 function contarErroPin_(email) {
   const cache = CacheService.getScriptCache();
   const k = 'pinerro_' + email.replace(/[^a-z0-9]/g, '_');
   const n = Number(cache.get(k) || 0) + 1;
   cache.put(k, String(n), PIN_BLOQUEIO_SEG);
+  try {
+    const dia = errosPinHoje_(email) + 1;
+    PropertiesService.getScriptProperties().setProperty(chaveErrosDia_(email), JSON.stringify({ d: hojePin_(), n: dia }));
+    if (dia === PIN_ERROS_DIA) registrarLog('sistema', 'BLOQUEIO', 'PIN', email, PIN_ERROS_DIA + ' PINs errados hoje: entrada travada ate amanha (o administrador destrava zerando o PIN)');
+  } catch (e) {}
   return n;
 }
+/* '' = livre; 'JANELA' = 5 erros nos ultimos 10 min; 'DIA' = o teto do dia. */
 function pinBloqueado_(email) {
-  return Number(CacheService.getScriptCache().get('pinerro_' + email.replace(/[^a-z0-9]/g, '_')) || 0) >= PIN_TENTATIVAS;
+  if (errosPinHoje_(email) >= PIN_ERROS_DIA) return 'DIA';
+  return Number(CacheService.getScriptCache().get('pinerro_' + email.replace(/[^a-z0-9]/g, '_')) || 0) >= PIN_TENTATIVAS ? 'JANELA' : '';
+}
+function avisoPinBloqueado_(motivo) {
+  return motivo === 'DIA'
+    ? 'PIN errado muitas vezes hoje. Por segurança, a entrada deste e-mail fica travada até amanhã — ou peça ao administrador para zerar o seu PIN.'
+    : 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.';
 }
 function zerarErrosPin_(email) {
   try { CacheService.getScriptCache().remove('pinerro_' + email.replace(/[^a-z0-9]/g, '_')); } catch (e) {}
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty(chaveErrosDia_(email))) props.deleteProperty(chaveErrosDia_(email));
+  } catch (e) {}
 }
 
 /*
@@ -952,9 +980,8 @@ function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
 
   const email = completarEmail_(emailBruto);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, erro: 'Digite o seu e-mail.' };
-  if (pinBloqueado_(email)) {
-    return { ok: false, erro: 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.' };
-  }
+  const travado = pinBloqueado_(email);
+  if (travado) return { ok: false, erro: avisoPinBloqueado_(travado) };
 
   const pin = String(pinBruto || '').trim();
   const registro = registroDeAcesso_(email);
@@ -1034,7 +1061,8 @@ function acaoTrocarMeuPin(usuario, params) {
   const atual = String(params.atual || '').trim();
   const novo = String(params.novo || '').trim();
   const conf = String(params.confirmacao || '').trim();
-  if (pinBloqueado_(email)) throw new Error('PIN errado muitas vezes. Espere 10 minutos e tente de novo.');
+  const travado = pinBloqueado_(email);
+  if (travado) throw new Error(avisoPinBloqueado_(travado));
   const registro = registroDeAcesso_(email);
   if (!registro || !String(registro.PIN_HASH || '').trim()) {
     throw new Error('Seu cadastro ainda não tem PIN. Saia e entre de novo para criar o seu.');

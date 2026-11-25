@@ -180,5 +180,18 @@ ok(comArroba.ok, 'usuario terminado em @ tambem completa o dominio');
 const errado = JSON.parse(run(ATACANTE, 'entrar', 'dono', '9999', '', '', '').valor);
 ok(!errado.ok, 'PIN errado com so o usuario continua recusado');
 
+// 25/11: teto de PINs errados por dia (o /exec da versao local fica aberto a "Qualquer pessoa")
+let travou = '';
+for (let i = 1; i <= 20; i++) {
+  if (i % 5 === 1) m.cache.clear();                       // passa a janela de 10 min
+  const r = JSON.parse(run(ATACANTE, 'entrar', DONO, String(1000 + i), '', '', '').valor);
+  travou = r.erro || '';
+}
+m.cache.clear();
+const certo = JSON.parse(run(ATACANTE, 'entrar', DONO, '4321', '', '', '').valor);
+ok(!certo.ok && /travada até amanhã/.test(certo.erro), '20 PINs errados no dia: nem o PIN certo entra ate amanha (' + (certo.erro || 'entrou') + ')');
+novaExecucao(m, PASTA, { contaGoogle: DONO }, { apagarComentarios: 'nenhum' }).zerarErrosPin_(DONO);
+const depois = JSON.parse(run(ATACANTE, 'entrar', DONO, '4321', '', '', '').valor);
+ok(depois.ok, 'zerar os erros (o administrador zerando o PIN) destrava');
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo ok'));
 process.exit(falhas ? 1 : 0);

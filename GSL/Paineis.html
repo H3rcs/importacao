@@ -442,14 +442,21 @@ function pnBarras(pares, cor, formatar) {
    FILIAIS E PAINEIS
    ===================================================================== */
 const PN_ESTADOS = { ATIVO: 'Ativo', OCULTO: 'Oculto', DESATIVADO: 'Desativado' };
+/*
+ * A faixa da tela (Ver / Ver e editar) vem do App.html (podeEditar, avisoSoVer). App.html da entrega
+ * anterior colado pela metade: a tela abre como antes (os botoes seguem as flags que o servidor manda
+ * com os dados, e o servidor recusa a gravacao de quem so ve do mesmo jeito).
+ */
+const pnPodeEditar = (tela) => (typeof podeEditar === 'function' ? podeEditar(tela) : true);
+const pnSoVer = (nome) => (typeof avisoSoVer === 'function' ? avisoSoVer(nome) : '');
 
 function pintarFiliais(r) {
   const d = r.dados;
   el('subtitulo-pagina').textContent = d.filiais.length + ' filial(is) · cada uma com banco e painéis próprios';
   // Com "Ver" em Filiais e paineis: so le (estado de cada painel, quem entra) — nada de criar, ligar ou desligar.
-  const ed = podeEditar('filiais');
+  const ed = pnPodeEditar('filiais');
   el('acoes-topo').innerHTML = ed ? `<button class="botao" onclick="formFilial()">Nova filial</button>` : '';
-  el('pagina').innerHTML = `${ed ? '' : avisoSoVer('Filiais e painéis')}
+  el('pagina').innerHTML = `${ed ? '' : pnSoVer('Filiais e painéis')}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Como funciona</div>
       <div class="pn-grade quatro">
@@ -465,7 +472,7 @@ function pintarFiliais(r) {
 }
 
 function cartaoFilial(f, d) {
-  const ed = podeEditar('filiais');
+  const ed = pnPodeEditar('filiais');
   return `<div class="cartao" style="${f.ativa ? '' : 'opacity:.7'}">
     <div class="linha-titulo" style="margin-bottom:10px">
       <div>
@@ -601,7 +608,7 @@ function pintarNobreaks(r) {
   const abas = [['painel', 'Painel'], ['lancar', 'Lançar semana'], ['historico', 'Histórico'], ['equipamentos', 'Equipamentos']]
     .filter((a) => a[0] !== 'lancar' || d.permissoes.lancar);
   if (!abas.some((a) => a[0] === ABA_NB)) ABA_NB = 'painel';
-  el('pagina').innerHTML = (podeEditar('nobreaks') ? '' : avisoSoVer('Nobreaks')) + pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
+  el('pagina').innerHTML = (pnPodeEditar('nobreaks') ? '' : pnSoVer('Nobreaks')) + pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
   pintarAbaNB(d);
 }
 
@@ -1232,7 +1239,7 @@ function pintarLimpeza(r) {
   // Link do e-mail de mencao da Limpeza: a acao abre na aba do plano. typeof: App.html de antes (colado pela metade).
   if (typeof ACAO_DO_LINK !== 'undefined' && ACAO_DO_LINK && ACAO_DO_LINK.tela === 'limpeza') ABA_LP = 'plano';
   if (!abas.some((a) => a[0] === ABA_LP)) ABA_LP = 'gestao';
-  el('pagina').innerHTML = (podeEditar('limpeza') ? '' : avisoSoVer('Limpeza CD')) + pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
+  el('pagina').innerHTML = (pnPodeEditar('limpeza') ? '' : pnSoVer('Limpeza CD')) + pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
   pintarAbaLP(d);
 }
 
@@ -3565,7 +3572,7 @@ function pintarEstoque(r) {
   const abas = [['itens', 'Estoque'], ['painel', 'Resumo'], ['movimentos', 'Movimentações']]
     .concat(p.cadastrar ? [['inventario', 'Inventário']] : []);
   if (!abas.some((a) => a[0] === ABA_EST)) ABA_EST = 'itens';
-  el('pagina').innerHTML = (podeEditar('estoque') ? '' : avisoSoVer('Estoque de TI')) + pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
+  el('pagina').innerHTML = (pnPodeEditar('estoque') ? '' : pnSoVer('Estoque de TI')) + pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
   pintarAbaEst(d);
 }
 

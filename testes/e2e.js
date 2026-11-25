@@ -2542,6 +2542,9 @@ async function rodar() {
     dono('comentarAcao', { id: a2, texto: '@Pedro Alves confere a validade?', mencoes: [PEDRO] });
     dono('comentarAcaoLimpeza', { id: l1, texto: '@Carla Dias confere na auditoria?', mencoes: [CONSULTA] });
     dono('comentarAcaoLimpeza', { id: l2, texto: '@Carla Dias veja', mencoes: [CONSULTA] });
+    // 3 faixas: a CONSULTA so ve a Limpeza; para responder pelo link ela tem "Ver e editar" ali (ajuste dela)
+    const cx = s.contexto(DONO); cx._porta = true;
+    dono('definirAjustePessoa', { id: cx.listar('ACESSOS').find((x) => x.EMAIL === CONSULTA).ID, tela: 'limpeza', nivel: 'EDITAR' });
     // Pedro e Carla entram em duas filiais: o link leva a filial (tambem a principal), senao cairiam na escolha da filial
     dono('salvarFilial', { nome: 'CD Salvador', cidade: 'Salvador - BA', codigo: 'SSA', paineis: { calendario: 'ATIVO', limpeza: 'ATIVO' } });
     const q1 = linkDaMencao(s, PEDRO, /Iluminação/), q2 = linkDaMencao(s, PEDRO, /Extintores/);
@@ -2555,7 +2558,8 @@ async function rodar() {
     let f = await frame(aba);
     await f.waitForSelector('#janela:not(.oculto) #cm-texto', { timeout: 20000 });
     let st = await janela(f);
-    afirmar(/Iluminação do Flow/.test(st.titulo) && !st.situacao && st.pagina === 'acoes' && st.filtro === 'TODAS', 'o link abriu a acao (o marcado so comenta): ' + JSON.stringify(st));
+    // 3 faixas: o coordenador tem "Ver e editar" no Plano de Acao — marcado, ele cuida da acao (comenta e muda a situacao)
+    afirmar(/Iluminação do Flow/.test(st.titulo) && st.situacao && st.pagina === 'acoes' && st.filtro === 'TODAS', 'o link abriu a acao: ' + JSON.stringify(st));
     afirmar(!/acao=/.test(aba.page.url()) && /tela=acoes/.test(aba.page.url()), 'endereco sem a acao: ' + aba.page.url());
     if (process.env.FOTO_LINK) await aba.page.screenshot({ path: process.env.FOTO_LINK + '-pedro.png' });
     await f.evaluate(() => fecharJanela());

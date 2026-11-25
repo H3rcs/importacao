@@ -77,7 +77,7 @@
         <input id="entrar-email" name="email" type="text" inputmode="email" autocomplete="off"
                autocapitalize="off" spellcheck="false" placeholder="nome.sobrenome"
                aria-describedby="entrar-email-sufixo"
-               oninput="esquecerPrimeiroAcesso(); sufixoDoEmail()">
+               oninput="esquecerPrimeiroAcesso(); if (window.sufixoDoEmail) sufixoDoEmail()">
         <span id="entrar-email-sufixo" class="entrar-email-sufixo">@bartofil.com.br</span>
       </div>
       <label class="entrar-rotulo" for="entrar-pin">PIN</label>

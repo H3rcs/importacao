@@ -846,7 +846,7 @@ async function rodar() {
     await esperarTela(aba, ['entrar']);
     let f = await frame(aba);
     await f.waitForFunction(() => /aberta muito tempo/.test(document.getElementById('entrar-msg').textContent), null, { timeout: 15000 });
-    afirmar(await f.inputValue('#entrar-email') === COORD, 'o e-mail continua preenchido');
+    afirmar(await f.inputValue('#entrar-email') === COORD.split('@')[0], 'o usuario continua preenchido (o dominio fica fixo ao lado)');
     await f.fill('#entrar-pin', '1234');
     await f.click('#entrar-botao');
     afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'o segundo Entrar entrou');
@@ -956,7 +956,7 @@ async function rodar() {
     await esperarTela(aba, ['entrar']);
     f = await frame(aba);
     await f.waitForSelector('#entrar-codigo', { state: 'visible', timeout: 15000 });
-    afirmar(await f.inputValue('#entrar-email') === COORD, 'e-mail continua preenchido');
+    afirmar(await f.inputValue('#entrar-email') === COORD.split('@')[0], 'usuario continua preenchido (o dominio fica fixo ao lado)');
     await f.fill('#entrar-pin', '1357');
     await f.fill('#entrar-codigo', codigoDoEmail(s, COORD));
     await f.fill('#entrar-pin2', '1357');

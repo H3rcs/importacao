@@ -209,7 +209,19 @@ const ESQUEMA = {
    */
   CARGA_BOXES:     ['NUMERO', 'ESTADO', 'OBSERVACAO'],
   CARGA_CARREGAMENTO: ['CARGA', 'COMPLEMENTO', 'PRIORIDADE', 'BOX', 'VEICULO', 'TIPO_VEICULO', 'MOTORISTA', 'SITUACAO', 'ETAPA',
-                    'CHEGADA', 'NO_BOX_EM', 'PREVISAO', 'CARREGADA_EM', 'CARREGADA_POR', 'OBSERVACAO', 'HISTORICO'],
+                    'CHEGADA', 'NO_BOX_EM', 'PREVISAO', 'CARREGADA_EM', 'CARREGADA_POR', 'OBSERVACAO', 'HISTORICO', 'DESCRICAO'],
+  /*
+   * FASE 3 (8.16 — Carga.gs).
+   * CARGA_CARREGAMENTO.DESCRICAO: a rota/destino (a DESCRICAO da planilha antiga); PREVISAO e o "HORARIO CHEGADA".
+   * CARGA_PESSOAS: o subturno da escala 5x2 de cada pessoa do Quadro (PESSOA = a chave; SUBTURNO A1 · A2 · C1 · C2).
+   * CARGA_ALOCACOES: a alocacao automatica de cada turno (TIPO ENTRADA: quem foi para o deposito da funcao;
+   * SAIDA: quem saiu no fim do turno), uma linha por turno e dia; PESSOAS em JSON; DESFEITA_EM/POR do "Desfazer".
+   * CARGA_CADASTRO: os cadastros do patio (TIPO MOTORISTA: CODIGO, VALOR = nome, PLACA; DESTINO e HORARIO: VALOR).
+   * CARGA_EQUIPAMENTOS.DEPOSITO no CHECKOUT: MIUDEZA ou NOBRE (um pool em cada).
+   */
+  CARGA_PESSOAS:   ['PESSOA', 'NOME', 'SUBTURNO'],
+  CARGA_ALOCACOES: ['TIPO', 'TURNO', 'DATA', 'EM', 'QTD', 'PESSOAS', 'PULADAS', 'DESFEITA_EM', 'DESFEITA_POR'],
+  CARGA_CADASTRO:  ['TIPO', 'VALOR', 'CODIGO', 'PLACA'],
   CARGA_PASSAGEM:  ['DATA', 'TURNO_SAI', 'TURNO_ENTRA', 'RESUMO', 'CONFIRMADO_POR', 'CONFIRMADO_NOME', 'CONFIRMADO_EM',
                     'CIENTE_POR', 'CIENTE_NOME', 'CIENTE_EM', 'OBSERVACAO'],
 
@@ -367,7 +379,7 @@ function escreverCabecalho(aba, colunas) {
  * referencia vazias sao semeadas. Nenhuma dessas correcoes deveria
  * depender de alguem rodar funcao no editor.
  */
-const VERSAO_ESQUEMA = '8.15';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) · 8.15: Situacao de Carga fase 2 (CARGA_SEQUENCIA, CARGA_PRESENCA, CARGA_PASSAGEM, CARGA_BOXES, CARGA_CARREGAMENTO, CARGA_EQUIPE.RUA, check-outs; paleteiras seguem os separadores) (a proxima e 8.16: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
+const VERSAO_ESQUEMA = '8.16';   // 8.0: filiais, nobreaks, limpeza e quadro · 8.1: estoque de TI e modulos por pessoa · 8.2: entrada por e-mail e PIN · 8.3: tela Relatos de erro · 8.4: estoque de TI com estoque ideal · 8.5: limpeza por lote e perfil SUPERVISOR · 8.6: comentarios nas acoes · 8.7: autor e tipo no historico das acoes · 8.8: limpeza com estoque e Plano de Acao (fotos nas acoes) · 8.9: modulo Jovem Aprendiz · 8.10: marcar pessoa nos comentarios das acoes (MENCOES e MARCADOS) · 8.11: programacao das ferias do Quadro do CD (FERIAS_PROG) · 8.12: matriz de acesso em tres faixas (TELA_<id> = OCULTO/VER/EDITAR, ACESSOS.AJUSTES, ATIVIDADES.ENTREGUE_POR) · 8.13: situacoes e parecer do gerente no Plano de Acao (ACOES.PRIORIDADE, PARECER, TRATATIVA, AUTOR, DESTINATARIO, LEGENDAS...) · 8.14: Situacao de Carga (CARGA_SNAPSHOTS, CARGA_EQUIPE, CARGA_EQUIPAMENTOS) · 8.15: Situacao de Carga fase 2 (CARGA_SEQUENCIA, CARGA_PRESENCA, CARGA_PASSAGEM, CARGA_BOXES, CARGA_CARREGAMENTO, CARGA_EQUIPE.RUA, check-outs; paleteiras seguem os separadores) · 8.16: Situacao de Carga fase 3 (escala 5x2: CARGA_PESSOAS com o subturno; CARGA_ALOCACOES, a alocacao automatica na entrada e na saida do turno; CARGA_CADASTRO; CARGA_CARREGAMENTO.DESCRICAO; check-outs por deposito) (a proxima e 8.17: as versoes sao comparadas parte por parte, ver numeroDaVersao_)
 
 function garantirEsquema() {
   // A checagem completa le o cabecalho de todas as abas. Rodar isso a
@@ -426,11 +438,20 @@ function garantirEsquema() {
   if (principal && versaoAntes < numeroDaVersao_('8.1') && adicionarPaineisNovosNaPrincipal_(['estoque'])) mexeu = true;
   // 8.9: o Jovem Aprendiz entra ligado na principal (uma vez; depois vale o que o administrador escolher).
   if (principal && versaoAntes < numeroDaVersao_('8.9') && adicionarPaineisNovosNaPrincipal_(['aprendiz'])) mexeu = true;
-  // 8.14: a Situacao de Carga entra ligada na principal, e cada filial ganha as paleteiras e os carrinhos padrao.
-  if (principal && versaoAntes < numeroDaVersao_('8.14') && adicionarPaineisNovosNaPrincipal_(['carga'])) mexeu = true;
-  if (versaoAntes < numeroDaVersao_('8.14') && typeof semearEquipamentosCarga_ === 'function' && semearEquipamentosCarga_()) mexeu = true;
-  // 8.15: as paleteiras "em uso" passam a seguir os separadores (a linha USO volta a LIVRE) e entram os check-outs.
-  if (versaoAntes < numeroDaVersao_('8.15') && typeof migrarCarga815_ === 'function' && migrarCarga815_()) mexeu = true;
+  // Se um passo da Situacao de Carga falhar, a versao nao e marcada (tenta de novo na proxima abertura) e a entrada
+  // continua: o erro vai para o LOG, como nos passos da Limpeza e dos pareceres, la embaixo.
+  let migracaoPendente = false;
+  // 8.14: a Situacao de Carga entra ligada na principal (uma vez so: ligarPainelNovoUmaVez_), e cada filial ganha
+  // as paleteiras e os carrinhos padrao.
+  try {
+    if (principal && versaoAntes < numeroDaVersao_('8.14') && ligarPainelNovoUmaVez_('carga')) mexeu = true;
+    if (versaoAntes < numeroDaVersao_('8.14') && typeof semearEquipamentosCarga_ === 'function' && semearEquipamentosCarga_()) mexeu = true;
+  } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'CARGA', '8.14', String(e)); }
+  // 8.15: as paleteiras "em uso" passam a seguir os separadores (a linha USO volta a LIVRE).
+  // 8.16: os check-outs ficam por deposito (Miudeza 8, Nobre 10); o do CD inteiro (da 8.15) sai. Pode rodar de novo.
+  try {
+    if (versaoAntes < numeroDaVersao_('8.16') && typeof migrarCarga815_ === 'function' && migrarCarga815_()) mexeu = true;
+  } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'CARGA', '8.16', String(e)); }
   if (!listar('ROTINAS').length) { semearRotinas(); mexeu = true; }
   if (!listar('PARAMETROS').length) { semearParametros(); mexeu = true; }
   // Chaves novas em instalacao ja existente: cria so as que faltam.
@@ -495,7 +516,6 @@ function garantirEsquema() {
    * que ja passou nao passa de novo.
    */
   // Se falhar (trava ocupada, por exemplo), a versao nao e marcada: tenta de novo na proxima abertura.
-  let migracaoPendente = false;
   try {
     if (migrarAcoesDaLimpeza_()) mexeu = true;
   } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'LP_ACOES', '', String(e)); }
@@ -520,6 +540,20 @@ function garantirEsquema() {
   } catch (e) { migracaoPendente = true; registrarLog('sistema', 'ERRO', 'ACOES', 'PARECER', String(e)); }
   if (mexeu) limparCache();
   if (!migracaoPendente) PropertiesService.getScriptProperties().setProperty(chaveVersao, VERSAO_ESQUEMA);
+  esquecerProps();
+  return mexeu;
+}
+
+/*
+ * Painel que nasce numa versao entra ligado na principal UMA VEZ: a marca PAINEL_NASCEU_<id> fica nas
+ * propriedades. Se a migracao ficar pendente e rodar de novo, o "Nao usar nesta filial" que o
+ * administrador escolheu nesse meio tempo fica como esta.
+ */
+function ligarPainelNovoUmaVez_(id) {
+  const chave = 'PAINEL_NASCEU_' + String(id).toUpperCase();
+  if (prop(chave, '') === 'SIM') return false;
+  const mexeu = adicionarPaineisNovosNaPrincipal_([id]);
+  PropertiesService.getScriptProperties().setProperty(chave, 'SIM');
   esquecerProps();
   return mexeu;
 }
@@ -569,6 +603,7 @@ const PARAMETROS_NOVOS = [
   ['CARGA_TURNO_A', 'Situação de Carga: horário do Turno A (1º turno), como 06:50-16:14', '06:50-16:14'],
   ['CARGA_TURNO_B', 'Situação de Carga: horário do Turno B (2º turno), como 16:04-01:01 (passa da meia-noite)', '16:04-01:01'],
   ['CARGA_TURNO_C', 'Situação de Carga: horário do Turno C (3º turno), como 23:00-07:00 (passa da meia-noite)', '23:00-07:00'],
+  ['CARGA_TURNO_ADM', 'Situação de Carga: horário ADM (Recebimento do Turno A e equipe ADM, segunda a sexta), como 08:00-17:48', '08:00-17:48'],
   ['CARGA_BOXES', 'Situação de Carga: quantos boxes (docas) o CD tem', '26'],
   ['CARGA_BOX_PERMANENCIA_MIN', 'Situação de Carga: minutos que um veículo pode ficar encostado no box antes do alerta', '120'],
   ['CARGA_SITUACOES_BOX', 'Situação de Carga: as situações do carregamento (separadas por ponto e vírgula)', CG_SITUACOES_PADRAO_TXT],

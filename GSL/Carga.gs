@@ -57,7 +57,7 @@ const CG_DEPOSITOS = [
 ];
 /* Os quatro depositos de uma supervisao so (a tela "Supervisao" mostra os quatro lado a lado). */
 const CG_GRUPO_SUPERVISAO = ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'];
-const CG_EQUIP_PADRAO = { PALETEIRA: 12, CARRINHO: 35, CHECKOUT: 12 };
+const CG_EQUIP_PADRAO = { PALETEIRA: 12, CARRINHO: 35, CHECKOUT: 18 };
 const CG_EQUIP_DONO = { CARRINHO: 'MIUDEZA' };       // carrinho e sempre da Miudeza; paleteira vai e volta do pool
 /*
  * 8.15 (pedido da gerencia): a paleteira e o check-out deixam de ser arrastados. Cada SEPARADOR alocado na
@@ -66,6 +66,22 @@ const CG_EQUIP_DONO = { CARRINHO: 'MIUDEZA' };       // carrinho e sempre da Miu
  * manutencao - em uso. A manutencao continua manual. Quem chegou por ultimo (DESDE) e quem fica sem.
  */
 const CG_EQUIP_CONSUMO = { PALETEIRA: 'SEPARADOR', CHECKOUT: 'CONFERENTE' };
+/*
+ * 8.16 (modelo 5x2 da gerencia): so a Miudeza e o Nobre tem check-out — um pool em cada um (Miudeza 8,
+ * Nobre 10, confirmado pela gerencia em 26/11; editaveis). O conferente dos outros depositos nao usa.
+ * Cada POOL: o tipo e, no check-out, o deposito (a coluna DEPOSITO da linha).
+ */
+const CG_POOLS = [
+  { id: 'PALETEIRA', tipo: 'PALETEIRA', dep: '', padrao: 12, papel: 'SEPARADOR', deps: ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'] },
+  { id: 'CARRINHO', tipo: 'CARRINHO', dep: 'MIUDEZA', padrao: 35 },
+  { id: 'CHECKOUT_MIUDEZA', tipo: 'CHECKOUT', dep: 'MIUDEZA', padrao: 8, papel: 'CONFERENTE', deps: ['MIUDEZA'] },
+  { id: 'CHECKOUT_NOBRE', tipo: 'CHECKOUT', dep: 'NOBRE', padrao: 10, papel: 'CONFERENTE', deps: ['NOBRE'] }
+];
+function cgPool_(tipo, dep) {
+  tipo = String(tipo || '').toUpperCase(); dep = String(dep || '').toUpperCase();
+  return CG_POOLS.filter(function (x) { return x.tipo === tipo && (tipo !== 'CHECKOUT' || x.dep === dep); })[0] || null;
+}
+function cgDoPool_(r, pool) { return String(r.TIPO) === pool.tipo && (pool.tipo !== 'CHECKOUT' || String(r.DEPOSITO || '') === pool.dep); }
 const CG_EQUIP_NOME = { PALETEIRA: ['Paleteira', 'paleteira', 'paleteiras'], CARRINHO: ['Carrinho', 'carrinho', 'carrinhos'], CHECKOUT: ['Check-out', 'check-out', 'check-outs'] };
 /*
  * EQUILIBRIO ENTRE DEPOSITOS (25/11): os depositos tem que andar juntos — a carga so sai quando
@@ -412,41 +428,42 @@ function cgContagemEquipe_(equipe) {
 function cgEquipamentos_() {
   const linhas = listar('CARGA_EQUIPAMENTOS');
   const saida = [];
-  Object.keys(CG_EQUIP_PADRAO).forEach(function (tipo) {
-    const minhas = linhas.filter(function (r) { return String(r.TIPO) === tipo; })
-      .sort(function (a, b) { return Number(a.NUMERO) - Number(b.NUMERO); });
+  CG_POOLS.forEach(function (pool) {
+    const minhas = linhas.filter(function (r) { return cgDoPool_(r, pool); }).sort(function (a, b) { return Number(a.NUMERO) - Number(b.NUMERO); });
     if (!minhas.length) {
-      for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) saida.push(cgEquipVirtual_(tipo, i));
+      for (let i = 1; i <= pool.padrao; i++) saida.push(cgEquipVirtual_(pool, i));
       return;
     }
     minhas.forEach(function (r) {
       if (Number(r.NUMERO) < 1) return;          // a linha 0 so guarda que a quantidade foi para zero
       let estado = CG_ESTADOS_EQUIP.indexOf(String(r.ESTADO)) !== -1 ? String(r.ESTADO) : 'LIVRE';
-      if (CG_EQUIP_CONSUMO[tipo] && estado === 'USO') estado = 'LIVRE';   // 8.15: o uso vem das pessoas alocadas
-      let dep = String(r.DEPOSITO || '');
-      if (CG_EQUIP_DONO[tipo]) dep = CG_EQUIP_DONO[tipo];
-      else if (estado !== 'USO') dep = '';
-      saida.push({ id: r.ID, tipo: tipo, numero: Number(r.NUMERO), estado: estado, dep: dep,
+      if (CG_EQUIP_CONSUMO[pool.tipo] && estado === 'USO') estado = 'LIVRE';   // 8.15: o uso vem das pessoas alocadas
+      saida.push({ id: r.ID, tipo: pool.tipo, pool: pool.id, numero: Number(r.NUMERO), estado: estado, dep: pool.dep,
         obs: String(r.OBSERVACAO || ''), quando: String(r.ATUALIZADO_EM || ''), por: String(r.ATUALIZADO_POR || '') });
     });
   });
   return saida;
 }
-function cgEquipVirtual_(tipo, i) {
-  return { id: '', tipo: tipo, numero: i, estado: 'LIVRE', dep: CG_EQUIP_DONO[tipo] || '', obs: '', quando: '', por: '' };
+function cgEquipVirtual_(pool, i) {
+  return { id: '', tipo: pool.tipo, pool: pool.id, numero: i, estado: 'LIVRE', dep: pool.dep, obs: '', quando: '', por: '' };
+}
+function cgSementeDoPool_(pool) {
+  const l = [];
+  for (let i = 1; i <= pool.padrao; i++) l.push({ TIPO: pool.tipo, DEPOSITO: pool.dep, NUMERO: String(i), ESTADO: 'LIVRE' });
+  return l;
 }
 
 /*
- * SEMENTE (instalacao, migracoes 8.14 e 8.15 e filial nova): 12 paleteiras no pool, 35 carrinhos na
- * Miudeza e 12 check-outs, tudo livre. So o TIPO que nunca teve linha nenhuma (nem a linha 0 de quem
- * zerou) — o que a gerencia ajustou depois fica.
+ * SEMENTE (instalacao, migracoes e filial nova): 12 paleteiras no pool do CD, 35 carrinhos na Miudeza e
+ * os check-outs (8 na Miudeza, 10 no Nobre), tudo livre. So o POOL que nunca teve linha nenhuma (nem a
+ * linha 0 de quem zerou) — o que a gerencia ajustou depois fica.
  */
 function semearEquipamentosCarga_() {
   const todas = listar('CARGA_EQUIPAMENTOS', true);
-  const linhas = [];
-  Object.keys(CG_EQUIP_PADRAO).forEach(function (tipo) {
-    if (todas.some(function (r) { return String(r.TIPO) === tipo; })) return;
-    for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) linhas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
+  let linhas = [];
+  CG_POOLS.forEach(function (pool) {
+    if (todas.some(function (r) { return cgDoPool_(r, pool); })) return;
+    linhas = linhas.concat(cgSementeDoPool_(pool));
   });
   if (!linhas.length) return false;
   inserirVarios('CARGA_EQUIPAMENTOS', linhas, 'sistema');
@@ -455,26 +472,36 @@ function semearEquipamentosCarga_() {
 
 /*
  * MIGRACAO 8.15: a paleteira "em uso" num deposito (arrastada a mao ate a 8.14) volta para LIVRE — o uso
- * agora e calculado pelos separadores alocados, entao nenhuma paleteira fica contada duas vezes; a
- * manutencao fica como estava. E os check-outs entram (12, livres).
+ * agora e calculado pelos separadores alocados; a manutencao fica como estava.
+ * 8.16: o check-out do CD inteiro (DEPOSITO vazio, da 8.15) sai; entram os da Miudeza e os do Nobre.
+ * As duas podem rodar de novo: so mexem no que ainda esta no jeito antigo.
  */
 function migrarCarga815_() {
   let mexeu = false;
-  const emUso = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return CG_EQUIP_CONSUMO[String(r.TIPO)] && String(r.ESTADO) === 'USO'; });
+  const vivas = listar('CARGA_EQUIPAMENTOS');
+  const emUso = vivas.filter(function (r) { return CG_EQUIP_CONSUMO[String(r.TIPO)] && String(r.ESTADO) === 'USO'; });
   if (emUso.length) {
     atualizarVarios('CARGA_EQUIPAMENTOS', emUso.map(function (r) { return { id: r.ID, linha: r._linha, campos: { ESTADO: 'LIVRE', DEPOSITO: '' } }; }), 'migracao');
     mexeu = true;
   }
+  if (migrarCheckoutsPorDeposito_()) mexeu = true;
   if (semearEquipamentosCarga_()) mexeu = true;
   return mexeu;
 }
+function migrarCheckoutsPorDeposito_() {
+  const velhos = listar('CARGA_EQUIPAMENTOS', true).filter(function (r) {
+    return String(r.TIPO) === 'CHECKOUT' && ['MIUDEZA', 'NOBRE'].indexOf(String(r.DEPOSITO || '')) === -1 && String(r.EXCLUIDO || '') !== 'SIM';
+  });
+  if (!velhos.length) return false;
+  atualizarVarios('CARGA_EQUIPAMENTOS', velhos.map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; }), 'migracao');
+  esquecerLeituras();
+  return true;
+}
 
-/* Dentro da trava: grava as linhas do tipo que so existiam no padrao (banco sem a semente). */
-function cgMaterializar_(tipo, quem) {
-  if (listar('CARGA_EQUIPAMENTOS').some(function (r) { return String(r.TIPO) === tipo; })) return;
-  const novas = [];
-  for (let i = 1; i <= CG_EQUIP_PADRAO[tipo]; i++) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
-  inserirVarios('CARGA_EQUIPAMENTOS', novas, quem);
+/* Dentro da trava: grava as linhas do pool que so existiam no padrao (banco sem a semente). */
+function cgMaterializar_(pool, quem) {
+  if (listar('CARGA_EQUIPAMENTOS').some(function (r) { return cgDoPool_(r, pool); })) return;
+  inserirVarios('CARGA_EQUIPAMENTOS', cgSementeDoPool_(pool), quem);
   esquecerLeituras();
 }
 
@@ -483,12 +510,13 @@ function cgMaterializar_(tipo, quem) {
 /* ------------------------------------------------------------------ */
 
 const CG_TABELAS_VIVAS = ['CARGA_SNAPSHOTS', 'CARGA_EQUIPE', 'CARGA_EQUIPAMENTOS', 'CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM',
-  'CARGA_BOXES', 'CARGA_CARREGAMENTO'];
+  'CARGA_BOXES', 'CARGA_CARREGAMENTO', 'CARGA_PESSOAS', 'CARGA_ALOCACOES', 'CARGA_CADASTRO'];
 function cgGeracao_() {
   return CG_TABELAS_VIVAS.map(function (t) { return geracaoTabela(t); }).join('.');
 }
 
 function acaoGeracaoCarga(usuario) {
+  cgAutoTurno_();          // a alocacao automatica da entrada/saida do turno (rapida quando ja foi feita)
   return { ok: true, g: cgGeracao_() };
 }
 
@@ -497,6 +525,7 @@ function acaoGeracaoCarga(usuario) {
 /* ------------------------------------------------------------------ */
 
 function dadosCarga(usuario, params) {
+  cgAutoTurno_();
   const snaps = cgSnapshots_();
   const ultimo = snaps[0] || null;
   const equipe = cgEquipe_();
@@ -527,7 +556,13 @@ function dadosCarga(usuario, params) {
     passagens: cgPassagens_(),
     sequencia: null,
     patio: null,
-    voce: { email: usuario.email, nome: String(usuario.nome || usuario.email || '') }
+    voce: { email: usuario.email, nome: String(usuario.nome || usuario.email || '') },
+    // fase 3 (8.16)
+    subturnos: cgSubturnos_(),
+    turnoAdm: cgHorarioAdm_(),
+    automaticas: cgAutoDaTela_(agora),
+    cadastro: cgCadastro_(),
+    pools: CG_POOLS.map(function (x) { return { id: x.id, tipo: x.tipo, dep: x.dep, papel: x.papel || '', deps: x.deps || [], padrao: x.padrao }; })
   };
   if (!ultimo) { base.sequencia = cgSequenciaDaTela_([]); base.patio = cgPatioDaTela_([]); return base; }
 
@@ -935,54 +970,58 @@ function acaoEquipamentoCarga(usuario, params) {
   const p = params || {};
   const tipo = String(p.tipo || '').toUpperCase();
   if (!CG_EQUIP_PADRAO[tipo]) throw new Error('Equipamento desconhecido.');
+  const pool = cgPool_(tipo, p.dep);
+  if (!pool) throw new Error('Check-out só na Miudeza ou no Nobre: diga de qual depósito.');
   const estado = String(p.estado || '').toUpperCase();
   if (CG_ESTADOS_EQUIP.indexOf(estado) === -1) throw new Error('Estado inválido.');
   if (CG_EQUIP_CONSUMO[tipo] && estado === 'USO') {
     throw new Error(tipo === 'PALETEIRA' ? 'A paleteira entra em uso sozinha: cada separador alocado na Grandeza, Nobre Grandeza, Pesáveis ou Blocado usa uma. Aqui só se marca manutenção.'
       : 'O check-out entra em uso sozinho: cada conferente alocado usa um. Aqui só se marca manutenção.');
   }
-  const dep = CG_EQUIP_DONO[tipo] || '';
+  const dep = pool.dep;
   const obs = estado === 'MANUTENCAO' ? cgTexto_(p.obs, 120) : '';
-  const nome = CG_EQUIP_NOME[tipo][0];
+  const nome = CG_EQUIP_NOME[tipo][0] + (tipo === 'CHECKOUT' ? ' da ' + cgNomeDep_(dep) : '');
   let numero = p.numero === '' || p.numero == null ? 0 : Number(p.numero);
   comTrava(function () {
-    cgMaterializar_(tipo, usuario.email);
-    const todas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.TIPO) === tipo && Number(r.NUMERO) >= 1; });
+    cgMaterializar_(pool, usuario.email);
+    const todas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return cgDoPool_(r, pool) && Number(r.NUMERO) >= 1; });
     if (!numero) throw new Error('Diga qual ' + CG_EQUIP_NOME[tipo][1] + '.');
     const linha = todas.filter(function (r) { return Number(r.NUMERO) === numero; })[0];
     if (!linha) throw new Error(nome + ' ' + numero + ' não existe.');
     atualizar('CARGA_EQUIPAMENTOS', linha.ID, { ESTADO: estado, DEPOSITO: dep, OBSERVACAO: obs }, usuario.email);
   });
   esquecerLeituras();
-  const onde = estado === 'USO' ? 'em uso' : (estado === 'LIVRE' ? (CG_EQUIP_CONSUMO[tipo] ? 'funcionando (no pool do CD)' : 'livre') : 'em manutenção');
-  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: nome + ' ' + numero + ': ' + onde + '.' };
+  const onde = estado === 'USO' ? 'em uso' : (estado === 'LIVRE' ? (CG_EQUIP_CONSUMO[tipo] ? 'funcionando (no pool' + (tipo === 'CHECKOUT' ? ')' : ' do CD)') : 'livre') : 'em manutenção');
+  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: CG_EQUIP_NOME[tipo][0] + ' ' + numero + (tipo === 'CHECKOUT' ? ' da ' + cgNomeDep_(dep) : '') + ': ' + onde + '.' };
 }
 function cgNomeDep_(id) { const d = CG_DEPOSITOS.filter(function (x) { return x.id === id; })[0]; return d ? d.nome : id; }
 
-/* QUANTIDADE de paleteiras (o pool do CD) ou de carrinhos (Miudeza). params: { tipo, quantidade } */
+/* QUANTIDADE de paleteiras (o pool do CD), carrinhos (Miudeza) ou check-outs (Miudeza ou Nobre). params: { tipo, dep, quantidade } */
 function acaoQuantidadeEquipamentoCarga(usuario, params) {
   const p = params || {};
   const tipo = String(p.tipo || '').toUpperCase();
   if (!CG_EQUIP_PADRAO[tipo]) throw new Error('Equipamento desconhecido.');
+  const pool = cgPool_(tipo, p.dep);
+  if (!pool) throw new Error('Check-out só na Miudeza ou no Nobre: diga de qual depósito.');
   const qtd = Number(p.quantidade);
   if (!(qtd >= 0 && qtd <= CG_MAX_EQUIP && Math.floor(qtd) === qtd)) throw new Error('Quantidade de 0 a ' + CG_MAX_EQUIP + '.');
   comTrava(function () {
-    cgMaterializar_(tipo, usuario.email);
-    const minhas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return String(r.TIPO) === tipo; });
+    cgMaterializar_(pool, usuario.email);
+    const minhas = listar('CARGA_EQUIPAMENTOS').filter(function (r) { return cgDoPool_(r, pool); });
     const zero = minhas.filter(function (r) { return Number(r.NUMERO) < 1; });
     const numeradas = minhas.filter(function (r) { return Number(r.NUMERO) >= 1; });
     const existe = {};
     numeradas.forEach(function (r) { existe[Number(r.NUMERO)] = r; });
     const novas = [];
-    for (let i = 1; i <= qtd; i++) if (!existe[i]) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: String(i), ESTADO: 'LIVRE' });
-    if (!qtd && !zero.length) novas.push({ TIPO: tipo, DEPOSITO: CG_EQUIP_DONO[tipo] || '', NUMERO: '0', ESTADO: 'LIVRE' });
+    for (let i = 1; i <= qtd; i++) if (!existe[i]) novas.push({ TIPO: tipo, DEPOSITO: pool.dep, NUMERO: String(i), ESTADO: 'LIVRE' });
+    if (!qtd && !zero.length) novas.push({ TIPO: tipo, DEPOSITO: pool.dep, NUMERO: '0', ESTADO: 'LIVRE' });
     const sobra = numeradas.filter(function (r) { return Number(r.NUMERO) > qtd; }).concat(qtd ? zero : [])
       .map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; });
     if (sobra.length) atualizarVarios('CARGA_EQUIPAMENTOS', sobra, usuario.email);
     if (novas.length) inserirVarios('CARGA_EQUIPAMENTOS', novas, usuario.email);
   });
   esquecerLeituras();
-  const nome = (qtd === 1 ? CG_EQUIP_NOME[tipo][1] : CG_EQUIP_NOME[tipo][2]) + (tipo === 'CARRINHO' ? ' na Miudeza' : ' no CD');
+  const nome = (qtd === 1 ? CG_EQUIP_NOME[tipo][1] : CG_EQUIP_NOME[tipo][2]) + (pool.dep ? (pool.dep === 'NOBRE' ? ' no ' : ' na ') + cgNomeDep_(pool.dep) : ' no CD');
   return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: qtd + ' ' + nome + '.' };
 }
 
@@ -1149,12 +1188,11 @@ function cgUsaPaleteira_(dep) { return CG_DEPOSITOS.some(function (d) { return d
  */
 function cgConsumoEquip_(equipe, equipamentos) {
   const saida = {};
-  Object.keys(CG_EQUIP_CONSUMO).forEach(function (tipo) {
-    const papel = CG_EQUIP_CONSUMO[tipo];
-    const lista = equipamentos.filter(function (e) { return e.tipo === tipo; });
+  CG_POOLS.filter(function (pool) { return pool.papel; }).forEach(function (pool) {
+    const lista = equipamentos.filter(function (e) { return (e.pool || e.tipo) === pool.id || (!e.pool && e.tipo === pool.tipo && e.dep === pool.dep); });
     const manut = lista.filter(function (e) { return e.estado === 'MANUTENCAO'; }).length;
     const disponiveis = lista.length - manut;
-    const pessoas = equipe.filter(function (p) { return p.papel === papel && (tipo !== 'PALETEIRA' || cgUsaPaleteira_(p.dep)); })
+    const pessoas = equipe.filter(function (p) { return p.papel === pool.papel && pool.deps.indexOf(p.dep) !== -1; })
       .sort(function (a, b) { return String(a.desde || '9999').localeCompare(String(b.desde || '9999')) || String(a.nome).localeCompare(String(b.nome)); });
     const porDep = {}, sem = [];
     pessoas.forEach(function (p, i) {
@@ -1162,7 +1200,7 @@ function cgConsumoEquip_(equipe, equipamentos) {
       d.pessoas++;
       if (i < disponiveis) d.com++; else { d.sem++; sem.push(p.k); }
     });
-    saida[tipo] = { total: lista.length, manutencao: manut, disponiveis: disponiveis, pessoas: pessoas.length,
+    saida[pool.id] = { total: lista.length, manutencao: manut, disponiveis: disponiveis, pessoas: pessoas.length,
       emUso: Math.min(pessoas.length, disponiveis), livres: Math.max(0, disponiveis - pessoas.length),
       falta: Math.max(0, pessoas.length - disponiveis), porDep: porDep, sem: sem };
   });
@@ -1612,7 +1650,7 @@ function cgCarregamentos_() {
     return { id: r.ID, linha: r._linha, n: String(r.CARGA || ''), comp: String(r.COMPLEMENTO || ''), prio: String(r.PRIORIDADE || ''),
       box: Number(r.BOX) || 0, veiculo: String(r.VEICULO || ''), tipo: String(r.TIPO_VEICULO || ''), motorista: String(r.MOTORISTA || ''),
       situacao: String(r.SITUACAO || ''), situacaoCat: cgCategoriaObs_(r.SITUACAO), etapa: CG_ETAPAS.indexOf(String(r.ETAPA)) !== -1 ? String(r.ETAPA) : 'FILA',
-      chegada: cgIso_(r.CHEGADA), noBox: cgIso_(r.NO_BOX_EM), previsao: String(r.PREVISAO || ''), carregadaEm: cgIso_(r.CARREGADA_EM),
+      chegada: cgIso_(r.CHEGADA), noBox: cgIso_(r.NO_BOX_EM), previsao: String(r.PREVISAO || ''), carregadaEm: cgIso_(r.CARREGADA_EM), descricao: String(r.DESCRICAO || ''),
       carregadaPor: String(r.CARREGADA_POR || ''), obs: String(r.OBSERVACAO || ''), hist: cgJson_(r.HISTORICO, []) || [],
       por: String(r.ATUALIZADO_POR || ''), em: String(r.ATUALIZADO_EM || '') };
   }).filter(function (x) { return x.n; });
@@ -1787,39 +1825,8 @@ function acaoCarregamentoCarga(usuario, params) {
       atualizar('CARGA_CARREGAMENTO', atual.id, campos, quem);
     };
     if (op === 'salvar') {
-      const cargas = cgCargasDoUltimo_();
-      const r = cgResolverCarga_(p.carga, cargas);
-      if (!r.n) throw new Error(r.erro);
-      const outro = todos.filter(function (x) { return x.n === r.n && x.etapa !== 'CARREGADA' && x.id !== idFinal; })[0];
-      if (outro) throw new Error('A carga ' + r.n + ' já está ' + (outro.box ? 'no box ' + outro.box : 'no pátio') + '.');
-      const box = conferirBox(Number(p.box) || 0);
-      const lista = cgSituacoesBox_();
-      const situacao = p.situacao ? cgSituacaoDaLista_(p.situacao, lista) : '';
-      if (p.situacao && !situacao) throw new Error('Situação "' + cgTexto_(p.situacao, 40).toUpperCase() + '" não está na lista (Configuração › Outros parâmetros › CARGA_SITUACOES_BOX).');
-      const tipo = String(p.tipo || '').toUpperCase();
-      if (tipo && CG_TIPOS_VEICULO.indexOf(tipo) === -1) throw new Error('Tipo de veículo desconhecido.');
-      const prev = String(p.previsao || '').trim();
-      if (prev && !/^([01]?\d|2[0-3])[:h][0-5]\d$/.test(prev)) throw new Error('Previsão: escreva a hora como 14:30.');
-      let chegada = '';
-      if (p.chegada) { chegada = cgHoraParaIso_(p.chegada, agora); if (!chegada) throw new Error('Chegada: escreva a hora como 05:40.'); }
-      const c = cargas.filter(function (x) { return x.n === r.n; })[0];
-      const campos = { CARGA: r.n, COMPLEMENTO: cgTexto_(p.complemento, 40), PRIORIDADE: cgTexto_(p.prioridade, 20), BOX: box ? String(box) : '',
-        VEICULO: cgTexto_(p.veiculo, 30).toUpperCase(), TIPO_VEICULO: tipo || cgTipoConhecido_(p.veiculo) || (c ? cgTipoConhecido_(c.v) : '') || '',
-        MOTORISTA: cgTexto_(p.motorista, 60), SITUACAO: situacao, PREVISAO: prev ? prev.replace('h', ':').replace(/^(\d):/, '0$1:') : '', OBSERVACAO: cgTexto_(p.observacao, 300) };
-      if (atual) {
-        if (atual.etapa === 'FILA' && box) campos.ETAPA = 'BOX';
-        if (!box && atual.etapa !== 'CARREGADA') { campos.ETAPA = 'FILA'; campos.NO_BOX_EM = ''; }
-        if (box && atual.box !== box && atual.noBox) campos.NO_BOX_EM = agora;
-        if (chegada && !atual.chegada) { campos.CHEGADA = chegada; if (box && !atual.noBox) campos.NO_BOX_EM = chegada; }
-        gravar(campos, 'editou' + (box !== atual.box ? ' · box ' + (box || 'pátio') : '') + (situacao && situacao !== atual.situacao ? ' · ' + situacao : ''));
-        recado = 'Carga ' + r.n + ' atualizada.';
-      } else {
-        campos.ETAPA = box ? 'BOX' : 'FILA';
-        if (chegada) { campos.CHEGADA = chegada; if (box) campos.NO_BOX_EM = chegada; }
-        campos.HISTORICO = cgHist_(null, nomeQuem, 'registrou' + (box ? ' no box ' + box : ' no pátio'), agora);
-        idFinal = inserir('CARGA_CARREGAMENTO', campos, quem);
-        recado = 'Carga ' + r.n + (box ? ' no box ' + box : ' no pátio') + (r.curto ? ' (' + r.curto + ' = ' + r.n + ')' : '') + (r.fora ? ' — não está na situação de carga' : '') + '.';
-      }
+      const r = cgAplicarLinha_(atual, p, { todos: todos, cargas: cgCargasDoUltimo_(), conferirBox: conferirBox, agora: agora, quem: quem, nomeQuem: nomeQuem }, false);
+      idFinal = r.id; recado = r.recado;
       return;
     }
     if (op === 'box') {
@@ -1866,6 +1873,132 @@ function acaoCarregamentoCarga(usuario, params) {
   return { ok: true, id: idFinal, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(), recado: recado };
 }
 
+/*
+ * UMA LINHA DO CARREGAMENTO (o formulario, a grade "Controle" e o colar da planilha passam por aqui).
+ * p: { carga, complemento, prioridade, box, veiculo (o CARRO da planilha), tipo, descricao, motorista,
+ *      situacao (a OBSERVACAO da planilha), previsao (o HORARIO CHEGADA), chegada (hh:mm, so no registro),
+ *      carregada ('SIM' / 'NAO'), observacao }.
+ * parcial = true (a grade): so os campos que vieram mudam. Sem `atual` e com a carga ja aberta no patio,
+ * a linha aberta e que e atualizada (colar a mesma carga de novo nao duplica).
+ */
+function cgAplicarLinha_(atual, p, ctx, parcial) {
+  const tem = function (k) { return !parcial || (p[k] !== undefined && p[k] !== null); };
+  const cargas = ctx.cargas, todos = ctx.todos, agora = ctx.agora;
+  let n = atual ? atual.n : '', res = {};
+  if (!atual || (tem('carga') && String(p.carga || '').replace(/\D+/g, '') && String(p.carga).replace(/\D+/g, '') !== atual.n)) {
+    res = cgResolverCarga_(p.carga, cargas);
+    if (!res.n) throw new Error(res.erro);
+    n = res.n;
+    const aberta = todos.filter(function (x) { return x.n === n && x.etapa !== 'CARREGADA' && (!atual || x.id !== atual.id); })[0];
+    if (aberta && !atual && parcial) atual = aberta;
+    else if (aberta) throw new Error('A carga ' + n + ' já está ' + (aberta.box ? 'no box ' + aberta.box : 'no pátio') + '.');
+  }
+  const c = cargas.filter(function (x) { return x.n === n; })[0];
+  const campos = {};
+  if (n !== (atual ? atual.n : '')) campos.CARGA = n;
+  if (tem('complemento')) campos.COMPLEMENTO = cgTexto_(p.complemento, 40);
+  if (tem('prioridade')) campos.PRIORIDADE = cgTexto_(p.prioridade, 20);
+  if (tem('veiculo')) campos.VEICULO = cgTexto_(p.veiculo, 30).toUpperCase();
+  if (tem('motorista')) campos.MOTORISTA = cgTexto_(p.motorista, 80);
+  if (tem('descricao')) campos.DESCRICAO = cgTexto_(p.descricao, 80).toUpperCase();
+  if (!atual && !campos.DESCRICAO && c) campos.DESCRICAO = cgTexto_(c.nm, 80);
+  if (tem('observacao')) campos.OBSERVACAO = cgTexto_(p.observacao, 300);
+  if (tem('situacao')) {
+    const s = p.situacao ? cgSituacaoDaLista_(p.situacao) : '';
+    if (p.situacao && !s) throw new Error('Observação "' + cgTexto_(p.situacao, 40).toUpperCase() + '" não está na lista (Boxes › Cadastros › Observações).');
+    campos.SITUACAO = s;
+  }
+  if (tem('tipo') && p.tipo) {
+    const t = String(p.tipo).toUpperCase();
+    if (CG_TIPOS_VEICULO.indexOf(t) === -1) throw new Error('Tipo de veículo desconhecido.');
+    campos.TIPO_VEICULO = t;
+  }
+  if (!(atual && atual.tipo) && !campos.TIPO_VEICULO) campos.TIPO_VEICULO = cgTipoConhecido_(campos.VEICULO || (atual ? atual.veiculo : '')) || (c ? cgTipoConhecido_(c.v) : '') || '';
+  if (tem('previsao')) {
+    const prev = String(p.previsao || '').trim();
+    if (prev && !/^([01]?\d|2[0-3])[:h][0-5]\d$/.test(prev)) throw new Error('Horário de chegada: escreva como 14:30.');
+    campos.PREVISAO = prev ? prev.replace('h', ':').replace(/^(\d):/, '0$1:') : '';
+  }
+  let chegada = '';
+  if (p.chegada) { chegada = cgHoraParaIso_(p.chegada, agora); if (!chegada) throw new Error('Chegada: escreva a hora como 05:40.'); }
+  const boxAntes = atual ? atual.box : 0;
+  let box = boxAntes;
+  if (tem('box')) box = ctx.conferirBox(Number(String(p.box == null ? '' : p.box).replace(/\D+/g, '')) || 0);
+  const etapaAntes = atual ? atual.etapa : '';
+  let carregar = null;
+  if (tem('carregada') && p.carregada !== '' && p.carregada != null) {
+    carregar = /^(S|SIM|X|OK|TRUE|1)$/i.test(cgNorm_(p.carregada).replace(/[^A-Z0-9]+/g, '')) ? true : false;
+  }
+  const textos = [];
+  if (atual) {
+    if (box !== boxAntes) {
+      campos.BOX = box ? String(box) : '';
+      if (etapaAntes !== 'CARREGADA') {
+        if (!box) { campos.ETAPA = 'FILA'; campos.NO_BOX_EM = ''; }
+        else { if (etapaAntes === 'FILA') campos.ETAPA = 'BOX'; campos.NO_BOX_EM = atual.chegada ? agora : ''; }
+      }
+      textos.push(box ? 'box ' + box : 'voltou ao pátio');
+    }
+    if (chegada && !atual.chegada) { campos.CHEGADA = chegada; if (box && !atual.noBox) campos.NO_BOX_EM = chegada; }
+  } else {
+    campos.BOX = box ? String(box) : '';
+    campos.ETAPA = box ? 'BOX' : 'FILA';
+    if (chegada) { campos.CHEGADA = chegada; if (box) campos.NO_BOX_EM = chegada; }
+  }
+  if (carregar === true && etapaAntes !== 'CARREGADA') { campos.ETAPA = 'CARREGADA'; campos.CARREGADA_EM = agora; campos.CARREGADA_POR = ctx.quem; textos.push('carregada'); }
+  if (carregar === false && etapaAntes === 'CARREGADA') { campos.ETAPA = box ? 'BOX' : 'FILA'; campos.CARREGADA_EM = ''; campos.CARREGADA_POR = ''; textos.push('reabriu'); }
+  if (campos.SITUACAO !== undefined && atual && campos.SITUACAO !== atual.situacao && campos.SITUACAO) textos.push(campos.SITUACAO);
+  if (atual) {
+    if (!Object.keys(campos).length) return { id: atual.id, recado: 'Carga ' + atual.n + ': nada mudou.' };
+    campos.HISTORICO = cgHist_(atual, ctx.nomeQuem, 'editou' + (textos.length ? ' · ' + textos.join(' · ') : ''), agora);
+    atualizar('CARGA_CARREGAMENTO', atual.id, campos, ctx.quem);
+    return { id: atual.id, recado: 'Carga ' + n + ' atualizada.' };
+  }
+  campos.CARGA = n;
+  campos.HISTORICO = cgHist_(null, ctx.nomeQuem, 'registrou' + (box ? ' no box ' + box : ' no pátio') + (textos.length ? ' · ' + textos.join(' · ') : ''), agora);
+  const id = inserir('CARGA_CARREGAMENTO', campos, ctx.quem);
+  todos.push({ id: id, n: n, etapa: campos.ETAPA, box: box });
+  return { id: id, recado: 'Carga ' + n + (box ? ' no box ' + box : ' no pátio') + (res.curto ? ' (' + res.curto + ' = ' + n + ')' : '') + (res.fora ? ' — não está na situação de carga' : '') + '.' };
+}
+
+/*
+ * A GRADE "CONTROLE" (as colunas da planilha antiga): varias linhas de uma vez — a edicao de uma celula,
+ * o colar de varias linhas do Excel / Sheets, "trazer as cargas do relatorio". params: { linhas: [{ id?, ... }] }
+ * (os campos do cgAplicarLinha_, so os que vierem). Cada linha da certo ou errado sozinha: devolve
+ * resultados [{ ok, id, erro }].
+ */
+function acaoCarregamentoLoteCarga(usuario, params) {
+  const linhas = (params && params.linhas) || [];
+  if (!Array.isArray(linhas) || !linhas.length) throw new Error('Nenhuma linha.');
+  if (linhas.length > 300) throw new Error('No máximo 300 linhas de uma vez.');
+  const quem = usuario.email, nomeQuem = cgTexto_(usuario.nome || quem, 60);
+  const resultados = [];
+  comTrava(function () {
+    const agora = cgAgoraIso_(), todos = cgCarregamentos_(), cargas = cgCargasDoUltimo_();
+    const nBoxes = cgNBoxes_(), gravados = cgBoxesGravados_();
+    const conferirBox = function (b) {
+      if (!b) return 0;
+      if (!(b >= 1 && b <= nBoxes && Math.floor(b) === b)) throw new Error('Box de 1 a ' + nBoxes + '.');
+      if (gravados[b] && gravados[b].estado === 'BLOQUEADO') throw new Error('O box ' + b + ' está bloqueado' + (gravados[b].obs ? ' (' + gravados[b].obs + ')' : '') + '.');
+      return b;
+    };
+    const ctx = { todos: todos, cargas: cargas, conferirBox: conferirBox, agora: agora, quem: quem, nomeQuem: nomeQuem };
+    linhas.forEach(function (l, i) {
+      try {
+        l = l || {};
+        const atual = l.id ? todos.filter(function (x) { return x.id === String(l.id); })[0] : null;
+        if (l.id && !atual) throw new Error('não existe mais');
+        const r = cgAplicarLinha_(atual || null, l, ctx, true);
+        resultados.push({ ok: true, id: r.id, linha: i + 1 });
+      } catch (e) { resultados.push({ ok: false, linha: i + 1, erro: String(e.message || e) }); }
+    });
+  });
+  esquecerLeituras();
+  const ok = resultados.filter(function (r) { return r.ok; }).length, erros = resultados.length - ok;
+  return { ok: true, resultados: resultados, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(),
+    recado: (resultados.length === 1 ? (ok ? 'Salvo.' : 'Não salvou: ' + resultados[0].erro) : ok + (ok === 1 ? ' linha salva' : ' linhas salvas') + (erros ? ', ' + erros + ' com erro' : '') + '.') };
+}
+
 /* BLOQUEAR / LIBERAR UM BOX. params: { numero, estado: 'BLOQUEADO' | 'LIVRE', obs } */
 function acaoBoxCarga(usuario, params) {
   const p = params || {};
@@ -1901,9 +2034,9 @@ function acaoImportarBoxesCarga(usuario, params) {
   let lido;
   try { lido = cgLerPlanilhaBoxes_(id); }
   catch (e) { throw new Error('Não consegui abrir a planilha. A conta dona do GSL precisa ter acesso a ela (só leitura basta).'); }
-  if (!lido.abas.controle && !lido.abas.situacao) throw new Error('A planilha "' + lido.fonte.nome + '" não tem a aba Controle (CARGA, BOX...) nem a Situação dos BOXs.');
+  if (!lido.abas.controle && !lido.abas.situacao && !lido.abas.cadastro) throw new Error('A planilha "' + lido.fonte.nome + '" não tem a aba Controle (CARGA, BOX...), a Situação dos BOXs nem o Cadastro.');
   const quem = usuario.email, nomeQuem = cgTexto_(usuario.nome || quem, 60);
-  let novos = 0, pulados = 0;
+  let novos = 0, pulados = 0, cadNovos = 0;
   comTrava(function () {
     const agora = cgAgoraIso_();
     const cargas = cgCargasDoUltimo_(), nBoxes = cgNBoxes_(), lista = cgSituacoesBox_();
@@ -1926,11 +2059,12 @@ function acaoImportarBoxesCarga(usuario, params) {
       if (!(box >= 1 && box <= nBoxes)) box = 0;
       const situacao = cgSituacaoDaLista_(r.obs, lista);
       const noBox = box && ((q && q.ocupado) || ['JA NO BOX', 'CARREGANDO'].indexOf(cgObsNorm_(r.obs)) !== -1);
-      const chegada = cgHoraParaIso_(r.chegada, agora) || (noBox ? agora : '');
+      const chegada = noBox ? (cgHoraParaIso_(cgHoraDaCelula_(r.chegada), agora) || agora) : '';
       const c = cargas.filter(function (x) { return x.n === res.n; })[0];
       novo(res.n, { CARGA: res.n, COMPLEMENTO: cgTexto_(r.complemento, 40), PRIORIDADE: cgTexto_(r.prioridade, 20), BOX: box ? String(box) : '',
         VEICULO: cgTexto_(r.carro, 30).toUpperCase(), TIPO_VEICULO: cgTipoConhecido_(r.carro) || (q ? cgTipoConhecido_(q.veiculo) : '') || (c ? cgTipoConhecido_(c.v) : ''),
-        MOTORISTA: cgTexto_(r.motorista, 60), SITUACAO: situacao,
+        MOTORISTA: cgTexto_(r.motorista, 80), SITUACAO: situacao, DESCRICAO: cgTexto_(r.descricao, 80).toUpperCase() || (c ? cgTexto_(c.nm, 80) : ''),
+        PREVISAO: cgHoraDaCelula_(r.chegada),
         ETAPA: cgObsNorm_(r.obs) === 'CARREGANDO' && box ? 'CARREGANDO' : (box ? 'BOX' : 'FILA'),
         CHEGADA: chegada, NO_BOX_EM: noBox ? chegada : '', OBSERVACAO: situacao ? '' : cgTexto_(r.obs, 300),
         HISTORICO: cgHist_(null, nomeQuem, 'importou da planilha antiga (linha ' + r.linha + ')', agora) });
@@ -1939,15 +2073,30 @@ function acaoImportarBoxesCarga(usuario, params) {
       const q = boxDoQuadro[n];
       if (!(q.box >= 1 && q.box <= nBoxes)) return;
       const c = cargas.filter(function (x) { return x.n === n; })[0];
-      novo(n, { CARGA: n, BOX: String(q.box), VEICULO: '', TIPO_VEICULO: cgTipoConhecido_(q.veiculo) || (c ? cgTipoConhecido_(c.v) : ''), ETAPA: 'BOX',
+      novo(n, { CARGA: n, BOX: String(q.box), VEICULO: /^\d{3,}$/.test(q.veiculo) ? q.veiculo : '', DESCRICAO: c ? cgTexto_(c.nm, 80) : '', TIPO_VEICULO: cgTipoConhecido_(q.veiculo) || (c ? cgTipoConhecido_(c.v) : ''), ETAPA: 'BOX',
         CHEGADA: q.ocupado ? agora : '', NO_BOX_EM: q.ocupado ? agora : '', SITUACAO: q.ocupado ? (cgSituacaoDaLista_('JÁ NO BOX', lista) || '') : '',
         HISTORICO: cgHist_(null, nomeQuem, 'importou do quadro dos boxes da planilha antiga', agora) });
     });
     if (linhas.length) inserirVarios('CARGA_CARREGAMENTO', linhas, quem);
+    // a aba Cadastro: motoristas, destinos e horarios entram (o que ja existe fica); as observacoes se juntam a lista
+    const cad = lido.cadastro || { motoristas: [], destinos: [], horarios: [], situacoes: [] };
+    const tem = {};
+    listar('CARGA_CADASTRO').forEach(function (r) { tem[String(r.TIPO) + '|' + cgNorm_(r.VALOR)] = true; });
+    const novosCad = [];
+    const add = function (tipo, campos) { const k = tipo + '|' + cgNorm_(campos.VALOR); if (!campos.VALOR || tem[k]) return; tem[k] = true; campos.TIPO = tipo; novosCad.push(campos); };
+    cad.motoristas.forEach(function (x) { add('MOTORISTA', { VALOR: cgTexto_(x.nome, 80), CODIGO: x.codigo, PLACA: x.placa }); });
+    cad.destinos.forEach(function (v) { add('DESTINO', { VALOR: cgTexto_(v, 80), CODIGO: '', PLACA: '' }); });
+    cad.horarios.forEach(function (v) { add('HORARIO', { VALOR: v, CODIGO: '', PLACA: '' }); });
+    if (novosCad.length) inserirVarios('CARGA_CADASTRO', novosCad, quem);
+    cadNovos = novosCad.length;
+    const sit = cgSituacoesBox_();
+    const mais = (cad.situacoes || []).filter(function (x) { return !sit.some(function (y) { return cgObsNorm_(y) === cgObsNorm_(x); }); });
+    if (mais.length) cgSalvarParametro_('CARGA_SITUACOES_BOX', sit.concat(mais).join('; '), quem);
   });
   esquecerLeituras();
   return { ok: true, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(),
-    recado: novos + (novos === 1 ? ' carga importada' : ' cargas importadas') + ' da planilha "' + lido.fonte.nome + '"' + (pulados ? ' (' + pulados + ' já estavam no GSL ou sem número)' : '') + '. A planilha não foi alterada.' };
+    recado: novos + (novos === 1 ? ' carga importada' : ' cargas importadas') + ' da planilha "' + lido.fonte.nome + '"' + (pulados ? ' (' + pulados + ' já estavam no GSL ou sem número)' : '') +
+      (cadNovos ? '; ' + cadNovos + ' itens no cadastro' : '') + '. A planilha não foi alterada.', cadastro: cgCadastro_() };
 }
 
 /* ---- planilha antiga dos boxes (so para Importar) ---- */
@@ -1960,6 +2109,9 @@ function cgLerPlanilhaBoxes_(id) {
     return { nome: aba.getName(), valores: aba.getRange(1, 1, nl, nc).getDisplayValues() };
   });
   const lido = cgInterpretarBoxes_(abas);
+  const cad = abas.filter(function (a) { return /^CADASTRO/.test(cgNorm_(a.nome)); })[0];
+  lido.cadastro = cad ? cgInterpretarCadastro_(cad.valores) : null;
+  lido.abas.cadastro = cad ? cad.nome : '';
   lido.fonte = { nome: ss.getName(), url: ss.getUrl() };
   return lido;
 }
@@ -2075,7 +2227,7 @@ function cgResumoPassagem_(cargas, equipe, equipamentos, faltas) {
     abertas: abertas.length, h24: abertas.filter(function (x) { return x.h; }).length, cargas: abertas.slice(0, 20),
     alocacao: alocacao, pessoas: equipe.length,
     manutencao: equipamentos.filter(function (e) { return e.estado === 'MANUTENCAO'; }).map(function (e) { return { tipo: e.tipo, numero: e.numero, obs: e.obs || '' }; }),
-    faltam: { PALETEIRA: consumo.PALETEIRA.falta, CHECKOUT: consumo.CHECKOUT.falta },
+    faltam: { PALETEIRA: consumo.PALETEIRA.falta, CHECKOUT_MIUDEZA: consumo.CHECKOUT_MIUDEZA.falta, CHECKOUT_NOBRE: consumo.CHECKOUT_NOBRE.falta },
     faltas: faltas.map(function (f) { return { nome: f.nome, equipe: f.equipe }; })
   };
 }
@@ -2120,4 +2272,500 @@ function acaoPassagemCarga(usuario, params) {
   });
   esquecerLeituras();
   return { ok: true, passagens: cgPassagens_(), g: cgGeracao_(), recado: recado };
+}
+
+/* ================================================================== */
+/* FASE 3 (8.16): ESCALA 5x2, ALOCACAO AUTOMATICA E CADASTROS DO PATIO */
+/* ================================================================== */
+
+/*
+ * A ESCALA 5x2 (o modelo da gerencia, 25/11):
+ *   Turno A: subturnos A1 (folga domingo e segunda) e A2 (folga domingo e terca); no sabado A1 + A2.
+ *            O Recebimento do Turno A (funcoes "Rec. mercadoria" e "Descarregador") e horario ADM, de
+ *            segunda a sexta, sem divisao.
+ *   Turno B: segunda a sexta (folga sabado e domingo), sem subturno.
+ *   Turno C: C1 (folga domingo e segunda) e C2 (folga domingo e terca); de quarta a sabado C1 + C2. O C que
+ *            comeca as 23:00 do dia D e do dia D (passa da meia-noite).
+ *   ADM (equipe ADM do Quadro): segunda a sexta, no horario ADM (parametro CARGA_TURNO_ADM).
+ * Quem e A ou C sem subturno marcado conta como "subturno a definir": trabalha de segunda a sabado
+ * (a tela pede para marcar). Os dias: 0 = domingo ... 6 = sabado.
+ */
+const CG_DIAS_5X2 = { A1: [2, 3, 4, 5, 6], A2: [1, 3, 4, 5, 6], A: [1, 2, 3, 4, 5, 6], C1: [2, 3, 4, 5, 6], C2: [1, 3, 4, 5, 6], C: [1, 2, 3, 4, 5, 6],
+  B: [1, 2, 3, 4, 5], ADM: [1, 2, 3, 4, 5] };
+const CG_SUBTURNOS = { A: ['A1', 'A2'], C: ['C1', 'C2'] };
+const CG_ADM_PADRAO = '08:00-17:48';
+
+function cgDiaDaSemana_(dia) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dia || '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() : -1; }
+function cgHorarioAdm_() {
+  const h = cgHorarioTurno_(parametro('CARGA_TURNO_ADM', '')) || cgHorarioTurno_(CG_ADM_PADRAO);
+  return { id: 'ADM', nome: 'ADM', ini: h.ini, fim: h.fim, cruza: h.fim < h.ini, texto: cgHoraTexto_(h.ini) + '–' + cgHoraTexto_(h.fim) };
+}
+/* Recebimento do Turno A (horario ADM): "Rec. mercadoria", "Recebimento de mercadoria", "Descarregador". */
+function cgEhRecebimento_(funcao) {
+  const k = cgNorm_(funcao).replace(/[^A-Z0-9]+/g, ' ').trim();
+  return /^DESCARREGADOR\b/.test(k) || /^REC(EBIMENTO)?\s+(DE\s+)?MERCADORIA/.test(k);
+}
+/*
+ * O REGIME de uma pessoa: { turno: A|B|C|ADM|'', grade: A1|A2|A|B|C1|C2|C|ADM|'', sub, adm, aDefinir }.
+ * grade e a chave de CG_DIAS_5X2; turno ADM usa o horario ADM.
+ */
+function cgRegime_(pessoa, subturnos) {
+  const t = cgTurnoDaEquipe_(pessoa.equipe);
+  const sub = String((subturnos || {})[pessoa.k] || '');
+  if (t === 'ADM') return { turno: 'ADM', grade: 'ADM', sub: '', adm: true };
+  if (t === 'A' && cgEhRecebimento_(pessoa.funcao)) return { turno: 'ADM', grade: 'ADM', sub: '', adm: true, recebimento: true };
+  if (t === 'B') return { turno: 'B', grade: 'B', sub: '' };
+  if (t === 'A' || t === 'C') {
+    const ok = CG_SUBTURNOS[t].indexOf(sub) !== -1;
+    return { turno: t, grade: ok ? sub : t, sub: ok ? sub : '', aDefinir: !ok };
+  }
+  return { turno: '', grade: '', sub: '' };
+}
+function cgTrabalhaNoDia_(regime, dia) { const d = cgDiaDaSemana_(dia); return !!(CG_DIAS_5X2[regime.grade] && CG_DIAS_5X2[regime.grade].indexOf(d) !== -1); }
+/* O horario do regime (A/B/C dos parametros, ou o ADM). */
+function cgHorarioDoRegime_(regime, turnos, adm) { return regime.turno === 'ADM' ? adm : (turnos || []).filter(function (t) { return t.id === regime.turno; })[0] || null; }
+/*
+ * Como a pessoa esta AGORA: { estado: 'servico' | 'folga' | 'fora' | 'sem', dia } — servico: dentro do
+ * horario e o dia (o do inicio do turno) e de trabalho; folga: dentro do horario, mas o dia e de folga
+ * (ou fora do horario, com o turno de hoje de folga: folgaHoje); fora: fora do horario.
+ */
+function cgSituacaoNaEscala_(regime, agoraIso, turnos, adm) {
+  const T = cgHorarioDoRegime_(regime, turnos, adm);
+  if (!T) return { estado: 'sem', dia: '', folgaHoje: false };
+  const min = cgMinDoDia_(agoraIso), hoje = String(agoraIso).slice(0, 10);
+  const dia = T.cruza && min < T.fim ? cgDiaMais_(hoje, -1) : hoje;
+  const trabalha = cgTrabalhaNoDia_(regime, dia);
+  if (!cgNoTurno_(T, min)) return { estado: 'fora', dia: dia, folgaHoje: !trabalha };
+  return { estado: trabalha ? 'servico' : 'folga', dia: dia, folgaHoje: !trabalha };
+}
+
+/*
+ * FUNCAO DO QUADRO -> DEPOSITO E PAPEL (tolerante, sem acento): "Separador nobre" -> Nobre/SEPARADOR,
+ * "Sep. grandeza I" -> Grandeza, "Sep. miudeza I" -> Miudeza, "Conf. nobre" -> Nobre/CONFERENTE,
+ * "Conf. miudeza II" -> Miudeza, "Conf. grandeza II" -> Grandeza; "Nobre grandeza" -> Nobre Grandeza;
+ * Blocado e Pesaveis do mesmo jeito. So "Separador" (sem deposito no nome) -> papel com deposito a definir.
+ * Outra funcao (carregamento, aux. expedicao...) -> null: a pessoa pode ser alocada a mao em qualquer lugar.
+ */
+function cgZonaDaFuncao_(funcao) {
+  const t = cgNorm_(funcao).replace(/[^A-Z0-9]+/g, ' ').trim();
+  let papel = '';
+  if (/(^| )CONF(ERENTE|ERENCIA)?( |$)/.test(t)) papel = 'CONFERENTE';
+  else if (/(^| )SEP(ARADORA?|ARADORES|ARACAO)?( |$)/.test(t)) papel = 'SEPARADOR';
+  if (!papel) return null;
+  let dep = '';
+  if (/NOBRE/.test(t) && /GRAND/.test(t)) dep = 'NOBRE_GRANDEZA';
+  else if (/NOBRE/.test(t)) dep = 'NOBRE';
+  else if (/GRAND/.test(t)) dep = 'GRANDEZA';
+  else if (/MIUD/.test(t)) dep = 'MIUDEZA';
+  else if (/BLOC/.test(t)) dep = 'BLOCADO';
+  else if (/PESAV|PESAD/.test(t)) dep = 'PESAVEIS';
+  return { dep: dep, papel: papel };
+}
+
+/* Os subturnos gravados: { chave da pessoa: 'A1' | 'A2' | 'C1' | 'C2' }. */
+function cgSubturnos_() {
+  const saida = {};
+  listar('CARGA_PESSOAS').forEach(function (r) { const s = String(r.SUBTURNO || ''); if (r.PESSOA && /^[AC][12]$/.test(s)) saida[String(r.PESSOA)] = s; });
+  return saida;
+}
+
+/*
+ * MARCAR O SUBTURNO. params: { pessoas: [{ k, nome, equipe, funcao }], subturno: 'A1' | 'A2' | 'C1' | 'C2' | '' }.
+ * Cada pessoa tem que ser do turno do subturno (A1/A2 so do Turno A, fora o Recebimento; C1/C2 so do C).
+ */
+function acaoSubturnoCarga(usuario, params) {
+  const p = params || {};
+  const sub = String(p.subturno || '').toUpperCase();
+  if (sub && !/^[AC][12]$/.test(sub)) throw new Error('Subturno é A1, A2, C1 ou C2.');
+  const pessoas = Array.isArray(p.pessoas) ? p.pessoas.slice(0, 400) : [];
+  if (!pessoas.length) throw new Error('Escolha as pessoas.');
+  const erros = [];
+  pessoas.forEach(function (x) {
+    if (!/^[CRN][\w#-]{1,80}$/.test(String(x && x.k || ''))) throw new Error('Pessoa inválida.');
+    if (!sub) return;
+    const r = cgRegime_({ k: x.k, equipe: x.equipe, funcao: x.funcao }, {});
+    if (r.turno !== sub.charAt(0)) erros.push(cgTitulo_(x.nome || x.k) + (r.recebimento ? ' (Recebimento: horário ADM)' : ' (' + (r.turno ? 'Turno ' + r.turno : 'sem turno') + ')'));
+  });
+  if (erros.length) throw new Error(sub + ' é só do Turno ' + sub.charAt(0) + (sub.charAt(0) === 'A' ? ', fora o Recebimento' : '') + ': ' + erros.slice(0, 5).join(', ') + (erros.length > 5 ? '…' : '') + '.');
+  const quem = usuario.email;
+  comTrava(function () {
+    const porK = {};
+    listar('CARGA_PESSOAS').forEach(function (r) { porK[String(r.PESSOA)] = r; });
+    const mudar = [], novas = [];
+    pessoas.forEach(function (x) {
+      const r = porK[x.k];
+      if (r) { if (String(r.SUBTURNO || '') !== sub) mudar.push({ id: r.ID, linha: r._linha, campos: { SUBTURNO: sub, NOME: cgTexto_(x.nome, 80) } }); }
+      else if (sub) novas.push({ PESSOA: x.k, NOME: cgTexto_(x.nome, 80), SUBTURNO: sub });
+    });
+    if (mudar.length) atualizarVarios('CARGA_PESSOAS', mudar, quem);
+    if (novas.length) inserirVarios('CARGA_PESSOAS', novas, quem);
+  });
+  esquecerLeituras();
+  return { ok: true, subturnos: cgSubturnos_(), g: cgGeracao_(),
+    recado: pessoas.length + (pessoas.length === 1 ? ' pessoa' : ' pessoas') + (sub ? ' no ' + sub : ' sem subturno') + '.' };
+}
+
+/*
+ * DISPONIBILIDADE (pura): separadores e conferentes por deposito — agora, nos proximos turnos e na semana.
+ *   pessoas do Quadro, subturnos, faltas valendo, turnos, horario ADM, agora.
+ * zona = 'DEP|PAPEL' (DEP vazio = funcao de separacao/conferencia sem deposito no nome).
+ */
+function cgDisponibilidade_(pessoas, subturnos, faltas, turnos, adm, agoraIso) {
+  const faltou = {};
+  (faltas || []).forEach(function (f) { faltou[f.k] = true; });
+  const zonas = {}, mapa = {}, semana = {};
+  const zona = function (z) { return zonas[z] = zonas[z] || { servico: 0, folga: 0, falta: 0, fora: 0, total: 0 }; };
+  let aDefinir = 0;
+  pessoas.forEach(function (p) {
+    if (p.situacao && p.situacao !== 'ATIVO') return;
+    const z = cgZonaDaFuncao_(p.funcao);
+    const fk = cgNorm_(p.funcao) || '(sem função)';
+    mapa[fk] = mapa[fk] || { funcao: p.funcao || '(sem função)', dep: z ? z.dep : '', papel: z ? z.papel : '', n: 0 };
+    mapa[fk].n++;
+    if (!z) return;
+    const reg = cgRegime_(p, subturnos);
+    if (reg.aDefinir) aDefinir++;
+    const k = z.dep + '|' + z.papel;
+    const x = zona(k);
+    x.total++;
+    const sit = cgSituacaoNaEscala_(reg, agoraIso, turnos, adm);
+    if (sit.estado === 'servico') { if (faltou[p.k]) x.falta++; else x.servico++; }
+    else if (sit.estado === 'folga') x.folga++;
+    else x.fora++;
+    const s = semana[k] = semana[k] || {};
+    s[reg.grade || '-'] = (s[reg.grade || '-'] || 0) + 1;
+  });
+  // os proximos dois turnos a comecar (A, B ou C), com o dia e quantos trabalham
+  const min = cgMinDoDia_(agoraIso), hoje = String(agoraIso).slice(0, 10);
+  const proximos = [];
+  for (let d = 0; d <= 1; d++) turnos.forEach(function (t) {
+    const dia = cgDiaMais_(hoje, d), ate = d * 1440 + t.ini - min;
+    if (ate > 0) proximos.push({ turno: t.id, dia: dia, inicio: dia + 'T' + cgHoraTexto_(t.ini), emMin: ate });
+  });
+  proximos.sort(function (a, b) { return a.emMin - b.emMin; });
+  const prox = proximos.slice(0, 3).map(function (x) {
+    const cont = {};
+    pessoas.forEach(function (p) {
+      if (p.situacao && p.situacao !== 'ATIVO') return;
+      const z = cgZonaDaFuncao_(p.funcao);
+      if (!z) return;
+      const reg = cgRegime_(p, subturnos);
+      if (reg.turno !== x.turno || !cgTrabalhaNoDia_(reg, x.dia)) return;
+      const k = z.dep + '|' + z.papel;
+      cont[k] = (cont[k] || 0) + 1;
+    });
+    x.zonas = cont; x.diaSemana = cgDiaDaSemana_(x.dia);
+    return x;
+  });
+  return { zonas: zonas, proximos: prox, semana: semana, mapeamento: Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.n - a.n; }), aDefinir: aDefinir };
+}
+
+/* ------------------------------------------------------------------ */
+/* ALOCACAO AUTOMATICA NA ENTRADA DO TURNO (CARGA_ALOCACOES)           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Regra da gerencia (26/11): quando um turno comeca, cada separador e conferente desse turno vai sozinho
+ * para o deposito e o papel da funcao dele no Quadro (cgZonaDaFuncao_), menos quem esta de folga hoje (5x2)
+ * ou marcado como falta. Quem ja esta alocado (a mao) fica onde esta; a funcao sem deposito no nome nao entra.
+ * Separadores do Nobre (flowrack) vao para o andar com menos gente (sem rua).
+ * Quando um turno termina (passou o fim dele), quem e desse turno sai da alocacao (o "Limpar alocacao do turno").
+ * Uma vez por turno e dia: a linha de CARGA_ALOCACOES (TIPO ENTRADA ou SAIDA) e o registro, com quem mexeu;
+ * "Desfazer" devolve (so quem continua onde a automatica pos). Roda na primeira abertura ou pergunta ao vivo
+ * depois da hora (a copia de 2 min no cache evita reler a tabela a cada 12 s).
+ */
+const CG_AUTO_JANELA_SAIDA_MIN = 8 * 60;
+function cgAutoChaves_(agoraIso, turnos) {
+  const min = cgMinDoDia_(agoraIso), hoje = String(agoraIso).slice(0, 10);
+  const saida = [];
+  turnos.forEach(function (t) {
+    if (cgNoTurno_(t, min)) saida.push({ tipo: 'ENTRADA', turno: t.id, dia: t.cruza && min < t.fim ? cgDiaMais_(hoje, -1) : hoje });
+    else {
+      // o fim mais recente deste turno: hoje (ou ontem), ha menos de 8 h
+      const desdeFim = (min - t.fim + 1440) % 1440;
+      if (desdeFim > 0 && desdeFim <= CG_AUTO_JANELA_SAIDA_MIN) {
+        const diaFim = min >= t.fim ? hoje : cgDiaMais_(hoje, -1);
+        saida.push({ tipo: 'SAIDA', turno: t.id, dia: t.cruza ? cgDiaMais_(diaFim, -1) : diaFim });
+      }
+    }
+  });
+  return saida;
+}
+function cgAlocacoesAuto_() {
+  return listar('CARGA_ALOCACOES').map(function (r) {
+    return { id: r.ID, tipo: String(r.TIPO || ''), turno: String(r.TURNO || ''), dia: String(r.DATA || ''), em: String(r.EM || ''), qtd: Number(r.QTD) || 0,
+      pessoas: cgJson_(r.PESSOAS, []) || [], desfeitaEm: String(r.DESFEITA_EM || ''), desfeitaPor: String(r.DESFEITA_POR || ''), puladas: cgJson_(r.PULADAS, {}) || {} };
+  });
+}
+/* Chamado pela tela e pela pergunta ao vivo: faz o que faltar (rapido quando nao falta nada). */
+function cgAutoTurno_() {
+  try {
+    const turnos = cgTurnos_(), agora = cgAgoraIso_();
+    const chaves = cgAutoChaves_(agora, turnos);
+    if (!chaves.length) return false;
+    const marca = chaveNoEspaco('cgauto|' + chaves.map(function (c) { return c.tipo + c.turno + c.dia; }).join(','));
+    if (lerTextoCache(marca)) return false;
+    const feitas = {};
+    cgAlocacoesAuto_().forEach(function (a) { feitas[a.tipo + a.turno + a.dia] = true; });
+    const falta = chaves.filter(function (c) { return !feitas[c.tipo + c.turno + c.dia]; });
+    if (!falta.length) { gravarTextoCache(marca, '1', 120); return false; }
+    let mexeu = false;
+    comTrava(function () {
+      const ja = {};
+      cgAlocacoesAuto_().forEach(function (a) { ja[a.tipo + a.turno + a.dia] = true; });
+      // a saida primeiro (libera quem saiu), depois a entrada
+      falta.sort(function (a, b) { return (a.tipo === 'SAIDA' ? 0 : 1) - (b.tipo === 'SAIDA' ? 0 : 1); }).forEach(function (c) {
+        if (ja[c.tipo + c.turno + c.dia]) return;
+        if (c.tipo === 'SAIDA') cgSaidaAuto_(c, agora); else cgEntradaAuto_(c, agora, turnos);
+        mexeu = true;
+      });
+    });
+    if (mexeu) esquecerLeituras();
+    gravarTextoCache(marca, '1', 120);
+    return mexeu;
+  } catch (e) { registrarLog('sistema', 'ERRO', 'CARGA_ALOCACOES', '', String(e && e.message || e)); return false; }
+}
+function cgEntradaAuto_(c, agora, turnos) {
+  const q = cgPessoasDoQuadro_();
+  const subturnos = cgSubturnos_(), adm = cgHorarioAdm_();
+  const faltou = {};
+  cgFaltas_(turnos, agora).forEach(function (f) { faltou[f.k] = true; });
+  const alocadas = {};
+  const equipe = listar('CARGA_EQUIPE');
+  equipe.forEach(function (r) { alocadas[String(r.PESSOA)] = true; });
+  const andares = [0, 0, 0, 0, 0];
+  equipe.forEach(function (r) { if (String(r.DEPOSITO) === 'NOBRE' && String(r.PAPEL) === 'SEPARADOR' && r.ANDAR !== '' && Number(r.ANDAR) >= 0) andares[Number(r.ANDAR)]++; });
+  const novas = [], pessoas = [], puladas = { folga: 0, falta: 0, jaAlocada: 0, semDeposito: 0 };
+  (q.pessoas || []).forEach(function (p) {
+    if (p.situacao && p.situacao !== 'ATIVO') return;
+    const z = cgZonaDaFuncao_(p.funcao);
+    if (!z) return;
+    const reg = cgRegime_(p, subturnos);
+    if (reg.turno !== c.turno) return;
+    if (!cgTrabalhaNoDia_(reg, c.dia)) { puladas.folga++; return; }
+    if (faltou[p.k]) { puladas.falta++; return; }
+    if (alocadas[p.k]) { puladas.jaAlocada++; return; }
+    if (!z.dep) { puladas.semDeposito++; return; }
+    let andar = '';
+    if (z.dep === 'NOBRE' && z.papel === 'SEPARADOR') { andar = andares.indexOf(Math.min.apply(null, andares)); andares[andar]++; }
+    novas.push({ PESSOA: p.k, NOME: p.nome, FUNCAO: cgTexto_(p.funcao, 60), EQUIPE: cgTexto_(p.equipe, 30), DEPOSITO: z.dep, PAPEL: z.papel,
+      ANDAR: andar === '' ? '' : String(andar), RUA: '', DESDE: agora });
+    pessoas.push({ k: p.k, dep: z.dep, papel: z.papel });
+    alocadas[p.k] = true;
+  });
+  if (novas.length) inserirVarios('CARGA_EQUIPE', novas, 'automatico');
+  inserir('CARGA_ALOCACOES', { TIPO: 'ENTRADA', TURNO: c.turno, DATA: c.dia, EM: agora, QTD: String(novas.length), PESSOAS: JSON.stringify(pessoas),
+    PULADAS: JSON.stringify(puladas) }, 'automatico');
+}
+function cgSaidaAuto_(c, agora) {
+  const sai = listar('CARGA_EQUIPE').filter(function (r) { return cgTurnoDaEquipe_(r.EQUIPE) === c.turno; });
+  const pessoas = sai.map(function (r) {
+    return { k: String(r.PESSOA), nome: String(r.NOME || ''), funcao: String(r.FUNCAO || ''), equipe: String(r.EQUIPE || ''), dep: String(r.DEPOSITO || ''),
+      papel: String(r.PAPEL || ''), andar: String(r.ANDAR == null ? '' : r.ANDAR), rua: String(r.RUA == null ? '' : r.RUA), desde: String(r.DESDE || '') };
+  });
+  if (sai.length) atualizarVarios('CARGA_EQUIPE', sai.map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; }), 'automatico');
+  inserir('CARGA_ALOCACOES', { TIPO: 'SAIDA', TURNO: c.turno, DATA: c.dia, EM: agora, QTD: String(sai.length), PESSOAS: JSON.stringify(pessoas), PULADAS: '{}' }, 'automatico');
+}
+/* DESFAZER UMA AUTOMATICA. params: { id }. Entrada: tira quem ainda esta onde ela pos; saida: devolve quem nao foi alocado de novo. */
+function acaoDesfazerAutoCarga(usuario, params) {
+  const id = String((params && params.id) || '');
+  let n = 0, tipo = '';
+  comTrava(function () {
+    const a = cgAlocacoesAuto_().filter(function (x) { return x.id === id; })[0];
+    if (!a) throw new Error('Esta alocação automática não existe mais. Atualize a tela.');
+    if (a.desfeitaEm) throw new Error('Já foi desfeita por ' + a.desfeitaPor + '.');
+    tipo = a.tipo;
+    const equipe = listar('CARGA_EQUIPE');
+    if (a.tipo === 'ENTRADA') {
+      const pos = {};
+      a.pessoas.forEach(function (p) { pos[p.k] = p; });
+      const tirar = equipe.filter(function (r) { const p = pos[String(r.PESSOA)]; return p && String(r.DEPOSITO) === p.dep && String(r.PAPEL) === p.papel && String(r.DESDE) === a.em; });
+      n = tirar.length;
+      if (n) atualizarVarios('CARGA_EQUIPE', tirar.map(function (r) { return { id: r.ID, linha: r._linha, campos: { EXCLUIDO: 'SIM' } }; }), usuario.email);
+    } else {
+      const ja = {};
+      equipe.forEach(function (r) { ja[String(r.PESSOA)] = true; });
+      const voltar = a.pessoas.filter(function (p) { return !ja[p.k]; }).map(function (p) {
+        return { PESSOA: p.k, NOME: p.nome, FUNCAO: p.funcao, EQUIPE: p.equipe, DEPOSITO: p.dep, PAPEL: p.papel, ANDAR: p.andar, RUA: p.rua, DESDE: p.desde };
+      });
+      n = voltar.length;
+      if (n) inserirVarios('CARGA_EQUIPE', voltar, usuario.email);
+    }
+    atualizar('CARGA_ALOCACOES', a.id, { DESFEITA_EM: cgAgoraIso_(), DESFEITA_POR: cgTexto_(usuario.nome || usuario.email, 80) }, usuario.email);
+  });
+  esquecerLeituras();
+  return { ok: true, equipe: cgEquipe_(), g: cgGeracao_(),
+    recado: tipo === 'ENTRADA' ? n + (n === 1 ? ' pessoa voltou' : ' pessoas voltaram') + ' para os disponíveis.' : n + (n === 1 ? ' pessoa voltou' : ' pessoas voltaram') + ' para onde estava.' };
+}
+/* As automaticas de hoje e de ontem (a nota da tela). */
+function cgAutoDaTela_(agoraIso) {
+  const hoje = String(agoraIso).slice(0, 10), ontem = cgDiaMais_(hoje, -1);
+  return cgAlocacoesAuto_().filter(function (a) { return (a.dia === hoje || a.dia === ontem) && (a.qtd || a.tipo === 'ENTRADA'); })
+    .sort(function (a, b) { return b.em.localeCompare(a.em); }).slice(0, 6).map(function (a) { delete a.pessoas; return a; });
+}
+
+/*
+ * ALOCAR VARIAS PESSOAS DE UMA VEZ (o botao "Alocar pela função", na tela). params: { itens: [{ pessoa, destino }] }.
+ * Cada uma como o moverPessoaCarga (quem faltou nao entra); devolve quantas foram e as que nao foram.
+ */
+function acaoAlocarLoteCarga(usuario, params) {
+  const itens = (params && params.itens) || [];
+  if (!Array.isArray(itens) || !itens.length) throw new Error('Ninguém para alocar.');
+  if (itens.length > 300) throw new Error('No máximo 300 pessoas de uma vez.');
+  let feitas = 0;
+  const erros = [];
+  comTrava(function () {
+    const agora = cgAgoraIso_(), turnos = cgTurnos_();
+    const faltou = {};
+    cgFaltas_(turnos, agora).forEach(function (f) { faltou[f.k] = true; });
+    const vivas = {};
+    listar('CARGA_EQUIPE').forEach(function (r) { vivas[String(r.PESSOA)] = r; });
+    const novas = [];
+    itens.forEach(function (it) {
+      const pe = (it && it.pessoa) || {}, de = (it && it.destino) || {};
+      const k = String(pe.k || '');
+      if (!/^[CRN][\w#-]{1,80}$/.test(k) || !cgTexto_(pe.nome, 80)) { erros.push('pessoa inválida'); return; }
+      const d = CG_DEPOSITOS.filter(function (x) { return x.id === String(de.dep); })[0];
+      const papel = String(de.papel || '').toUpperCase();
+      if (!d || CG_PAPEIS.indexOf(papel) === -1) { erros.push(cgTitulo_(pe.nome) + ': destino inválido'); return; }
+      if (faltou[k]) { erros.push(cgTitulo_(pe.nome) + ': faltou'); return; }
+      if (vivas[k]) { erros.push(cgTitulo_(pe.nome) + ': já alocado'); return; }
+      let andar = '';
+      if (d.andares && papel === 'SEPARADOR') { andar = Number(de.andar); if (!(andar >= 0 && andar < d.andares)) { erros.push(cgTitulo_(pe.nome) + ': escolha o andar'); return; } }
+      novas.push({ PESSOA: k, NOME: cgTexto_(pe.nome, 80), FUNCAO: cgTexto_(pe.funcao, 60), EQUIPE: cgTexto_(pe.equipe, 30), DEPOSITO: d.id, PAPEL: papel,
+        ANDAR: andar === '' ? '' : String(andar), RUA: '', DESDE: agora });
+      vivas[k] = true;
+    });
+    if (novas.length) inserirVarios('CARGA_EQUIPE', novas, usuario.email);
+    feitas = novas.length;
+  });
+  esquecerLeituras();
+  return { ok: true, equipe: cgEquipe_(), g: cgGeracao_(),
+    recado: feitas + (feitas === 1 ? ' pessoa alocada' : ' pessoas alocadas') + (erros.length ? '; ' + erros.length + ' não: ' + erros.slice(0, 3).join(', ') + (erros.length > 3 ? '…' : '') : '') + '.' };
+}
+
+/* ------------------------------------------------------------------ */
+/* CADASTROS DO PATIO (o que a aba "Cadastro" da planilha tinha)       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * CARGA_CADASTRO: TIPO MOTORISTA (CODIGO, VALOR = o nome, PLACA), DESTINO (VALOR = a rota, como
+ * "FPI-D-URUCUI") e HORARIO (VALOR = hh:mm, os horarios de chegada da lista). As observacoes (situacoes)
+ * ficam no parametro CARGA_SITUACOES_BOX. Os nomes de verdade so entram pela tela ou pelo Importar.
+ */
+const CG_CAD_TIPOS = ['MOTORISTA', 'DESTINO', 'HORARIO'];
+function cgCadastro_() {
+  const saida = { motoristas: [], destinos: [], horarios: [] };
+  listar('CARGA_CADASTRO').forEach(function (r) {
+    const t = String(r.TIPO || ''), v = String(r.VALOR || '');
+    if (!v) return;
+    if (t === 'MOTORISTA') saida.motoristas.push({ id: r.ID, codigo: String(r.CODIGO || ''), nome: v, placa: String(r.PLACA || '') });
+    else if (t === 'DESTINO') saida.destinos.push({ id: r.ID, valor: v });
+    else if (t === 'HORARIO') saida.horarios.push({ id: r.ID, valor: v });
+  });
+  saida.motoristas.sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+  saida.destinos.sort(function (a, b) { return a.valor.localeCompare(b.valor); });
+  saida.horarios.sort(function (a, b) { return a.valor.localeCompare(b.valor); });
+  return saida;
+}
+/* "144381 - NOME DO MOTORISTA (ABC1D23)" -> { codigo, nome, placa } */
+function cgLerMotorista_(texto) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  const m = /^(\d{2,10})\s*[-–—]\s*(.+?)\s*(?:\(\s*([A-Za-z0-9-]{4,10})\s*\))?\s*$/.exec(t);
+  if (m) return { codigo: m[1], nome: m[2].toUpperCase(), placa: (m[3] || '').toUpperCase() };
+  const s = /^(.+?)\s*(?:\(\s*([A-Za-z0-9-]{4,10})\s*\))?\s*$/.exec(t);
+  return { codigo: '', nome: s[1].toUpperCase(), placa: (s[2] || '').toUpperCase() };
+}
+/* "0,0208333" (a hora do Sheets) ou "00:30" -> "00:30" */
+function cgHoraDaCelula_(v) {
+  const t = String(v == null ? '' : v).trim();
+  let m = /^(\d{1,2})[:h](\d{2})/.exec(t);
+  if (m && +m[1] < 24 && +m[2] < 60) return ('0' + m[1]).slice(-2) + ':' + m[2];
+  const f = Number(t.replace(',', '.'));
+  if (t && isFinite(f) && f >= 0 && f < 1) { const min = Math.round(f * 1440) % 1440; return cgHoraTexto_(min); }
+  return '';
+}
+/*
+ * MEXER NOS CADASTROS. params: { op: 'salvar' | 'excluir' | 'situacoes', tipo, id, valor, codigo, placa, lista }.
+ *   salvar     inclui ou troca um (motorista: codigo, nome, placa; destino ou horario: valor)
+ *   excluir    tira um
+ *   situacoes  a lista das observacoes inteira (o parametro CARGA_SITUACOES_BOX)
+ */
+function acaoCadastroCarga(usuario, params) {
+  const p = params || {};
+  const op = String(p.op || '');
+  const quem = usuario.email;
+  let recado = '';
+  if (op === 'situacoes') {
+    const lista = (Array.isArray(p.lista) ? p.lista : String(p.lista || '').split(/[;\n]+/)).map(function (x) { return cgTexto_(x, 40).toUpperCase(); }).filter(Boolean);
+    if (!lista.length) throw new Error('A lista de observações não pode ficar vazia.');
+    const unicas = lista.filter(function (x, i) { return lista.map(cgObsNorm_).indexOf(cgObsNorm_(x)) === i; });
+    comTrava(function () { cgSalvarParametro_('CARGA_SITUACOES_BOX', unicas.join('; '), quem); });
+    return { ok: true, recado: unicas.length + ' observações na lista.', invalidarTudo: true };
+  }
+  if (op === 'excluir') {
+    const id = String(p.id || '');
+    comTrava(function () {
+      const r = listar('CARGA_CADASTRO').filter(function (x) { return String(x.ID) === id; })[0];
+      if (!r) throw new Error('Este cadastro não existe mais.');
+      excluir('CARGA_CADASTRO', id, quem);
+      recado = cgTitulo_(String(r.VALOR)) + ' saiu do cadastro.';
+    });
+  } else if (op === 'salvar') {
+    const tipo = String(p.tipo || '').toUpperCase();
+    if (CG_CAD_TIPOS.indexOf(tipo) === -1) throw new Error('Cadastro desconhecido.');
+    let campos;
+    if (tipo === 'MOTORISTA') {
+      const nome = cgTexto_(p.valor || p.nome, 80).toUpperCase();
+      if (!nome) throw new Error('Informe o nome do motorista.');
+      campos = { TIPO: tipo, VALOR: nome, CODIGO: cgTexto_(p.codigo, 12).replace(/\D+/g, ''), PLACA: cgTexto_(p.placa, 10).toUpperCase().replace(/[^A-Z0-9-]/g, '') };
+    } else if (tipo === 'HORARIO') {
+      const h = cgHoraDaCelula_(p.valor);
+      if (!h) throw new Error('Horário: escreva como 05:30.');
+      campos = { TIPO: tipo, VALOR: h, CODIGO: '', PLACA: '' };
+    } else {
+      const v = cgTexto_(p.valor, 80).toUpperCase();
+      if (!v) throw new Error('Informe o destino.');
+      campos = { TIPO: tipo, VALOR: v, CODIGO: '', PLACA: '' };
+    }
+    comTrava(function () {
+      const todas = listar('CARGA_CADASTRO');
+      const igual = todas.filter(function (x) { return String(x.TIPO) === tipo && cgNorm_(x.VALOR) === cgNorm_(campos.VALOR) && String(x.ID) !== String(p.id || ''); })[0];
+      if (igual) throw new Error('"' + campos.VALOR + '" já está no cadastro.');
+      if (p.id) {
+        if (!todas.some(function (x) { return String(x.ID) === String(p.id); })) throw new Error('Este cadastro não existe mais.');
+        atualizar('CARGA_CADASTRO', String(p.id), campos, quem);
+      } else inserir('CARGA_CADASTRO', campos, quem);
+    });
+    recado = cgTitulo_(campos.VALOR) + ' no cadastro.';
+  } else throw new Error('Operação desconhecida no cadastro.');
+  esquecerLeituras();
+  return { ok: true, cadastro: cgCadastro_(), g: cgGeracao_(), recado: recado };
+}
+
+/*
+ * A ABA "CADASTRO" DA PLANILHA ANTIGA (pura): as colunas sao reconhecidas pelo conteudo — motoristas
+ * ("codigo - nome (placa)"), horarios (hh:mm ou a fracao do dia do Sheets), observacoes (a lista conhecida)
+ * e destinos (o resto do texto).
+ */
+function cgInterpretarCadastro_(valores) {
+  const saida = { motoristas: [], destinos: [], horarios: [], situacoes: [] };
+  if (!valores || !valores.length) return saida;
+  const nCol = valores.reduce(function (m, l) { return Math.max(m, (l || []).length); }, 0);
+  for (let j = 0; j < nCol; j++) {
+    const col = valores.map(function (l) { return String((l || [])[j] == null ? '' : l[j]).trim(); }).filter(Boolean);
+    if (!col.length) continue;
+    const conta = function (f) { return col.filter(f).length / col.length; };
+    if (conta(function (v) { return /^\d{2,10}\s*[-–—]\s*\S/.test(v); }) >= 0.6) {
+      col.forEach(function (v) { const m = cgLerMotorista_(v); if (m && /^\d/.test(v)) saida.motoristas.push(m); });
+    } else if (conta(function (v) { return !!cgHoraDaCelula_(v); }) >= 0.6) {
+      col.forEach(function (v) { const h = cgHoraDaCelula_(v); if (h) saida.horarios.push(h); });
+    } else if (conta(function (v) { const c = cgCategoriaObs_(v); return c && c !== 'outra'; }) >= 0.4) {
+      col.forEach(function (v) { if (!/^OBSERVA/i.test(cgNorm_(v))) saida.situacoes.push(cgTexto_(v, 40).toUpperCase()); });
+    } else if (conta(function (v) { return /[A-Za-z]/.test(v); }) >= 0.6) {
+      col.forEach(function (v) { if (!/^(DESCRI|DESTINO|ROTA)/i.test(cgNorm_(v))) saida.destinos.push(cgTexto_(v, 80).toUpperCase()); });
+    }
+  }
+  return saida;
 }

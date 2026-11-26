@@ -425,7 +425,7 @@ caso('migracao de um banco 8.11: SIM/NAO + PODE_ viram as tres faixas (capacidad
   afirmar(ctx(m).permissoesDe('AUDITOR').niveis.estoque === 'EDITAR', 'leitura do modelo antigo antes da migracao');
   const adm = entrar(m, DONO, '4321');                       // a entrada roda a migracao
   const c = ctx(m);
-  afirmar(c.prop('VERSAO_ESQUEMA') === '8.15', 'versao: ' + c.prop('VERSAO_ESQUEMA'));
+  afirmar(c.prop('VERSAO_ESQUEMA') === '8.16', 'versao: ' + c.prop('VERSAO_ESQUEMA'));
   const cel = (perfil) => { const l = c.listar('PERFIS').find((x) => x.PERFIL === perfil); const o = {}; TELAS.forEach((t) => { o[t.id] = l['TELA_' + t.id.toUpperCase()]; }); return o; };
   const esperado = {
     ADMIN:       'inicio:E calendario:E acoes:E assiduidade:E apresentacao:E nobreaks:E limpeza:E quadro:E estoque:E aprendiz:E carga:E config:E acessos:E filiais:E relatos:E',
@@ -466,7 +466,7 @@ caso('migracao a partir da 8.9 e da 8.10 tambem converte na primeira entrada', (
     const m = bancoAntigo(v);
     entrar(m, DONO, '4321');
     const c = ctx(m);
-    afirmar(c.prop('VERSAO_ESQUEMA') === '8.15', v + ': versao ' + c.prop('VERSAO_ESQUEMA'));
+    afirmar(c.prop('VERSAO_ESQUEMA') === '8.16', v + ': versao ' + c.prop('VERSAO_ESQUEMA'));
     afirmar(c.listar('PERFIS').every((l) => TELAS.every((t) => ['OCULTO', 'VER', 'EDITAR'].indexOf(l['TELA_' + t.id.toUpperCase()]) !== -1)), v + ': tudo em faixas');
   });
 });

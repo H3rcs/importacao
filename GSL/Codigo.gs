@@ -874,6 +874,12 @@ const ACOES = {
   boxCarga:            { tela: 'carga', funcao: 'acaoBoxCarga' },
   importarBoxesCarga:  { tela: 'carga', funcao: 'acaoImportarBoxesCarga' },
   parametrosCarga:     { tela: 'carga', funcao: 'acaoParametrosCarga' },
+  // fase 3 (8.16): escala 5x2 (subturno), alocacao (automatica: desfazer; em lote), grade "Controle" e cadastros do patio
+  subturnoCarga:       { tela: 'carga', funcao: 'acaoSubturnoCarga' },
+  desfazerAutoCarga:   { tela: 'carga', funcao: 'acaoDesfazerAutoCarga' },
+  alocarLoteCarga:     { tela: 'carga', funcao: 'acaoAlocarLoteCarga' },
+  carregamentoLoteCarga: { tela: 'carga', funcao: 'acaoCarregamentoLoteCarga' },
+  cadastroCarga:       { tela: 'carga', funcao: 'acaoCadastroCarga' },
 
   // gerais, da propria pessoa
   // Bolinha do menu (acoes em aberto por modulo): so leitura; so conta o que a pessoa ve (nivelNaTela).

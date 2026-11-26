@@ -1,0 +1,371 @@
+/* GSL Bartofil — Aprendiz.html (montado por ferramentas/montar-local.js; nao edite aqui) */
+
+/* =====================================================================
+   JOVEM APRENDIZ — o "Portal RH Aprendiz" no GSL (4.2.2).
+   O servidor (Aprendiz.gs) le a planilha da Imersao Corporativa e manda
+   tudo pronto. Aqui so se desenha: as duas abas do portal antigo —
+   Relatorio e Avaliacoes / Cronograma Geral dos Setores. Os graficos sao
+   do proprio GSL (SVG), sem biblioteca de fora.
+   ===================================================================== */
+const BUILD_APRENDIZ_TELA = '2026.11.26';   /* carimbo da entrega (ver conferirVersao no App.html) */
+const APZ = { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' };
+/* Saiu a pessoa (computador compartilhado): o portal volta ao comeco. Chamado pelo App.html. */
+function apzZerar() { Object.assign(APZ, { aba: 'relatorio', chave: '', avaliacao: 0, avaliacaoId: '', busca: '' }); }
+const APZ_SELO = { 'Concluído': '\u{1F7E2}', 'Pendente': '\u{1F535}', 'Não realizada': '⚪' };
+const APZ_OPT = { 'Concluído': 'concluido', 'Pendente': 'pendente', 'Não realizada': 'nao' };
+const APZ_PILARES = ['Atenção', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
+const APZ_PILARES_LONGO = ['Atenção Concentrada', 'Interesse', 'Proatividade', 'Aprendizado', 'Disciplina'];
+
+/* 3 -> "3"; 3.4 -> "3.4" — como o portal mostrava; no maximo uma casa (nota corrigida a mao, 14/3 -> 4.7). */
+const apzNum = (n) => String(Number((Number(n) || 0).toFixed(1)));
+/* Nota ou media que nao existe (nota em branco na planilha): um traco, nao zero. */
+const apzSemNota = (n) => n === null || n === undefined || n === '';
+const apzNota = (n) => apzSemNota(n) ? '—' : apzNum(n);
+const apzData = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
+
+function pintarAprendiz(r) {
+  const d = r.dados;
+  // Repintura com a pessoa digitando na busca (chegou avaliacao nova): o foco e o cursor continuam la.
+  const ativo = document.activeElement;
+  const foco = ativo && ativo.id === 'apz-busca' ? [ativo.selectionStart, ativo.selectionEnd] : null;
+  apzPintarTela(d);
+  if (foco) {
+    const caixa = el('apz-busca');
+    if (caixa) { caixa.focus({ preventScroll: true }); try { caixa.setSelectionRange(foco[0], foco[1]); } catch (e) {} }
+  }
+}
+
+function apzPintarTela(d) {
+  el('acoes-topo').innerHTML = '';
+  if (!d.configurado) {
+    el('subtitulo-pagina').textContent = 'Imersão corporativa: avaliações por setor e cronograma de rotação';
+    el('pagina').innerHTML = `<div class="cartao pn-vazio-grande">
+      <strong>Falta ligar o Jovem Aprendiz à planilha da Imersão Corporativa desta filial.</strong>
+      É a planilha das respostas do formulário de avaliação, com as abas "Respostas ao formulário 1" e "Cronograma".
+      ${d.podeConfigurar ? `<div class="pn-linha" style="justify-content:center;margin-top:16px">
+        <input id="apz-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..." style="max-width:460px">
+        <button class="botao" onclick="agir('salvarFonteAprendiz',{link:val('apz-link')}).catch(()=>{})">Ligar planilha</button></div>`
+        : '<br><br>Peça para quem configura o sistema ligar a planilha.'}</div>`;
+    return;
+  }
+  el('subtitulo-pagina').textContent = 'Imersão corporativa · ' + (d.lista || []).length + ' aprendiz(es) · avaliações por setor e cronograma de rotação';
+  el('acoes-topo').innerHTML = `
+    <button class="botao secundario" onclick="agir('atualizarAprendiz',{}).catch(()=>{})">Atualizar dados</button>
+    ${d.podeConfigurar ? `<button class="icone-botao" onclick="apzTrocarFonte()">Trocar planilha</button>` : ''}`;
+  if (d.erro) { el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
+  // Aprendiz que saiu da planilha depois de escolhido: volta para o "Selecione".
+  if (APZ.chave && !(d.paineis || {})[APZ.chave]) { APZ.chave = ''; APZ.avaliacao = 0; }
+
+  el('pagina').innerHTML = `<div class="apz">
+    <div class="apz-topo">
+      <h4><span aria-hidden="true">\u{1F393}</span>Bartofil | Portal RH Aprendiz</h4>
+      <select id="apz-sel" class="${APZ.aba === 'cronograma' ? 'apz-escondido' : ''}" onchange="apzSelecionar(this.value)" aria-label="Jovem aprendiz">
+        <option value="">Selecione um Jovem Aprendiz...</option>
+        ${(d.lista || []).map((x) => `<option value="${esc(x.chave)}" class="apz-opt-${APZ_OPT[x.status] || 'nao'}" ${x.chave === APZ.chave ? 'selected' : ''}>${APZ_SELO[x.status] || ''} ${esc(x.nomeOriginal)} (${esc(x.status)})</option>`).join('')}
+      </select>
+    </div>
+    <div class="apz-abas">
+      <button class="apz-aba ${APZ.aba === 'relatorio' ? 'ativa' : ''}" data-aba="relatorio" onclick="apzAba('relatorio')">\u{1F4C8} Relatório e Avaliações</button>
+      <button class="apz-aba ${APZ.aba === 'cronograma' ? 'ativa' : ''}" data-aba="cronograma" onclick="apzAba('cronograma')">\u{1F4C5} Cronograma Geral dos Setores</button>
+    </div>
+    <div class="apz-corpo" id="apz-conteudo"></div>
+    <p class="apz-rodape">Fonte: ${d.fonte ? `<a href="${esc(d.fonte.url)}" target="_blank" rel="noopener">${esc(d.fonte.nome)}</a>` : 'planilha da Imersão Corporativa'}
+      — abas ${esc((d.fonte && d.fonte.abaRespostas) || 'Respostas ao formulário 1')} e ${esc((d.fonte && d.fonte.abaCronograma) || 'Cronograma')}.
+      ${d.atualizado ? 'Dados lidos em ' + new Date(d.atualizado).toLocaleString('pt-BR') + '.' : ''}</p>
+  </div>`;
+  apzDesenhar();
+}
+
+function apzAba(qual) {
+  APZ.aba = qual;
+  document.querySelectorAll('.apz-aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === qual));
+  // Como no portal: o seletor de aprendiz some no cronograma geral (ali aparecem todos).
+  const sel = el('apz-sel'); if (sel) sel.classList.toggle('apz-escondido', qual === 'cronograma');
+  apzDesenhar();
+}
+
+function apzSelecionar(chave) {
+  APZ.chave = chave || '';
+  APZ.avaliacao = 0; APZ.avaliacaoId = '';
+  apzDesenhar();
+}
+
+/*
+ * Identidade de uma avaliacao: setor, data e avaliador, mais quantas iguais sao MAIS ANTIGAS que ela
+ * (a lista vem da mais recente para a mais antiga e a resposta nova entra na frente: contando pelo
+ * fim, o numero de cada uma nao muda). Duas respostas iguais no mesmo dia continuam distintas.
+ */
+function apzIdAvaliacao(lista, i) {
+  const a = lista[i]; if (!a) return '';
+  const base = a.setor + '|' + a.data + '|' + a.avaliador;
+  let antes = 0;
+  for (let j = i + 1; j < lista.length; j++) if (lista[j].setor + '|' + lista[j].data + '|' + lista[j].avaliador === base) antes++;
+  return base + '#' + antes;
+}
+function apzEscolherAvaliacao(i) {
+  const p = ((DADOS && DADOS.paineis) || {})[APZ.chave];
+  APZ.avaliacao = Number(i) || 0;
+  APZ.avaliacaoId = p ? apzIdAvaliacao(p.avaliacoes, APZ.avaliacao) : '';
+  apzPintarCompetencias();
+}
+
+function apzDesenhar() {
+  const alvo = el('apz-conteudo'); if (!alvo || !DADOS) return;
+  try {
+    alvo.innerHTML = APZ.aba === 'cronograma' ? apzCronograma(DADOS) : apzRelatorio(DADOS);
+    if (APZ.aba === 'relatorio') apzPintarGraficos();
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+function apzTrocarFonte() {
+  abrirJanela('Planilha do Jovem Aprendiz', `
+    <div class="campo"><label>Link da planilha da Imersão Corporativa</label><input id="apz-link2" value="${esc(DADOS.fonte ? DADOS.fonte.url : '')}"></div>
+    <p class="dica">A planilha precisa das abas "Respostas ao formulário 1" e "Cronograma". A conta que implantou o GSL precisa ter acesso de leitura a ela.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarFonteAprendiz',{link:val('apz-link2')}).catch(()=>{})">Salvar</button>`);
+}
+
+/* ---------- ABA 1: RELATORIO E AVALIACOES ---------- */
+function apzRelatorio(d) {
+  const p = (d.paineis || {})[APZ.chave];
+  if (!p) {
+    return `<div class="apz-prompt"><div class="apz-prompt-icone" aria-hidden="true">\u{1F4C7}</div>
+      <h4>Selecione um aprendiz no menu superior para visualizar o relatório completo.</h4></div>`;
+  }
+  const linhaDoTempo = p.linhaDoTempo.length
+    ? p.linhaDoTempo.map((s) => {
+        const t = { concluido: ['Concluído', 'Média: ' + apzNota(s.media)], fazendo: ['Em Destaque', 'Setor Atual'], pendente: ['Pendente', 'Aguardando'] }[s.status];
+        return `<div class="apz-etapa ${s.status}"><span class="apz-etapa-selo ${s.status}">${t[0]}</span>
+          <div class="apz-etapa-nome">${esc(s.setor)}</div><div class="apz-etapa-nota">${t[1]}</div></div>`;
+      }).join('')
+    : '<p class="apz-sub" style="font-size:.85rem">Nenhum setor cadastrado no cronograma para este aprendiz.</p>';
+  // A avaliacao escolhida e procurada pela identidade; se saiu da planilha, volta para a mais recente.
+  const escolhida = APZ.avaliacaoId ? p.avaliacoes.findIndex((a, i) => apzIdAvaliacao(p.avaliacoes, i) === APZ.avaliacaoId) : -1;
+  APZ.avaliacao = escolhida >= 0 ? escolhida : 0;
+  if (escolhida < 0) APZ.avaliacaoId = '';
+
+  return `
+    <div class="apz-cab">
+      <div><h2 class="apz-nome">${esc(p.nome)}</h2>
+        <p class="apz-sub">\u{1F504} Acompanhamento do Plano de Rotação por Setor</p></div>
+      <div class="apz-pilulas">
+        <span class="apz-pilula vermelha">\u{1F4C6} Fim de Contrato: <strong>${esc(p.fimContrato)}</strong></span>
+        <span class="apz-pilula verde">\u{1F3D6}️ Período de Férias: <strong>${esc(p.periodoFerias)}</strong></span>
+      </div>
+    </div>
+    <div class="apz-kpis">
+      <div class="apz-kpi"><div class="apz-kpi-linha">
+        <div><span class="apz-kpi-titulo">Média Geral Acumulada</span><div class="apz-kpi-valor" data-kpi="media">${apzNum(p.mediaGeral)} / 5</div></div>
+        <div class="apz-kpi-icone azul" aria-hidden="true">⭐</div></div></div>
+      <div class="apz-kpi"><div class="apz-kpi-linha">
+        <div><span class="apz-kpi-titulo">Setores Vivenciados</span><div class="apz-kpi-valor" data-kpi="setores">${p.vivenciados} / ${p.totais}</div></div>
+        <div class="apz-kpi-icone verde" aria-hidden="true">\u{1F9E9}</div></div>
+        <div class="apz-progresso" role="progressbar" aria-valuenow="${Math.min(100, p.progresso)}" aria-valuemin="0" aria-valuemax="100">
+          <div style="width:${Math.min(100, p.progresso)}%"></div></div></div>
+    </div>
+    <div class="apz-card">
+      <div class="apz-card-cab"><h5>\u{1F9ED} Cronograma de Treinamento e Status dos Setores</h5>
+        <small>Média unificada entre avaliações de turnos</small></div>
+      <div class="apz-linha-tempo">${linhaDoTempo}</div>
+    </div>
+    <div class="apz-graficos">
+      <div class="apz-card"><h5>\u{1F4CA} Média por Setor Concluído</h5><div id="apz-g-colunas"></div></div>
+      <div class="apz-card"><h5>\u{1F578}️ Média Geral por Competência</h5><div id="apz-g-radar"></div></div>
+    </div>
+    <div class="apz-card">
+      <div class="apz-card-cab"><h5>\u{1F39A}️ Detalhamento de Competências por Setor Especial</h5>
+        ${p.avaliacoes.length ? `<select id="apz-sel-setor" onchange="apzEscolherAvaliacao(this.value)" aria-label="Avaliação">
+          ${p.avaliacoes.map((a, i) => `<option value="${i}" ${i === APZ.avaliacao ? 'selected' : ''}>${esc(a.setor)} (${esc(a.data)} - ${esc(a.avaliador)})</option>`).join('')}</select>`
+          : '<select disabled><option>Sem setores avaliados</option></select>'}</div>
+      <div id="apz-competencias"></div>
+    </div>
+    <div class="apz-card"><h5>\u{1F4DD} Feedback Detalhado dos Avaliadores</h5>
+      ${p.avaliacoes.length ? p.avaliacoes.map((a) => `
+        <div class="apz-feedback">
+          <div class="apz-feedback-cab"><h6>${esc(a.setor)}</h6><span class="apz-data">${esc(a.data)}</span></div>
+          <p class="apz-feedback-quem"><strong>Avaliador:</strong> ${esc(a.avaliador)} | <strong>Média:</strong> ${apzNota(a.mediaSetor)}</p>
+          <div class="apz-feedback-colunas">
+            <div><strong class="apz-positivo">\u{1F44D} Pontos Positivos:</strong>
+              <ul>${a.pontosPositivos.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+            <div><strong class="apz-melhorar">⚠️ Pontos a Melhorar:</strong>
+              <ul>${a.pontosMelhorar.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+          </div>
+        </div>`).join('')
+        : '<p class="apz-sub" style="text-align:center;padding:1rem 0">Nenhuma avaliação do formulário registrada para este aprendiz até o momento.</p>'}
+    </div>`;
+}
+
+/* ---------- GRAFICOS (SVG, escala de 0 a 5) ----------
+   Desenhados na largura real da caixa, depois que o HTML existe: o texto
+   fica sempre com 11-12 px (como no Chart.js do portal) em qualquer tela.
+   Mudou o tamanho da janela, redesenha (apzAoRedimensionar). */
+function apzPintarGraficos() {
+  const p = ((DADOS && DADOS.paineis) || {})[APZ.chave];
+  if (!p || APZ.aba !== 'relatorio') return;
+  const colunas = el('apz-g-colunas'), radar = el('apz-g-radar');
+  if (colunas) colunas.innerHTML = apzGraficoColunas(p.avaliacoes.slice().reverse().map((a) =>
+    ({ rotulo: a.setor, valor: a.mediaSetor, dica: a.setor + ' · ' + a.data + ' · ' + a.avaliador })), apzLargura(colunas));
+  if (radar) radar.innerHTML = apzGraficoRadar(APZ_PILARES, p.mediasPilares, apzLargura(radar));
+  apzPintarCompetencias();
+}
+function apzPintarCompetencias() {
+  const p = ((DADOS && DADOS.paineis) || {})[APZ.chave];
+  const alvo = el('apz-competencias');
+  if (!p || !alvo) return;
+  const a = p.avaliacoes[APZ.avaliacao];
+  alvo.innerHTML = a ? apzGraficoBarras(APZ_PILARES_LONGO, a.notas, apzLargura(alvo))
+    : '<div class="apz-sem-dados">Nenhuma avaliação registrada ainda.</div>';
+}
+let apzRedesenho = 0;
+window.addEventListener('resize', function apzAoRedimensionar() {
+  clearTimeout(apzRedesenho);
+  apzRedesenho = setTimeout(() => { if (paginaAtual === 'aprendiz' && el('apz-g-colunas')) apzPintarGraficos(); }, 150);
+});
+
+const apzLargura = (caixa) => Math.max(240, Math.floor(caixa.clientWidth || 0));
+/* Largura do texto em px, na fonte da pagina (para os rotulos nao se encostarem). */
+function apzMedir(texto, px, peso) {
+  const c = apzMedir.ctx || (apzMedir.ctx = document.createElement('canvas').getContext('2d'));
+  if (!apzMedir.fonte) apzMedir.fonte = getComputedStyle(document.body).fontFamily || 'sans-serif';
+  c.font = (peso || 400) + ' ' + px + 'px ' + apzMedir.fonte;
+  return c.measureText(String(texto)).width;
+}
+/* Corta com reticencias ate caber em `limite` px. */
+function apzCaber(texto, px, limite) {
+  let t = String(texto);
+  if (apzMedir(t, px) <= limite) return t;
+  while (t.length > 3 && apzMedir(t + '…', px) > limite) t = t.slice(0, -1);
+  return t.trimEnd() + '…';
+}
+
+/* Coluna com ponta arredondada (4 px) e base reta na linha do zero. */
+function apzColuna(x, y, w, h) {
+  const r = Math.min(4, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+/* Media de cada avaliacao, em ordem de data (o primeiro grafico do portal). 300 px de altura, como la. */
+function apzGraficoColunas(itens, W) {
+  if (!itens.length) return '<div class="apz-sem-dados">Nenhuma avaliação registrada ainda.</div>';
+  const A = 300, mL = 26, mR = 8, mT = 20, n = itens.length, fonte = 11;
+  const fatia = (W - mL - mR) / n, barra = Math.max(6, Math.min(24, fatia * 0.6));
+  // Rotulo que nao cabe deitado inclina 45 graus (como o Chart.js); o espaco de baixo cresce ate 110 px.
+  const larguras = itens.map((it) => apzMedir(it.rotulo, fonte));
+  const gira = Math.max.apply(null, larguras) > fatia - 6;
+  const mB = gira ? Math.min(110, Math.ceil(Math.max.apply(null, larguras) * 0.71) + 20) : 28;
+  const rotulos = itens.map((it) => gira ? apzCaber(it.rotulo, fonte, (mB - 20) / 0.71) : apzCaber(it.rotulo, fonte, fatia - 4));
+  // Muitas avaliacoes numa tela estreita: o numero em cima da coluna so quando cabe na fatia, e o
+  // rotulo inclinado de k em k (o nome inteiro continua no balao de cada coluna).
+  const mostraValor = Math.max.apply(null, itens.map((it) => apzMedir(apzNota(it.valor), fonte, 600))) + 2 <= fatia;
+  const passo = gira ? Math.max(1, Math.ceil((fonte + 2) / (fatia * 0.71))) : 1;
+  const y = (v) => mT + (A - mT - mB) * (1 - Math.max(0, Math.min(5, v)) / 5);
+  const base = A - mB + 15;
+  return `<svg class="apz-grafico" width="${W}" height="${A}" viewBox="0 0 ${W} ${A}" role="img" aria-label="Média por setor concluído">
+    ${[0, 1, 2, 3, 4, 5].map((g) => `<line x1="${mL}" x2="${W - mR}" y1="${y(g)}" y2="${y(g)}" stroke="var(--linha)" stroke-width="1"/>
+      <text x="${mL - 8}" y="${y(g) + 4}" text-anchor="end" font-size="${fonte}" fill="var(--apz-tinta-media)">${g}</text>`).join('')}
+    ${itens.map((it, i) => {
+      const cx = mL + fatia * i + fatia / 2, topo = y(it.valor), alt = y(0) - topo;
+      return `<g><title>${esc(it.dica || it.rotulo)}: média ${apzNota(it.valor)}</title>
+        <rect x="${cx - fatia / 2}" y="${mT}" width="${fatia}" height="${A - mT - mB}" fill="transparent"/>
+        ${alt > 0 ? `<path d="${apzColuna(cx - barra / 2, topo, barra, alt)}" fill="var(--apz-serie)"/>` : ''}
+        ${mostraValor ? `<text x="${cx}" y="${topo - 6}" text-anchor="middle" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${apzNota(it.valor)}</text>` : ''}
+        ${i % passo === 0 ? `<text x="${cx}" y="${base}" font-size="${fonte}" fill="var(--apz-tinta-media)" ${gira
+          ? `text-anchor="end" transform="rotate(-45 ${cx + 4} ${base - 4})"` : 'text-anchor="middle"'}>${esc(rotulos[i])}</text>` : ''}</g>`;
+    }).join('')}
+  </svg>`;
+}
+
+/* Barras deitadas: as cinco notas de uma avaliacao. 280 px de altura, como no portal. */
+function apzGraficoBarras(rotulos, valores, W) {
+  const fonte = 12, mT = 6, mB = 26, A = 280, mR = 30;
+  const mL = Math.min(W * 0.4, Math.ceil(Math.max.apply(null, rotulos.map((r) => apzMedir(r, fonte)))) + 14);
+  const linha = (A - mT - mB) / rotulos.length, e = Math.min(24, linha * 0.6);
+  const x = (v) => mL + (W - mL - mR) * Math.max(0, Math.min(5, v)) / 5;
+  return `<svg class="apz-grafico" width="${W}" height="${A}" viewBox="0 0 ${W} ${A}" role="img" aria-label="Nota de cada competência">
+    ${[0, 1, 2, 3, 4, 5].map((g) => `<line x1="${x(g)}" x2="${x(g)}" y1="${mT}" y2="${A - mB}" stroke="var(--linha)" stroke-width="1"/>
+      <text x="${x(g)}" y="${A - 8}" text-anchor="middle" font-size="11" fill="var(--apz-tinta-media)">${g}</text>`).join('')}
+    ${rotulos.map((r, i) => {
+      const vazia = apzSemNota(valores[i]);
+      const cy = mT + linha * i + linha / 2, v = vazia ? 0 : Number(valores[i]) || 0, larg = x(v) - x(0), k = Math.min(4, larg);
+      return `<g><title>${esc(r)}: ${vazia ? 'sem nota' : apzNum(v)}</title>
+        <text x="${mL - 10}" y="${cy + 4}" text-anchor="end" font-size="${fonte}" fill="var(--apz-tinta)">${esc(apzCaber(r, fonte, mL - 14))}</text>
+        ${larg > 0 ? `<path d="M${x(0)},${cy - e / 2}H${x(v) - k}Q${x(v)},${cy - e / 2} ${x(v)},${cy - e / 2 + k}V${cy + e / 2 - k}Q${x(v)},${cy + e / 2} ${x(v) - k},${cy + e / 2}H${x(0)}Z" fill="var(--apz-serie)"/>` : ''}
+        <text x="${x(v) + 6}" y="${cy + 4}" font-size="${fonte}" font-weight="600" fill="var(--apz-tinta)">${vazia ? '—' : apzNum(v)}</text></g>`;
+    }).join('')}
+  </svg>`;
+}
+
+/* Radar das cinco competencias (media de todas as avaliacoes). 300 px de altura, como no portal. */
+function apzGraficoRadar(rotulos, valores, W) {
+  const A = 300, cx = W / 2, cy = A / 2 + 4, n = rotulos.length, fonte = 12;
+  // espaco dos rotulos dos lados: o maior nome de competencia
+  const lado = Math.ceil(Math.max.apply(null, rotulos.map((r) => apzMedir(r, fonte)))) + 14;
+  const R = Math.max(50, Math.min(W / 2 - lado, A / 2 - 44));
+  const ang = (i) => -Math.PI / 2 + (2 * Math.PI * i) / n;
+  const ponto = (i, v) => [cx + R * (v / 5) * Math.cos(ang(i)), cy + R * (v / 5) * Math.sin(ang(i))];
+  const anel = (v) => rotulos.map((_, i) => ponto(i, v).map((c) => c.toFixed(1)).join(',')).join(' ');
+  const vals = rotulos.map((_, i) => Math.max(0, Math.min(5, Number(valores[i]) || 0)));
+  const rotuloVal = (i) => apzSemNota(valores[i]) ? '—' : apzNum(vals[i]);
+  return `<svg class="apz-grafico" width="${W}" height="${A}" viewBox="0 0 ${W} ${A}" role="img" aria-label="Média geral por competência">
+    ${[1, 2, 3, 4, 5].map((v) => `<polygon points="${anel(v)}" fill="none" stroke="var(--linha)" stroke-width="1"/>`).join('')}
+    ${rotulos.map((_, i) => { const p = ponto(i, 5); return `<line x1="${cx}" y1="${cy}" x2="${p[0]}" y2="${p[1]}" stroke="var(--linha)" stroke-width="1"/>`; }).join('')}
+    ${[1, 2, 3, 4, 5].map((v) => `<text x="${cx + 4}" y="${cy - R * v / 5 + 4}" font-size="10" fill="var(--apz-tinta-media)">${v}</text>`).join('')}
+    <polygon points="${vals.map((v, i) => ponto(i, v).map((c) => c.toFixed(1)).join(',')).join(' ')}"
+      fill="var(--apz-serie)" fill-opacity=".14" stroke="var(--apz-serie)" stroke-width="2" stroke-linejoin="round"/>
+    ${vals.map((v, i) => { const p = ponto(i, v); return `<g><title>${esc(rotulos[i])}: ${rotuloVal(i)}</title>
+      <circle cx="${p[0]}" cy="${p[1]}" r="11" fill="transparent"/>
+      <circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="var(--apz-serie)" stroke="var(--apz-cartao)" stroke-width="2"/></g>`; }).join('')}
+    ${rotulos.map((r, i) => {
+      const c = Math.cos(ang(i)), sn = Math.sin(ang(i));
+      const p = [cx + (R + 10) * c, cy + (R + 10) * sn + (sn < -0.5 ? -18 : (sn > 0.5 ? 10 : -4))];
+      const ancora = Math.abs(c) < 0.2 ? 'middle' : (c > 0 ? 'start' : 'end');
+      return `<text x="${p[0]}" y="${p[1]}" text-anchor="${ancora}" font-size="${fonte}" fill="var(--apz-tinta)">${esc(r)}
+        <tspan x="${p[0]}" dy="15" font-weight="700">${rotuloVal(i)}</tspan></text>`;
+    }).join('')}
+  </svg>`;
+}
+
+/* ---------- ABA 2: CRONOGRAMA GERAL (contrato que vence primeiro em cima) ---------- */
+function apzCronograma(d) {
+  return `<div class="apz-card">
+    <div class="apz-card-cab apz-crono-cab">
+      <div><h4 class="apz-crono-titulo">\u{1F4C5} Cronograma Completo de Rotação dos Aprendizes</h4>
+        <p class="apz-sub" style="font-size:.85rem;margin-top:4px">Visualize o progresso por datas reais e acompanhe as informações de contrato e férias.
+          Em ordem de fim de contrato: o que vence primeiro aparece primeiro.</p></div>
+      <input id="apz-busca" placeholder="\u{1F50D} Pesquisar por nome do aprendiz..." value="${esc(APZ.busca)}"
+        oninput="APZ.busca=this.value;apzFiltrarCronograma()">
+    </div>
+    <div id="apz-crono-grade" class="apz-crono-grade">${apzCartoesCronograma(d)}</div>
+  </div>`;
+}
+
+/* A busca nao redesenha a caixa de texto (senao perde o foco a cada letra). */
+function apzFiltrarCronograma() {
+  const alvo = el('apz-crono-grade');
+  if (alvo && DADOS) alvo.innerHTML = apzCartoesCronograma(DADOS);
+}
+
+function apzCartoesCronograma(d) {
+  const sem = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const termo = sem(APZ.busca).trim();
+  const lista = (d.cronograma || []).filter((a) => !termo || sem(a.nome).indexOf(termo) !== -1);
+  if (!lista.length) return '<p class="apz-sub" style="grid-column:1/-1;text-align:center;padding:1.5rem 0">Nenhum jovem encontrado no cronograma.</p>';
+  const hoje = d.hoje;
+  return lista.map((a) => `
+    <div class="apz-crono-cartao">
+      <div class="apz-crono-cartao-cab">
+        <h5>\u{1F464} ${esc(a.nome)}</h5>
+        <div><span class="apz-mini-pilula vermelha">\u{1F4C5} Fim: <strong>${esc(a.final_contrato || 'N/A')}</strong></span>
+          <span class="apz-mini-pilula amarela">\u{1F3D6}️ Férias: <strong>${esc(a.ferias || 'N/A')}</strong></span></div>
+      </div>
+      <ul class="apz-setores">
+        ${a.cronograma.map((s) => {
+          let st = ['futuro', 'A Fazer'];
+          if (s.final && hoje > s.final) st = ['concluido', 'Concluído'];
+          else if (s.inicio && s.final && hoje >= s.inicio && hoje <= s.final) st = ['andamento', 'Em Andamento'];
+          return `<li><div><strong>${esc(s.setor)}</strong><br><small>${apzData(s.inicio)} a ${apzData(s.final)}</small></div>
+            <span class="apz-tag ${st[0]}">${st[1]}</span></li>`;
+        }).join('')}
+      </ul>
+    </div>`).join('');
+}

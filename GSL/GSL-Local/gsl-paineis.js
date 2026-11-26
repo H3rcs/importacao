@@ -1,0 +1,4084 @@
+/* GSL Bartofil — Paineis.html (montado por ferramentas/montar-local.js; nao edite aqui) */
+
+/* Carimbo desta entrega (ver conferirVersao no App.html). */
+const BUILD_PAINEIS = '2026.11.26';
+
+/* =====================================================================
+   PAINEIS NOVOS DO GSL
+     Filiais e painéis · Nobreaks · Limpeza CD · Quadro do CD
+   Usam as mesmas pecas do App (abrir, agir, abrirJanela, avisar, kpi,
+   barra, esc, el, val) e guardam o estado da tela em variaveis globais,
+   porque toda acao redesenha a tela com os dados novos.
+   ===================================================================== */
+
+/* ---------------- utilidades ---------------- */
+const pnNum = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '—'
+  : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: casas || 0, maximumFractionDigits: casas || 0 });
+const pnMoeda = (v) => (v === null || v === undefined || isNaN(Number(v))) ? '—'
+  : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const pnPct = (v, casas) => (v === null || v === undefined || isNaN(Number(v))) ? '—' : pnNum(v, casas === undefined ? 0 : casas) + '%';
+const pnData = (iso) => iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) : '—';
+const pnDataLonga = (iso) => iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) + '/' + String(iso).slice(0, 4) : '—';
+const PN_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const PN_SEMANA_LONGA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const PN_MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const pnDiaSemana = (iso) => { const d = pnParaData(iso); return d ? PN_SEMANA[d.getDay()] : ''; };
+function pnParaData(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+function pnISO(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function pnSomarDias(iso, n) { const d = pnParaData(iso); d.setDate(d.getDate() + n); return pnISO(d); }
+function pnSegunda(iso) { const d = pnParaData(iso); const dia = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dia); return pnISO(d); }
+const pnRotuloMes = (k) => { const p = String(k).split('-'); return p.length >= 2 ? PN_MESES[+p[1] - 1] + '/' + p[0].slice(2) : k; };
+/*
+ * Le o numero como a pessoa digitou: 221,5 ou 221.5. Em potencia (VA),
+ * "6.900" e seis mil e novecentos — ponto de milhar, como se escreve no
+ * Brasil. Em tensao e corrente o ponto e decimal.
+ */
+function pnLerNumero(t, milhar) {
+  let s = String(t == null ? '' : t).trim().replace(/\s/g, '');
+  if (!s) return null;
+  if (milhar && /^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  const n = Number(s.indexOf(',') !== -1 ? s.replace(/\./g, '').replace(',', '.') : s);
+  return isNaN(n) ? null : n;
+}
+
+/* KPI com linha de apoio; `compacto` para valores longos (dinheiro). */
+const pnKpi = (valor, rotulo, cor, sub, compacto) => `<div class="cartao kpi ${cor}${compacto ? ' compacto' : ''}">
+  <div class="kpi-valor">${esc(valor)}</div><div class="kpi-rotulo">${esc(rotulo)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`;
+const pnMoedaCurta = (v) => (v === null || v === undefined || isNaN(Number(v))) ? '—'
+  : 'R$ ' + Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+
+/*
+ * CORES DA BARTOFIL NOS RELATORIOS (Excel e PDF). As mesmas do Marca.html,
+ * do Estilo.html e dos e-mails: azul com tarja verde e amarela. A marca NAO
+ * tem vermelho: vermelho e laranja so aparecem como sinal de alerta.
+ */
+const PN_MARCA = { azul: '111785', verde: '01973A', amarelo: 'FFEE03' };
+/* Tons de situacao: [fundo claro, texto escuro] — a celula { v, tom } do Excel e a etiqueta .tom do PDF. */
+const PN_TONS = {
+  azul: ['E7EAFE', '111785'], verde: ['D9F5E6', '016B2A'], amarelo: ['FFF6C2', '6B5300'], cinza: ['ECEEF3', '475569'],
+  laranja: ['FFE9D5', 'A34400'], vermelho: ['FDE7E5', '8E1B1B']
+};
+/* A classe do pn-chip da tela no tom do Excel (a mesma leitura de cor). */
+const PN_TOM_DO_CHIP = { ok: 'verde', atencao: 'laranja', alerta: 'vermelho', neutro: 'cinza' };
+
+/*
+ * EXPORTAR PARA EXCEL (.xlsx de verdade, sem biblioteca externa), nas cores da Bartofil.
+ * abas: [{ nome, linhas: [[celula, ...], ...] }] — numero vira numero,
+ * o resto vira texto. O arquivo e um zip "sem compressao" com o XML
+ * que o Excel, o LibreOffice e o Google Planilhas abrem.
+ *
+ * O formato das linhas e o de sempre; o estilo sai da posicao:
+ *   - linhas antes da 1a linha vazia, com uma celula so cada: a 1a e o TITULO
+ *     (azul, negrito, maior), as outras o subtitulo (cinza); a linha vazia
+ *     logo depois vira a tarja da marca (verde e amarelo);
+ *   - a 1a linha depois de uma linha vazia (ou a 1a da aba, se nao ha titulo)
+ *     e o CABECALHO: texto branco em negrito sobre o azul, filete verde embaixo;
+ *   - o resto e dado: linhas zebradas (azul-acinzentado bem claro), borda fina
+ *     clara, numero a direita;
+ *   - com uma tabela so na aba, o cabecalho fica congelado e com filtro.
+ *
+ * CELULA DE SITUACAO (opcional, qualquer tela pode usar): no lugar do valor,
+ *   { v: 'TEXTO', tom: 'verde' }
+ * sai com o fundo claro e o texto escuro do tom, em negrito e centralizada
+ * (v pode ser numero). Tons: 'azul', 'verde', 'amarelo', 'cinza' (identidade
+ * e informacao) e 'laranja', 'vermelho' (SO alerta: a marca nao tem vermelho).
+ * Sem tom, ou tom desconhecido, a celula sai como as outras.
+ * PN_TOM_DO_CHIP traduz a classe do pn-chip da tela (ok, atencao, alerta, neutro).
+ * No PDF o mesmo tom e a etiqueta <span class="tom verde">...</span> (pnImprimirRelatorio).
+ */
+function pnBaixarXlsx(nomeArquivo, abas) {
+  pnBaixarBlob(nomeArquivo, pnZipSemCompressao(pnXlsxArquivos(abas)), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/* As partes do .xlsx: [[caminho no zip, texto XML], ...] (separado do download para os testes lerem o XML). */
+function pnXlsxArquivos(abas) {
+  const xml = (t) => String(t).replace(/[\u000B\u000C]/g, ' ').replace(/[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const col = (i) => { let s = ''; i++; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const NS = 'http:\/\/schemas.openxmlformats.org';
+  // (montado em pedacos: o HtmlService trataria o cabecalho XML como scriptlet)
+  const XML_CAB = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>';
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  // estilos (cellXfs): a ordem da lista E o numero usado no s="" das celulas
+  const TONS = Object.keys(PN_TONS);
+  const S = { titulo: 1, sub: 2, cab: 3, txt: 4, num: 5, txtZebra: 6, numZebra: 7, verde: 8, amarelo: 9, tom: 10 };
+  const cor = (rgb) => `<color rgb="FF${rgb}"/>`;
+  const fonte = (negrito, tam, rgb) => `<font>${negrito ? '<b/>' : ''}<sz val="${tam}"/>${rgb ? cor(rgb) : ''}<name val="Calibri"/><family val="2"/></font>`;
+  const fundo = (rgb) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${rgb}"/><bgColor indexed="64"/></patternFill></fill>`;
+  const lado = (l, estilo, rgb) => `<${l} style="${estilo}">${cor(rgb)}</${l}>`;
+  const fontes = [fonte(false, 11), fonte(true, 16, PN_MARCA.azul), fonte(false, 10, '4A4F6A'), fonte(true, 11, 'FFFFFF')]
+    .concat(TONS.map((t) => fonte(true, 11, PN_TONS[t][1])));
+  const fundos = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>',
+    fundo(PN_MARCA.azul), fundo('F3F5FA'), fundo(PN_MARCA.verde), fundo(PN_MARCA.amarelo)].concat(TONS.map((t) => fundo(PN_TONS[t][0])));
+  const bordas = ['<border><left/><right/><top/><bottom/><diagonal/></border>',
+    '<border>' + ['left', 'right', 'top', 'bottom'].map((l) => lado(l, 'thin', 'D5D9E8')).join('') + '<diagonal/></border>',
+    '<border>' + lado('left', 'thin', '3A3F9E') + lado('right', 'thin', '3A3F9E') + lado('top', 'thin', PN_MARCA.azul) + lado('bottom', 'medium', PN_MARCA.verde) + '<diagonal/></border>'];
+  const xf = (f, p, b, alinha) => `<xf numFmtId="0" fontId="${f}" fillId="${p}" borderId="${b}" xfId="0"` +
+    (f ? ' applyFont="1"' : '') + (p ? ' applyFill="1"' : '') + (b ? ' applyBorder="1"' : '') + (alinha ? ` applyAlignment="1"><alignment ${alinha}/></xf>` : '/>');
+  const MEIO = 'vertical="center"', DIREITA = 'horizontal="right" vertical="center"', CENTRO = 'horizontal="center" vertical="center"';
+  const estilos = [xf(0, 0, 0), xf(1, 0, 0, MEIO), xf(2, 0, 0, MEIO), xf(3, 2, 2, CENTRO), xf(0, 0, 1, MEIO), xf(0, 0, 1, DIREITA),
+    xf(0, 3, 1, MEIO), xf(0, 3, 1, DIREITA), xf(0, 4, 0), xf(0, 5, 0)].concat(TONS.map((t, k) => xf(4 + k, 6 + k, 1, CENTRO)));
+  const lista = (tag, itens) => `<${tag} count="${itens.length}">${itens.join('')}</${tag}>`;
+
+  // valor da celula: o proprio valor ou o v de { v, tom }
+  const comTom = (c) => !!c && typeof c === 'object' && 'v' in c;
+  const valor = (c) => comTom(c) ? c.v : c;
+  const vazio = (c) => { const v = valor(c); return v === null || v === undefined || v === ''; };
+  const vazia = (l) => !l || !l.some((c) => !vazio(c));
+  const rodape = xml('&L&8GSL Bartofil' + (filial ? ' · ' + filial.replace(/&/g, '&&') : '') + '&R&8Página &P de &N');
+
+  const planilha = (linhas, iAba) => {
+    // o papel de cada linha: titulo, sub, tarja, cab, dado ou vazia
+    const iVazia = linhas.findIndex(vazia);
+    const temTitulo = iVazia > 0 && linhas.slice(0, iVazia).every((l) => l.filter((c) => !vazio(c)).length <= 1) &&
+      linhas.slice(iVazia).some((l) => !vazia(l));
+    const papel = linhas.map((l, i) => {
+      if (vazia(l)) return temTitulo && i === iVazia ? 'tarja' : 'vazia';
+      if (temTitulo && i < iVazia) return i === 0 ? 'titulo' : 'sub';
+      return (i === 0 || vazia(linhas[i - 1])) ? 'cab' : 'dado';
+    });
+    // tabelas: do cabecalho ate a ultima linha de dado; a largura e a da linha mais comprida
+    const tabelas = [];
+    papel.forEach((p, i) => {
+      if (p === 'cab') tabelas.push({ ini: i, fim: i, larg: 0 });
+      const t = tabelas[tabelas.length - 1];
+      if (t && (p === 'cab' || (p === 'dado' && t.fim === i - 1))) { t.fim = i; t.larg = Math.max(t.larg, linhas[i].length); }
+    });
+    const tabelaDa = (i) => tabelas.find((t) => i >= t.ini && i <= t.fim);
+    // largura das colunas so pelas tabelas (o titulo transborda para as celulas vazias ao lado)
+    const larg = [];
+    papel.forEach((p, i) => {
+      if (p !== 'cab' && p !== 'dado') return;
+      linhas[i].forEach((c, j) => {
+        const n = String(vazio(c) ? '' : valor(c)).length;
+        const w = p === 'cab' ? Math.ceil(n * 1.15) + 3 : n + (comTom(c) ? 4 : 2);
+        larg[j] = Math.min(60, Math.max(larg[j] || 8, w));
+      });
+    });
+    const cols = larg.length ? '<cols>' + larg.map((w, j) => `<col min="${j + 1}" max="${j + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>' : '';
+    const celula = (ref, c, s) => {
+      const v = valor(c);
+      if (v === null || v === undefined || v === '') return `<c r="${ref}" s="${s}"/>`;
+      if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
+      return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+    };
+    const dados = linhas.map((l, i) => {
+      const p = papel[i], r = i + 1;
+      if (p === 'vazia') return '';
+      if (p === 'titulo' || p === 'sub') {
+        const j = l.findIndex((c) => !vazio(c));
+        return `<row r="${r}"${p === 'titulo' ? ' ht="26" customHeight="1"' : ''}>${celula(col(j) + r, l[j], p === 'titulo' ? S.titulo : S.sub)}</row>`;
+      }
+      if (p === 'tarja') {
+        const t = tabelas.find((x) => x.ini > i), w = Math.max(1, t ? t.larg : 1), meio = Math.ceil(w / 2);
+        return `<row r="${r}" ht="5" customHeight="1">` + Array.from({ length: w }, (_, j) => `<c r="${col(j)}${r}" s="${j < meio ? S.verde : S.amarelo}"/>`).join('') + '</row>';
+      }
+      const t = tabelaDa(i) || { ini: i - 1, larg: l.length }, zebra = p === 'dado' && (i - t.ini) % 2 === 0;
+      return `<row r="${r}"${p === 'cab' ? ' ht="21" customHeight="1"' : ''}>` + Array.from({ length: t.larg }, (_, j) => {
+        const c = l[j], ref = col(j) + r;
+        if (p === 'cab') return celula(ref, c, S.cab);
+        const k = comTom(c) ? TONS.indexOf(c.tom) : -1;
+        if (k !== -1 && !vazio(c)) return celula(ref, c, S.tom + k);
+        const v = valor(c), numero = typeof v === 'number' && isFinite(v);
+        return celula(ref, c, numero ? (zebra ? S.numZebra : S.num) : (zebra ? S.txtZebra : S.txt));
+      }).join('') + '</row>';
+    }).join('');
+    // cabecalho congelado (o da 1a tabela, se esta no alto) e filtro (so com uma tabela, com dados)
+    const t0 = tabelas[0];
+    const congela = t0 && t0.ini < 12 ? `<pane ySplit="${t0.ini + 1}" topLeftCell="A${t0.ini + 2}" activePane="bottomLeft" state="frozen"/>` +
+      `<selection pane="bottomLeft" activeCell="A${t0.ini + 2}" sqref="A${t0.ini + 2}"/>` : '';
+    const filtro = tabelas.length === 1 && t0.fim > t0.ini ? `$A$${t0.ini + 1}:$${col(t0.larg - 1)}$${t0.fim + 1}` : '';
+    const corpo = `${XML_CAB}<worksheet xmlns="${NS}/spreadsheetml/2006/main">` +
+      `<sheetPr><tabColor rgb="FF${PN_MARCA.azul}"/><pageSetUpPr fitToPage="1"/></sheetPr>` +
+      `<sheetViews><sheetView workbookViewId="0"${iAba === 0 ? ' tabSelected="1"' : ''}>${congela}</sheetView></sheetViews>` +
+      `<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${dados}</sheetData>` +
+      (filtro ? `<autoFilter ref="${filtro.replace(/\$/g, '')}"/>` : '') +
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.6" header="0.3" footer="0.3"/>' +
+      '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>' +
+      `<headerFooter><oddFooter>${rodape}</oddFooter></headerFooter></worksheet>`;
+    return { corpo, filtro };
+  };
+  const nomes = abas.map((a, i) => String(a.nome || ('Aba ' + (i + 1))).replace(/[\\\/?*\[\]:]/g, ' ').slice(0, 31));
+  const folhas = abas.map((a, i) => planilha(a.linhas || [], i));
+  // o filtro do Excel tem um nome escondido por aba (_FilterDatabase), como o proprio Excel grava
+  const nomesFiltro = folhas.map((f, i) => f.filtro ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">` +
+    xml('\x27' + nomes[i].replace(/\x27/g, '\x27\x27') + '\x27!' + f.filtro) + '</definedName>' : '').join('');
+  return [
+    ['[Content_Types].xml', `${XML_CAB}<Types xmlns="${NS}/package/2006/content-types">` +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      abas.map((a, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '</Types>'],
+    ['_rels/.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `${XML_CAB}<workbook xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheets>` +
+      nomes.map((n, i) => `<sheet name="${xml(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets>' +
+      (nomesFiltro ? '<definedNames>' + nomesFiltro + '</definedNames>' : '') + '</workbook>'],
+    ['xl/_rels/workbook.xml.rels', `${XML_CAB}<Relationships xmlns="${NS}/package/2006/relationships">` +
+      abas.map((a, i) => `<Relationship Id="rId${i + 1}" Type="${NS}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+      `<Relationship Id="rId${abas.length + 1}" Type="${NS}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/styles.xml', `${XML_CAB}<styleSheet xmlns="${NS}/spreadsheetml/2006/main">` +
+      lista('fonts', fontes) + lista('fills', fundos) + lista('borders', bordas) +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      lista('cellXfs', estilos) +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>']
+  ].concat(folhas.map((f, i) => ['xl/worksheets/sheet' + (i + 1) + '.xml', f.corpo]));
+}
+
+/* Zip no modo "store": [[nome, texto], ...] -> Uint8Array. */
+function pnZipSemCompressao(arquivos) {
+  const tabela = pnZipSemCompressao.tabela || (pnZipSemCompressao.tabela = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+    return t;
+  })());
+  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = tabela[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const enc = new TextEncoder();
+  const partes = [], centrais = [];
+  let pos = 0;
+  const cab = (tam) => { const b = new Uint8Array(tam); return { b, v: new DataView(b.buffer) }; };
+  arquivos.forEach(([nome, texto]) => {
+    const n = enc.encode(nome), dados = enc.encode(texto), crc = crc32(dados);
+    const h = cab(30);
+    h.v.setUint32(0, 0x04034b50, true); h.v.setUint16(4, 20, true); h.v.setUint16(6, 0x0800, true); h.v.setUint16(8, 0, true);
+    h.v.setUint16(10, 0, true); h.v.setUint16(12, 0x21, true); h.v.setUint32(14, crc, true);
+    h.v.setUint32(18, dados.length, true); h.v.setUint32(22, dados.length, true); h.v.setUint16(26, n.length, true); h.v.setUint16(28, 0, true);
+    const c = cab(46);
+    c.v.setUint32(0, 0x02014b50, true); c.v.setUint16(4, 20, true); c.v.setUint16(6, 20, true); c.v.setUint16(8, 0x0800, true);
+    c.v.setUint16(10, 0, true); c.v.setUint16(12, 0, true); c.v.setUint16(14, 0x21, true); c.v.setUint32(16, crc, true);
+    c.v.setUint32(20, dados.length, true); c.v.setUint32(24, dados.length, true); c.v.setUint16(28, n.length, true);
+    c.v.setUint32(42, pos, true);
+    partes.push(h.b, n, dados); centrais.push(c.b, n);
+    pos += 30 + n.length + dados.length;
+  });
+  const tamCentral = centrais.reduce((s, b) => s + b.length, 0);
+  const fim = cab(22);
+  fim.v.setUint32(0, 0x06054b50, true); fim.v.setUint16(8, arquivos.length, true); fim.v.setUint16(10, arquivos.length, true);
+  fim.v.setUint32(12, tamCentral, true); fim.v.setUint32(16, pos, true);
+  const tudo = partes.concat(centrais, [fim.b]);
+  const saida = new Uint8Array(tudo.reduce((s, b) => s + b.length, 0));
+  let o = 0; tudo.forEach((b) => { saida.set(b, o); o += b.length; });
+  return saida;
+}
+
+function pnBaixarBlob(nome, bytes, tipo) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nome; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
+  avisar('Arquivo gerado: ' + nome);
+}
+
+/*
+ * Logo da Bartofil para o relatorio: a MESMA imagem do Marca.html, lida da
+ * folha de estilo da pagina (getComputedStyle de um .logo-completa), sem
+ * copiar o base64 para ca. Sem a folha (nao deveria acontecer), '' — o
+ * relatorio cai no nome escrito no bloco azul.
+ */
+function pnLogoMarca(classe) {
+  const chave = classe || 'logo-completa';
+  pnLogoMarca.cache = pnLogoMarca.cache || {};
+  if (pnLogoMarca.cache[chave]) return pnLogoMarca.cache[chave];
+  try {
+    const d = document.createElement('div');
+    d.className = chave;
+    d.style.display = 'none';
+    document.body.appendChild(d);
+    const fundo = getComputedStyle(d).backgroundImage || '';
+    d.remove();
+    const url = fundo.replace(/^url\(|\)$/g, '').replace(/[\x22\x27]/g, '');
+    return url.indexOf('data:image') === 0 ? (pnLogoMarca.cache[chave] = url) : '';
+  } catch (e) { return ''; }
+}
+
+/*
+ * RELATORIO EM PDF: abre o relatorio numa janela propria, ja formatado
+ * para A4 deitado, e chama a impressao — no destino, "Salvar como PDF".
+ * Sai nas cores da Bartofil: logo, titulo em azul, tarja azul/verde/amarela,
+ * cabecalho de tabela azul com texto branco, linhas zebradas e, em toda
+ * pagina, o rodape "GSL Bartofil · filial · gerado em ...". As cores
+ * imprimem mesmo com "Graficos de plano de fundo" desligado
+ * (print-color-adjust: exact). Vermelho so como alerta (tr.alerta).
+ * O rodape repete por pagina com o espacador do tfoot da tabela que embrulha
+ * o relatorio (o Chrome repete o tfoot e desenha o fixed em cada folha).
+ * Etiqueta de situacao no corpo: <span class="tom verde">Normal</span>, com os
+ * tons do Excel (PN_TONS). cssExtra: o CSS proprio do relatorio (vem depois e
+ * pode sobrepor).
+ */
+function pnImprimirRelatorio(titulo, subtitulo, corpoHtml, cssExtra) {
+  const w = window.open('', '_blank');
+  if (!w) return avisar('O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo.', true);
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const gerado = new Date().toLocaleString('pt-BR');
+  const logo = pnLogoMarca();
+  const marca = logo ? `<img class="logo" src="${esc(logo)}" alt="Bartofil Distribuidora">`
+    : '<div class="logo logo-texto" role="img" aria-label="Bartofil Distribuidora">BARTOFIL<small>DISTRIBUIDORA</small></div>';
+  const tarja = (cls) => `<div class="rel-tarja${cls ? ' ' + cls : ''}" aria-hidden="true"><i class="az"></i><i class="vd"></i><i class="am"></i></div>`;
+  w.document.open();
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)} — ${esc(subtitulo)}</title>
+    <style>
+      @page { size: A4 landscape; margin: 10mm 12mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html { background: #fff; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #14152B; font-size: 11px; margin: 0; background: #fff; }
+      .rel-cab { display: flex; align-items: center; gap: 14px; padding-bottom: 8px; }
+      .rel-cab .logo { display: block; height: 15mm; width: auto; border-radius: 3px; flex-shrink: 0; }
+      .rel-cab .logo-texto { width: 44mm; background: #111785; color: #fff; font-weight: 800; font-size: 20px; letter-spacing: .06em;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .rel-cab .logo-texto small { font-size: 7.5px; letter-spacing: .3em; font-weight: 700; }
+      .rel-tit { flex: 1; min-width: 0; }
+      .rel-tit h1 { font-size: 20px; line-height: 1.15; margin: 0; color: #111785; }
+      .rel-tit .sub { font-size: 12px; color: #4A4F6A; margin-top: 3px; }
+      .rel-info { text-align: right; font-size: 10.5px; line-height: 1.5; color: #4A4F6A; white-space: nowrap; }
+      .rel-info b { color: #111785; font-size: 12px; }
+      .rel-tarja { display: flex; height: 5px; margin: 0 0 14px; }
+      .rel-tarja i { display: block; height: 100%; }
+      .rel-tarja .az { flex: 6; background: #111785; } .rel-tarja .vd { flex: 2; background: #01973A; } .rel-tarja .am { flex: 2; background: #FFEE03; }
+      h2 { font-size: 13px; margin: 16px 0 6px; color: #111785; border-left: 4px solid #01973A; padding-left: 7px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #D5D9E8; padding: 4px 5px; text-align: right; white-space: nowrap; }
+      th { background: #111785; color: #fff; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; text-align: center; border-bottom: 2px solid #01973A; }
+      tbody tr:nth-child(even) td { background: #F3F5FA; }
+      th.en { background: #E7EAFE; color: #111785; border-bottom: 2px solid #111785; } th.sa { background: #D9F5E6; color: #016B2A; border-bottom: 2px solid #01973A; }
+      td:first-child, td:nth-child(2) { text-align: left; } td.oc { text-align: left; white-space: normal; }
+      table.folha tr.novo td { border-top: 1.5px solid #8A8FB8; } tr.alerta td { color: #C62828; }
+      thead { display: table-header-group; } tr { page-break-inside: avoid; }
+      .nota { color: #4A4F6A; font-size: 10px; margin-top: 8px; }
+      .tom { display: inline-block; padding: 1px 8px; border-radius: 9px; font-weight: 700; font-size: 9.5px; letter-spacing: .02em; }
+      ${Object.keys(PN_TONS).map((t) => `.tom.${t} { background: #${PN_TONS[t][0]}; color: #${PN_TONS[t][1]}; }`).join(' ')}
+      table.rel-pagina, table.rel-pagina > tbody > tr > td, table.rel-pagina > tfoot > tr > td { border: 0; padding: 0; text-align: left; white-space: normal; background: none; }
+      table.rel-pagina > tbody > tr, table.rel-pagina > tfoot > tr { page-break-inside: auto; break-inside: auto; }
+      .rel-esp-rod { height: 9mm; }
+      .rel-rod { position: fixed; left: 0; right: 0; bottom: 0; height: 6mm; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        border-top: 1px solid #C9CEE3; font-size: 9px; color: #4A4F6A; background: #fff; }
+      .rel-rod b { color: #111785; }
+      .rel-rod .rel-tarja { width: 34mm; height: 3px; margin: 0; flex-shrink: 0; }
+      .barra { margin: 0 0 14px; }
+      .barra button { font: 700 13px Arial, Helvetica, sans-serif; padding: 8px 16px; background: #111785; color: #fff; border: 0; border-bottom: 3px solid #01973A; border-radius: 6px; cursor: pointer; }
+      @media screen {
+        body { max-width: 1180px; margin: 0 auto; padding: 16px 20px; }
+        .rel-rod { position: static; height: auto; margin-top: 18px; padding-top: 6px; } .rel-esp-rod { display: none; }
+      }
+      @media print { .barra { display: none; } }
+      ${cssExtra || ''}
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">Imprimir / Salvar como PDF</button></div>
+    <table class="rel-pagina"><tbody><tr><td>
+      <header class="rel-cab">${marca}
+        <div class="rel-tit"><h1>${esc(titulo)}</h1><div class="sub">${esc(subtitulo)}</div></div>
+        <div class="rel-info"><b>GSL Bartofil</b><br>${esc(filial)}<br>gerado em ${esc(gerado)}</div></header>
+      ${tarja('')}
+      ${corpoHtml}
+    </td></tr></tbody><tfoot><tr><td><div class="rel-esp-rod"></div></td></tr></tfoot></table>
+    <footer class="rel-rod"><span>${['<b>GSL Bartofil</b>', esc(filial), 'gerado em ' + esc(gerado)].filter(Boolean).join(' · ')}</span>${tarja('mini')}</footer>
+    </body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) {} }, 400);
+}
+
+/* Abas internas de um painel. */
+function pnAbas(lista, atual, funcao) {
+  return `<div class="abas">${lista.map(([id, nome]) => `<button class="aba ${atual === id ? 'ativa' : ''}" data-aba="${esc(id)}"
+    onclick="${funcao}(${jsArg(id)})">${nome}</button>`).join('')}</div>`;
+}
+
+/*
+ * Grafico de linhas com varias series. Cada serie: { nome, cor, pontos:[numero|null] }.
+ * Buraco (null) quebra a linha — leitura que nao foi lancada aparece como falha.
+ * `referencias`: linhas tracejadas (tensao nominal, limite de carga).
+ */
+function pnGraficoLinhas(rotulos, series, opcoes) {
+  const o = opcoes || {};
+  const todos = [];
+  series.forEach((s) => s.pontos.forEach((v) => { if (v !== null && v !== undefined) todos.push(v); }));
+  (o.referencias || []).forEach((r) => todos.push(r.valor));
+  if (!todos.length || !rotulos.length) return '<div class="vazio">Sem leituras neste período.</div>';
+  const L = 720, A = o.altura || 200, mL = 46, mB = 28, mT = 14, mR = 10;
+  let min = o.min !== undefined ? o.min : Math.min(...todos), max = o.max !== undefined ? o.max : Math.max(...todos);
+  if (min === max) { min -= 1; max += 1; }
+  const folga = (max - min) * 0.08; if (o.min === undefined) min -= folga; max += folga;
+  const px = (i) => mL + (rotulos.length === 1 ? (L - mL - mR) / 2 : i * (L - mL - mR) / (rotulos.length - 1));
+  const py = (v) => mT + (A - mT - mB) * (1 - (v - min) / (max - min));
+  const passo = Math.max(1, Math.ceil(rotulos.length / 10));
+  const grades = [0, .25, .5, .75, 1].map((f) => min + (max - min) * f);
+  const trechos = (pts) => {
+    const saida = []; let atual = [];
+    pts.forEach((v, i) => {
+      if (v === null || v === undefined) { if (atual.length) saida.push(atual); atual = []; }
+      else atual.push(px(i).toFixed(1) + ',' + py(v).toFixed(1));
+    });
+    if (atual.length) saida.push(atual);
+    return saida;
+  };
+  return `<svg viewBox="0 0 ${L} ${A}" style="width:100%;height:auto;display:block" role="img" aria-label="${esc(o.titulo || 'gráfico')}">
+    ${grades.map((g) => `<line x1="${mL}" x2="${L - mR}" y1="${py(g)}" y2="${py(g)}" stroke="var(--linha)" stroke-width="1"/>
+      <text x="${mL - 6}" y="${py(g) + 3}" text-anchor="end" font-size="10" fill="var(--tinta-fraca)">${pnNum(g, (max - min) < 10 ? 1 : 0)}</text>`).join('')}
+    ${(o.referencias || []).map((r) => `<line x1="${mL}" x2="${L - mR}" y1="${py(r.valor)}" y2="${py(r.valor)}"
+      stroke="${r.cor}" stroke-dasharray="5 4" stroke-width="1.4" opacity=".8"/>
+      <text x="${L - mR - 2}" y="${py(r.valor) - 4}" text-anchor="end" font-size="10" fill="${r.cor}">${esc(r.nome)}</text>`).join('')}
+    ${series.map((s) => trechos(s.pontos).map((t) => t.length === 1
+      ? `<circle cx="${t[0].split(',')[0]}" cy="${t[0].split(',')[1]}" r="3" fill="${s.cor}"/>`
+      : `<polyline points="${t.join(' ')}" fill="none" stroke="${s.cor}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`).join('')).join('')}
+    ${series.map((s) => s.pontos.map((v, i) => (v === null || v === undefined) ? '' :
+      `<circle cx="${px(i)}" cy="${py(v)}" r="6" fill="transparent"><title>${esc(rotulos[i])} · ${esc(s.nome)}: ${pnNum(v, 1)}</title></circle>`).join('')).join('')}
+    ${rotulos.map((r, i) => (i % passo === 0 || i === rotulos.length - 1)
+      ? `<text x="${px(i)}" y="${A - 8}" text-anchor="middle" font-size="9.5" fill="var(--tinta-fraca)">${esc(String(r).slice(0, 5))}</text>` : '').join('')}
+  </svg>`;
+}
+
+/* Barras horizontais a partir de [[rotulo, valor]] — usa a peca `barra` do App. */
+function pnBarras(pares, cor, formatar) {
+  if (!pares.length) return '<div class="vazio">Nada por aqui.</div>';
+  const max = Math.max(...pares.map((p) => p[1]), 1);
+  return pares.map((p) => barra(p[0], formatar ? formatar(p[1]) : String(p[1]), max, p[1], cor)).join('');
+}
+
+/* =====================================================================
+   FILIAIS E PAINEIS
+   ===================================================================== */
+const PN_ESTADOS = { ATIVO: 'Ativo', OCULTO: 'Oculto', DESATIVADO: 'Desativado' };
+/*
+ * A faixa da tela (Ver / Ver e editar) vem do App.html (podeEditar, avisoSoVer). App.html da entrega
+ * anterior colado pela metade: a tela abre como antes (os botoes seguem as flags que o servidor manda
+ * com os dados, e o servidor recusa a gravacao de quem so ve do mesmo jeito).
+ */
+const pnPodeEditar = (tela) => (typeof podeEditar === 'function' ? podeEditar(tela) : true);
+const pnSoVer = (nome) => (typeof avisoSoVer === 'function' ? avisoSoVer(nome) : '');
+
+function pintarFiliais(r) {
+  const d = r.dados;
+  el('subtitulo-pagina').textContent = d.filiais.length + ' filial(is) · cada uma com banco e painéis próprios';
+  // Com "Ver" em Filiais e paineis: so le (estado de cada painel, quem entra) — nada de criar, ligar ou desligar.
+  const ed = pnPodeEditar('filiais');
+  el('acoes-topo').innerHTML = ed ? `<button class="botao" onclick="formFilial()">Nova filial</button>` : '';
+  el('pagina').innerHTML = `${ed ? '' : pnSoVer('Filiais e painéis')}
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Como funciona</div>
+      <div class="pn-grade quatro">
+        <div><span class="pn-chip ok">Ativo</span><p class="dica">Aparece para todo mundo que tem o nível de acesso liberado para ele.</p></div>
+        <div><span class="pn-chip atencao">Oculto</span><p class="dica">Só o administrador vê, com a etiqueta oculto. Bom para montar e testar (e ligar a planilha) antes de mostrar para a equipe.</p></div>
+        <div><span class="pn-chip neutro">Desativado</span><p class="dica">Some do menu de todos, inclusive do administrador. Os dados continuam guardados — é só voltar para Ativo.</p></div>
+        <div><span class="pn-chip neutro">Não usar nesta filial</span><p class="dica">O painel não faz parte desta filial: some do menu de todos, como o Desativado. Os dados continuam guardados.</p></div>
+      </div>
+    </div>
+    <div class="pn-grade duas">
+      ${d.filiais.map((f) => cartaoFilial(f, d)).join('')}
+    </div>`;
+}
+
+function cartaoFilial(f, d) {
+  const ed = pnPodeEditar('filiais');
+  return `<div class="cartao cartao-filial-cfg" style="${f.ativa ? '' : 'opacity:.7'}">
+    <div class="linha-titulo filial-cab">
+      <div>
+        <div class="nb-codigo">${esc(f.nome)}</div>
+        <div class="pn-mini"><span class="mono">${esc(f.codigo)}</span>${f.cidade ? ' · ' + esc(f.cidade) : ''} ·
+          ${f.pessoas} pessoa(s) com acesso</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${f.principal ? '<span class="pn-chip ok">principal</span>' : ''}
+        ${f.ativa ? '' : '<span class="pn-chip neutro">desligada</span>'}
+      </div>
+    </div>
+    <table><thead><tr><th>Painel</th><th>Estado nesta filial</th></tr></thead><tbody>
+      ${d.catalogo.map((p) => {
+        const e = f.paineis[p.id] || '';
+        return `<tr><td><strong>${esc(p.nome)}</strong><div class="pn-mini">${esc(p.frase)}</div></td>
+          <td>${ed ? `<select onchange="agir('alterarPainel',{codigo:${jsArg(f.codigo)},painel:${jsArg(p.id)},estado:this.value},'Painel atualizado')">
+            <option value="REMOVER" ${e ? '' : 'selected'}>Não usar nesta filial</option>
+            ${Object.keys(PN_ESTADOS).map((k) => `<option value="${k}" ${e === k ? 'selected' : ''}>${PN_ESTADOS[k]}</option>`).join('')}
+          </select>` : `<span class="pn-chip ${e === 'ATIVO' ? 'ok' : e === 'OCULTO' ? 'atencao' : 'neutro'}">${esc(e ? (PN_ESTADOS[e] || e) : 'Não usar nesta filial')}</span>`}</td></tr>`;
+      }).join('')}
+    </tbody></table>
+    ${ed ? `<div class="cartao-rodape">
+      <button class="icone-botao" onclick="formPessoasFilial(${jsArg(f.codigo)})">Quem entra (${f.pessoas})</button>
+      <button class="icone-botao" onclick="formFilial(${jsArg(f.codigo)})">Editar nome</button>
+      ${f.banco ? `<button class="icone-botao" onclick="window.open(${jsArg(f.banco)},'_blank')">Abrir banco de dados</button>` : ''}
+      ${f.principal ? '' : `<button class="icone-botao" onclick="agir('alternarFilial',{codigo:${jsArg(f.codigo)}},'Filial atualizada')">${f.ativa ? 'Desligar filial' : 'Religar filial'}</button>`}
+    </div>` : ''}
+  </div>`;
+}
+
+/* Quem entra nesta filial — marca e desmarca de uma vez. */
+function formPessoasFilial(codigo) {
+  const d = DADOS;
+  const f = d.filiais.find((x) => x.codigo === codigo);
+  const pessoas = d.pessoas || [];
+  abrirJanela('Quem entra em ' + f.nome, `
+    <p class="dica" style="margin:0 0 10px">Marque quem pode escolher esta filial ao entrar no GSL. Quem tem nível ADMIN
+      ou está em “todas as filiais” entra sempre (para mudar isso, edite a pessoa em Pessoas e acessos).</p>
+    <div class="campo-busca" style="margin-bottom:10px"><input placeholder="Buscar pessoa" oninput="document.querySelectorAll('#pf-lista label').forEach((l)=>{l.style.display=l.textContent.toLowerCase().indexOf(this.value.toLowerCase())!==-1?'':'none'})"></div>
+    <div class="lista-marcadores" id="pf-lista" style="max-height:50vh;overflow:auto">
+      ${pessoas.map((p) => `<label class="marcador"><input type="checkbox" class="pf-pessoa" value="${esc(p.email)}"
+        ${p.todas || p.filiais.indexOf(codigo) !== -1 ? 'checked' : ''} ${p.todas ? 'disabled' : ''}>
+        ${esc(p.nome || p.email)} <span class="pn-mini">${esc(p.perfil)}${p.todas ? ' · todas as filiais' : ''}</span></label>`).join('')
+        || '<div class="vazio">Ninguém cadastrado.</div>'}
+    </div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarPessoasFilial',{codigo:${jsArg(codigo)},emails:[...document.querySelectorAll('.pf-pessoa')].filter((c)=>c.checked&&!c.disabled).map((c)=>c.value)},'Acessos da filial salvos').catch(()=>{})">Salvar</button>`);
+}
+
+/* Editar nome: os paineis vao junto SO para o Filiais.gs de antes de 19/10 (colado pela metade), que
+   regravava PAINEIS com o que viesse — sem eles, gravava {} e a filial perdia todos os paineis. O
+   Filiais.gs de agora ignora esse campo na edicao: os paineis mudam um a um, em alterarPainel. */
+function formFilial(codigo) {
+  const d = DADOS;
+  const f = codigo ? d.filiais.find((x) => x.codigo === codigo) : null;
+  if (f) {
+    return abrirJanela('Editar ' + f.nome, `
+      <div class="campo-duplo">
+        <div class="campo"><label>Nome</label><input id="fl-nome" value="${esc(f.nome)}"></div>
+        <div class="campo"><label>Cidade</label><input id="fl-cidade" value="${esc(f.cidade)}"></div>
+      </div>
+      <p class="dica">O código (${esc(f.codigo)}) não muda. Os painéis se ajustam direto no cartão da filial.</p>`, `
+      <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+      <button class="botao" onclick="agir('salvarFilial',{id:${jsArg(f.id)},nome:val('fl-nome'),cidade:val('fl-cidade'),paineis:${esc(JSON.stringify(f.paineis))}},'Filial salva').catch(()=>{})">Salvar</button>`);
+  }
+  abrirJanela('Nova filial', `
+    <p class="dica" style="margin:0 0 14px">O GSL cria uma planilha de banco só para esta filial, na mesma pasta
+      do sistema. Os dados de uma filial nunca aparecem na outra.</p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Código (2 a 6 letras)</label><input id="fl-codigo" maxlength="6" placeholder="SSA" style="text-transform:uppercase"></div>
+      <div class="campo"><label>Nome</label><input id="fl-nome" placeholder="CD Salvador"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Cidade</label><input id="fl-cidade" placeholder="Salvador - BA"></div>
+      <div class="campo"><label>Copiar a configuração de</label>
+        <select id="fl-copiar"><option value="">Não copiar — começar com o padrão</option>
+          ${d.filiais.map((x) => `<option value="${esc(x.codigo)}" ${x.principal ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}
+        </select></div>
+    </div>
+    <p class="dica" style="margin:-8px 0 14px">Copia rotinas do calendário, setores, parâmetros, tabela do RH (DE-PARA),
+      zonas e produtos da limpeza. <b>Não</b> copia atividades, leituras, ações nem pessoas.</p>
+    <div class="campo"><label>Painéis desta filial</label>
+      <div class="lista-marcadores">
+        ${d.catalogo.map((p) => `<div class="pn-linha" style="justify-content:space-between;align-items:center">
+          <label class="marcador"><input type="checkbox" class="fl-painel" value="${p.id}"> <b>${esc(p.nome)}</b></label>
+          <select id="fl-estado-${p.id}" style="width:auto"><option value="ATIVO">Ativo</option><option value="OCULTO">Oculto (só eu vejo)</option></select>
+        </div>`).join('')}
+      </div>
+    </div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="criarFilial()">Criar filial</button>`);
+}
+
+function criarFilial() {
+  const paineis = {};
+  document.querySelectorAll('.fl-painel').forEach((c) => { if (c.checked) paineis[c.value] = val('fl-estado-' + c.value); });
+  if (!Object.keys(paineis).length) return avisar('Marque pelo menos um painel.', true);
+  avisar('Criando o banco da filial — pode levar alguns segundos…');
+  // A lista de filiais da sessao (e o "Trocar filial") vem em dia com a resposta (aplicarMenu, no App).
+  agir('salvarFilial', { codigo: val('fl-codigo'), nome: val('fl-nome'), cidade: val('fl-cidade'),
+    copiarDe: val('fl-copiar'), paineis: paineis }, 'Filial criada').catch(() => {});
+}
+
+/* =====================================================================
+   NOBREAKS
+   ===================================================================== */
+let ABA_NB = 'painel';          // painel | lancar | historico | equipamentos
+let NB_GRAFICO = { nobreak: '', dias: 30 };
+let NB_SEMANA = { nobreak: '', inicio: '' };
+let NB_HIST = { nobreak: '', mes: undefined };   // mes '' = todos os meses
+
+function nbEquip(d, codigo) { return d.equipamentos.find((e) => e.codigo === codigo) || null; }
+
+/* Uma leitura, com as contas e os alertas. */
+function nbAvaliar(l, e, p) {
+  const r = { carga: null, poPi: null, motivos: [], vi: false, vo: false };
+  if (e && e.potencia && l.po !== null) r.carga = l.po / e.potencia * 100;
+  if (l.pi && l.po !== null) r.poPi = l.po / l.pi * 100;
+  const fora = (v, nominal) => nominal && v !== null && Math.abs(v - nominal) / nominal * 100 > p.tolerancia;
+  if (e && fora(l.vi, e.tensaoEntrada)) { r.vi = true; r.motivos.push('Tensão de entrada ' + pnNum(l.vi, 1) + ' V (nominal ' + e.tensaoEntrada + ' V ± ' + p.tolerancia + '%)'); }
+  if (e && fora(l.vo, e.tensaoSaida)) { r.vo = true; r.motivos.push('Tensão de saída ' + pnNum(l.vo, 1) + ' V (nominal ' + e.tensaoSaida + ' V ± ' + p.tolerancia + '%)'); }
+  if (r.carga !== null && r.carga >= p.cargaAlerta) r.motivos.push('Carga de ' + pnNum(r.carga) + '% (limite ' + p.cargaAlerta + '%)');
+  return r;
+}
+
+function pintarNobreaks(r) {
+  const d = r.dados;
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  el('subtitulo-pagina').textContent = ativos.length + ' nobreak(s) monitorado(s) · ' + d.totalLeituras + ' leitura(s) lançada(s)';
+  el('acoes-topo').innerHTML = d.permissoes.lancar
+    ? `<button class="botao" onclick="trocarAbaNB('lancar')">Lançar leituras da semana</button>` : '';
+  const abas = [['painel', 'Painel'], ['lancar', 'Lançar semana'], ['historico', 'Histórico'], ['equipamentos', 'Equipamentos']]
+    .filter((a) => a[0] !== 'lancar' || d.permissoes.lancar);
+  if (!abas.some((a) => a[0] === ABA_NB)) ABA_NB = 'painel';
+  el('pagina').innerHTML = (pnPodeEditar('nobreaks') ? '' : pnSoVer('Nobreaks')) + pnAbas(abas, ABA_NB, 'trocarAbaNB') + '<div id="conteudo-nb"></div>';
+  pintarAbaNB(d);
+}
+
+function trocarAbaNB(aba) {
+  ABA_NB = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
+  pintarAbaNB(DADOS);
+}
+
+function pintarAbaNB(d) {
+  const alvo = el('conteudo-nb'); if (!alvo) return;
+  try {
+    if (!d.equipamentos.length && ABA_NB !== 'equipamentos') {
+      alvo.innerHTML = `<div class="cartao pn-vazio-grande"><strong>Nenhum nobreak cadastrado nesta filial.</strong>
+        Cadastre os equipamentos (código, local e potência nominal) na aba <b>Equipamentos</b> — é a potência que
+        permite calcular a carga de saída.<br><br>
+        ${d.permissoes.cadastrar ? '<button class="botao" onclick="trocarAbaNB(\'equipamentos\')">Cadastrar nobreak</button>' : ''}</div>`;
+      return;
+    }
+    if (ABA_NB === 'lancar') return nbLancar(d, alvo);
+    if (ABA_NB === 'historico') { alvo.innerHTML = nbHistorico(d); return; }
+    if (ABA_NB === 'equipamentos') { alvo.innerHTML = nbEquipamentos(d); return; }
+    alvo.innerHTML = nbPainel(d);
+  } catch (e) {
+    alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+  }
+}
+
+/* ---------- PAINEL ---------- */
+function nbPainel(d) {
+  const p = d.parametros;
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  const hoje = d.hoje, segunda = pnSegunda(hoje);
+  const doDia = d.leituras.filter((l) => l.data === hoje);
+  const daSemana = d.leituras.filter((l) => l.data >= segunda && l.data <= hoje);
+  const diasSemana = Math.round((pnParaData(hoje) - pnParaData(segunda)) / 86400000) + 1;
+  const ultimos7 = d.leituras.filter((l) => l.data > pnSomarDias(hoje, -7));
+
+  const estados = ativos.map((e) => {
+    const minhas = d.leituras.filter((l) => l.nobreak === e.codigo);
+    const ultima = minhas[minhas.length - 1] || null;
+    const av = ultima ? nbAvaliar(ultima, e, p) : null;
+    const hojeN = minhas.filter((l) => l.data === hoje).length;
+    let chip;
+    if (!ultima) chip = ['neutro', 'Sem leituras'];
+    else if (av.motivos.length) chip = ['alerta', 'Alerta'];
+    else if (ultima.data < pnSomarDias(hoje, -1)) chip = ['atencao', 'Leitura atrasada'];
+    else chip = ['ok', 'Normal'];
+    return { e: e, ultima: ultima, av: av, hojeN: hojeN, chip: chip };
+  });
+
+  const cargas = ultimos7.map((l) => nbAvaliar(l, nbEquip(d, l.nobreak), p).carga).filter((v) => v !== null);
+  const cargaMedia = cargas.length ? cargas.reduce((s, v) => s + v, 0) / cargas.length : null;
+  const emAlerta = estados.filter((s) => s.chip[0] === 'alerta').length;
+  const esperadasHoje = ativos.length * p.porDia;
+
+  if (!NB_GRAFICO.nobreak || !nbEquip(d, NB_GRAFICO.nobreak)) NB_GRAFICO.nobreak = (ativos[0] || d.equipamentos[0]).codigo;
+
+  return `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(doDia.length + ' / ' + esperadasHoje, 'Leituras hoje', doDia.length >= esperadasHoje ? 'verde' : 'amarelo', p.porDia + ' por nobreak')}
+      ${pnKpi(daSemana.length + ' / ' + (esperadasHoje * diasSemana), 'Leituras na semana', daSemana.length >= esperadasHoje * diasSemana ? 'verde' : 'azul', 'desde segunda')}
+      ${pnKpi(emAlerta, 'Em alerta agora', emAlerta ? 'vermelho' : 'verde', 'tensão fora ou carga alta')}
+      ${pnKpi(cargaMedia === null ? '—' : pnPct(cargaMedia), 'Carga média — 7 dias', cargaMedia !== null && cargaMedia >= p.cargaAlerta ? 'vermelho' : 'azul', 'limite ' + p.cargaAlerta + '%')}
+    </div>
+
+    <div class="pn-grade tres" style="margin-bottom:16px">
+      ${estados.map((s) => nbCartao(s, d)).join('')}
+    </div>
+
+    <div class="cartao" style="margin-bottom:16px">
+      <div class="cartao-titulo linha-titulo">
+        <span>Tendência</span>
+        <span class="pn-linha">
+          <select onchange="NB_GRAFICO.nobreak=this.value;pintarAbaNB(DADOS)" style="width:auto">
+            ${d.equipamentos.map((e) => `<option value="${esc(e.codigo)}" ${e.codigo === NB_GRAFICO.nobreak ? 'selected' : ''}>${esc(e.codigo)}${e.local ? ' — ' + esc(e.local) : ''}</option>`).join('')}
+          </select>
+          <select onchange="NB_GRAFICO.dias=Number(this.value);pintarAbaNB(DADOS)" style="width:auto">
+            ${[7, 30, 90].map((n) => `<option value="${n}" ${NB_GRAFICO.dias === n ? 'selected' : ''}>últimos ${n} dias</option>`).join('')}
+          </select>
+        </span>
+      </div>
+      ${nbGraficos(d)}
+    </div>
+
+    <div class="cartao">
+      <div class="cartao-titulo">Médias do período <span class="pn-mini">(últimos ${d.leituras.length ? 'dias carregados' : '—'})</span></div>
+      ${nbMedias(d)}
+    </div>`;
+}
+
+function nbCartao(s, d) {
+  const e = s.e, u = s.ultima, p = d.parametros;
+  const carga = s.av ? s.av.carga : null;
+  const larg = carga === null ? 0 : Math.min(100, carga);
+  const med = (rot, v, casas, classe, foraFlag) => `<div class="${classe}"><span>${rot}</span><b class="${foraFlag ? 'fora' : ''}">${u ? pnNum(v, casas) : '—'}</b></div>`;
+  return `<div class="cartao nb-cartao">
+    <div class="nb-topo">
+      <div><div class="nb-codigo">${esc(e.codigo)}</div>
+        <div class="pn-mini">${esc(e.local || 'local não informado')}${e.modelo ? ' · ' + esc(e.modelo) : ''}${e.potencia ? ' · ' + pnNum(e.potencia) + ' VA' : ''}</div></div>
+      <span class="pn-chip ${s.chip[0]}">${s.chip[1]}</span>
+    </div>
+    <div class="nb-carga"><b>${carga === null ? '—' : pnPct(carga)}</b><span class="pn-mini">carga de saída${e.potencia ? '' : ' · cadastre a potência'}</span></div>
+    <div class="nb-trilho"><span class="${carga !== null && carga >= p.cargaAlerta ? 'alto' : ''}" style="width:${larg}%"></span>
+      <i style="left:${Math.min(100, p.cargaAlerta)}%" title="limite ${p.cargaAlerta}%"></i></div>
+    <div class="nb-medidas">
+      ${med('Vi (V)', u && u.vi, 1, 'entrada', s.av && s.av.vi)}${med('Ii (A)', u && u.ii, 2, 'entrada')}${med('Pi (VA)', u && u.pi, 0, 'entrada')}
+      ${med('Vo (V)', u && u.vo, 1, 'saida', s.av && s.av.vo)}${med('Io (A)', u && u.io, 2, 'saida')}${med('Po (VA)', u && u.po, 0, 'saida')}
+    </div>
+    <div class="pn-mini" style="margin-top:10px">${u ? 'Última leitura: ' + pnDataLonga(u.data) + ' às ' + esc(u.hora || '—') + ' (' + u.leitura + 'ª)' : 'Nenhuma leitura lançada ainda.'}
+      · hoje ${s.hojeN}/${p.porDia}</div>
+    ${s.av && s.av.motivos.length ? `<ul class="nb-motivos">${s.av.motivos.map((m) => '<li>' + esc(m) + '</li>').join('')}</ul>` : ''}
+  </div>`;
+}
+
+function nbGraficos(d) {
+  const e = nbEquip(d, NB_GRAFICO.nobreak);
+  const desde = pnSomarDias(d.hoje, -NB_GRAFICO.dias);
+  const ls = d.leituras.filter((l) => l.nobreak === NB_GRAFICO.nobreak && l.data > desde);
+  if (!ls.length) return '<div class="vazio">Sem leituras deste nobreak no período.</div>';
+  const rot = ls.map((l) => pnData(l.data) + ' ' + (l.hora || l.leitura + 'ª'));
+  const p = d.parametros;
+  const refs = [];
+  if (e && e.tensaoEntrada) refs.push({ valor: e.tensaoEntrada, nome: 'nominal entrada ' + e.tensaoEntrada + ' V', cor: '#3B82F6' });
+  if (e && e.tensaoSaida && e.tensaoSaida !== e.tensaoEntrada) refs.push({ valor: e.tensaoSaida, nome: 'nominal saída ' + e.tensaoSaida + ' V', cor: 'var(--verde)' });
+  const cargas = ls.map((l) => nbAvaliar(l, e, p).carga);
+  return `
+    <div class="pn-legenda"><span><i style="background:#3B82F6"></i>Vi — entrada</span><span><i style="background:var(--verde)"></i>Vo — saída</span>
+      <span style="color:var(--tinta-fraca)"><i class="tracejada"></i>tensão nominal</span></div>
+    ${pnGraficoLinhas(rot, [{ nome: 'Vi (V)', cor: '#3B82F6', pontos: ls.map((l) => l.vi) },
+                             { nome: 'Vo (V)', cor: 'var(--verde)', pontos: ls.map((l) => l.vo) }], { referencias: refs, titulo: 'Tensões' })}
+    <div class="pn-legenda" style="margin-top:14px"><span><i style="background:var(--neon-ambar)"></i>Carga de saída (%)</span>
+      <span style="color:var(--alerta)"><i class="tracejada"></i>limite ${p.cargaAlerta}%</span></div>
+    ${e && e.potencia
+      ? pnGraficoLinhas(rot, [{ nome: 'Carga (%)', cor: 'var(--neon-ambar)', pontos: cargas }],
+          { min: 0, referencias: [{ valor: p.cargaAlerta, nome: 'limite', cor: 'var(--alerta)' }], altura: 170, titulo: 'Carga' })
+      : '<div class="vazio">Cadastre a potência nominal deste nobreak para ver a carga.</div>'}`;
+}
+
+function nbMedias(d) {
+  const p = d.parametros;
+  const media = (arr) => { const v = arr.filter((x) => x !== null && x !== undefined); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+  const linhas = d.equipamentos.map((e) => {
+    const ls = d.leituras.filter((l) => l.nobreak === e.codigo);
+    const cargas = ls.map((l) => nbAvaliar(l, e, p).carga).filter((v) => v !== null);
+    const poMax = ls.map((l) => l.po).filter((v) => v !== null);
+    return { e: e, n: ls.length, vi: media(ls.map((l) => l.vi)), ii: media(ls.map((l) => l.ii)), pi: media(ls.map((l) => l.pi)),
+      vo: media(ls.map((l) => l.vo)), io: media(ls.map((l) => l.io)), po: media(ls.map((l) => l.po)),
+      carga: media(cargas), poMax: poMax.length ? Math.max(...poMax) : null, cargaMax: cargas.length ? Math.max(...cargas) : null };
+  });
+  return `<div class="pn-tabela-rolagem"><table><thead><tr><th>Nobreak</th><th class="numero">Leituras</th>
+    <th class="numero">Vi (V)</th><th class="numero">Ii (A)</th><th class="numero">Pi (VA)</th>
+    <th class="numero">Vo (V)</th><th class="numero">Io (A)</th><th class="numero">Po (VA)</th>
+    <th class="numero">Carga méd.</th><th class="numero">Po máx.</th><th class="numero">Carga máx.</th></tr></thead>
+    <tbody>${linhas.map((x) => `<tr><td><strong>${esc(x.e.codigo)}</strong></td><td class="numero">${x.n}</td>
+      <td class="numero">${pnNum(x.vi, 1)}</td><td class="numero">${pnNum(x.ii, 2)}</td><td class="numero">${pnNum(x.pi)}</td>
+      <td class="numero">${pnNum(x.vo, 1)}</td><td class="numero">${pnNum(x.io, 2)}</td><td class="numero">${pnNum(x.po)}</td>
+      <td class="numero">${pnPct(x.carga)}</td><td class="numero">${pnNum(x.poMax)}</td>
+      <td class="numero" style="${x.cargaMax !== null && x.cargaMax >= p.cargaAlerta ? 'color:var(--alerta);font-weight:700' : ''}">${pnPct(x.cargaMax)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="dica">Carga = Po medido ÷ potência nominal cadastrada. Po / Pi mostra quanto o nobreak entrega do que puxa da rede.
+      As médias usam as leituras dos últimos ${120} dias.</p>`;
+}
+
+/* ---------- LANCAR SEMANA (a folha de papel na tela) ---------- */
+const NB_COLS = ['vi', 'ii', 'pi', 'vo', 'io', 'po'];
+
+async function nbLancar(d, alvo) {
+  const ativos = d.equipamentos.filter((e) => e.ativo);
+  if (!NB_SEMANA.nobreak || !nbEquip(d, NB_SEMANA.nobreak)) NB_SEMANA.nobreak = (ativos[0] || d.equipamentos[0]).codigo;
+  if (!NB_SEMANA.inicio) NB_SEMANA.inicio = pnSegunda(d.hoje);
+  const inicio = NB_SEMANA.inicio, fim = pnSomarDias(inicio, 6);
+  const desdeCarregado = pnSomarDias(d.hoje, -120);
+
+  alvo.innerHTML = `<div class="cartao"><div class="vazio">Montando a folha…</div></div>`;
+  let leituras;
+  if (inicio > desdeCarregado) {
+    leituras = d.leituras.filter((l) => l.nobreak === NB_SEMANA.nobreak && l.data >= inicio && l.data <= fim);
+  } else {
+    try { leituras = (await executarAcaoSrv('semanaNobreak', { nobreak: NB_SEMANA.nobreak, inicio: inicio })).leituras; }
+    catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; return; }
+  }
+  const mapa = {};
+  leituras.forEach((l) => { mapa[l.data + '|' + l.leitura] = l; });
+  const e = nbEquip(d, NB_SEMANA.nobreak);
+  const porDia = d.parametros.porDia || 3;
+
+  let linhas = '';
+  for (let i = 0; i < 7; i++) {
+    const dia = pnSomarDias(inicio, i);
+    const dt = pnParaData(dia);
+    for (let n = 1; n <= porDia; n++) {
+      const l = mapa[dia + '|' + n] || {};
+      const cel = (k) => `<td><input inputmode="decimal" data-k="${k}" value="${l[k] === null || l[k] === undefined ? '' : Number(l[k]).toLocaleString('pt-BR', { maximumFractionDigits: 3, useGrouping: false })}"
+        oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>`;
+      linhas += `<tr class="${n === 1 ? 'novo-dia' : ''} ${dia === d.hoje ? 'hoje' : ''}" data-data="${dia}" data-leitura="${n}" data-existe="${l.id ? '1' : ''}">
+        ${n === 1 ? `<td class="nb-dia" rowspan="${porDia}">${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(dia)}</small></td>` : ''}
+        <td>${n}ª</td>
+        <td><input class="hora" data-k="hora" inputmode="numeric" maxlength="5" placeholder="0000" value="${esc(l.hora || '')}"
+          oninput="nbMascaraHora(this);nbAoDigitar(this)" onblur="nbFecharHora(this)" onkeydown="nbTeclado(event,this)"></td>
+        ${cel('vi')}${cel('ii')}${cel('pi')}${cel('vo')}${cel('io')}${cel('po')}
+        <td class="carga" data-carga></td>
+        <td><input class="oc" data-k="ocorrencia" value="${esc(l.ocorrencia || '')}" placeholder="ocorrência (opcional)" oninput="nbAoDigitar(this)" onkeydown="nbTeclado(event,this)"></td>
+      </tr>`;
+    }
+  }
+
+  alvo.innerHTML = `
+    <div class="cartao" style="margin-bottom:14px">
+      <div class="pn-linha">
+        <div class="campo"><label>Nobreak</label>
+          <select id="nb-sel" onchange="NB_SEMANA.nobreak=this.value;pintarAbaNB(DADOS)">
+            ${d.equipamentos.map((x) => `<option value="${esc(x.codigo)}" ${x.codigo === NB_SEMANA.nobreak ? 'selected' : ''}>${esc(x.codigo)}${x.local ? ' — ' + esc(x.local) : ''}${x.ativo ? '' : ' (desativado)'}</option>`).join('')}
+          </select></div>
+        <div class="campo"><label>Semana</label>
+          <div class="pn-linha" style="gap:6px">
+            <button class="icone-botao" onclick="NB_SEMANA.inicio=pnSomarDias(NB_SEMANA.inicio,-7);pintarAbaNB(DADOS)" title="Semana anterior">◀</button>
+            <input type="date" value="${inicio}" onchange="if(this.value){NB_SEMANA.inicio=pnSegunda(this.value);pintarAbaNB(DADOS)}" style="width:auto">
+            <button class="icone-botao" onclick="NB_SEMANA.inicio=pnSomarDias(NB_SEMANA.inicio,7);pintarAbaNB(DADOS)" title="Próxima semana">▶</button>
+          </div></div>
+        <div class="pn-mini" style="padding-bottom:10px">${pnDataLonga(inicio)} a ${pnDataLonga(fim)} ·
+          ${leituras.length} leitura(s) já lançada(s)${e && e.potencia ? ' · potência ' + pnNum(e.potencia) + ' VA' : ''}</div>
+      </div>
+      <p class="dica">Hora só com números: <b>0830</b> vira 08:30, <b>14</b> vira 14:00 (não precisa dos dois pontos).
+        Mesma ordem da folha: hora, <b style="color:#2563EB">ENTRADA</b> (Vi, Ii, Pi) e depois
+        <b style="color:var(--verde)">SAÍDA</b> (Vo, Io, Po). Pode usar vírgula. <b>Enter</b> pula para o próximo campo.
+        Apagar todos os números de uma linha apaga aquela leitura.</p>
+    </div>
+    <div class="cartao">
+      <div class="pn-tabela-rolagem" style="max-height:62vh;overflow:auto">
+        <table class="nb-folha" id="nb-folha">
+          <thead><tr><th>Dia</th><th>Leitura</th><th>Hora</th>
+            <th class="entrada">Vi (V)</th><th class="entrada">Ii (A)</th><th class="entrada">Pi (VA)</th>
+            <th class="saida">Vo (V)</th><th class="saida">Io (A)</th><th class="saida">Po (VA)</th>
+            <th>Carga</th><th>Ocorrências</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
+        <span class="pn-mini" id="nb-pendentes" style="align-self:center"></span>
+        <button class="botao secundario" onclick="pintarAbaNB(DADOS)">Descartar alterações</button>
+        <button class="botao" onclick="nbGravarSemana()">Gravar semana</button>
+      </div>
+    </div>`;
+  document.querySelectorAll('#nb-folha tbody tr').forEach(nbRecalcularLinha);
+}
+
+/*
+ * HORA SO COM NUMEROS. Os dois pontos entram sozinhos enquanto a pessoa
+ * digita (830 -> 8:30, 1415 -> 14:15) e, ao sair do campo, a hora fica
+ * completa (8 -> 08:00). "8h" tambem vale: a letra e ignorada.
+ */
+function nbMascaraHora(inp) {
+  const d = String(inp.value || '').replace(/\D/g, '').slice(0, 4);
+  const v = d.length === 3 ? d.slice(0, 1) + ':' + d.slice(1) : (d.length === 4 ? d.slice(0, 2) + ':' + d.slice(2) : d);
+  if (v !== inp.value) inp.value = v;
+}
+function nbHoraValida(bruto) {
+  const d = String(bruto || '').replace(/\D/g, '');
+  if (!d) return '';
+  let h, m;
+  if (d.length <= 2) { h = Number(d); m = 0; }
+  else if (d.length === 3) { h = Number(d.slice(0, 1)); m = Number(d.slice(1)); }
+  else { h = Number(d.slice(0, 2)); m = Number(d.slice(2, 4)); }
+  if (h > 23 || m > 59) return null;
+  return ('0' + h).slice(-2) + ':' + ('0' + m).slice(-2);
+}
+function nbFecharHora(inp) {
+  const h = nbHoraValida(inp.value);
+  inp.classList.toggle('invalida', h === null);
+  if (h !== null && h !== inp.value) inp.value = h;
+}
+
+function nbAoDigitar(inp) {
+  inp.classList.add('alterado');
+  nbRecalcularLinha(inp.closest('tr'));
+  const n = document.querySelectorAll('#nb-folha input.alterado').length;
+  el('nb-pendentes').textContent = n ? n + ' campo(s) alterado(s) — não esqueça de gravar' : '';
+}
+
+function nbRecalcularLinha(tr) {
+  const e = nbEquip(DADOS, NB_SEMANA.nobreak);
+  const po = pnLerNumero((tr.querySelector('[data-k="po"]') || {}).value, true);
+  const td = tr.querySelector('[data-carga]');
+  if (!td) return;
+  if (e && e.potencia && po !== null) {
+    const c = po / e.potencia * 100;
+    td.textContent = pnPct(c);
+    td.classList.toggle('alta', c >= DADOS.parametros.cargaAlerta);
+  } else { td.textContent = ''; td.classList.remove('alta'); }
+}
+
+/* Enter anda para o proximo campo, como numa planilha. */
+function nbTeclado(ev, inp) {
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const todos = [...document.querySelectorAll('#nb-folha input')];
+  const i = todos.indexOf(inp);
+  if (todos[i + 1]) { todos[i + 1].focus(); todos[i + 1].select && todos[i + 1].select(); }
+}
+
+function nbGravarSemana() {
+  const linhas = [];
+  let invalido = '';
+  document.querySelectorAll('#nb-folha tbody tr').forEach((tr) => {
+    const alterada = tr.querySelector('input.alterado');
+    if (!alterada && !tr.dataset.existe) return;          // nada a fazer nesta linha
+    if (!alterada) return;                                 // existe e nao mudou
+    const l = { data: tr.dataset.data, leitura: Number(tr.dataset.leitura) };
+    tr.querySelectorAll('input').forEach((inp) => {
+      const k = inp.dataset.k;
+      if (k === 'hora') {
+        const h = nbHoraValida(inp.value);
+        if (h === null) invalido = invalido || (pnDataLonga(l.data) + ' ' + l.leitura + 'ª: hora "' + inp.value + '" não existe');
+        l.hora = h || '';
+      } else if (k === 'ocorrencia') l[k] = inp.value.trim();
+      else {
+        const bruto = inp.value.trim();
+        const n = pnLerNumero(bruto, k === 'pi' || k === 'po');
+        if (bruto && n === null) invalido = invalido || (pnDataLonga(l.data) + ' ' + l.leitura + 'ª: "' + bruto + '" não é número');
+        l[k] = n;
+      }
+    });
+    linhas.push(l);
+  });
+  if (invalido) return avisar(invalido, true);
+  if (!linhas.length) return avisar('Nenhuma alteração para gravar.');
+  agir('lancarLeituras', { nobreak: NB_SEMANA.nobreak, leituras: linhas }, 'Leituras gravadas').catch(() => {});
+}
+
+/* ---------- HISTORICO (mesma cara da folha de lancamento) ---------- */
+function nbListaHistorico(d) {
+  return d.leituras.filter((l) => (!NB_HIST.nobreak || l.nobreak === NB_HIST.nobreak) && (!NB_HIST.mes || l.data.slice(0, 7) === NB_HIST.mes))
+    .slice().sort((a, b) => a.data.localeCompare(b.data) || a.nobreak.localeCompare(b.nobreak) || (a.leitura - b.leitura));
+}
+
+function nbHistorico(d) {
+  const meses = [...new Set(d.leituras.map((l) => l.data.slice(0, 7)))].sort().reverse();
+  if (NB_HIST.mes === undefined || (NB_HIST.mes && meses.indexOf(NB_HIST.mes) === -1)) NB_HIST.mes = meses[0] || '';
+  const p = d.parametros;
+  const lista = nbListaHistorico(d);
+  const grupos = {};
+  lista.forEach((l) => { const k = l.data + '|' + l.nobreak; grupos[k] = (grupos[k] || 0) + 1; });
+  let anterior = '';
+  const linhas = lista.map((l) => {
+    const k = l.data + '|' + l.nobreak;
+    const primeira = k !== anterior; anterior = k;
+    const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
+    const n = (v, casas, alerta) => `<td class="numero${alerta ? ' nb-fora' : ''}">${pnNum(v, casas)}</td>`;
+    const dt = pnParaData(l.data);
+    return `<tr class="${primeira ? 'novo-dia' : ''} ${l.data === d.hoje ? 'hoje' : ''}">
+      ${primeira ? `<td class="nb-dia" rowspan="${grupos[k]}">${NB_HIST.nobreak ? '' : `<span class="nb-cod">${esc(l.nobreak)}</span>`}${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(l.data)}</small></td>` : ''}
+      <td>${l.leitura}ª</td><td>${esc(l.hora || '—')}</td>
+      ${n(l.vi, 1, av.vi)}${n(l.ii, 2)}${n(l.pi)}${n(l.vo, 1, av.vo)}${n(l.io, 2)}${n(l.po)}
+      <td class="carga ${av.carga !== null && av.carga >= p.cargaAlerta ? 'alta' : ''}">${pnPct(av.carga)}</td>
+      <td class="numero">${pnPct(av.poPi)}</td>
+      <td class="nb-oc">${esc(l.ocorrencia || '')}</td>
+      ${primeira ? `<td rowspan="${grupos[k]}">${d.permissoes.lancar ? `<button class="icone-botao" onclick="nbAbrirSemanaDe(${jsArg(l.nobreak)},${jsArg(l.data)})">Corrigir</button>` : ''}</td>` : ''}
+    </tr>`;
+  }).join('');
+  return `<div class="cartao" style="margin-bottom:14px">
+    <div class="pn-linha">
+      <div class="campo"><label>Nobreak</label><select onchange="NB_HIST.nobreak=this.value;pintarAbaNB(DADOS)">
+        <option value="">Todos</option>${d.equipamentos.map((e) => `<option ${NB_HIST.nobreak === e.codigo ? 'selected' : ''}>${esc(e.codigo)}</option>`).join('')}</select></div>
+      <div class="campo"><label>Mês</label><select onchange="NB_HIST.mes=this.value;pintarAbaNB(DADOS)">
+        ${meses.map((m) => `<option value="${m}" ${NB_HIST.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('')}
+        <option value="" ${NB_HIST.mes === '' ? 'selected' : ''}>Todos (últimos 120 dias)</option></select></div>
+      <div class="pn-mini" style="padding-bottom:10px">${lista.length} leitura(s)</div>
+      <div style="margin-left:auto;display:flex;gap:8px;padding-bottom:6px">
+        <button class="botao secundario" onclick="nbExportarExcel()" ${lista.length ? '' : 'disabled'}>Exportar Excel</button>
+        <button class="botao secundario" onclick="nbExportarPdf()" ${lista.length ? '' : 'disabled'}>Exportar PDF</button>
+      </div>
+    </div>
+  </div>
+  <div class="cartao">
+    <div class="pn-tabela-rolagem" style="max-height:62vh;overflow:auto">
+      <table class="nb-folha nb-historico">
+        <thead><tr><th>Dia</th><th>Leitura</th><th>Hora</th>
+          <th class="entrada">Vi (V)</th><th class="entrada">Ii (A)</th><th class="entrada">Pi (VA)</th>
+          <th class="saida">Vo (V)</th><th class="saida">Io (A)</th><th class="saida">Po (VA)</th>
+          <th>Carga</th><th>Po/Pi</th><th>Ocorrências</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="13" class="vazio">Nenhuma leitura com esses filtros.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p class="dica">Em vermelho: tensão fora da faixa ou carga acima de ${pnNum(p.cargaAlerta)}%. O histórico mostra os últimos 120 dias;
+      leituras mais antigas aparecem na aba <b>Lançar semana</b> ao navegar até a semana delas.</p>
+  </div>`;
+}
+
+/* ---------- EXPORTAR (Excel e PDF) ---------- */
+function nbDadosRelatorio() {
+  const d = DADOS, p = d.parametros;
+  const lista = nbListaHistorico(d);
+  const periodo = NB_HIST.mes ? pnRotuloMes(NB_HIST.mes) : 'Últimos 120 dias';
+  const linhas = lista.map((l) => {
+    const av = nbAvaliar(l, nbEquip(d, l.nobreak), p);
+    return { l, av, alerta: !!(av.vi || av.vo || (av.carga !== null && av.carga >= p.cargaAlerta)) };
+  });
+  const resumo = {};
+  linhas.forEach(({ l, av, alerta }) => {
+    const r = resumo[l.nobreak] || (resumo[l.nobreak] = { n: 0, somaCarga: 0, nCarga: 0, cargaMax: null, alertas: 0 });
+    r.n++; if (alerta) r.alertas++;
+    if (av.carga !== null) { r.somaCarga += av.carga; r.nCarga++; r.cargaMax = r.cargaMax === null ? av.carga : Math.max(r.cargaMax, av.carga); }
+  });
+  return { d, p, periodo, linhas, resumo, filtro: NB_HIST.nobreak || 'Todos os nobreaks' };
+}
+
+/*
+ * As leituras filtradas montadas como a FOLHA DE LANCAMENTO: por nobreak e
+ * por semana (segunda a domingo), todos os dias e todas as leituras do dia
+ * — as que nao foram lancadas aparecem em branco, como no papel.
+ */
+function nbFolhasDoRelatorio() {
+  const d = DADOS, p = d.parametros, porDia = p.porDia || 3;
+  const lista = nbListaHistorico(d);
+  const mapa = {}, semanas = {};
+  lista.forEach((l) => {
+    mapa[l.nobreak + '|' + l.data + '|' + l.leitura] = l;
+    const k = l.nobreak + '|' + pnSegunda(l.data);
+    semanas[k] = true;
+  });
+  return Object.keys(semanas).sort().map((k) => {
+    const [codigo, inicio] = k.split('|');
+    const e = nbEquip(d, codigo) || { codigo };
+    const dias = [];
+    for (let i = 0; i < 7; i++) {
+      const dia = pnSomarDias(inicio, i);
+      const leituras = [];
+      for (let n = 1; n <= porDia; n++) {
+        const l = mapa[codigo + '|' + dia + '|' + n] || null;
+        leituras.push({ n, l, av: l ? nbAvaliar(l, e, p) : null });
+      }
+      dias.push({ dia, leituras });
+    }
+    return { e, codigo, inicio, fim: pnSomarDias(inicio, 6), dias };
+  });
+}
+
+function nbExportarExcel() {
+  const r = nbDadosRelatorio();
+  const folhas = nbFolhasDoRelatorio();
+  if (!folhas.length) return avisar('Nenhuma leitura no período escolhido.', true);
+  const num = (v, casas) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '' : Number(Number(v).toFixed(casas));
+  // o que a folha em PDF pinta de vermelho (tensao fora da faixa, carga alta) sai no tom de alerta
+  const alerta = (v, sim) => sim && v !== '' ? { v, tom: 'vermelho' } : v;
+  const cargaAlta = (c) => c !== null && c !== undefined && c >= r.p.cargaAlerta;
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const abas = folhas.map((fl) => {
+    const e = fl.e;
+    const linhas = [
+      ['Folha de leituras — ' + fl.codigo + ' — semana ' + pnDataLonga(fl.inicio) + ' a ' + pnDataLonga(fl.fim)],
+      ['Local: ' + (e.local || '—') + ' · Modelo: ' + (e.modelo || '—') + ' · Potência: ' + (e.potencia ? e.potencia + ' VA' : '—') + ' · ' + filial],
+      [],
+      ['Dia', 'Data', 'Leitura', 'Hora', 'Vi (V)', 'Ii (A)', 'Pi (VA)', 'Vo (V)', 'Io (A)', 'Po (VA)', 'Carga (%)', 'Ocorrências']
+    ];
+    fl.dias.forEach((dd) => dd.leituras.forEach((x, i) => {
+      const l = x.l || {}, av = x.av || {};
+      linhas.push([i === 0 ? PN_SEMANA_LONGA[pnParaData(dd.dia).getDay()] : '', i === 0 ? pnDataLonga(dd.dia) : '', x.n + 'ª', l.hora || '',
+        alerta(num(l.vi, 1), av.vi), num(l.ii, 2), num(l.pi, 0), alerta(num(l.vo, 1), av.vo), num(l.io, 2), num(l.po, 0),
+        x.l ? alerta(num(av.carga, 1), cargaAlta(av.carga)) : '', l.ocorrencia || '']);
+    }));
+    return { nome: (fl.codigo + ' ' + fl.inicio.slice(8, 10) + '-' + fl.inicio.slice(5, 7)).slice(0, 31), linhas };
+  });
+  const resumo = [['Nobreaks — ' + r.filtro + ' — ' + r.periodo], ['Filial: ' + filial + ' · gerado em ' + new Date().toLocaleString('pt-BR')], [],
+    ['Nobreak', 'Local', 'Potência (VA)', 'Leituras', 'Carga média (%)', 'Carga máxima (%)', 'Leituras em alerta']]
+    .concat(Object.keys(r.resumo).sort().map((k) => {
+      const x = r.resumo[k], e = nbEquip(r.d, k) || {};
+      return [k, e.local || '', num(e.potencia, 0), x.n, x.nCarga ? num(x.somaCarga / x.nCarga, 1) : '', alerta(num(x.cargaMax, 1), cargaAlta(x.cargaMax)),
+        alerta(x.alertas, x.alertas > 0)];
+    }));
+  pnBaixarXlsx('Nobreaks ' + (NB_HIST.nobreak || 'todos') + ' ' + (NB_HIST.mes || 'ultimos-120-dias') + '.xlsx',
+    [{ nome: 'Resumo', linhas: resumo }].concat(abas));
+}
+
+function nbExportarPdf() {
+  const r = nbDadosRelatorio();
+  const folhas = nbFolhasDoRelatorio();
+  if (!folhas.length) return avisar('Nenhuma leitura no período escolhido.', true);
+  const num = (v, casas) => (v === null || v === undefined) ? '' : pnNum(v, casas);
+  const corpo = folhas.map((fl) => {
+    const e = fl.e;
+    const linhas = fl.dias.map((dd) => dd.leituras.map((x, i) => {
+      const l = x.l || {}, av = x.av || {};
+      const dt = pnParaData(dd.dia);
+      return `<tr class="${i === 0 ? 'novo-dia' : ''}">
+        ${i === 0 ? `<td class="dia" rowspan="${dd.leituras.length}">${PN_SEMANA_LONGA[dt.getDay()]}<small>${pnDataLonga(dd.dia)}</small></td>` : ''}
+        <td class="c">${x.n}ª</td><td class="c">${esc(l.hora || '')}</td>
+        <td class="${av.vi ? 'fora' : ''}">${num(l.vi, 1)}</td><td>${num(l.ii, 2)}</td><td>${num(l.pi)}</td>
+        <td class="${av.vo ? 'fora' : ''}">${num(l.vo, 1)}</td><td>${num(l.io, 2)}</td><td>${num(l.po)}</td>
+        <td class="carga ${av.carga !== null && av.carga !== undefined && av.carga >= r.p.cargaAlerta ? 'alta' : ''}">${x.l ? pnPct(av.carga) : ''}</td>
+        <td class="oc">${esc(l.ocorrencia || '')}</td></tr>`;
+    }).join('')).join('');
+    return `<section class="folha-nb">
+      <div class="cab-folha">
+        <div><span class="rot">Nobreak</span><b>${esc(fl.codigo)}</b></div>
+        <div><span class="rot">Local</span><b>${esc(e.local || '—')}</b></div>
+        <div><span class="rot">Modelo</span><b>${esc(e.modelo || '—')}</b></div>
+        <div><span class="rot">Potência</span><b>${e.potencia ? pnNum(e.potencia) + ' VA' : '—'}</b></div>
+        <div><span class="rot">Tensão nominal</span><b>${e.tensaoEntrada || '—'} V / ${e.tensaoSaida || '—'} V</b></div>
+        <div><span class="rot">Semana</span><b>${pnDataLonga(fl.inicio)} a ${pnDataLonga(fl.fim)}</b></div>
+      </div>
+      <table class="nb-folha-pdf">
+        <thead>
+          <tr><th rowspan="2">Dia</th><th rowspan="2">Leitura</th><th rowspan="2">Hora</th>
+            <th colspan="3" class="g-en">ENTRADA</th><th colspan="3" class="g-sa">SAÍDA</th>
+            <th rowspan="2">Carga</th><th rowspan="2">Ocorrências</th></tr>
+          <tr><th class="en">Vi (V)</th><th class="en">Ii (A)</th><th class="en">Pi (VA)</th>
+            <th class="sa">Vo (V)</th><th class="sa">Io (A)</th><th class="sa">Po (VA)</th></tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </section>`;
+  }).join('');
+  pnImprimirRelatorio('Folha de leituras dos nobreaks', r.filtro + ' · ' + r.periodo, corpo +
+    `<p class="nota">Carga = Po ÷ potência nominal. Em vermelho: tensão fora da faixa (± ${pnNum(r.p.tolerancia)}%) ou carga acima de ${pnNum(r.p.cargaAlerta)}%.
+      Linhas em branco: leitura não lançada.</p>`, `
+      .folha-nb { page-break-after: always; break-after: page; }
+      .folha-nb:last-of-type { page-break-after: auto; break-after: auto; }
+      .cab-folha { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px 14px; border: 1.5px solid #111785; border-left-width: 5px; border-radius: 6px;
+        padding: 8px 12px; margin-bottom: 8px; background: #F3F5FA; }
+      .cab-folha .rot { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #4A4F6A; }
+      .cab-folha b { font-size: 12px; color: #111785; }
+      table.nb-folha-pdf { border-collapse: collapse; width: 100%; font-size: 10.5px; }
+      .nb-folha-pdf th, .nb-folha-pdf td { border: 1px solid #C9CEE3; padding: 3px 5px; text-align: right; white-space: nowrap; }
+      .nb-folha-pdf th { background: #111785; color: #fff; border-color: #3A3F9E; text-align: center; font-size: 9.5px; }
+      .nb-folha-pdf th.en, .nb-folha-pdf th.sa { text-transform: none; }
+      .nb-folha-pdf th.g-en { background: #111785; color: #fff; } .nb-folha-pdf th.g-sa { background: #01973A; color: #fff; border-color: #01973A; }
+      .nb-folha-pdf th.en { background: #E7EAFE; color: #111785; border-color: #C9CEE3; border-bottom: 2.5px solid #111785; }
+      .nb-folha-pdf th.sa { background: #D9F5E6; color: #016B2A; border-color: #C9CEE3; border-bottom: 2.5px solid #01973A; }
+      .nb-folha-pdf td.dia { text-align: left; font-weight: 700; text-transform: uppercase; font-size: 9.5px; letter-spacing: .04em; color: #111785; background: #F3F5FA; }
+      .nb-folha-pdf td.dia small { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: #4A4F6A; font-size: 9.5px; }
+      .nb-folha-pdf td.c { text-align: center; } .nb-folha-pdf td.oc { text-align: left; white-space: normal; min-width: 140px; }
+      .nb-folha-pdf tr.novo-dia td { border-top: 2px solid #8A8FB8; }
+      .nb-folha-pdf td.carga { font-weight: 700; } .nb-folha-pdf td.carga.alta, .nb-folha-pdf td.fora { color: #C62828; font-weight: 700; }
+      .nb-folha-pdf tbody tr:nth-child(even) td:not(.dia) { background: #F3F5FA; }`);
+}
+
+function nbAbrirSemanaDe(codigo, data) {
+  NB_SEMANA = { nobreak: codigo, inicio: pnSegunda(data) };
+  trocarAbaNB('lancar');
+}
+
+/* ---------- EQUIPAMENTOS ---------- */
+function nbEquipamentos(d) {
+  return `<div class="cartao" style="margin-bottom:14px">
+    <div class="cartao-titulo linha-titulo"><span>Nobreaks cadastrados</span>
+      <span class="pn-linha">
+        ${d.permissoes.cadastrar ? `<button class="icone-botao" onclick="nbFormImportar()">Importar planilha antiga</button>
+        <button class="botao" onclick="nbFormEquip()">Novo nobreak</button>` : ''}
+      </span></div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Código</th><th>Local</th><th>Modelo</th>
+      <th class="numero">Potência (VA)</th><th class="numero">Tensão entrada</th><th class="numero">Tensão saída</th><th>Situação</th><th></th></tr></thead>
+      <tbody>${d.equipamentos.map((e) => `<tr><td><strong>${esc(e.codigo)}</strong></td><td>${esc(e.local || '—')}</td><td>${esc(e.modelo || '—')}</td>
+        <td class="numero">${e.potencia ? pnNum(e.potencia) : '<span class="pendente-entrega">falta</span>'}</td>
+        <td class="numero">${e.tensaoEntrada ? e.tensaoEntrada + ' V' : '—'}</td><td class="numero">${e.tensaoSaida ? e.tensaoSaida + ' V' : '—'}</td>
+        <td>${e.ativo ? '<span class="pn-chip ok">monitorado</span>' : '<span class="pn-chip neutro">desativado</span>'}</td>
+        <td>${d.permissoes.cadastrar ? `<button class="icone-botao" onclick="nbFormEquip(${jsArg(e.id)})">Editar</button>` : ''}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="vazio">Nenhum nobreak cadastrado.</td></tr>'}</tbody></table></div>
+    <p class="dica">A <b>potência nominal</b> faz a carga (%) funcionar. As tensões nominais servem para o alerta:
+      leitura fora de ±${d.parametros.tolerancia}% da nominal acende o alerta. Os limites ficam em Configuração › Sistema.</p>
+  </div>`;
+}
+
+function nbFormEquip(id) {
+  const e = id ? DADOS.equipamentos.find((x) => x.id === id) : null;
+  abrirJanela(e ? 'Editar ' + e.codigo : 'Novo nobreak', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Código</label><input id="ne-codigo" value="${esc(e ? e.codigo : '')}" placeholder="NB-04"></div>
+      <div class="campo"><label>Local</label><input id="ne-local" value="${esc(e ? e.local : '')}" placeholder="onde ele fica"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Modelo</label><input id="ne-modelo" value="${esc(e ? e.modelo : '')}"></div>
+      <div class="campo"><label>Potência nominal (VA)</label><input id="ne-pot" inputmode="decimal" value="${e && e.potencia ? e.potencia : ''}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Tensão nominal de entrada (V)</label><input id="ne-te" inputmode="decimal" value="${e && e.tensaoEntrada ? e.tensaoEntrada : '220'}"></div>
+      <div class="campo"><label>Tensão nominal de saída (V)</label><input id="ne-ts" inputmode="decimal" value="${e && e.tensaoSaida ? e.tensaoSaida : '120'}"></div>
+    </div>
+    <div class="campo"><label>Observação</label><input id="ne-obs" value="${esc(e ? e.observacao : '')}"></div>
+    <label class="marcador"><input type="checkbox" id="ne-ativo" ${!e || e.ativo ? 'checked' : ''}> Monitorado (aparece no painel e na folha)</label>`, `
+    ${e ? `<button class="botao perigo" onclick="agir('excluirNobreak',{id:${jsArg(e.id)}},'Nobreak removido').catch(()=>{})">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarNobreak',{id:${jsArg(e ? e.id : '')},codigo:val('ne-codigo'),local:val('ne-local'),modelo:val('ne-modelo'),potencia:val('ne-pot'),tensaoEntrada:val('ne-te'),tensaoSaida:val('ne-ts'),observacao:val('ne-obs'),ativo:marcado('ne-ativo')},'Nobreak salvo').catch(()=>{})">Salvar</button>`);
+}
+
+function nbFormImportar() {
+  abrirJanela('Importar a planilha antiga de nobreaks', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">Cole o link da planilha
+      <b>Monitoramento de Nobreaks</b> (a que tem as abas Cadastro e Lancamentos). O GSL traz os nobreaks
+      e todas as leituras. Leitura repetida não entra duas vezes, e a linha de exemplo é ignorada.</p>
+    <div class="campo"><label>Link da planilha</label><input id="nb-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..."></div>
+    <p class="dica">Se a planilha estiver em .xlsx no Drive, abra no Google Planilhas e use Arquivo › Salvar como Planilhas Google antes.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('importarNobreaks',{link:val('nb-link')}).catch(()=>{})">Importar</button>`);
+}
+
+
+/* =====================================================================
+   LIMPEZA CD (4.2.2) — Gestão, Plano de Ação e Estoque.
+   O plano é o MESMO do Calendário (desenhado por planoHtml, no App.html)
+   e o estoque é o MESMO do TI (as funções est*, mais abaixo). Aqui fica
+   só o que é da limpeza: as abas, a Gestão, as zonas e a importação.
+   ===================================================================== */
+let ABA_LP = 'gestao';                 // gestao | plano | estoque | movimentos | inventario
+// 8.13: o mesmo filtro do plano do Calendario (parecer, situacao, prioridade, turno, zona, busca e ordem).
+const LP_PLANO_FILTRO = { parecer: '', situacao: 'ABERTAS', turno: '', busca: '', zona: '', crit: '', prio: '', ordem: 'urgentes' };
+const PLANO_LP = {
+  id: 'LIMPEZA',
+  dados: () => (DADOS && DADOS.plano) || {},
+  acoes: { salvar: 'salvarAcaoLimpeza', concluir: 'concluirAcaoLimpeza', comentar: 'comentarAcaoLimpeza',
+           reabrir: 'reabrirAcaoLimpeza', cancelar: 'cancelarAcaoLimpeza', excluir: 'excluirAcaoLimpeza',
+           foto: 'fotoAcaoLimpeza', removerFoto: 'removerFotoAcaoLimpeza',
+           situacao: 'salvarSituacaoLimpeza', parecer: 'parecerSituacaoLimpeza' },
+  // A tela da limpeza traz todas as ações que a pessoa enxerga: o filtro e feito aqui.
+  local: LP_PLANO_FILTRO,
+  filtrar: (m) => { Object.assign(LP_PLANO_FILTRO, m); pintarAbaLP(DADOS); },
+  extras: () => ({ zonas: (DADOS && DADOS.zonas) || [], origens: ((DADOS && DADOS.listas) || {}).origens || [],
+                   criticidades: ((DADOS && DADOS.listas) || {}).criticidades || [] })
+};
+
+function pintarLimpeza(r) {
+  EST = EST_LP; PLANO = PLANO_LP;
+  const d = r.dados;
+  const ativos = d.estoque.itens.filter((i) => i.ativo);
+  const repor = ativos.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO').length;
+  el('subtitulo-pagina').textContent = d.plano.contagens.abertas + ' ação(ões) em aberto · ' + ativos.length +
+    ' produto(s) no estoque' + (repor ? ' · ' + repor + ' para repor' : '');
+  const abas = [['gestao', 'Gestão'], ['plano', 'Plano de Ação'], ['estoque', 'Estoque'], ['movimentos', 'Movimentações']]
+    .concat(d.estoque.permissoes.cadastrar ? [['inventario', 'Inventário']] : []);
+  // Link do e-mail de mencao da Limpeza: a acao abre na aba do plano. typeof: App.html de antes (colado pela metade).
+  if (typeof ACAO_DO_LINK !== 'undefined' && ACAO_DO_LINK && ACAO_DO_LINK.tela === 'limpeza') ABA_LP = 'plano';
+  if (!abas.some((a) => a[0] === ABA_LP)) ABA_LP = 'gestao';
+  el('pagina').innerHTML = (pnPodeEditar('limpeza') ? '' : pnSoVer('Limpeza CD')) + pnAbas(abas, ABA_LP, 'trocarAbaLP') + '<div id="conteudo-lp"></div>';
+  pintarAbaLP(d);
+}
+
+function trocarAbaLP(aba) {
+  ABA_LP = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
+  pintarAbaLP(DADOS);
+}
+
+/* Os botões do topo acompanham a aba: no plano, ação nova; no estoque, entrada e saída. */
+function lpBotoesTopo(d) {
+  const g = d.permissoes.gerir, e = d.estoque.permissoes;
+  // 8.13: os botoes do plano (Relatorio, acao direta e a situacao nova); App.html de antes: so a acao.
+  const novaAcao = typeof paBotoesTopo === 'function' ? paBotoesTopo(d.plano || {})
+    : (g ? '<button class="botao" onclick="formAcao()">+ Nova ação</button>' : '');
+  let html;
+  if (ABA_LP === 'gestao') html = (g ? '<button class="botao secundario" onclick="lpFormImportar()">Importar planilha antiga</button>' : '') + novaAcao;
+  else if (ABA_LP === 'plano') html = (g ? '<button class="botao secundario" onclick="lpFormZonas()">Zonas</button>' : '') + novaAcao;
+  else html = (e.movimentar ? `<button class="botao secundario" onclick="estFormMov('SAIDA')">Registrar saída</button>
+      <button class="botao" onclick="estFormMov('ENTRADA')">Registrar entrada</button>` : '') +
+    (e.cadastrar ? '<button class="botao secundario" onclick="estFormItem()">Novo produto</button>' : '');
+  el('acoes-topo').innerHTML = html;
+}
+
+function pintarAbaLP(d) {
+  const alvo = el('conteudo-lp'); if (!alvo) return;
+  EST = EST_LP; PLANO = PLANO_LP;
+  lpBotoesTopo(d);
+  try {
+    if (ABA_LP === 'plano') {
+      alvo.innerHTML = planoHtml(d.plano);
+      if (typeof paDepoisDePintar === 'function') paDepoisDePintar();
+      if (typeof abrirAcaoDoLink === 'function') abrirAcaoDoLink();
+      return;
+    }
+    if (ABA_LP === 'gestao') { alvo.innerHTML = lpGestao(d); return; }
+    if (!d.estoque.itens.length && ABA_LP !== 'movimentos') { alvo.innerHTML = lpEstoqueVazio(d); return; }
+    if (ABA_LP === 'estoque') alvo.innerHTML = estItens(d.estoque);
+    else if (ABA_LP === 'movimentos') alvo.innerHTML = estMovimentos(d.estoque);
+    else alvo.innerHTML = estInventario(d.estoque);
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+function lpEstoqueVazio(d) {
+  const c = d.estoque.permissoes.cadastrar;
+  return `<div class="cartao pn-vazio-grande"><strong>Nenhum produto no estoque da limpeza ainda.</strong>
+    Funciona igual ao Estoque de TI: cadastre cada produto (nome, unidade, estoque mínimo e ideal) em <b>Novo produto</b>,
+    ou copie a lista de uma planilha e cole em <b>Colar da planilha</b>. Depois é só registrar as entradas (o que chegou)
+    e as saídas (quanto saiu, quando e para onde).<br><br>
+    ${c ? `<button class="botao" onclick="estFormItem()">Novo produto</button>
+      <button class="botao secundario" onclick="estFormLote()">Colar da planilha</button>` : ''}</div>`;
+}
+
+/*
+ * ---------- GESTAO — o resumo das duas coisas ----------
+ * 21/10: as acoes (cartoes, "vencem primeiro") sao so as em que a pessoa esta
+ * citada, como no plano. Quem gere o plano ve tambem o total do plano inteiro
+ * (geral: so numeros, nenhuma acao) — "0 em aberto" nao pode parecer plano vazio.
+ */
+function lpGestao(d) {
+  const pl = d.plano, es = d.estoque, c = pl.contagens, g = pl.geral;
+  const noPlano = (n) => (g ? ' · ' + n + ' no plano inteiro' : '');
+  const abertas = (pl.lista || []).filter((a) => a.situacao === 'PENDENTE');
+  const vencem = abertas.slice().sort((a, b) => (a.prazoISO || '9999').localeCompare(b.prazoISO || '9999')).slice(0, 8);
+  const ativos = es.itens.filter((i) => i.ativo);
+  const repor = ativos.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO')
+    .sort((a, b) => (a.saldo - a.minimo) - (b.saldo - b.minimo));
+  const mes = d.hoje.slice(0, 7);
+  const saidasMes = es.movimentos.filter((m) => m.tipo === 'SAIDA' && !m.estornado && (m.data || '').slice(0, 7) === mes);
+  // A criticidade virou a prioridade do plano (8.13): Alta, Media, Normal (= a Baixa de antes).
+  const prioDe = (a) => a.prioridade || ({ Alta: 'ALTA', 'Média': 'MEDIA', Baixa: 'NORMAL' })[a.criticidade] || '';
+  const altas = abertas.filter((a) => prioDe(a) === 'ALTA').length;
+  return `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(c.abertas, 'Ações em aberto', 'azul', altas + ' de prioridade alta' + noPlano(g && g.abertas))}
+      ${pnKpi(c.atrasadas, 'Ações atrasadas', c.atrasadas ? 'vermelho' : 'verde', c.minhas + ' sob sua responsabilidade' + noPlano(g && g.atrasadas))}
+      ${pnKpi(repor.length, 'Produtos para repor', repor.length ? 'vermelho' : 'verde',
+        ativos.filter((i) => i.situacao === 'ZERADO').length + ' zerado(s)')}
+      ${pnKpi(pnNum(saidasMes.reduce((s, m) => s + m.quantidade, 0)), 'Unidades entregues no mês', 'amarelo',
+        saidasMes.length + ' saída(s) · ' + pnRotuloMes(mes))}
+    </div>
+    <div class="pn-grade duas">
+      <div class="cartao">
+        <div class="cartao-titulo linha-titulo"><span>As ações que vencem primeiro</span>
+          <button class="botao-texto" onclick="trocarAbaLP('plano')">Abrir o plano →</button></div>
+        ${vencem.length ? `<table><tbody>${vencem.map((a) => `<tr class="${a.status === 'Atrasada' ? 'lp-atrasada' : ''}">
+          <td style="white-space:nowrap"><strong>${esc(a.prazo || '—')}</strong><div class="lp-sub">${planoPrazoTexto(a)}</div></td>
+          <td><strong>${esc(a.acao)}</strong> ${typeof seloComentarios === 'function' && typeof podeComentarAcao === 'function' ? seloComentarios(a, podeComentarAcao(a, pl.permissoes)) : ''}<div class="lp-sub">${esc([a.zona, a.local].filter(Boolean).join(' · ') || a.responsavel || '')}</div></td>
+          <td>${prioDe(a) ? `<span class="pa-prio ${prioDe(a)}">${({ ALTA: 'Alta', MEDIA: 'Média', NORMAL: 'Normal' })[prioDe(a)]}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+          : g && g.abertas ? `<div class="vazio">Nenhuma ação em aberto em que você esteja citado (o plano tem ${g.abertas}).</div>`
+          : '<div class="vazio">Nenhuma ação em aberto. 👍</div>'}
+        <p class="dica">Só as ações em que você está citado: como responsável ou marcado num comentário.</p>
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo linha-titulo"><span>Precisa repor</span>
+          <button class="botao-texto" onclick="EST_LP.filtro.situacao='REPOR';trocarAbaLP('estoque')">Abrir o estoque →</button></div>
+        ${repor.length ? `<table><thead><tr><th>Produto</th><th class="numero">Estoque</th><th class="numero">Mínimo</th><th class="numero">Ideal</th><th></th></tr></thead><tbody>
+          ${repor.slice(0, 10).map((i) => `<tr><td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
+            <td class="numero" style="color:${i.saldo <= 0 ? 'var(--alerta)' : 'var(--laranja-escuro)'};font-weight:700">${estQtd(i.saldo, i.unidade)}</td>
+            <td class="numero">${pnNum(i.minimo)}</td><td class="numero">${i.ideal ? pnNum(i.ideal) : '—'}</td>
+            <td>${es.permissoes.movimentar ? `<button class="icone-botao" onclick="estEntradaRapida(${jsArg(i.codigo)})">+ Entrada</button>` : ''}</td></tr>`).join('')}
+          </tbody></table>${repor.length > 10 ? `<p class="dica">E mais ${repor.length - 10}.</p>` : ''}`
+          : `<div class="vazio">${ativos.length ? 'Nenhum produto no estoque mínimo. 👍' : 'Cadastre os produtos na aba Estoque.'}</div>`}
+        <p class="dica">Entra aqui o produto com saldo igual ou abaixo do estoque mínimo cadastrado, e o que zerou.</p>
+      </div>
+    </div>`;
+}
+
+/* ---------- ZONAS E IMPORTACAO ---------- */
+function lpFormZonas() {
+  const zonas = DADOS.zonas;
+  abrirJanela('Zonas do CD', `
+    <p class="dica" style="margin:0 0 12px">Preencha com as ruas e áreas reais. Zona desmarcada some das listas, mas as ações antigas continuam com ela.</p>
+    <table id="lz-tabela"><thead><tr><th>Zona</th><th>Descrição</th><th>Em uso</th></tr></thead><tbody>
+      ${zonas.map((z) => `<tr data-id="${esc(z.id)}"><td><input class="lz-zona" value="${esc(z.zona)}" style="width:70px"></td>
+        <td><input class="lz-desc" value="${esc(z.descricao)}"></td><td><input type="checkbox" class="lz-ativo" ${z.ativo ? 'checked' : ''}></td></tr>`).join('')}
+      <tr data-id=""><td><input class="lz-zona" placeholder="Z11" style="width:70px"></td><td><input class="lz-desc" placeholder="nova zona"></td><td><input type="checkbox" class="lz-ativo" checked></td></tr>
+    </tbody></table>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="lpSalvarZonas()">Salvar zonas</button>`);
+}
+
+function lpSalvarZonas() {
+  const zonas = [...document.querySelectorAll('#lz-tabela tbody tr')].map((tr) => ({
+    id: tr.dataset.id, zona: tr.querySelector('.lz-zona').value, descricao: tr.querySelector('.lz-desc').value,
+    ativo: tr.querySelector('.lz-ativo').checked })).filter((z) => z.zona.trim());
+  agir('salvarZona', { zonas: zonas }, 'Zonas salvas').catch(() => {});
+}
+
+function lpFormImportar() {
+  abrirJanela('Importar a planilha antiga da limpeza', `
+    <p style="margin:0 0 14px;line-height:1.7;color:var(--tinta-media)">Cole o link da planilha
+      <b>Gestão da Limpeza</b> (a versão online). O GSL traz as <b>não conformidades</b> (viram ações do Plano de Ação),
+      os <b>produtos</b> (viram itens do estoque, com saldo zero — o saldo nasce das entradas) e as <b>zonas</b>.
+      O que já foi importado não entra de novo.</p>
+    <div class="campo"><label>Link da planilha</label><input id="lp-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..."></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('importarLimpeza',{link:val('lp-link')}).catch(()=>{})">Importar</button>`);
+}
+
+/* =====================================================================
+   QUADRO DO CD (13/10) — o quadro de cada turno, montado pelo GSL a partir
+   da aba GERAL da planilha (EQUIPE, COD, PROD, DESCRICAO, RH, STATUS).
+   Quatro abas:
+     Visao geral       o CD e os turnos em 10 segundos
+     Quadro por turno  o quadro de parede de cada turno (por funcao) e a lista A-Z
+     Movimentacao      quem entrou, quem saiu e por que
+     Conferencia       o que corrigir na planilha, com a linha
+   Cor = equipe (1° azul, 2° laranja, 3° verde-agua, ADM amarelo; o CD
+   inteiro em ardosia), sempre ao lado do nome escrito e nunca no texto.
+   Vermelho e ambar so para problema, sempre com icone e palavra — e o
+   vermelho so diz "o numero do quadro esta errado por causa da planilha".
+   Uma linha de filtros (Equipe, Funcao) vale para tudo abaixo dela; quando
+   o eixo de um grafico e a propria dimensao filtrada, o filtro destaca em
+   vez de esconder (cartoes, colunas do mapa, "onde saem").
+   ===================================================================== */
+const qdEstadoInicial = (de) => ({ de: de || '', aba: 'geral', equipe: '*', funcao: '', iniciado: false,
+  busca: '', mostrar: 'empresa', organizar: 'funcao', ordK: 'nome', ordA: 1, limite: 100,
+  periodo: 180, motivo: '', mes: '', sentido: 'tudo', limiteMov: 30, recolhidas: {},
+  admAberto: false, desfalquesTodos: false, verTabela: false, leituraAberta: false,
+  // aba Ferias (21/10): Lista ou Calendario ('' = a ultima escolha deste navegador), a busca pelo nome, a linha de quem
+  // esta de ferias agora aberta, os grupos com todos, a lista de quem esta sem dados aberta, o mes do calendario, o dia
+  // aberto e o periodo da janela Programar
+  feVista: '', feBusca: '', feAgora: false, feTodos: {}, feSemDados: false, feMes: '', feDia: '', feAlvo: null });
+let QD = qdEstadoInicial();
+const QD_EQUIPES = ['1° TURNO', '2° TURNO', '3° TURNO', 'ADM'];
+const QD_TURNOS = ['1° TURNO', '2° TURNO', '3° TURNO'];
+const QD_COR = { '1° TURNO': 'var(--s1)', '2° TURNO': 'var(--s2)', '3° TURNO': 'var(--s3)', 'ADM': 'var(--s4)' };
+const QD_TRILHO = { '1° TURNO': 'var(--s1t)', '2° TURNO': 'var(--s2t)', '3° TURNO': 'var(--s3t)', 'ADM': 'var(--s4t)' };
+const qdCor = (e) => QD_COR[e] || 'var(--bq-ink-3)';
+const QD_SEM_FUNCAO = 'SEM FUNÇÃO';
+const QD_LIDER = /(^| )(LIDER|SUPERVISOR|COORDENADOR|ENCARREGAD|GERENTE|CHEFE)/;
+const QD_SITUACAO = { ATIVO: 'Disponível', FERIAS: 'Férias', AFASTADO: 'Afastado', FORA: 'Fora da empresa' };
+const QD_MESES_LONGOS = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
+const qdN = (n) => Number(n || 0).toLocaleString('pt-BR');
+const qdPct = (v) => (Math.round(v * 10) / 10).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+const qdPlural = (n, um, varios) => qdN(n) + ' ' + (n === 1 ? um : varios);
+function qdChaveCod(v) { return String(v == null ? '' : v).replace(/\s+/g, '').replace(/\.0+$/, '').replace(/^0+(?=\d)/, '').toUpperCase(); }
+/* COD/RH que identifica alguem: precisa de algarismo de 1 a 9 ("-", "0", "#N/A" nao) — a mesma regra do servidor. */
+const qdIdCod = (v) => { const c = qdChaveCod(v); return /[1-9]/.test(c) ? c : ''; };
+function qdChaveNome(v) {
+  return String(v == null ? '' : v).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+const qdFuncaoDe = (r) => r.funcao || QD_SEM_FUNCAO;
+/* Funcao comparada sem acento e sem pontuacao, mas com os numeros (ANALISTA 1 e ANALISTA 2 sao funcoes diferentes). */
+const qdChaveFuncao = (v) => String(v == null ? '' : v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() || String(v == null ? '' : v);
+/* A funcao como a tela a escreve (mapa, blocos, desfalques, impressao): a grafia mais usada na GERAL. */
+const qdFuncaoTela = (r) => { const f = qdFuncaoDe(r); return qdMemo().grafia[qdChaveFuncao(f)] || f; };
+const qdLider = (f) => QD_LIDER.test(qdChaveNome(f));
+/* Funcao escrita na tela: DESCRICAO vazia vira "Sem funcao" em italico. */
+const qdRotFuncao = (f) => f === QD_SEM_FUNCAO ? '<em>Sem função</em>' : esc(f);
+/* Nome sempre em maiusculas (a CDESLIGADOS as vezes vem "Gustavo santos araujo"). */
+const qdNomeTxt = (r) => String((r && r.nome) || '').toUpperCase();
+/* Tipo do desligamento: involuntario, voluntario (pedido) ou sem tipo. */
+function qdTipo(t) {
+  const k = qdChaveNome(t);
+  if (/^INVOL|DISPENS|JUSTA CAUSA|DEMITID|DECISAO DA EMPRESA|INICIATIVA DA EMPRESA/.test(k)) return 'inv';
+  if (/^VOL|PEDID|PEDIU|INICIATIVA DO (COLABORADOR|EMPREGADO|FUNCIONARIO)/.test(k)) return 'vol';
+  if (/(^| )TERMIN|FIM D[EO] CONTRATO/.test(k)) return 'inv';
+  return 'sem';
+}
+/* Motivo agrupado sem diferenciar maiuscula nem acento; vazio = nao informado. */
+const qdMotivoChave = (m) => qdChaveNome(m) || '-';
+const qdHoraLeitura = () => DADOS.atualizado ? new Date(DADOS.atualizado).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+/* Etiqueta de equipe: quadradinho na cor da equipe e o nome em tinta. */
+function qdEq(equipe, bruta) {
+  return `<span class="qd-eq${equipe ? '' : ' sem'}"><i style="background:${qdCor(equipe)}"></i>${equipe ? esc(equipe)
+    : (bruta ? `<em>${esc(bruta)}</em>` : 'Sem turno')}</span>`;
+}
+/* Icones de estado, uma forma por estado (quadrado, triangulo, circulo): nunca dependem so da cor. */
+const QD_ICONES = {
+  grave: '<svg class="qd-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><rect x="1" y="1" width="12" height="12" rx="2" fill="#d03b3b"/><path d="M7 3.6v4.3M7 10.3v.2" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  atencao: '<svg class="qd-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><path d="M7 1.3 13.3 12.6H.7z" fill="#fab219" stroke="#c98500" stroke-width=".8" stroke-linejoin="round"/><path d="M7 5.2v3.4M7 10.5v.2" stroke="#0F172A" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  ok: '<svg class="qd-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="6" fill="#0ca30c"/><path d="m4.2 7.2 1.9 1.9 3.8-4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  info: '<svg class="qd-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 6.3v3.6M7 4.3v.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+};
+/* Selo de problema: icone + palavra em tinta — a cor nunca fala sozinha. */
+const qdSelo = (grav, texto) => `<span class="qd-selo ${grav}">${QD_ICONES[grav === 'grave' ? 'grave' : 'atencao']}${esc(texto)}</span>`;
+/* Pessoas no quadro: disponiveis, de ferias e afastadas. */
+function qdConta(lista) {
+  const c = { n: lista.length, d: 0, f: 0, a: 0 };
+  lista.forEach((g) => { if (g.situacao === 'FERIAS') c.f++; else if (g.situacao === 'AFASTADO') c.a++; else c.d++; });
+  return c;
+}
+function qdContaTxt(c) {
+  if (!c.n) return '';
+  if (c.d === c.n) return c.n === 1 ? '1 disponível' : 'todos disponíveis';
+  return [qdN(c.d) + (c.d === 1 ? ' disponível' : ' disponíveis'), c.f ? qdN(c.f) + ' de férias' : '',
+    c.a ? qdPlural(c.a, 'afastado', 'afastados') : ''].filter(Boolean).join(' · ');
+}
+
+/* --- dados do servidor, com indices guardados por carga --- */
+const QD_COLUNAS_ROT = { equipe: 'EQUIPE', cod: 'COD', nome: 'PROD', funcao: 'DESCRIÇÃO', rh: 'RH', status: 'STATUS' };
+const QD_COLUNA_POR = {
+  nome: 'Por isso os nomes não aparecem.', equipe: 'Por isso ninguém pôde ser separado por turno.',
+  status: 'Por isso todos estão contando como ativos.', cod: 'Sem ela, desligados e admitidos só são achados pela matrícula ou pelo nome.',
+  rh: 'Sem ela, desligados e admitidos só são achados pelo produtivo ou pelo nome.', funcao: 'Sem ela, o quadro não separa as funções.'
+};
+let QD_MEMO = null;
+function qdMemo() {
+  if (QD_MEMO && QD_MEMO.dados === DADOS) return QD_MEMO;
+  const l = DADOS.leitura || {}, faltam = l.faltam || [];
+  // Coluna que falta vira item da Conferencia (grave para PROD, EQUIPE e STATUS); os avisos que ela mesma causa saem.
+  const colunas = faltam.map((k) => ({ tipo: 'COLUNA', coluna: k, nome: QD_COLUNAS_ROT[k] || k, linha: 0,
+    gravidade: ['nome', 'equipe', 'status'].indexOf(k) !== -1 ? 'grave' : 'atencao',
+    detalhe: (QD_COLUNAS_ROT[k] || k) + ' não encontrada no cabeçalho da GERAL. ' + (QD_COLUNA_POR[k] || '') }));
+  // a aba FÉRIAS que nao serve para os avisos (so o cabecalho, ou sem coluna essencial): nada de "planilha conferida"
+  const lf = l.ferias, lfFaltam = (lf && lf.faltam) || [];
+  const rotFe = { matricula: 'Matricula', nome: 'Nome', paFim: 'pa_fim', limiteMax: 'DTA_LIMITEMAX' };
+  const efeito = { limiteMax: 'sem ela, o GSL não sabe o prazo de ninguém',
+    matricula: 'só as linhas do centro de custo do CD se ligam à GERAL, pelo nome exato; as dos outros centros de custo ficam de fora',
+    nome: 'a matrícula liga as linhas do CD sem conferir o nome; o final de RH que é de mais de uma pessoa ativa fica sem dono, e as linhas dos outros centros de custo ficam de fora',
+    paFim: '"pode sair a partir de" usa só o DTA_LIMITE (sem ele, fica sem data), e a programação liga o período pelo DTA_LIMITEMAX' };
+  const feAba = lf && (lfFaltam.length || lf.linhas === 0) ? [{ tipo: 'FERIAS_ABA', nome: 'Aba ' + (lf.aba || 'FÉRIAS'), gravidade: 'atencao',
+    linha: 1, aba: lf.aba, gid: (DADOS.ferias || {}).gid,
+    detalhe: lfFaltam.length && lf.linhas === 0
+      ? 'Não achei ' + (lfFaltam.length === 1 ? 'a coluna ' : 'as colunas ') + lfFaltam.map((k) => rotFe[k] || k).join(', ') + ' no cabeçalho da aba ' + (lf.aba || 'FÉRIAS') +
+        ', e nenhuma linha foi lida' + (lfFaltam.indexOf('matricula') !== -1 && lfFaltam.indexOf('nome') !== -1 ? ' (sem Matricula e sem Nome, nenhuma linha serve)' : '') +
+        ': o GSL não sabe o prazo de ninguém.'
+      : lfFaltam.length ? lfFaltam.map((k) => 'Não achei a coluna ' + (rotFe[k] || k) + ': ' + (efeito[k] || 'falta no cabeçalho') + '.').join(' ')
+      : 'A aba ' + (lf.aba || 'FÉRIAS') + ' está vazia: só tem o cabeçalho. Sem as linhas, o GSL não sabe o prazo de ninguém.' }] : [];
+  const inc = colunas.concat(feAba, (DADOS.inconsistencias || []).filter((x) =>
+    !(x.tipo === 'EQUIPE' && faltam.indexOf('equipe') !== -1) && !(x.tipo === 'SEM_NOME' && faltam.indexOf('nome') !== -1)));
+  const pend = {};
+  inc.forEach((x) => { (x.refs && x.refs.length ? x.refs : [x.ref]).forEach((r) => { if (r) (pend[r] = pend[r] || []).push(x); }); });
+  const indice = (lista) => {
+    const ix = { cod: {}, rh: {}, nome: {} };
+    lista.forEach((r) => {
+      const c = qdIdCod(r.cod), m = qdIdCod(r.rh), n = qdChaveNome(r.nome);
+      if (c) (ix.cod[c] = ix.cod[c] || []).push(r);
+      if (m) (ix.rh[m] = ix.rh[m] || []).push(r);
+      if (n) (ix.nome[n] = ix.nome[n] || []).push(r);
+    });
+    return ix;
+  };
+  const desTodos = (DADOS.des || []).concat(DADOS.desSemData || []);
+  // A grafia de cada funcao na tela: a mais usada entre quem esta na empresa (com e sem acento viram uma so).
+  const conta = {}, grafia = {};
+  (DADOS.geral || []).filter((g) => g.ativo).forEach((g) => {
+    const f = qdFuncaoDe(g), k = qdChaveFuncao(f), c = conta[k] = conta[k] || {};
+    c[f] = (c[f] || 0) + 1;
+  });
+  Object.keys(conta).forEach((k) => { grafia[k] = Object.keys(conta[k]).sort((a, b) => conta[k][b] - conta[k][a] || a.localeCompare(b))[0]; });
+  QD_MEMO = { dados: DADOS, inc, pend, grafia, ixAdm: indice(DADOS.adm || []), ixDes: indice(desTodos), ixGeral: indice(DADOS.geral || []),
+    desMaisAntiga: (DADOS.des || []).reduce((m, d) => (d.data && (!m || d.data < m) ? d.data : m), '') };
+  return QD_MEMO;
+}
+function qdAchar(ix, r) {
+  const c = qdIdCod(r.cod), m = qdIdCod(r.rh), n = qdChaveNome(r.nome);
+  if (c && ix.cod[c]) return ix.cod[c];
+  if (m && ix.rh[m]) return ix.rh[m];
+  // pelo nome, so quem nao tem outro COD/RH: homonimo nao e a mesma pessoa (como o servidor)
+  const l = ((n && ix.nome[n]) || []).filter((g) => !(c && qdIdCod(g.cod)) && !(m && qdIdCod(g.rh)));
+  return l.length ? l : null;
+}
+const qdGeral = () => (DADOS && DADOS.geral) || [];
+const qdNaEmpresa = () => qdGeral().filter((g) => g.ativo);
+/* Recorte da linha de filtros. `sem` = 'funcao' ou 'equipe': ignora aquele filtro (contagem de faceta). */
+function qdRecorte(lista, sem) {
+  const f = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
+  return lista.filter((g) => (sem === 'equipe' || QD.equipe === '*' || (g.equipe || '') === QD.equipe) &&
+    (sem === 'funcao' || !f || qdChaveFuncao(qdFuncaoDe(g)) === f));
+}
+const qdRotuloRecorte = () => [QD.equipe === '*' ? '' : (QD.equipe || 'Sem turno'), QD.funcao === QD_SEM_FUNCAO ? 'Sem função' : QD.funcao].filter(Boolean).join(' · ');
+/* Hoje, em aaaa-mm-dd (o fuso do navegador e o do CD). */
+const qdHoje = () => pnISO(new Date());
+/* Novo: esta no quadro e na CADMITIDOS, com admissao nos ultimos 90 dias (ou sem data). */
+function qdAdmissao(g) {
+  const adm = qdAchar(qdMemo().ixAdm, g);
+  if (!adm || !g.ativo) return null;
+  const a = adm.slice().sort((x, y) => String(y.data || '9').localeCompare(String(x.data || '9')))[0];
+  return (!a.data || a.data >= pnSomarDias(qdHoje(), -89)) ? a : null;
+}
+/* Link da planilha: a aba GERAL (gid) e a linha; sem o gid, so a planilha. */
+function qdLinkLinha(linha, gid) {
+  const f = DADOS.fonte, l = DADOS.leitura || {};
+  if (!f || !f.url) return '';
+  const base = String(f.url).replace(/#.*$/, '');
+  const g = gid === undefined ? l.gid : gid;                  // sem gid: a GERAL
+  if (g === null || g === undefined) return base;
+  return base + '#gid=' + g + (linha ? '&range=A' + linha : '');
+}
+/* Link da linha de um item da Conferencia: da GERAL, ou da aba que o item diz (a FÉRIAS tem o seu gid). */
+const qdLinkItem = (x, linha) => x.gid !== undefined && x.gid !== null ? qdLinkLinha(linha, x.gid) : (!x.aba ? qdLinkLinha(linha) : '');
+
+/* ------------------------------------------------------------------ */
+/* A TELA                                                              */
+/* ------------------------------------------------------------------ */
+
+function pintarQuadro(r) {
+  const d = r.dados;
+  el('acoes-topo').innerHTML = '';
+  el('subtitulo-pagina').removeAttribute('title');
+  QD_MEMO = null;
+  if (!d.configurado) {
+    el('subtitulo-pagina').textContent = 'O quadro de cada turno, montado a partir da aba GERAL';
+    el('pagina').innerHTML = `<div class="cartao pn-vazio-grande">
+      <strong>Falta ligar o Quadro à planilha desta filial.</strong>
+      É a planilha com as abas <b>GERAL</b> (EQUIPE, COD, PROD, DESCRIÇÃO, RH, STATUS), <b>CADMITIDOS</b> e <b>CDESLIGADOS</b>.
+      ${d.podeConfigurar ? `<div class="pn-linha" style="justify-content:center;margin-top:16px">
+        <input id="bq-link" placeholder="https:\/\/docs.google.com/spreadsheets/d/..." style="max-width:460px">
+        <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link')}).catch(()=>{})">Ligar planilha</button></div>`
+        : '<br><br>Peça para quem configura o sistema ligar a planilha.'}</div>`;
+    return;
+  }
+  const acoes = (completo) => `
+    <button class="botao secundario" onclick="qdAtualizar()" title="Lê a planilha de novo, na hora.">Atualizar dados</button>
+    ${d.fonte && d.fonte.url ? `<a class="icone-botao" href="${esc(String(d.fonte.url).replace(/#.*$/, ''))}" target="_blank" rel="noopener">Abrir planilha ↗</a>` : ''}
+    ${completo ? '<button class="icone-botao" onclick="qdCopiarResumo()">Copiar resumo</button>' : ''}
+    ${d.podeConfigurar ? `<button class="icone-botao" onclick="bqTrocarFonte()">Trocar planilha</button>` : ''}`;
+  if (d.erro) { el('acoes-topo').innerHTML = acoes(false); el('pagina').innerHTML = `<div class="erro-caixa">${esc(d.erro)}</div>`; return; }
+  if (d.formato !== 4) {
+    el('acoes-topo').innerHTML = acoes(false);
+    el('subtitulo-pagina').textContent = 'Atualização incompleta';
+    el('pagina').innerHTML = d.formato > 4
+      // aba aberta antes de uma implantacao nova: o servidor ja e mais novo que esta pagina
+      ? `<div class="cartao pn-vazio-grande"><strong>O GSL foi atualizado.</strong> Recarregue a página (F5) para ver o Quadro do CD.</div>`
+      // Paineis.html novo com o Quadro.gs anterior: a tela nova nao tem com que trabalhar.
+      : `<div class="cartao pn-vazio-grande"><strong>O Quadro.gs desta implantação é da versão anterior.</strong>
+      Cole o Quadro.gs desta entrega no Apps Script e crie uma Nova versão da implantação. Se já fez isso, recarregue a página (F5).</div>`;
+    return;
+  }
+  el('acoes-topo').innerHTML = acoes(true);
+  // Computador compartilhado: outra pessoa entrou nesta aba — o recorte de quem saiu nao vale para ela.
+  const quem = (SESSAO && SESSAO.usuario && SESSAO.usuario.email) || '';
+  if (QD.de !== quem) QD = qdEstadoInicial(quem);
+  // Primeira abertura: o coordenador cai no turno dele (A = 1° TURNO, B = 2°, C = 3°). E ponto de partida, nao permissao.
+  if (!QD.iniciado) {
+    QD.iniciado = true;
+    const t = String((SESSAO && SESSAO.usuario && SESSAO.usuario.turno) || '').toUpperCase().trim();
+    const meu = { A: '1° TURNO', B: '2° TURNO', C: '3° TURNO' }[t];
+    if (meu && qdNaEmpresa().some((g) => g.equipe === meu)) QD.equipe = meu;
+    qdFeRetomar(quem);                     // a gravacao das ferias pela pagina volta na aba Ferias
+  }
+  if ((QD.equipe !== '*' && QD.equipe !== '' && QD_EQUIPES.indexOf(QD.equipe) === -1) ||
+      (QD.equipe === '' && !qdNaEmpresa().some((g) => !g.equipe))) QD.equipe = '*';
+  const lida = d.atualizado ? new Date(d.atualizado) : null;
+  const hoje = lida && pnISO(lida) === qdHoje();
+  const l = d.leitura || {};
+  el('subtitulo-pagina').textContent = (l.layout === 'APOIO' ? 'Abas APOIO' : 'Aba GERAL') + (d.fonte ? ' de «' + d.fonte.nome + '»' : '') +
+    (lida ? ' · lida ' + (hoje ? 'hoje' : 'em ' + pnDataLonga(pnISO(lida)).slice(0, 5)) + ' às ' + qdHoraLeitura() : '') +
+    (qdMemo().inc.length ? '' : ' · planilha conferida');
+  QD_FAIXA_HTML = null;                    // o #qd-faixa e novo: uma leitura nova da planilha e anunciada uma vez
+  el('pagina').innerHTML = `<div class="bi-quadro qd">
+    <div id="qd-faixa"></div>
+    <div id="qd-abas"></div>
+    <div id="qd-filtros"></div>
+    <div id="qd-conteudo"></div>
+  </div>`;
+  qdDesenhar();
+}
+
+/* Sair (ou sessao vencida, no computador compartilhado): nada do Quadro de quem saiu fica na memoria da pagina. */
+function qdZerar() { QD_MEMO = null; QD = qdEstadoInicial(); QD_FAIXA_HTML = null; }
+
+/* Atualizar dados: a tela fica a 60% (sem pular) ate a leitura nova chegar. */
+function qdAtualizar() {
+  const q = document.querySelector('.bi-quadro');
+  if (q) q.classList.add('qd-relendo');
+  agir('atualizarQuadro', {}).catch(() => {}).then(() => { const x = document.querySelector('.bi-quadro.qd-relendo'); if (x) x.classList.remove('qd-relendo'); });
+}
+
+function qdAba(qual) { QD.aba = qual; qdDesenhar(); try { window.scrollTo({ top: 0 }); } catch (e) {} }
+function qdEquipe(e) {
+  QD.equipe = (QD.equipe === e && e !== '*') ? '*' : e;
+  // a funcao escolhida sai se nao existir na equipe nova
+  if (QD.funcao && !qdRecorte(qdNaEmpresa(), 'funcao').some((g) => qdChaveFuncao(qdFuncaoDe(g)) === qdChaveFuncao(QD.funcao))) QD.funcao = '';
+  QD.limite = 100; QD.desfalquesTodos = false; qdDesenhar();
+}
+function qdFuncao(f) {
+  // a funcao fica com a grafia da tela (a mais usada na GERAL; a CDESLIGADOS pode escrever sem acento)
+  if (f) f = qdMemo().grafia[qdChaveFuncao(f)] || f;
+  // o filtro soma as grafias (compara pela chave): tocar de novo na mesma funcao, em qualquer grafia, desliga
+  QD.funcao = (QD.funcao && qdChaveFuncao(QD.funcao) === qdChaveFuncao(f)) ? '' : f; QD.limite = 100; qdDesenhar();
+}
+function qdLimpar() { QD.equipe = '*'; QD.funcao = ''; QD.motivo = ''; QD.mes = ''; QD.limite = 100; QD.limiteMov = 30; qdDesenhar(); }
+/* Atalho para o Quadro por turno ja recortado (celula do mapa, desfalque, "ver quem"). */
+function qdVerPessoas(equipe, funcao, mostrar) {
+  QD.equipe = equipe; QD.funcao = funcao; QD.mostrar = mostrar || 'empresa'; QD.busca = ''; QD.limite = 100;
+  Object.keys(QD.recolhidas).forEach((k) => { if (k.indexOf('eq') === 0) delete QD.recolhidas[k]; });     // a secao recolhida abre
+  QD.focoDepois = '#qd-lista .qd-pessoa, #qd-lista .qd-tabela tbody tr';                                // teclado: na primeira pessoa
+  qdAba('pessoas');
+}
+/* A Conferencia ja rolada ate o grupo (ou com "Como o GSL leu a planilha" aberto). */
+function qdIrConferencia(alvo) {
+  if (alvo === 'leitura') QD.leituraAberta = true;
+  if (alvo) QD.focoDepois = alvo === 'leitura' ? '#qd-leitura' : '#qd-grupo-' + alvo + ' h3';      // so com o teclado
+  QD.aba = 'conf';
+  qdDesenhar();
+  const e = el(alvo === 'leitura' ? 'qd-leitura' : 'qd-grupo-' + alvo);
+  try {
+    if (!e) { window.scrollTo({ top: 0 }); return; }
+    const t = document.querySelector('.topo');                      // o topo do GSL fica fixo: o grupo nao pode parar embaixo dele
+    const fixo = t && getComputedStyle(t).position === 'sticky' ? t.offsetHeight : 0;
+    window.scrollTo({ top: e.getBoundingClientRect().top + window.scrollY - fixo - 12 });
+  } catch (x) {}
+}
+
+/*
+ * Depois de redesenhar, o foco volta ao mesmo controle (filtro, aba, ordenacao).
+ * So quem usa o TECLADO e levado a outro lugar (a 1a pessoa da lista aberta pelo
+ * mapa, o 1o item novo do Mostrar mais, a aba): com o mouse, um foco levado a
+ * outro controle faria a barra de espaco aciona-lo em vez de rolar a pagina.
+ */
+const qdChaveFoco = (x) => x.tagName + '|' + String(x.className).split(' ')[0] + '|' + (x.getAttribute('onclick') || x.getAttribute('onchange') || x.id || '');
+function qdGuardarFoco() {
+  const a = document.activeElement;
+  if (!(a && a !== document.body && a.closest && a.closest('.bi-quadro'))) return null;
+  let teclado = true;
+  try { teclado = a.matches(':focus-visible'); } catch (e) {}
+  return { k: qdChaveFoco(a), teclado: teclado };
+}
+function qdFocar(n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } }
+function qdDevolverFoco(f) {
+  const depois = QD.focoDepois;
+  QD.focoDepois = '';
+  if (!f) return;
+  const n = Array.from(document.querySelectorAll('.bi-quadro button, .bi-quadro select, .bi-quadro input, .bi-quadro summary')).find((x) => qdChaveFoco(x) === f.k);
+  if (!f.teclado) {
+    // mouse ou toque: o mesmo controle (se ainda existe); se sumiu, o foco fica na pagina
+    if (n) qdFocar(n); else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    return;
+  }
+  // destino escolhido pelo proprio controle (ex.: a primeira pessoa da lista aberta pelo mapa)
+  const alvo = depois && document.querySelector(depois);
+  if (alvo) {
+    // item que nao e controle (li, h3, a secao): focavel so agora e so ate perder o foco (o clique do mouse nao o foca)
+    if (alvo.tabIndex < 0 && !alvo.hasAttribute('tabindex')) {
+      alvo.setAttribute('tabindex', '-1');
+      alvo.addEventListener('blur', () => alvo.removeAttribute('tabindex'), { once: true });
+    }
+    qdFocar(alvo);
+    return;
+  }
+  const aba = document.querySelector('#qd-abas .aba.ativa');
+  if (n || aba) qdFocar(n || aba);          // o controle sumiu (Limpar filtros, chip): volta para a aba
+}
+let QD_FAIXA_HTML = null;
+function qdDesenhar() {
+  const alvo = el('qd-conteudo'); if (!alvo) return;
+  const foco = qdGuardarFoco();
+  // a rolagem do grafico mes a mes (quem rolou ate um mes nao pode ver o grafico pular sob o dedo)
+  const grAntes = document.querySelector('.qd-grade2 .qd-espelho');
+  const rolagem = grAntes ? { x: grAntes.scrollLeft, n: grAntes.children.length } : null;
+  // a faixa (role=alert) so e trocada quando muda: recriada a cada clique, o leitor de tela a leria de novo
+  const fx = qdFaixa();
+  if (fx !== QD_FAIXA_HTML) { el('qd-faixa').innerHTML = fx; QD_FAIXA_HTML = fx; }
+  el('qd-abas').innerHTML = pnAbas([['geral', 'Visão geral'], ['pessoas', 'Quadro por turno'], ['mov', 'Movimentação'],
+    ['ferias', 'Férias ' + qdFeSeloAba()], ['conf', 'Conferência ' + qdSeloAba()]], QD.aba, 'qdAba');
+  el('qd-filtros').innerHTML = qdFiltros();
+  try {
+    if (QD.aba === 'pessoas') alvo.innerHTML = qdPessoas();
+    else if (QD.aba === 'mov') alvo.innerHTML = qdMovimentacao();
+    else if (QD.aba === 'conf') alvo.innerHTML = qdConferencia();
+    else if (QD.aba === 'ferias') alvo.innerHTML = qdFerias();
+    else alvo.innerHTML = qdVisaoGeral();
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+  // o grafico mes a mes rola dentro do cartao: abre nos meses mais recentes (ou no mes escolhido);
+  // com os mesmos meses, fica onde a pessoa deixou, e so rola se o mes escolhido estiver fora da vista
+  const gr = document.querySelector('.qd-grade2 .qd-espelho');
+  if (gr) {
+    const m = gr.querySelector('.qd-esp-mes.escolhido');
+    if (rolagem && rolagem.n === gr.children.length) gr.scrollLeft = rolagem.x;
+    else gr.scrollLeft = m ? m.offsetLeft - 40 : gr.scrollWidth;
+    if (m) {
+      const esq = m.offsetLeft, dir = esq + m.offsetWidth, ver = gr.scrollLeft, ate = ver + gr.clientWidth;
+      if (dir <= ver || esq >= ate) gr.scrollLeft = esq - 40;         // todo fora da vista: traz, com folga
+      else if (esq < ver) gr.scrollLeft = esq;                        // cortado na borda: rola so o que falta (o mes fica sob o dedo)
+      else if (dir > ate) gr.scrollLeft = dir - gr.clientWidth;
+    }
+  }
+  qdDevolverFoco(foco);
+}
+
+/* Contador da aba Conferencia: ■ graves, ▲ so atencao, ✓ nada (conta a planilha inteira). */
+function qdSeloAba() {
+  const inc = qdMemo().inc;
+  const g = inc.filter((x) => x.gravidade === 'grave').length, a = inc.length - g;
+  const rot = inc.length ? [g ? qdPlural(g, 'grave', 'graves') : '', a ? a + ' de atenção' : ''].filter(Boolean).join(' e ') : 'planilha conferida';
+  if (g) return `<span class="qd-contador grave" role="img" aria-label="${rot}" title="${rot}">■ ${g}</span>`;
+  if (a) return `<span class="qd-contador atencao" role="img" aria-label="${rot}" title="${rot}">▲ ${a}</span>`;
+  return `<span class="qd-contador ok" role="img" aria-label="${rot}" title="${rot}">✓</span>`;
+}
+
+/*
+ * FAIXA: so existe quando o numero do quadro esta errado por causa da
+ * planilha — desligado que continua ATIVO na GERAL (o pedido da gerencia) ou
+ * coluna PROD/EQUIPE/STATUS que nao foi achada — e, informativa, no formato
+ * antigo (abas APOIO). Fica acima das abas, nunca e filtrada e some na
+ * Conferencia (que diz o mesmo). Pontos de atencao vao so no contador.
+ */
+function qdFaixa() {
+  if (QD.aba === 'conf') return '';
+  const l = DADOS.leitura || {}, inc = qdMemo().inc;
+  const faltam = inc.filter((x) => x.tipo === 'COLUNA' && x.gravidade === 'grave');
+  const graves = inc.filter((x) => x.tipo === 'DESLIGADO_ATIVO' && x.gravidade === 'grave');
+  if (!faltam.length && !graves.length) {
+    return l.layout === 'APOIO' ? `<div class="qd-faixa info" role="status"><span class="qd-faixa-ico">${QD_ICONES.info}</span>
+      <div class="qd-faixa-txt"><span>Esta planilha ainda não tem a aba <b>GERAL</b>: o GSL leu as abas APOIO TA, TB e TC. Crie a aba GERAL
+        (EQUIPE, COD, PROD, DESCRIÇÃO, RH, STATUS) e o GSL passa a montar os turnos sozinho.</span></div></div>` : '';
+  }
+  const partes = faltam.map((x) => `<b>Não achei a coluna ${esc(x.nome)} na aba GERAL</b>
+    <span>${esc(QD_COLUNA_POR[x.coluna] || '')} O cabeçalho precisa ter EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS na mesma linha, numa das 15 primeiras.</span>`);
+  if (graves.length) {
+    const k = graves.length, N = qdNaEmpresa().length;
+    const nomes = graves.slice(0, 2).map((x) => `<button class="qd-link" onclick="qdFicha(${Number(x.ref) || 0})">${esc(qdNomeTxt(x) || 'Sem nome')}</button>
+      (${esc(x.equipe || 'sem turno')}, ${x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'sem data na CDESLIGADOS'})`).join(' e ');
+    partes.push(`<b>${k === 1 ? '1 desligado continua ATIVO na GERAL' : k + ' desligados continuam ATIVOS na GERAL'}</b>
+      <span>Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro. Sem ${k === 1 ? 'ele' : 'eles'}, o CD teria
+        ${qdPlural(N - k, 'pessoa', 'pessoas')}. ${nomes}${k > 2 ? ' e mais ' + (k - 2) : ''}.</span>`);
+  }
+  const atencao = inc.filter((x) => x.gravidade !== 'grave').length;
+  return `<div class="qd-faixa" role="alert">
+    <span class="qd-faixa-ico">${QD_ICONES.grave}</span>
+    <div class="qd-faixa-txt">${partes.join('')}
+      ${atencao ? `<button class="qd-link" onclick="qdIrConferencia('')">+ ${qdPlural(atencao, 'ponto de atenção', 'pontos de atenção')} na planilha</button>` : ''}</div>
+    ${graves.length ? `<button class="botao secundario" onclick="qdIrConferencia('DESLIGADO_ATIVO')">Ver e corrigir</button>`
+      : `<button class="botao secundario" onclick="qdIrConferencia('leitura')">Ver como a planilha foi lida</button>`}
+  </div>`;
+}
+
+/*
+ * LINHA DE FILTROS: Equipe (sem contagem: os cartoes e cabecalhos ja contam,
+ * e na Movimentacao um efetivo ali seria lido como movimento) e Funcao (com
+ * contagem). Some na Conferencia, que mostra a planilha inteira.
+ */
+function qdFiltros() {
+  if (QD.aba === 'conf') return '';
+  const base = qdNaEmpresa();
+  const temSem = base.some((g) => !g.equipe);
+  const opcoes = [['*', 'Todas', 'Todas']].concat(QD_EQUIPES.map((e) => [e, e, e === 'ADM' ? 'ADM' : e.slice(0, 2)]))
+    .concat(temSem ? [['', 'Sem turno', 'Sem turno']] : []);
+  // uma opcao por funcao: as grafias com e sem acento somam (o filtro compara pela chave); vale a grafia mais usada
+  const funcoes = {}, grafias = {};
+  qdRecorte(base, 'funcao').forEach((g) => {
+    const f = qdFuncaoDe(g), k = qdChaveFuncao(f);
+    funcoes[k] = (funcoes[k] || 0) + 1;
+    const gr = grafias[k] = grafias[k] || {}; gr[f] = (gr[f] || 0) + 1;
+  });
+  const grafia = (k) => qdMemo().grafia[k] || Object.keys(grafias[k]).sort((a, b) => grafias[k][b] - grafias[k][a] || a.localeCompare(b))[0];
+  const kSel = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
+  const lista = Object.keys(funcoes).map((k) => [k, k === kSel ? QD.funcao : grafia(k)]).sort((a, b) => a[1].localeCompare(b[1]));
+  if (kSel && !funcoes[kSel]) lista.unshift([kSel, QD.funcao]);
+  const ativo = QD.equipe !== '*' || QD.funcao || QD.motivo || QD.mes;
+  return `<div class="qd-filtros" role="group" aria-label="Filtros do quadro">
+    <div class="qd-seg" role="group" aria-label="Equipe">${opcoes.map(([e, longo, curto]) => `<button class="qd-pill" aria-pressed="${QD.equipe === e}"
+        onclick="qdEquipe(${jsArg(e)})" title="${esc(longo)}">${e !== '*' ? `<i class="${e ? '' : 'sem'}" style="background:${qdCor(e)}"></i>` : ''}<span class="qd-pill-longo">${esc(longo)}</span><span class="qd-pill-curto">${esc(curto)}</span></button>`).join('')}</div>
+    <label class="qd-funcao"><span class="bq-rot">Função</span>
+      <select onchange="QD.funcao=this.value;QD.limite=100;qdDesenhar()"><option value="">Todas as funções</option>
+        ${lista.map(([k, f]) => `<option value="${esc(f)}" ${k === kSel ? 'selected' : ''}>${f === QD_SEM_FUNCAO ? 'Sem função' : esc(f)} (${funcoes[k] || 0})</option>`).join('')}</select></label>
+    ${ativo ? '<button class="bq-limpar" onclick="qdLimpar()">Limpar filtros</button>' : ''}
+  </div>`;
+}
+
+/* COPIAR RESUMO: 4 ou 5 linhas para colar no WhatsApp ou no e-mail, do recorte da tela. */
+function qdResumoTexto() {
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const escopo = qdRecorte(qdNaEmpresa());
+  const c = qdConta(escopo);
+  const j90 = qdJanela(90);
+  const des = qdRecorte(DADOS.des || []), adm = qdRecorte(DADOS.adm || []);
+  const s = des.filter((x) => qdDentro(x.data, j90)).length, e = adm.filter((x) => qdDentro(x.data, j90)).length, z = adm.filter((x) => !x.data).length;
+  const k = qdMemo().inc.filter((x) => x.tipo === 'DESLIGADO_ATIVO' && x.gravidade === 'grave').length;
+  const porEq = QD.equipe !== '*' ? '' : ': ' + QD_EQUIPES.map((q) => q + ' ' + escopo.filter((g) => g.equipe === q).length).join(' · ') +
+    (escopo.some((g) => !g.equipe) ? ' · sem turno ' + escopo.filter((g) => !g.equipe).length : '');
+  return ['Quadro do CD' + (filial ? ' — ' + filial : '') + ' — ' + pnDataLonga(qdHoje()) + (qdRotuloRecorte() ? ' — ' + qdRotuloRecorte() : ''),
+    qdPlural(c.n, 'pessoa', 'pessoas') + ' no quadro' + porEq,
+    qdContaTxt(c) || 'ninguém neste recorte',
+    'Últimos 90 dias: ' + qdPlural(s, 'saída', 'saídas') + ' e ' + qdPlural(e, 'entrada', 'entradas') + (z ? ' (' + qdPlural(z, 'admitido sem data', 'admitidos sem data') + ')' : '')]
+    .concat(k ? ['Atenção: ' + (k === 1 ? '1 desligado ainda ATIVO na GERAL' : k + ' desligados ainda ATIVOS na GERAL')] : [])
+    .concat(DADOS.ferias ? [qdFeResumoLinha()] : []).join('\n');
+}
+async function qdCopiarResumo() {
+  const t = QD.aba === 'ferias' && DADOS.ferias ? qdFeResumoTexto() : qdResumoTexto();
+  try { await navigator.clipboard.writeText(t); avisar('Resumo copiado'); return; } catch (e) { /* a moldura do Google pode barrar */ }
+  try {
+    const a = document.createElement('textarea');
+    a.value = t; a.setAttribute('readonly', ''); a.style.position = 'fixed'; a.style.opacity = '0';
+    document.body.appendChild(a); a.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(a);
+    if (ok) { avisar('Resumo copiado'); return; }
+  } catch (e) { /* segue para a janela */ }
+  abrirJanela('Resumo do quadro', `<p class="dica">Copie com Ctrl+C (no celular, toque e segure).</p>
+    <textarea id="qd-resumo" rows="6" style="width:100%" readonly>${esc(t)}</textarea>`, '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+  const a = el('qd-resumo'); if (a) { a.focus(); a.select(); }
+}
+
+/* ------------------------------------------------------------------ */
+/* FICHA DA PESSOA                                                     */
+/* ------------------------------------------------------------------ */
+
+function qdFicha(ref) {
+  const g = qdGeral().find((x) => x.ref === ref);
+  if (!g) return;
+  const linha = g.linha;
+  const memo = qdMemo();
+  const adm = qdAchar(memo.ixAdm, g) || [], des = qdAchar(memo.ixDes, g) || [];
+  const pend = (memo.pend[ref] || []).slice().sort((a, b) => (a.gravidade === 'grave' ? 0 : 1) - (b.gravidade === 'grave' ? 0 : 1));
+  const ini = qdNomeTxt(g).split(' ').filter(Boolean);
+  const link = g.aba ? '' : qdLinkLinha(linha);            // no layout APOIO o gid nao e o da aba da pessoa
+  const entendeu = g.ativo ? 'No quadro, ' + (g.situacao === 'ATIVO' ? 'disponível' : QD_SITUACAO[g.situacao].toLowerCase()) : 'Fora da empresa (não conta no quadro)';
+  abrirJanela('', `<div class="qd-ficha">
+    <div class="qd-ficha-topo"><div class="qd-avatar" aria-hidden="true">${esc(((ini[0] || '?')[0] || '?') + (ini.length > 1 ? ini[ini.length - 1][0] : ''))}</div>
+      <div><h3>${g.nome ? esc(qdNomeTxt(g)) : '<em>Sem nome na GERAL</em>'}</h3>
+        <div class="qd-ficha-chips">${qdEq(g.equipe, g.equipeBruta)}<span class="qd-tag">${g.funcao ? esc(g.funcao) : 'Sem função'}</span></div></div></div>
+    <dl class="qd-ficha-dados">
+      <div><dt>Produtivo (COD)</dt><dd class="bq-num">${esc(g.cod || '—')}</dd></div>
+      <div><dt>Matrícula (RH)</dt><dd class="bq-num">${esc(g.rh || '—')}</dd></div>
+      <div><dt>STATUS na planilha</dt><dd>${esc(g.status || '(vazio)')}</dd></div>
+      <div><dt>Como o GSL entendeu</dt><dd>${entendeu}</dd></div>
+      <div><dt>Linha da ${esc(g.aba || 'GERAL')}</dt><dd class="bq-num">${linha}</dd></div>
+    </dl>
+    ${qdFeFichaSecao(ref)}
+    ${adm.length || des.length ? `<h4>Movimentação</h4><ul class="qd-ficha-lista">
+      ${adm.map((a) => `<li>↑ Admitido(a) ${a.data ? 'em ' + pnDataLonga(a.data) : '(sem data na planilha)'}${a.status ? ' · ' + esc(a.status) : ''}</li>`).join('')}
+      ${des.map((x) => `<li>↓ Desligado(a) ${x.data ? 'em ' + pnDataLonga(x.data) : '(sem data na planilha)'} · ${esc(x.tipo)}${x.motivo ? ' · ' + esc(x.motivo) : ''}</li>`).join('')}</ul>` : ''}
+    ${pend.length ? `<h4>Para corrigir</h4><ul class="qd-ficha-lista">${pend.map((x) => `<li>${qdSelo(x.gravidade, QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo)} ${esc(x.detalhe)}</li>`).join('')}</ul>` : ''}
+  </div>`, `${link ? `<a class="botao secundario" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha (linha ${linha}) ↗</a>` : ''}
+    <button class="botao" onclick="fecharJanela()">Fechar</button>`);
+}
+
+/* ------------------------------------------------------------------ */
+/* CONFERENCIA — a lista de tarefas da planilha                        */
+/* ------------------------------------------------------------------ */
+
+const QD_TIPOS = {
+  COLUNA: { titulo: 'Colunas não encontradas na GERAL', curto: 'coluna faltando',
+    oque: 'O GSL procura EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS na mesma linha, numa das 15 primeiras.',
+    corrigir: 'Escreva o nome da coluna exatamente assim no cabeçalho.' },
+  DESLIGADO_ATIVO: { titulo: 'Desligados que continuam ATIVOS na GERAL', curto: 'desligado ainda ativo',
+    oque: 'Estão na aba CDESLIGADOS, mas o STATUS na GERAL ainda é ativo — por isso contam no quadro.',
+    corrigir: 'Mude o STATUS para DESLIGADO (ou INATIVO) na GERAL. Se foi recontratação, ponha na CADMITIDOS a data da nova admissão, com o COD (ou o RH) e o nome como estão na GERAL — a saída antiga fica, porque conta no turnover.' },
+  MESMO_NOME: { titulo: 'Mesmo nome de um desligado, outro COD ou RH', curto: 'mesmo nome de um desligado',
+    oque: 'A pessoa está ativa na GERAL e tem o mesmo nome de alguém da CDESLIGADOS, mas o COD ou a matrícula não batem: pode ser um homônimo ou um número digitado errado.',
+    corrigir: 'Se foi recontratação com COD ou matrícula nova, ponha na CADMITIDOS a data da nova admissão, com o COD (ou o RH) e o nome como estão na GERAL (o aviso some). Se o número foi digitado errado, acerte-o. Se for outra pessoa (homônimo), não mude nada na GERAL.' },
+  SEM_NOME: { titulo: 'Linhas sem nome', curto: 'sem nome',
+    oque: 'A coluna PROD está vazia: a pessoa conta no quadro, mas aparece como Sem nome.', corrigir: 'Preencha o PROD.' },
+  EQUIPE: { titulo: 'EQUIPE fora do padrão', curto: 'sem turno',
+    oque: 'O valor não é 1° TURNO, 2° TURNO, 3° TURNO nem ADM: a pessoa conta no CD, mas em nenhum turno.',
+    corrigir: 'Escreva exatamente 1° TURNO, 2° TURNO, 3° TURNO ou ADM.' },
+  COD_REPETIDO: { titulo: 'Produtivo (COD) repetido', curto: 'COD repetido',
+    oque: 'O mesmo número em mais de uma linha de quem está no quadro: pessoa duplicada (conta duas vezes) ou número digitado errado.',
+    corrigir: 'Confira cada linha e apague a duplicada.' },
+  RH_REPETIDO: { titulo: 'Matrícula (RH) repetida', curto: 'RH repetido',
+    oque: 'O mesmo número em mais de uma linha de quem está no quadro: pessoa duplicada (conta duas vezes) ou número digitado errado.',
+    corrigir: 'Confira cada linha e apague a duplicada.' },
+  ADMITIDO_FORA: { titulo: 'Admitidos que não estão na GERAL', curto: 'não está na GERAL',
+    oque: 'Estão na CADMITIDOS, mas não na GERAL: o quadro conta gente a menos.',
+    corrigir: 'Inclua a pessoa na GERAL com EQUIPE, COD, PROD, DESCRIÇÃO, RH e STATUS.' },
+  // FÉRIAS (14/10): a extracao do sistema cruzada com a GERAL pela matricula (os ultimos numeros do RH)
+  FERIAS_ABA: { titulo: 'Férias: a aba FÉRIAS está vazia ou incompleta', curto: 'aba FÉRIAS',
+    oque: 'Faltam as linhas ou uma coluna que o GSL usa para ligar as férias à GERAL e calcular os prazos. O detalhe diz o que deixa de funcionar.',
+    corrigir: 'Extraia as férias do sistema de novo e cole na aba com o cabeçalho como sai do sistema (Matricula, Nome, pa_fim, DTA_LIMITE, DTA_LIMITEMAX…); depois use Atualizar dados.' },
+  FERIAS_NOME: { titulo: 'Férias: matrícula de outra pessoa', curto: 'férias: matrícula de outro nome',
+    oque: 'A matrícula da aba FÉRIAS (os últimos números do RH) bate com alguém da GERAL de outro nome: as férias seriam de outra pessoa, e o GSL não as liga a ela.',
+    corrigir: 'Confira o RH na GERAL: os últimos números precisam ser a matrícula do sistema.' },
+  FERIAS_DUPLA: { titulo: 'Férias: linha que serve a mais de uma pessoa', curto: 'férias: duas pessoas',
+    oque: 'A matrícula (ou o nome) da aba FÉRIAS bate com mais de uma pessoa ativa da GERAL, e o nome não desempata.',
+    corrigir: 'Confira o RH e o nome dessas pessoas na GERAL.' },
+  FERIAS_FORA_GERAL: { titulo: 'Férias: do CD, mas fora da GERAL', curto: 'férias: fora da GERAL',
+    oque: 'Está na extração de férias com o centro de custo do CD (veja os parâmetros da aba Férias), mas ninguém da GERAL é o dono dela. Se alguém da GERAL tem o mesmo nome com outro RH, o detalhe diz quem.',
+    corrigir: 'Inclua a pessoa na GERAL (com o RH), corrija o RH de quem tem o mesmo nome, ou confira se ela ainda é do CD.' },
+  FERIAS_SEM_DADOS: { titulo: 'Férias: sem linha na aba FÉRIAS', curto: 'sem dados de férias',
+    oque: 'Está ativo(a) na GERAL, mas nenhuma linha da aba FÉRIAS ficou com ele(a): a matrícula não veio na extração, veio com outro nome ou serve a mais de uma pessoa (o detalhe diz qual). Sem a linha, o GSL não avisa o prazo.',
+    corrigir: 'Confira o RH na GERAL (os últimos números são a matrícula do sistema) e se a extração saiu completa (todos os centros de custo do CD).' }
+};
+const QD_ORDEM_TIPOS = ['COLUNA', 'DESLIGADO_ATIVO', 'MESMO_NOME', 'SEM_NOME', 'EQUIPE', 'COD_REPETIDO', 'RH_REPETIDO', 'ADMITIDO_FORA',
+  'FERIAS_ABA', 'FERIAS_NOME', 'FERIAS_DUPLA', 'FERIAS_FORA_GERAL', 'FERIAS_SEM_DADOS'];
+/* Item que nao e de uma pessoa (coluna que falta na GERAL, a aba FÉRIAS que nao serve): o nome vai como esta e sem "linha N". */
+const qdItemDaPlanilha = (x) => x.tipo === 'COLUNA' || x.tipo === 'FERIAS_ABA';
+/* "linha 14" ou "linhas 14 e 174", cada uma com o link para a linha (so na GERAL). */
+function qdLinhasItem(x) {
+  const ls = x.linhas && x.linhas.length > 1 ? x.linhas : (x.linha ? [String(x.linha) + (x.aba ? ' (' + x.aba + ')' : '')] : []);
+  if (!ls.length) return '';
+  const um = (t) => (/^\d+$/.test(String(t)) && DADOS.fonte && qdLinkItem(x, Number(t)))
+    ? `<a href="${esc(qdLinkItem(x, Number(t)))}" target="_blank" rel="noopener">${esc(t)}</a>` : esc(t);
+  return `<span class="bq-num">${ls.length > 1 ? 'linhas ' : 'linha '}${ls.length > 1 ? ls.slice(0, -1).map(um).join(', ') + ' e ' + um(ls[ls.length - 1]) : um(ls[0])}</span>`;
+}
+
+function qdConferencia() {
+  const inc = qdMemo().inc;
+  const graves = inc.filter((x) => x.gravidade === 'grave').length;
+  const k = inc.filter((x) => x.tipo === 'DESLIGADO_ATIVO' && x.gravidade === 'grave').length;
+  const grupos = QD_ORDEM_TIPOS.map((t) => [t, inc.filter((x) => x.tipo === t)]).filter((g) => g[1].length);
+  const outros = inc.filter((x) => QD_ORDEM_TIPOS.indexOf(x.tipo) === -1);
+  if (outros.length) grupos.push(['OUTROS', outros]);
+  const hora = qdHoraLeitura();
+  const geral = qdLinkLinha(0);
+  const cabeca = inc.length
+    ? `<div class="qd-conf-resumo"><h2>${qdPlural(inc.length, 'ponto para corrigir na planilha', 'pontos para corrigir na planilha')}</h2>
+        ${graves ? qdSelo('grave', qdPlural(graves, 'grave', 'graves')) : ''}${inc.length - graves ? qdSelo('atencao', (inc.length - graves) + ' de atenção') : ''}</div>
+      <p class="qd-conf-sub">${k ? `O que mais pesa: ${k === 1 ? '1 desligado ainda conta' : k + ' desligados ainda contam'} no quadro. ` : ''}${hora ? 'Lida às ' + hora + ' — corrigiu a planilha? Use <b>Atualizar dados</b>.' : ''}</p>
+      <div class="qd-conf-acoes">${geral ? `<a class="icone-botao" href="${esc(geral)}" target="_blank" rel="noopener">Abrir a GERAL ↗</a>` : ''}
+        <button class="icone-botao" onclick="qdBaixarConferencia()">Baixar lista (Excel)</button></div>`
+    : `<div class="qd-conf-resumo ok">${QD_ICONES.ok}<h2>Planilha conferida — nenhuma inconsistência</h2></div>
+      <p class="qd-conf-sub">Conferido: desligados que continuam ativos, linhas sem nome, EQUIPE fora do padrão, COD e RH repetidos, admitidos fora da GERAL${DADOS.ferias ? ' e as matrículas da aba FÉRIAS' : ''}.</p>`;
+  return cabeca + grupos.map(([tipo, itens]) => {
+    const t = QD_TIPOS[tipo] || { titulo: 'Outros', oque: '', corrigir: '' };
+    const grav = itens.some((x) => x.gravidade === 'grave') ? 'grave' : 'atencao';
+    const ord = itens.slice().sort((a, b) => (a.linha || 1e9) - (b.linha || 1e9));
+    const mostra = (ord.length > 8 && !QD.recolhidas['tudo' + tipo]) ? ord.slice(0, 8) : ord;
+    return `<section class="bq-card qd-grupo ${grav}" id="qd-grupo-${esc(tipo)}">
+      <header class="qd-grupo-cab">${qdSelo(grav, grav === 'grave' ? 'grave' : 'atenção')}<h3>${esc(t.titulo)} <span class="bq-num">${itens.length}</span></h3></header>
+      <p class="bq-sub">${esc(t.oque)} <b>Como corrigir:</b> ${esc(t.corrigir)}</p>
+      <ul class="qd-itens">${mostra.map((x) => {
+        const link = x.tipo !== 'COLUNA' && x.linha ? qdLinkItem(x, x.linha) : '';
+        return `<li class="qd-item">
+          <div class="qd-item-quem">${x.ref ? `<button class="qd-link qd-item-nome" onclick="qdFicha(${Number(x.ref)})">${x.nome ? esc(qdNomeTxt(x)) : '<em>Sem nome</em>'}</button>`
+            : `<span class="qd-item-nome">${x.nome ? esc(qdItemDaPlanilha(x) ? x.nome : qdNomeTxt(x)) : '<em>Sem nome</em>'}</span>`}
+            <span class="qd-item-ids bq-num">${x.cod ? 'COD ' + esc(x.cod) : ''}${x.cod && x.rh ? ' · ' : ''}${x.rh ? 'RH ' + esc(x.rh) : ''}</span>
+            ${x.equipe ? qdEq(QD_EQUIPES.indexOf(x.equipe) !== -1 ? x.equipe : '', x.equipe) : ''}</div>
+          <div class="qd-item-det">${esc(x.detalhe)}</div>
+          <div class="qd-item-acoes">${qdItemDaPlanilha(x) ? '' : qdLinhasItem(x)}
+            ${link ? `<a class="icone-botao" href="${esc(link)}" target="_blank" rel="noopener">Abrir na planilha ↗</a>` : ''}</div>
+        </li>`; }).join('')}</ul>
+      ${ord.length > mostra.length ? `<button class="qd-link" onclick="QD.focoDepois='#qd-grupo-${esc(tipo)} .qd-item:nth-child(${mostra.length + 1})';QD.recolhidas['tudo${tipo}']=true;qdDesenhar()">Ver todos (${ord.length})</button>` : ''}
+    </section>`;
+  }).join('') + qdLeitura();
+}
+
+/* Excel so com a lista da Conferencia (para quem corrige a planilha). */
+function qdLinhasConferencia() {
+  return [['GRAVIDADE', 'TIPO', 'NOME', 'COD', 'RH', 'EQUIPE', 'LINHA', 'DETALHE', 'COMO CORRIGIR']].concat(qdMemo().inc.map((x) => {
+    const t = QD_TIPOS[x.tipo] || {};
+    return [x.gravidade === 'grave' ? { v: 'GRAVE', tom: 'vermelho' } : { v: 'ATENÇÃO', tom: 'amarelo' }, t.titulo || x.tipo, qdItemDaPlanilha(x) ? x.nome : qdNomeTxt(x), x.cod || '', x.rh || '', x.equipe || '',
+      x.linhas && x.linhas.length ? x.linhas.join(', ') : (x.linha || ''), x.detalhe, t.corrigir || ''];
+  }));
+}
+function qdBaixarConferencia() { pnBaixarXlsx('conferencia-quadro-cd-' + qdHoje() + '.xlsx', [{ nome: 'Conferência', linhas: qdLinhasConferencia() }]); }
+
+/* Como o GSL leu a planilha: o raio-X que explica o "vira e mexe o nome some". */
+function qdLeitura() {
+  const l = DADOS.leitura || {};
+  const colunas = [['equipe', 'EQUIPE'], ['cod', 'COD'], ['nome', 'PROD'], ['funcao', 'DESCRIÇÃO'], ['rh', 'RH'], ['status', 'STATUS']];
+  const faltam = l.faltam || [];
+  const st = l.status || {}, eq = l.equipes || {};
+  const linhasSt = Object.keys(st).sort((a, b) => (st[b].n || 0) - (st[a].n || 0));
+  const linhasEq = Object.keys(eq).sort((a, b) => (eq[b].n || 0) - (eq[a].n || 0));
+  const comoSt = (s) => s === 'FORA' ? 'fora da empresa, não conta' : (s === 'ATIVO' ? 'no quadro, disponível' : 'no quadro, ' + (QD_SITUACAO[s] || s).toLowerCase());
+  const semFuncao = qdGeral().filter((g) => !g.funcao).length;
+  const aba = (x, nome) => !x ? `<li>${qdSelo('atencao', 'Não achei a aba ' + nome)}</li>`
+    : `<li><b>${esc(x.aba || nome)}</b>: ${qdPlural(x.linhas || 0, 'linha', 'linhas')}${x.semData ? ' (' + x.semData + ' sem data)' : ''}${x.semMotivo ? ' · sem a coluna MOTIVO' : ''}</li>`;
+  const aberto = faltam.length || QD.leituraAberta;
+  return `<details class="bq-card qd-leitura" id="qd-leitura"${aberto ? ' open' : ''} ontoggle="QD.leituraAberta=this.open">
+    <summary><h3>Como o GSL leu a planilha</h3><span class="bq-sub">${esc(l.aba || 'GERAL')} · ${qdPlural(l.linhas || 0, 'linha com dados', 'linhas com dados')}${l.linhaCabecalho ? ' · cabeçalho na linha ' + l.linhaCabecalho : ''}</span></summary>
+    ${l.layout === 'APOIO' ? '' : `<div class="qd-leitura-cols">${colunas.map(([k, rot]) => faltam.indexOf(k) === -1
+      ? `<span class="qd-col ok">✓ ${esc(rot)}${l.colunas && l.colunas[k] && l.colunas[k] !== rot && !(k === 'funcao' && l.colunas[k] === 'DESCRICAO') ? ' <small>(' + esc(l.colunas[k]) + ')</small>' : ''}</span>`
+      : `<span class="qd-col falta">${qdSelo(['nome', 'equipe', 'status'].indexOf(k) !== -1 ? 'grave' : 'atencao',
+          rot + ' não encontrada' + (k === 'nome' ? ' — os nomes aparecem como Sem nome' : ''))}</span>`).join('')}</div>`}
+    <div class="qd-leitura-tabs">
+      <div><h4>Valores de STATUS</h4><table><thead><tr><th>Como está escrito</th><th class="n">Linhas</th><th>O GSL entende</th></tr></thead>
+        <tbody>${linhasSt.map((k) => `<tr><td>${esc(k)}</td><td class="n">${qdN(st[k].n)}</td><td>${esc(comoSt(st[k].situacao))}</td></tr>`).join('')}</tbody></table></div>
+      <div><h4>Valores de EQUIPE</h4><table><thead><tr><th>Como está escrito</th><th class="n">Linhas</th><th>Turno</th></tr></thead>
+        <tbody>${linhasEq.map((k) => `<tr><td>${esc(k)}</td><td class="n">${qdN(eq[k].n)}</td><td>${eq[k].equipe ? qdEq(eq[k].equipe) : qdSelo('atencao', 'não reconhecido')}</td></tr>`).join('')}</tbody></table></div>
+    </div>
+    <ul class="qd-leitura-mais">
+      ${semFuncao ? `<li>DESCRIÇÃO vazia em ${qdPlural(semFuncao, 'linha', 'linhas')}.</li>` : ''}
+      ${l.mescladas ? `<li>${qdPlural(l.mescladas, 'linha completada', 'linhas completadas')} com o valor de células mescladas (a planilha só guarda o valor na primeira linha da mesclagem).</li>` : ''}
+      ${l.adm !== undefined ? aba(l.adm, 'CADMITIDOS') : ''}${l.des !== undefined ? aba(l.des, 'CDESLIGADOS') : ''}
+      <li>${l.layout === 'APOIO' ? 'A planilha ainda não tem a aba GERAL: o GSL leu as abas APOIO TA, APOIO TB e APOIO TC.'
+        : 'As abas APOIO TA, APOIO TB e APOIO TC não são mais lidas.'}</li>
+    </ul>
+  </details>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* QUADRO POR TURNO — o quadro de parede de cada turno                 */
+/* ------------------------------------------------------------------ */
+
+const QD_MOSTRAR = [['empresa', 'No quadro'], ['disponiveis', 'Disponíveis'], ['foradoposto', 'Fora do posto'], ['novos', 'Novos'],
+  ['pendencia', 'Com pendência'], ['fora', 'Fora da empresa']];
+function qdMostrar(lista, qual) {
+  const pend = qdMemo().pend;
+  if (qual === 'fora') return lista.filter((g) => !g.ativo);
+  if (qual === 'pendencia') return lista.filter((g) => pend[g.ref]);
+  const na = lista.filter((g) => g.ativo);
+  if (qual === 'disponiveis') return na.filter((g) => g.situacao === 'ATIVO');
+  if (qual === 'foradoposto') return na.filter((g) => g.situacao === 'FERIAS' || g.situacao === 'AFASTADO');
+  if (qual === 'novos') return na.filter((g) => qdAdmissao(g));
+  return na;
+}
+/* Busca sem acento nem maiuscula: o nome contem o texto; COD e RH comecam com ele. */
+function qdBuscar(lista) {
+  const b = qdChaveNome(QD.busca), bc = qdChaveCod(QD.busca);
+  if (!b && !bc) return lista;
+  return lista.filter((g) => (b && qdChaveNome(g.nome).indexOf(b) !== -1) ||
+    (bc && (qdChaveCod(g.cod).indexOf(bc) === 0 || qdChaveCod(g.rh).indexOf(bc) === 0)));
+}
+const qdListaDaTela = () => qdBuscar(qdMostrar(qdRecorte(qdGeral()), QD.mostrar));
+/* Etiquetas da pessoa: situacao e novo (neutras) e pendencias (selo, com icone). */
+function qdEtiquetas(g) {
+  const memo = qdMemo(), t = [];
+  if (!g.ativo) t.push('<span class="qd-tag">Fora da empresa</span>');
+  else if (g.situacao === 'FERIAS') t.push('<span class="qd-tag">Férias</span>');
+  else if (g.situacao === 'AFASTADO') t.push('<span class="qd-tag">Afastado</span>');
+  const a = qdAdmissao(g);
+  if (a) {
+    const trein = /TREIN/.test(qdChaveNome(a.status));
+    t.push(`<span class="qd-tag" title="Admissão: ${a.data ? pnDataLonga(a.data) : 'sem data na planilha'}${a.status ? ' · ' + esc(a.status) : ''}">${trein ? 'Novo · em treinamento' : 'Novo'}</span>`);
+  }
+  (memo.pend[g.ref] || []).forEach((x) => t.push(qdSelo(x.gravidade, x.tipo === 'DESLIGADO_ATIVO'
+    ? (x.data ? 'desligado em ' + pnDataLonga(x.data).slice(0, 5) : 'desligado (sem data)') : (QD_TIPOS[x.tipo] ? QD_TIPOS[x.tipo].curto : x.tipo))));
+  return t.join('');
+}
+/* Nome vazio nunca fica em branco. */
+function qdPessoaNome(g) {
+  return g.nome ? esc(qdNomeTxt(g)) : `<em class="qd-semnome">Sem nome na ${esc(g.aba || 'GERAL')} · linha ${g.linha}</em>`;
+}
+const qdTemGrave = (g) => (qdMemo().pend[g.ref] || []).some((x) => x.gravidade === 'grave');
+
+function qdPessoas() {
+  const recorte = qdRecorte(qdGeral());
+  const contaMostrar = (q) => qdMostrar(recorte, q).length;
+  const chips = QD_MOSTRAR.filter(([q]) => ['empresa', 'disponiveis', 'foradoposto'].indexOf(q) !== -1 || contaMostrar(q) || QD.mostrar === q);
+  const controles = `<div class="qd-sub-filtros">
+    <label class="qd-busca"><span class="bq-rot">Buscar nome, COD ou RH</span>
+      <input type="search" id="qd-busca" value="${esc(QD.busca)}" placeholder="Ex.: Maria, 30063 ou 100063" autocomplete="off"
+        oninput="QD.busca=this.value;QD.limite=100;clearTimeout(QD.tBusca);QD.tBusca=setTimeout(qdRedesenharLista,200)"
+        onkeydown="if(event.key==='Enter')qdBuscaEnter()"></label>
+    <div class="qd-chips" role="group" aria-label="Mostrar">${chips.map(([q, rot]) =>
+      `<button class="qd-chip" aria-pressed="${QD.mostrar === q}" onclick="QD.mostrar=${jsArg(q)};QD.limite=100;qdDesenhar()">${esc(rot)} <b class="bq-num">${qdN(contaMostrar(q))}</b></button>`).join('')}</div>
+    <div class="qd-seg pequeno" role="group" aria-label="Organizar">
+      <button class="qd-pill" aria-pressed="${QD.organizar === 'funcao'}" onclick="QD.organizar='funcao';qdDesenhar()">Por função</button>
+      <button class="qd-pill" aria-pressed="${QD.organizar === 'az'}" onclick="QD.organizar='az';qdDesenhar()">A–Z</button></div>
+    <div class="qd-exportar"><button class="icone-botao" onclick="qdImprimirQuadro()">Imprimir quadro</button>
+      <button class="icone-botao" onclick="qdExportarExcel()">Exportar Excel</button></div>
+  </div>`;
+  return controles + `<div id="qd-lista">${qdListaPessoas(qdListaDaTela())}</div>`;
+}
+/* A busca redesenha so a lista (o cursor fica no campo). */
+function qdRedesenharLista() {
+  const alvo = el('qd-lista'); if (!alvo) return;
+  const foco = qdGuardarFoco();
+  alvo.innerHTML = qdListaPessoas(qdListaDaTela());
+  qdDevolverFoco(foco);
+}
+/* Enter com um resultado so abre a ficha. */
+function qdBuscaEnter() {
+  clearTimeout(QD.tBusca);
+  const l = qdListaDaTela();
+  if (l.length === 1) qdFicha(l[0].ref); else qdRedesenharLista();
+}
+
+/* Funcoes de um turno: da maior para a menor (empate de A a Z), com a lideranca no fim, como no mapa. */
+function qdOrdemFuncoes(porF) {
+  return Object.keys(porF).sort((a, b) => (qdLider(a) - qdLider(b)) || porF[b].length - porF[a].length || a.localeCompare(b));
+}
+function qdListaPessoas(lista) {
+  if (!lista.length) {
+    return `<div class="bq-card"><p class="bq-vazio">${QD.busca ? 'Ninguém com «' + esc(QD.busca) + '» neste recorte.'
+      : 'Ninguém com esses filtros.'}${QD.equipe !== '*' || QD.funcao || QD.mostrar !== 'empresa'
+      ? ' <button class="qd-link" onclick="QD.mostrar=\'empresa\';qdLimpar()">Limpar filtros</button>' : ''}</p></div>`;
+  }
+  if (QD.organizar === 'az') return qdListaAZ(lista);
+  // Uma secao por equipe (ordem fixa) e, dentro, blocos por funcao.
+  const equipes = QD_EQUIPES.concat(['']).filter((e) => lista.some((g) => (g.equipe || '') === e));
+  return equipes.map((e) => {
+    const deles = lista.filter((g) => (g.equipe || '') === e);
+    const disp = deles.filter((g) => g.ativo && g.situacao === 'ATIVO').length;
+    const porF = {};
+    deles.forEach((g) => { const f = qdFuncaoTela(g); (porF[f] = porF[f] || []).push(g); });
+    const chave = 'eq' + (e || 'sem');
+    const fechado = QD.recolhidas[chave] === true;
+    return `<section class="bq-card qd-turno">
+      <header class="qd-turno-cab"><div>${qdEq(e)}<span class="qd-turno-n"><b class="bq-num">${qdN(deles.length)}</b> ${deles.length === 1 ? 'pessoa' : 'pessoas'}${QD.mostrar === 'empresa' ? ' · ' + qdN(disp) + ' disponíve' + (disp === 1 ? 'l' : 'is') : ''}</span></div>
+        <button class="qd-link" aria-expanded="${!fechado}" onclick="QD.recolhidas[${jsArg(chave)}]=!QD.recolhidas[${jsArg(chave)}];qdRedesenharLista()">${fechado ? 'Abrir' : 'Recolher'}</button></header>
+      ${fechado ? '' : `<div class="qd-blocos">${qdOrdemFuncoes(porF).map((f) => {
+        const ps = porF[f].slice().sort((a, b) => (qdNomeTxt(a) || '￿').localeCompare(qdNomeTxt(b) || '￿'));
+        const fora = ps.filter((g) => g.ativo && g.situacao !== 'ATIVO').length;
+        return `<div class="qd-bloco"><h4>${qdRotFuncao(f)} <span class="bq-num">· ${ps.length}</span>${fora ? `<small>· ${fora} fora do posto</small>` : ''}</h4>
+          <ul>${ps.map((g) => `<li${qdTemGrave(g) ? ' class="grave"' : ''}><button class="qd-pessoa" onclick="qdFicha(${g.ref})"><span class="qd-pessoa-nome">${qdPessoaNome(g)}</span>
+            <span class="qd-pessoa-cod bq-num">${esc(g.cod || '')}</span></button><span class="qd-pessoa-tags">${qdEtiquetas(g)}</span></li>`).join('')}</ul></div>`;
+      }).join('')}</div>`}
+    </section>`;
+  }).join('');
+}
+
+function qdOrdem(k) { QD.ordA = (QD.ordK === k) ? -QD.ordA : 1; QD.ordK = k; qdRedesenharLista(); }
+function qdListaAZ(lista) {
+  const k = QD.ordK, a = QD.ordA;
+  const num = (v) => Number(qdChaveCod(v)) || 0;
+  const valor = (g) => k === 'nome' ? (qdNomeTxt(g) || '￿') : String(g[k] || '￿');
+  const ord = lista.slice().sort((x, y) => (k === 'cod' || k === 'rh') ? (num(x[k]) - num(y[k])) * a : valor(x).localeCompare(valor(y)) * a);
+  const mostra = ord.slice(0, QD.limite);
+  const th = (c, rot, n) => `<th${n ? ' class="n"' : ''} aria-sort="${QD.ordK === c ? (QD.ordA > 0 ? 'ascending' : 'descending') : 'none'}"><button class="qd-ordem" onclick="qdOrdem('${c}')">${rot}${QD.ordK === c ? (QD.ordA > 0 ? ' ▲' : ' ▼') : ''}</button></th>`;
+  return `<div class="bq-card"><p class="bq-sub">Toque no cabeçalho para ordenar.</p><div class="bq-rolagem"><table class="qd-tabela">
+    <thead><tr>${th('nome', 'Nome')}${th('equipe', 'Equipe')}${th('funcao', 'Função')}${th('cod', 'COD', true)}${th('rh', 'RH', true)}${th('status', 'STATUS')}</tr></thead>
+    <tbody>${mostra.map((g) => `<tr onclick="qdFicha(${g.ref})" tabindex="0" onkeydown="if(event.key==='Enter')qdFicha(${g.ref})">
+      <td><span class="qd-pessoa-nome">${qdPessoaNome(g)}</span> <span class="qd-pessoa-tags">${qdEtiquetas(g)}</span></td>
+      <td>${qdEq(g.equipe, g.equipeBruta)}</td><td>${g.funcao ? esc(g.funcao) : '<em>Sem função</em>'}</td>
+      <td class="n">${esc(g.cod || '—')}</td><td class="n">${esc(g.rh || '—')}</td><td>${esc(g.status || '—')}</td></tr>`).join('')}</tbody>
+  </table></div>
+  ${ord.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='${ord.length - mostra.length > 100 ? '#qd-lista .qd-mais' : '#qd-lista .qd-tabela tbody tr:nth-child(' + (mostra.length + 1) + ')'}';QD.limite+=100;qdRedesenharLista()">Mostrar mais (${qdN(ord.length - mostra.length)})</button>` : ''}</div>`;
+}
+
+/* A situacao no Excel: disponivel sai normal; ferias, afastado e fora da empresa com o tom (nenhum e alerta). */
+function qdSituacaoExcel(g) {
+  if (!g.ativo) return { v: 'Fora da empresa', tom: 'cinza' };
+  const v = QD_SITUACAO[g.situacao];
+  return g.situacao === 'FERIAS' ? { v, tom: 'azul' } : (g.situacao === 'AFASTADO' ? { v, tom: 'amarelo' } : v);
+}
+
+/* Excel: a GERAL organizada e recortada (o que esta na tela) e, havendo, a Conferencia. */
+function qdExportarExcel() {
+  const lista = qdListaDaTela();
+  const pend = qdMemo().pend;
+  const ordem = QD_EQUIPES.concat(['']);
+  const apoio = (DADOS.leitura || {}).layout === 'APOIO';
+  const linhas = [['EQUIPE', 'COD', 'PROD', 'DESCRIÇÃO', 'RH', 'STATUS', 'SITUAÇÃO', apoio ? 'LINHA' : 'LINHA NA GERAL', 'PENDÊNCIA']].concat(lista
+    .slice().sort((a, b) => ordem.indexOf(a.equipe || '') - ordem.indexOf(b.equipe || '') ||
+      qdFuncaoTela(a).localeCompare(qdFuncaoTela(b)) || qdNomeTxt(a).localeCompare(qdNomeTxt(b)))
+    .map((g) => [g.equipe || g.equipeBruta || '', g.cod, qdNomeTxt(g), g.funcao, g.rh, g.status, qdSituacaoExcel(g),
+      g.aba ? g.aba + ' ' + g.linha : g.linha, (pend[g.ref] || []).map((x) => x.detalhe).join(' | ')]));
+  const abas = [{ nome: 'Quadro', linhas }];
+  if (qdMemo().inc.length) abas.push({ nome: 'Conferência', linhas: qdLinhasConferencia() });
+  // o nome do arquivo diz o recorte, com os numeros da funcao (ANALISTA 1 e ANALISTA 2 sao arquivos diferentes)
+  const parte = (v) => qdChaveFuncao(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const sufixo = [QD.equipe === '*' ? '' : parte(QD.equipe || 'Sem turno'),
+    QD.funcao ? (parte(QD.funcao === QD_SEM_FUNCAO ? 'Sem funcao' : QD.funcao) || 'funcao') : ''].filter(Boolean).join('-');
+  pnBaixarXlsx('quadro-cd-' + qdHoje() + (sufixo ? '-' + sufixo : '') + '.xlsx', abas);
+}
+
+/* Imprimir: o quadro de parede (A4 deitado), um turno por pagina, blocos por funcao em 3 colunas. */
+function qdImprimirQuadro() {
+  const lista = qdListaDaTela();
+  const equipes = QD_EQUIPES.concat(['']).filter((e) => lista.some((g) => (g.equipe || '') === e));
+  const corpo = equipes.map((e, i) => {
+    const deles = lista.filter((g) => (g.equipe || '') === e);
+    const porF = {};
+    deles.forEach((g) => { const f = qdFuncaoTela(g); (porF[f] = porF[f] || []).push(g); });
+    return `<section${i ? ' class="nova"' : ''}><h2>${esc(e || 'Sem turno')} — ${deles.length} ${deles.length === 1 ? 'pessoa' : 'pessoas'}</h2><div class="cols">${qdOrdemFuncoes(porF).map((f) =>
+      `<div class="bloco"><b>${f === QD_SEM_FUNCAO ? 'Sem função' : esc(f)} (${porF[f].length})</b><ol>${porF[f].slice().sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)))
+        .map((g) => {
+          const nota = !g.ativo ? 'fora da empresa' : (g.situacao === 'FERIAS' ? 'férias' : (g.situacao === 'AFASTADO' ? 'afastado' : (qdAdmissao(g) ? 'novo' : '')));
+          return `<li>${esc(qdNomeTxt(g) || 'Sem nome')}${nota ? ' (' + nota + ')' : ''} <span>${esc(g.cod || '')}</span></li>`;
+        }).join('')}</ol></div>`).join('')}</div></section>`;
+  }).join('');
+  const hora = qdHoraLeitura();
+  pnImprimirRelatorio('Quadro do CD', (qdRotuloRecorte() || 'CD inteiro') + ' · ' + qdPlural(lista.length, 'pessoa', 'pessoas') + ' · ' + pnDataLonga(qdHoje()) +
+    (hora ? ' · aba ' + ((DADOS.leitura || {}).aba || 'GERAL') + ' lida às ' + hora : ''), corpo,
+    `.cols { column-count: 3; column-gap: 18px; } .bloco { break-inside: avoid; margin: 0 0 10px; }
+     section.nova { break-before: page; }
+     .bloco b { font-size: 11px; color: #111785; } .bloco ol { margin: 4px 0 0; padding-left: 18px; }
+     .bloco li { font-size: 10.5px; padding: 1px 0; } .bloco li span { color: #777; font-size: 9.5px; }`);
+}
+
+/* ------------------------------------------------------------------ */
+/* MOVIMENTACAO — quem entrou, quem saiu e por que                     */
+/* ------------------------------------------------------------------ */
+
+const QD_PERIODOS = [[30, '30 dias', '30 d'], [90, '90 dias', '90 d'], [180, '6 meses', '6 m'], [365, '12 meses', '12 m'], [0, 'Tudo', 'Tudo']];
+const QD_PERIODO_ANT = { 30: 'nos 30 dias anteriores', 90: 'nos 90 dias anteriores', 180: 'nos 6 meses anteriores', 365: 'nos 12 meses anteriores' };
+/* Janela do periodo [ini, fim] em aaaa-mm-dd, e a anterior do mesmo tamanho. */
+function qdJanela(dias, deslocar) {
+  const hoje = qdHoje();
+  if (!dias) return { ini: '0000-00-00', fim: '9999-99-99' };
+  const fim = pnSomarDias(hoje, -(deslocar ? dias : 0));
+  return { ini: pnSomarDias(fim, -dias + 1), fim };
+}
+const qdDentro = (iso, j) => !!iso && iso >= j.ini && iso <= j.fim;
+/* Meses do turnover: 30 d = 1, 90 d = 3, 6 m = 6, 12 m = 12; Tudo = meses do calendario entre a 1a e a ultima data. */
+function qdMesesDoPeriodo(p, datas) {
+  if (p) return Math.max(1, Math.round(p / 30.4));
+  return Math.max(1, qdMesesEntre(datas.filter(Boolean).map((d) => String(d).slice(0, 7))));
+}
+function qdMesesEntre(meses) {
+  if (!meses.length) return 1;
+  const s = meses.slice().sort(), a = s[0].split('-'), b = s[s.length - 1].split('-');
+  return (Number(b[0]) - Number(a[0])) * 12 + Number(b[1]) - Number(a[1]) + 1;
+}
+/*
+ * Variacao das saidas contra a janela anterior. Nao aparece em "Tudo" nem
+ * sem historico (a anterior vazia e a CDESLIGADOS comecando depois do inicio
+ * da janela atual) — e o numero anterior vai entre parenteses, porque o
+ * historico pode ser parcial.
+ */
+function qdDelta(p, saidas, des) {
+  if (!p) return '';
+  const j = qdJanela(p), ant = des.filter((d) => qdDentro(d.data, qdJanela(p, true))).length;
+  const antiga = qdMemo().desMaisAntiga;
+  if (!ant && (!antiga || antiga >= j.ini)) return '<span class="qd-delta">sem histórico anterior para comparar</span>';
+  const dif = saidas - ant, quando = QD_PERIODO_ANT[p] || 'no período anterior';
+  if (dif > 0) return `<span class="qd-delta"><span class="qd-delta-ico pior" aria-hidden="true">▲</span> ${dif} a mais que ${quando} (${ant})</span>`;
+  if (dif < 0) return `<span class="qd-delta"><span class="qd-delta-ico melhor" aria-hidden="true">▼</span> ${-dif} a menos que ${quando} (${ant})</span>`;
+  return `<span class="qd-delta">= igual ${quando.replace(/^nos/, 'aos')} (${ant})</span>`;
+}
+
+function qdMovimentacao() {
+  const adm = qdRecorte(DADOS.adm || []), des = qdRecorte(DADOS.des || []);
+  const p = QD.periodo, j = qdJanela(p);
+  const saidas = des.filter((d) => qdDentro(d.data, j));
+  const entradas = adm.filter((a) => qdDentro(a.data, j)), semData = adm.filter((a) => !a.data);
+  const algumaData = (DADOS.adm || []).some((a) => a.data);
+  const trein = adm.filter((a) => (!a.data || qdDentro(a.data, j)) && /TREIN/.test(qdChaveNome(a.status))).length;
+  const efetivo = qdRecorte(qdNaEmpresa()).length;
+  const meses = qdMesesDoPeriodo(p, des.map((d) => d.data).concat(adm.map((a) => a.data)));
+  const turnover = efetivo ? saidas.length / efetivo / meses * 100 : null;
+  const tipos = { vol: 0, inv: 0, sem: 0 };
+  saidas.forEach((d) => { tipos[qdTipo(d.tipo)]++; });
+  const sub = [tipos.vol ? qdPlural(tipos.vol, 'voluntária', 'voluntárias') : '', tipos.inv ? qdPlural(tipos.inv, 'involuntária', 'involuntárias') : '',
+    tipos.sem ? tipos.sem + ' de outro tipo ou sem tipo' : ''].filter(Boolean).join(' · ');
+  const semDataDes = qdRecorte(DADOS.desSemData || []).length;
+  // o mes tocado no grafico recorta motivos, "onde saem" e a lista pelo proprio mes
+  const jMes = QD.mes ? { ini: QD.mes + '-01', fim: QD.mes + '-31' } : j;
+  const saidasMes = QD.mes ? des.filter((d) => qdDentro(d.data, jMes)) : saidas;
+
+  const cabeca = `<div class="qd-sub-filtros"><div class="qd-seg pequeno" role="group" aria-label="Período">${QD_PERIODOS.map(([d, rot, curto]) =>
+      `<button class="qd-pill" aria-pressed="${QD.periodo === d}" onclick="QD.periodo=${d};QD.mes='';QD.limiteMov=30;qdDesenhar()"><span class="qd-pill-longo">${rot}</span><span class="qd-pill-curto">${curto}</span></button>`).join('')}</div>
+    ${QD.mes ? `<button class="qd-chip" aria-pressed="true" onclick="QD.mes='';qdDesenhar()">Mês: ${pnRotuloMes(QD.mes)} ✕</button>` : ''}
+    ${QD.motivo ? `<button class="qd-chip" aria-pressed="true" onclick="QD.motivo='';qdDesenhar()">Motivo: ${esc(qdMotivoRotulo(QD.motivo))} ✕</button>` : ''}</div>`;
+  const kpis = `<div class="qd-kpis">
+    <div class="qd-kpi"><span class="bq-rot">Saídas</span><b>${qdN(saidas.length)}</b>${qdDelta(p, saidas.length, des)}<small>${sub || 'nenhuma no período'}</small></div>
+    <div class="qd-kpi"><span class="bq-rot">Entradas</span><b>${algumaData ? qdN(entradas.length) : '—'}</b><small>${!algumaData ? 'a CADMITIDOS não tem datas de admissão'
+      : [semData.length ? qdPlural(semData.length, 'admitido sem data', 'admitidos sem data') + ' (fora desta conta)' : '', trein ? trein + ' em treinamento' : ''].filter(Boolean).join(' · ') || 'admitidos com data no período'}</small></div>
+    <div class="qd-kpi largo"><span class="bq-rot">Turnover de saída</span><b>${turnover === null ? '—' : qdPct(turnover)}<span class="qd-kpi-un"> ao mês</span></b>
+      <small>saídas ÷ ${qdN(efetivo)} no quadro hoje ÷ ${meses} ${meses === 1 ? 'mês' : 'meses'}</small></div>
+  </div>
+  ${semDataDes ? `<p class="qd-nota">${qdSelo('atencao', qdPlural(semDataDes, 'desligamento sem data', 'desligamentos sem data'))} na CDESLIGADOS: ficam fora destas contas, mas a Conferência confere se a pessoa saiu da GERAL.</p>` : ''}`;
+  return cabeca + kpis + `<div class="qd-grade2">
+      <div class="bq-card">${qdEspelhoCard(adm, des, algumaData, semData.length)}</div>
+      <div class="bq-card"><h2>Por que saem</h2><p class="bq-sub">${saidasMes.length ? 'Motivo de cada saída ' + (QD.mes ? 'em ' + pnRotuloMes(QD.mes) : 'no período') + ' (coluna MOTIVO da CDESLIGADOS), por tipo. Toque num motivo para filtrar a lista.' : 'Nenhuma saída no período.'}</p>
+        ${DADOS.temColunaMotivo ? '' : '<div class="bq-aviso">A aba CDESLIGADOS não tem a coluna <b>MOTIVO</b>. Crie a coluna com esse nome — os motivos aparecem aqui sozinhos.</div>'}
+        ${qdPorQueSaem(saidasMes)}</div>
+    </div>
+    <div class="bq-card qd-onde"><h2>Onde saem</h2><p class="bq-sub">Saídas do período por turno (e o peso no tamanho de cada turno hoje) e as funções que mais perdem gente.</p>
+      ${qdOndeSaem(saidasMes, jMes)}</div>
+    ${qdListaMov(adm, des, jMes)}`;
+}
+
+/* Os ultimos N meses do calendario ate o atual (aaaa-mm). */
+function qdUltimosMeses(n) {
+  const d = new Date(); d.setDate(1);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0')); }
+  return out;
+}
+/* Entradas e saidas por mes: o grafico espelhado ou, no alternador, a tabela. */
+function qdEspelhoCard(adm, des, algumaData, semData) {
+  const p = QD.periodo;
+  let n = p === 0 ? (function () {
+    const todos = des.map((d) => d.mes).concat(adm.map((a) => a.mes)).filter(Boolean);
+    return todos.length ? Math.min(24, Math.max(6, qdMesesEntre(todos.slice().sort().slice(0, 1).concat([qdUltimosMeses(1)[0]])))) : 6;
+  })() : (p <= 180 ? 6 : 12);
+  const meses = qdUltimosMeses(n);
+  const cortado = p === 0 && des.concat(adm).some((r) => r.mes && r.mes < meses[0]);
+  const e = {}, s = {}, sv = {};
+  if (algumaData) adm.forEach((a) => { if (a.mes) e[a.mes] = (e[a.mes] || 0) + 1; });
+  des.forEach((d) => { if (d.mes) { s[d.mes] = (s[d.mes] || 0) + 1; if (qdTipo(d.tipo) === 'vol') sv[d.mes] = (sv[d.mes] || 0) + 1; } });
+  const titulo = algumaData ? 'Entradas e saídas por mês' : 'Saídas por mês';
+  const alternar = `<button class="qd-link qd-alternar" onclick="QD.verTabela=!QD.verTabela;qdDesenhar()">${QD.verTabela ? 'Ver gráfico' : 'Ver em tabela'}</button>`;
+  const vazio = !meses.some((m) => e[m] || s[m]);
+  const sub = algumaData ? 'Entradas para cima, saídas para baixo, na mesma escala.' + (semData ? ' ' + qdPlural(semData, 'admitido sem data não aparece', 'admitidos sem data não aparecem') + ' no gráfico — estão no fim da lista abaixo.' : '')
+    : 'A CADMITIDOS não tem datas de admissão: o gráfico mostra só as saídas.';
+  if (QD.verTabela) {
+    const efetivo = qdRecorte(qdNaEmpresa()).length;
+    return `<div class="qd-card-cab"><h2>${titulo}</h2>${alternar}</div><p class="bq-sub">Turnover de saída = saídas do mês ÷ ${qdN(efetivo)} no quadro hoje.</p>
+      <div class="bq-rolagem"><table class="qd-tabela-mes"><thead><tr><th>Mês</th>${algumaData ? '<th class="n">Entradas</th>' : ''}<th class="n">Saídas</th><th class="n">Turnover de saída</th></tr></thead>
+      <tbody>${meses.slice().reverse().map((m) => `<tr><td>${pnRotuloMes(m)}</td>${algumaData ? `<td class="n">${e[m] || 0}</td>` : ''}<td class="n">${s[m] || 0}</td>
+        <td class="n">${efetivo ? qdPct((s[m] || 0) / efetivo * 100) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  return `<div class="qd-card-cab"><h2>${titulo}</h2>${alternar}</div><p class="bq-sub">${sub} Toque num mês para filtrar a lista.${cortado ? ' Mostrando os 24 últimos meses — os números acima contam tudo.' : ''}</p>
+    ${vazio ? '<p class="bq-vazio">Nenhuma entrada ou saída no período.</p>' : qdEspelho(meses, e, s, sv, { rotulos: true, algumaData })}`;
+}
+/*
+ * Colunas espelhadas numa base comum: um eixo so (pessoas), entradas acima
+ * (a 40%) e saidas abaixo (cheias), na cor do CD ou da equipe filtrada. A
+ * posicao diz o sentido, entao a cor continua so dizendo equipe.
+ */
+function qdEspelho(meses, e, s, sv, op) {
+  const max = Math.max(1, ...meses.map((m) => Math.max(e[m] || 0, s[m] || 0)));
+  const cor = QD.equipe !== '*' && QD.equipe ? qdCor(QD.equipe) : 'var(--qd-cd)';
+  const mesAtual = qdUltimosMeses(1)[0];
+  const j = qdJanela(QD.periodo);
+  // rotulo direto: ate 6 meses, todos; com mais, so o maior de cada metade e o mes corrente
+  const meio = Math.ceil(meses.length / 2);
+  const maiorDe = (lista, obj) => lista.reduce((b, m) => ((obj[m] || 0) > (obj[b] || 0) ? m : b), lista[0]);
+  const destaque = meses.length <= 6 ? null : [maiorDe(meses.slice(0, meio), e), maiorDe(meses.slice(meio), e), maiorDe(meses.slice(0, meio), s), maiorDe(meses.slice(meio), s), mesAtual];
+  const mostra = (m) => op.rotulos && (!destaque || destaque.indexOf(m) !== -1);
+  return `<div class="qd-espelho${op.mini ? ' mini' : ''}" style="--qd-cor:${cor}">${meses.map((m) => {
+    const noPeriodo = op.mini || QD.periodo === 0 || (m + '-31' >= j.ini && m + '-01' <= j.fim);
+    const ve = op.algumaData ? (e[m] || 0) : 0, vs = s[m] || 0;
+    const atual = m === mesAtual;
+    const dica = pnRotuloMes(m) + (atual ? ' (até ' + pnDataLonga(qdHoje()).slice(0, 5) + ')' : '') + ' — ' +
+      (op.algumaData ? qdPlural(ve, 'entrada', 'entradas') + ' · ' : '') + qdPlural(vs, 'saída', 'saídas') + (sv[m] ? ' (' + sv[m] + (sv[m] === 1 ? ' voluntária)' : ' voluntárias)') : '');
+    return `<button class="qd-esp-mes${noPeriodo ? '' : ' fora'}${QD.mes === m && !op.mini ? ' escolhido' : ''}" title="${esc(dica)}" aria-label="${esc(dica)}"
+        onclick="${op.mini ? `QD.periodo=180;QD.mes=${jsArg(m)};QD.motivo='';qdAba('mov')` : `QD.mes=(QD.mes===${jsArg(m)}?'':${jsArg(m)});QD.limiteMov=30;qdDesenhar()`}">
+      <span class="qd-esp-cima">${ve ? `<i style="height:${Math.max(4, ve / max * 100)}%"></i>${mostra(m) ? `<em>${ve}</em>` : ''}` : ''}</span>
+      <span class="qd-esp-baixo">${vs ? `<i style="height:${Math.max(4, vs / max * 100)}%"></i>${mostra(m) ? `<em>${vs}</em>` : ''}` : ''}</span>
+      <span class="qd-esp-rot">${PN_MESES[Number(m.slice(5, 7)) - 1]}${op.mini ? '' : '/' + m.slice(2, 4)}${atual ? '*' : ''}</span></button>`;
+  }).join('')}</div>
+  <div class="bq-leg">${op.algumaData ? '<span><i class="qd-leg-ent"></i>Entradas' + (op.mini ? '' : ' (acima)') + '</span>' : ''}<span><i class="qd-leg-sai"></i>Saídas${op.mini || !op.algumaData ? '' : ' (abaixo)'}</span></div>`;
+}
+
+/* Rotulo do motivo: a grafia mais frequente entre os que dao a mesma chave. */
+function qdMotivoRotulo(chave) {
+  if (chave === '-') return 'Motivo não informado';
+  const conta = {};
+  (DADOS.des || []).forEach((d) => { if (qdMotivoChave(d.motivo) === chave) { const t = String(d.motivo).trim(); conta[t] = (conta[t] || 0) + 1; } });
+  return Object.keys(conta).sort((a, b) => conta[b] - conta[a] || a.localeCompare(b))[0] || chave;
+}
+/* Por que saem: barras por motivo, agrupadas por tipo (pedido do colaborador x decisao da empresa). */
+function qdPorQueSaem(saidas) {
+  if (!saidas.length) return '';
+  const grupos = [['vol', 'Pedido do colaborador (voluntário)'], ['inv', 'Decisão da empresa (involuntário)'], ['sem', 'Outro tipo ou não informado']];
+  const max = Math.max(1, ...grupos.map(([t]) => {
+    const c = {}; saidas.filter((d) => qdTipo(d.tipo) === t).forEach((d) => { const k = qdMotivoChave(d.motivo); c[k] = (c[k] || 0) + 1; });
+    return Math.max(0, ...Object.keys(c).map((k) => c[k]));
+  }));
+  const cor = QD.equipe !== '*' && QD.equipe ? qdCor(QD.equipe) : 'var(--qd-cd)';
+  return `<div class="qd-barras" style="--qd-cor:${cor}">${grupos.map(([t, rot]) => {
+    const deste = saidas.filter((d) => qdTipo(d.tipo) === t);
+    if (!deste.length) return '';
+    const c = {};
+    deste.forEach((d) => { const k = qdMotivoChave(d.motivo); c[k] = (c[k] || 0) + 1; });
+    const ks = Object.keys(c).sort((a, b) => (a === '-') - (b === '-') || c[b] - c[a] || a.localeCompare(b));
+    return `<h4 class="qd-barras-grupo">${rot} · ${deste.length}${t !== 'sem' ? ' · ' + Math.round(deste.length / saidas.length * 100) + '%' : ''}</h4>` + ks.map((k) => {
+      const v = c[k], nome = qdMotivoRotulo(k);
+      return `<button class="qd-barra${QD.motivo === k ? ' escolhida' : (QD.motivo ? ' apagada' : '')}${k === '-' ? ' cinza' : ''}"
+        onclick="QD.motivo=(QD.motivo===${jsArg(k)}?'':${jsArg(k)});QD.limiteMov=30;qdDesenhar()" title="${esc(nome)}: ${qdPlural(v, 'saída', 'saídas')} · ${Math.round(v / saidas.length * 100)}% do período">
+        <span class="qd-barra-nome">${esc(nome)}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, v / max * 100)}%"></i></span>
+        <span class="qd-barra-n bq-num">${v}</span></button>`;
+    }).join('');
+  }).join('')}</div>`;
+}
+/* Onde saem: por turno (na cor da equipe, com o rotulo ao lado) e por funcao (as 6 que mais perdem). */
+function qdOndeSaem(saidas, jan) {
+  if (!saidas.length) return '<p class="bq-vazio">Nenhuma saída no período.</p>';
+  const lista = QD.motivo ? saidas.filter((d) => qdMotivoChave(d.motivo) === QD.motivo) : saidas;
+  const hoje = qdRecorte(qdNaEmpresa(), 'equipe');                     // o efetivo de cada turno respeita a funcao
+  // o turno escolhido destaca (os outros a 35%), para nao virar grafico de uma barra so
+  const todas = qdRecorte(DADOS.des || [], 'equipe').filter((d) => qdDentro(d.data, jan) && (!QD.motivo || qdMotivoChave(d.motivo) === QD.motivo));
+  const porEqTodas = {};
+  todas.forEach((d) => { porEqTodas[d.equipe || ''] = (porEqTodas[d.equipe || ''] || 0) + 1; });
+  const eqs = QD_EQUIPES.concat(porEqTodas[''] ? [''] : []);
+  const maxE = Math.max(1, ...eqs.map((e) => porEqTodas[e] || 0));
+  const porF = {}, rotF = {};
+  lista.forEach((d) => { const k = qdChaveFuncao(qdFuncaoDe(d)); porF[k] = (porF[k] || 0) + 1; if (!rotF[k]) rotF[k] = qdFuncaoTela(d); });
+  const fs = Object.keys(porF).sort((a, b) => porF[b] - porF[a] || a.localeCompare(b));
+  const top = fs.slice(0, 6), resto = fs.slice(6);
+  const maxF = top.length ? porF[top[0]] : 1;
+  const cor = QD.equipe !== '*' && QD.equipe ? qdCor(QD.equipe) : 'var(--qd-cd)';
+  const naFuncao = (k) => hoje.filter((g) => (QD.equipe === '*' || (g.equipe || '') === QD.equipe) && qdChaveFuncao(qdFuncaoDe(g)) === k).length;
+  return `<div class="qd-onde-grade"><div><h4>Por turno</h4>${eqs.map((e) => {
+      const s = porEqTodas[e] || 0, n = hoje.filter((g) => (g.equipe || '') === e).length;
+      const apagada = QD.equipe !== '*' && QD.equipe !== e;
+      return `<button class="qd-barra${apagada ? ' apagada' : ''}${QD.equipe === e ? ' escolhida' : ''}" onclick="qdEquipe(${jsArg(e)})"
+        title="${esc(e || 'Sem turno')}: ${qdPlural(s, 'saída', 'saídas')}${n ? ' — ' + Math.round(s / n * 100) + '% do turno hoje' : ''}">
+        <span class="qd-barra-nome">${qdEq(e)}</span><span class="qd-barra-trilho"><i style="width:${s ? Math.max(3, s / maxE * 100) : 0}%;background:${qdCor(e)}"></i></span>
+        <span class="qd-barra-n bq-num">${qdPlural(s, 'saída', 'saídas')} <small>· ${n ? Math.round(s / n * 100) + '% do turno' : '—'}</small></span></button>`;
+    }).join('')}</div>
+    <div style="--qd-cor:${cor}"><h4>Por função</h4>${top.map((f) => {
+      const c = naFuncao(f);
+      const rot = rotF[f];
+      return `<button class="qd-barra${QD.funcao && qdChaveFuncao(QD.funcao) === f ? ' escolhida' : ''}" onclick="qdFuncao(${jsArg(rot)})" title="${esc(rot)}: ${qdPlural(porF[f], 'saída', 'saídas')}">
+        <span class="qd-barra-nome">${qdRotFuncao(rot)}</span><span class="qd-barra-trilho"><i style="width:${Math.max(3, porF[f] / maxF * 100)}%"></i></span>
+        <span class="qd-barra-n bq-num">${porF[f]} <small>· ${c ? 'de ' + qdN(c) + ' hoje' : '—'}</small></span></button>`;
+    }).join('')}${resto.length ? `<p class="qd-outras">Outras (${resto.length}): ${qdPlural(resto.reduce((t, f) => t + porF[f], 0), 'saída', 'saídas')}</p>` : ''}</div></div>`;
+}
+/* Lista unica de entradas e saidas, da mais recente para a mais antiga, por mes; admitidos sem data no fim. */
+function qdListaMov(adm, des, j) {
+  const memo = qdMemo();
+  let todos = [];
+  des.filter((d) => qdDentro(d.data, j)).forEach((d) => todos.push({ s: 'saida', r: d, data: d.data }));
+  adm.filter((a) => !a.data || qdDentro(a.data, j)).forEach((a) => todos.push({ s: 'entrada', r: a, data: a.data || '' }));
+  if (QD.motivo) todos = todos.filter((x) => x.s === 'saida' && qdMotivoChave(x.r.motivo) === QD.motivo);
+  if (QD.mes) todos = todos.filter((x) => x.data && x.data.slice(0, 7) === QD.mes);
+  const nS = todos.filter((x) => x.s === 'saida').length, nE = todos.length - nS;
+  const itens = QD.sentido === 'tudo' ? todos : todos.filter((x) => x.s === (QD.sentido === 'saidas' ? 'saida' : 'entrada'));
+  itens.sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
+  const mostra = itens.slice(0, QD.limiteMov);
+  // contagem de cada mes (para o divisor), sobre a lista inteira
+  const porMes = {};
+  itens.forEach((x) => { const k = x.data ? x.data.slice(0, 7) : '-'; const c = porMes[k] = porMes[k] || { s: 0, e: 0 }; c[x.s === 'saida' ? 's' : 'e']++; });
+  let mesAnt = null;
+  const admFora = {};
+  memo.inc.filter((x) => x.tipo === 'ADMITIDO_FORA').forEach((x) => { admFora[qdIdCod(x.cod) || ('N' + qdChaveNome(x.nome))] = true; });
+  const linha = (x, i) => {
+    const r = x.r, naGeral = qdAchar(memo.ixGeral, r);
+    const g = naGeral ? naGeral.find((y) => y.ativo) || naGeral[0] : null;
+    const pend = x.s === 'saida' && g ? (memo.pend[g.ref] || []).find((q) => q.tipo === 'DESLIGADO_ATIVO') : null;
+    const fora = x.s === 'entrada' && admFora[qdIdCod(r.cod) || ('N' + qdChaveNome(r.nome))];
+    const k = x.data ? x.data.slice(0, 7) : '-';
+    let div = '';
+    if (k !== mesAnt) {
+      mesAnt = k;
+      const c = porMes[k];
+      div = `<li class="qd-mov-div">${k === '-' ? 'SEM DATA DE ADMISSÃO' : QD_MESES_LONGOS[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4)}
+        <span>${[c.s ? qdPlural(c.s, 'saída', 'saídas') : '', c.e ? qdPlural(c.e, 'entrada', 'entradas') : ''].filter(Boolean).join(' · ')}</span></li>`;
+    }
+    const tipo = qdTipo(r.tipo);
+    return div + `<li class="qd-mov ${x.s}" id="qd-mov-${i}">
+      <span class="qd-mov-data bq-num">${x.data ? pnDataLonga(x.data) : 'sem data'}</span>
+      <span class="qd-mov-seta">${x.s === 'saida' ? '↓ saída' : '↑ entrada'}</span>
+      <span class="qd-mov-quem">${g ? `<button class="qd-link" onclick="qdFicha(${g.ref})">${esc(qdNomeTxt(r) || 'Sem nome')}</button>` : esc(qdNomeTxt(r) || 'Sem nome')}
+        <small class="bq-num">${r.cod ? 'COD ' + esc(r.cod) : ''}</small></span>
+      <span class="qd-mov-eq">${qdEq(r.equipe, r.equipeBruta)} <small>${r.funcao ? esc(r.funcao) : ''}</small></span>
+      <span class="qd-mov-det">${x.s === 'saida' ? (tipo === 'vol' ? 'Voluntário' : (tipo === 'inv' ? 'Involuntário' : esc(r.tipo || 'Tipo não informado'))) +
+          ' · ' + (r.motivo ? esc(r.motivo) : '<em>motivo não informado</em>') : esc(r.status ? r.status.charAt(0) + r.status.slice(1).toLowerCase() : 'Admitido')}
+        ${pend ? qdSelo('grave', 'ainda ativo na GERAL') : ''}${fora ? qdSelo('atencao', 'não está na GERAL') : ''}</span>
+    </li>`;
+  };
+  return `<div class="bq-card qd-movlista"><div class="qd-movlista-cab"><div><h2>Quem entrou e quem saiu</h2>
+      <p class="bq-sub">Do mais recente para o mais antigo, conferido com a GERAL${QD.motivo || QD.mes ? ' (com o filtro escolhido)' : ''}.${todos.some((x) => !x.data) ? ' Admitidos sem data ficam no fim.' : ''}</p></div>
+      <div class="qd-seg pequeno" role="group" aria-label="Mostrar">${[['tudo', 'Tudo', nS + nE], ['saidas', 'Saídas', nS], ['entradas', 'Entradas', nE]].map(([k, rot, n]) =>
+        `<button class="qd-pill" aria-pressed="${QD.sentido === k}" onclick="QD.sentido=${jsArg(k)};QD.limiteMov=30;qdDesenhar()">${rot} (${n})</button>`).join('')}</div></div>
+    ${mostra.length ? `<ul class="qd-movs">${mostra.map(linha).join('')}</ul>` : '<p class="bq-vazio">Nada neste período.</p>'}
+    ${itens.length > mostra.length ? `<button class="qd-mais" onclick="QD.focoDepois='${itens.length - mostra.length > 30 ? '.qd-movlista .qd-mais' : '#qd-mov-' + mostra.length}';QD.limiteMov+=30;qdDesenhar()">Mostrar mais (${itens.length - mostra.length})</button>` : ''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* FERIAS (21/10, programacao) — dados                                 */
+/* ------------------------------------------------------------------ */
+/*
+ * A aba FÉRIAS (extracao do sistema de RH) chega casada com a GERAL (f.ref, pela matricula = os ultimos numeros
+ * do RH) e com a programacao de cada periodo (f.prog = o ID em DADOS.programacoes, gravada no banco da filial).
+ * Cada periodo tem duas datas da extracao: L, a partir de quando a pessoa pode sair (o DTA_LIMITE; sem ele, o dia
+ * seguinte ao pa_fim) e M, o limite maximo para sair (o DTA_LIMITEMAX: o ultimo dia para COMECAR as ferias). A
+ * situacao de cada periodo e calculada aqui, com a data de hoje, numa cor de urgencia:
+ *   azul = no prazo · amarelo = atencao · laranja = urgente · vermelho = critico · verde = resolvido · cinza = nada a fazer
+ * Sem programacao: cinza (ainda longe de poder sair), vermelho (o limite maximo passou, ou o aviso ja nao cabe antes
+ * dele), laranja (limite maximo em ate "urgente" dias), amarelo (ja pode sair) e azul (pode sair em breve).
+ * Programada: azul, amarelo na semana do aviso, azul, laranja na semana da saida e do inicio ate a tolerancia
+ * ("confirme"), vermelho depois; verde se a GERAL ja diz que esta de ferias. Confirmada: verde. A pessoa vale pelo
+ * periodo mais urgente. Palavras neutras (prazo, pode sair, limite maximo, programar, aviso, confirmar): quem ve a
+ * tela pode ser o proprio colaborador.
+ */
+const QD_FE_PADRAO = { cc: ['655'], digitos: 3, aviso: 30, janela: 60, urgente: 60, tolerancia: 3 };
+const qdFeP = () => Object.assign({}, QD_FE_PADRAO, (DADOS && DADOS.parametrosFerias) || {});
+/* Dias de uma data ISO (aaaa-mm-dd) a outra, sem fuso. */
+function qdDias(de, ate) {
+  const u = (s) => { const x = String(s).split('-'); return Date.UTC(Number(x[0]), Number(x[1]) - 1, Number(x[2])); };
+  return Math.round((u(ate) - u(de)) / 86400000);
+}
+function qdSomarDias(iso, n) {
+  const x = String(iso).split('-');
+  return new Date(Date.UTC(Number(x[0]), Number(x[1]) - 1, Number(x[2]) + n)).toISOString().slice(0, 10);
+}
+/* "aaaa-mm-dd" de uma data que existe (31/02 nao). */
+function qdIsoValido(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return !!m && qdSomarDias(iso, 0) === iso;
+}
+/* A ordem de urgencia. O periodo ja cumprido vem por ultimo: o proximo periodo da pessoa vale mais que ele. */
+const QD_FE_CORES = ['vermelho', 'laranja', 'amarelo', 'azul', 'semdata', 'verde', 'cinza'];
+const qdFeRank = (st) => st.feita ? QD_FE_CORES.length : QD_FE_CORES.indexOf(st.cor);
+const qdFePorUrgencia = (a, b) => qdFeRank(a) - qdFeRank(b) || String(a.data || '9999').localeCompare(String(b.data || '9999'));
+/*
+ * A situacao de um periodo: { cor, k, txt (o texto colorido), data (a que importa: a folhinha e a pilula do
+ * calendario), L, M, prog, programada, feita }.
+ */
+function qdFeSituacao(f, prog, g, hoje, P) {
+  P = P || qdFeP();
+  const L = f.limite || (f.paFim ? qdSomarDias(f.paFim, 1) : ''), M = f.limiteMax || '';
+  const st = { f, prog: prog || null, L, M, programada: !!(prog && prog.situacao === 'PROGRAMADA'), feita: !!(prog && prog.situacao === 'CUMPRIDA') };
+  const dm = qdFeDM, em = qdFeEm;
+  const ret = (cor, k, txt, data) => Object.assign(st, { cor, k, txt, data: data || '' });
+  if (st.feita) return ret('verde', 'cumprida', 'Férias cumpridas', prog.inicio);
+  if (st.programada) {
+    const I = prog.inicio, A = qdSomarDias(I, -P.aviso);
+    if (M && I > M && hoje < I) {
+      return ret('vermelho', 'depois', M >= hoje ? 'Programada depois do limite máximo — reprogramar' : 'Limite máximo vencido em ' + dm(M) + ' — sai em ' + dm(I), I);
+    }
+    if (hoje < qdSomarDias(A, -7)) return ret('azul', 'prog', 'Programada para ' + dm(I) + ' · aviso até ' + dm(A), I);
+    if (hoje <= A) return ret('amarelo', 'aviso', 'Entregar o aviso até ' + dm(A) + ' (' + em(A) + ')', I);
+    if (hoje < qdSomarDias(I, -7)) return ret('azul', 'sai', 'Sai em ' + dm(I) + ' (' + em(I) + ')', I);
+    if (hoje < I) return ret('laranja', 'breve', 'Sai ' + em(I) + ' (' + dm(I) + ')', I);
+    if (g && g.situacao === 'FERIAS') return ret('verde', 'deferias', 'De férias desde ' + dm(I), I);
+    if (hoje <= qdSomarDias(I, P.tolerancia)) return ret('laranja', 'confirme', 'Saída prevista para ' + dm(I) + ' — confirme', I);
+    return ret('vermelho', 'confirmeja', 'Saiu de férias em ' + dm(I) + '? Confirme', I);
+  }
+  if (M && hoje > M) return ret('vermelho', 'vencido', 'Limite máximo para sair vencido em ' + dm(M) + ' (' + em(M) + ')', M);
+  if (L && hoje < qdSomarDias(L, -P.janela)) return ret('cinza', 'emdia', 'Em dia — pode sair a partir de ' + dm(L), L);
+  if (!M) return ret('semdata', 'semdata', 'Sem limite máximo na aba FÉRIAS', L);
+  const dias = qdDias(hoje, M);
+  if (dias < P.aviso) return ret('vermelho', 'hoje', 'Programe hoje: limite máximo ' + em(M), M);
+  if (dias <= P.urgente) return ret('laranja', 'ja', 'Programe já: limite máximo ' + em(M), M);
+  if (!L) return ret('amarelo', 'pode', 'Sem programação — limite máximo em ' + dm(M), M);
+  if (hoje >= L) return ret('amarelo', 'pode', 'Já pode sair desde ' + dm(L) + ' — sem programação', L);
+  return ret('azul', 'programar', 'Programar: pode sair a partir de ' + dm(L), L);
+}
+/*
+ * Uma entrada por pessoa ATIVA da GERAL com ferias: { g, periodos: [situacao], pior }. Linhas do CD sem par na GERAL
+ * ficam em foraGeral (a Conferencia aponta); cumpridas = as programacoes cumpridas (confirmadas, ou com o periodo
+ * ja fechado pelo RH) que comecaram nos ultimos 60 dias. Guardado por dia.
+ */
+function qdFeriasDados() {
+  const memo = qdMemo(), hoje = qdHoje(), P = qdFeP();
+  if (memo.ferias && memo.ferias.hoje === hoje) return memo.ferias;
+  const porRef = {}, progs = {};
+  qdGeral().forEach((g) => { porRef[g.ref] = g; });
+  (DADOS.programacoes || []).forEach((x) => { progs[x.id] = x; });
+  const pessoas = {}, foraGeral = [];
+  ((DADOS.ferias || {}).linhas || []).forEach((f) => {
+    const g = f.ref ? porRef[f.ref] : null;
+    if (!g) { foraGeral.push(f); return; }
+    if (!g.ativo) return;                                     // ja saiu da empresa
+    const p = pessoas[g.ref] = pessoas[g.ref] || { g, periodos: [] };
+    p.periodos.push(qdFeSituacao(f, f.prog ? progs[f.prog] : null, g, hoje, P));
+  });
+  const lista = Object.keys(pessoas).map((r) => {
+    const p = pessoas[r];
+    p.periodos.sort(qdFePorUrgencia);
+    p.pior = p.periodos[0];
+    return p;
+  });
+  const desde = qdSomarDias(hoje, -60);
+  const cumpridas = (DADOS.programacoes || []).filter((x) => x.situacao === 'CUMPRIDA' && x.inicio && x.inicio >= desde && porRef[x.ref] && porRef[x.ref].ativo)
+    .map((x) => ({ x, g: porRef[x.ref] })).sort((a, b) => b.x.inicio.localeCompare(a.x.inicio));
+  memo.ferias = { hoje, lista, porRef: pessoas, foraGeral, cumpridas, tem: !!DADOS.ferias };
+  return memo.ferias;
+}
+/* Quem grava a programacao: quem pode trocar a planilha do Quadro, com o servidor desta versao (a tabela no banco). */
+const qdFePodeProgramar = () => !!(DADOS.podeConfigurar && Array.isArray(DADOS.programacoes) && !DADOS.semProgramacao);
+
+/* ------------------------------------------------------------------ */
+/* FERIAS — a aba                                                      */
+/* ------------------------------------------------------------------ */
+/*
+ * Um cartao so, "Programacao de ferias". Em cima, a busca pelo nome (com texto, a lista de todo mundo que bate,
+ * em qualquer situacao, com os botoes: da para programar quem esta em dia). Embaixo, dois grupos: Programar (sem
+ * data escolhida e ja na janela, ou atrasado) e Programadas (acompanhar o aviso e confirmar a saida), cada pessoa
+ * uma vez, com a folhinha da data que importa e o texto colorido. Uma linha recolhida diz quem esta de ferias
+ * agora e quantas foram cumpridas nos ultimos 60 dias. O calendario do mes fica a um toque (Lista | Calendario).
+ * No rodape: em dia, sem dados, Excel, Parametros e a legenda das cores. Cada pessoa conta num lugar so:
+ * Programar + Programadas + em dia + sem dados = o quadro do recorte (Equipe, Funcao).
+ */
+const QD_FE_MES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+const QD_FE_MES_LONGO = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const QD_FE_SEMANA = [['DOM', 'D'], ['SEG', 'S'], ['TER', 'T'], ['QUA', 'Q'], ['QUI', 'Q'], ['SEX', 'S'], ['SÁB', 'S']];
+const QD_FE_SEMANA_LONGA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const QD_FE_LEGENDA = [['vermelho', 'crítico'], ['laranja', 'urgente'], ['amarelo', 'atenção'], ['azul', 'no prazo'], ['verde', 'resolvido'], ['cinza', 'nada a fazer']];
+/* Lista ou Calendario: a ultima escolha de quem olha fica neste navegador. */
+const QD_FE_CHAVE_VISTA = 'gsl_ferias_vista';
+/* Quantas pessoas cada grupo mostra antes do "Mostrar todos". */
+const QD_FE_LIMITE = 40;
+const QD_FE_ICO = {
+  emdia: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+  sem: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.3 1.8"/></svg>',
+  sol: '<svg class="qd-fe-ico" viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="2.7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 .9v1.6M7 11.5v1.6M.9 7h1.6M11.5 7h1.6M2.7 2.7l1.1 1.1M10.2 10.2l1.1 1.1M2.7 11.3l1.1-1.1M10.2 3.8l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  lista: '<svg class="qd-fe-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.2" fill="currentColor"/><circle cx="2.6" cy="8" r="1.2" fill="currentColor"/><circle cx="2.6" cy="12" r="1.2" fill="currentColor"/></svg>',
+  cal: '<svg class="qd-fe-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="1.6" y="2.6" width="12.8" height="11.8" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.8 6.4h12.4M5 1.2v2.8M11 1.2v2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+};
+/* "17/10"; com o ano quando a data esta a mais de 300 dias de hoje (para frente ou para tras), para o ano nunca ser lido errado. */
+const qdFeDM = (iso) => iso ? (Math.abs(qdDias(qdHoje(), iso)) > 300 ? pnDataLonga(iso) : iso.slice(8, 10) + '/' + iso.slice(5, 7)) : '—';
+const qdFeSemana = (iso) => QD_FE_SEMANA_LONGA[new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)))).getUTCDay()];
+/* "17/10 sáb": o dia da semana importa (as ferias nao podem comecar nos 2 dias antes do descanso ou de feriado). */
+const qdFeDMS = (iso) => iso ? qdFeDM(iso) + ' ' + qdFeSemana(iso).slice(0, 3) : '—';
+/* Com o ano (a ficha mostra periodos de anos diferentes). */
+const qdFeDMAS = (iso) => iso ? pnDataLonga(iso) + ' ' + qdFeSemana(iso).slice(0, 3) : '—';
+const qdFeMesLongo = (ym) => { const m = QD_FE_MES_LONGO[Number(ym.slice(5, 7)) - 1]; return m[0].toUpperCase() + m.slice(1) + ' de ' + ym.slice(0, 4); };
+const qdFeSomarMes = (ym, n) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + n, 1)).toISOString().slice(0, 7);
+/* O nome no texto copiado e no Excel: sem PROD na GERAL, "Sem nome" com o COD e o RH (como a tela mostra). */
+function qdFeNomeOuId(g) { return qdNomeTxt(g) || ('Sem nome' + (g.cod ? ', COD ' + g.cod : '') + (g.rh ? ', RH ' + g.rh : '')); }
+/* "ANA SOUZA LIMA" -> "ANA LIMA" (primeiro e ultimo nome, sem DA/DE/DOS); o nome inteiro vai na dica e no leitor de tela. */
+function qdFeNomeCurto(nome) {
+  const p = String(nome || '').toUpperCase().split(/\s+/).filter((x) => x && !/^(DA|DE|DO|DAS|DOS|E)$/.test(x));
+  return p.length > 1 ? p[0] + ' ' + p[p.length - 1] : (p[0] || 'SEM NOME');
+}
+/* Na pilula do calendario: primeiro e ultimo nome se couber (ate 13 letras); senao, o primeiro e a inicial do ultimo. */
+function qdFeNomePilula(nome) {
+  const c = qdFeNomeCurto(nome), x = c.split(' ');
+  return c.length <= 13 || x.length < 2 ? c : x[0] + ' ' + x[x.length - 1][0] + '.';
+}
+/* "em 3 dias" / "amanhã" / "hoje" / "ontem" / "há 2 dias" ate uma data. */
+function qdFeEm(iso) {
+  const d = qdDias(qdHoje(), iso);
+  if (d === 0) return 'hoje';
+  if (d === 1) return 'amanhã';
+  if (d === -1) return 'ontem';
+  return d > 0 ? 'em ' + qdPlural(d, 'dia', 'dias') : 'há ' + qdPlural(-d, 'dia', 'dias');
+}
+/* Quem a CDESLIGADOS diz que saiu e continua ATIVO na GERAL (a faixa vermelha do painel ja diz o nome): a linha avisa. */
+const qdFeSaiu = (g) => (qdMemo().pend[g.ref] || []).some((x) => x.tipo === 'DESLIGADO_ATIVO');
+const qdFePorPessoa = (a, b) => qdFePorUrgencia(a.pior, b.pior) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g));
+const qdFeUrgente = (p) => p.pior.cor === 'vermelho' || p.pior.cor === 'laranja';
+
+/* Quem entra: as pessoas ATIVAS da GERAL com ferias, no recorte da linha de filtros (Equipe, Funcao). */
+function qdFePessoas() {
+  const refs = {};
+  qdRecorte(qdNaEmpresa()).forEach((g) => { refs[g.ref] = true; });
+  return qdFeriasDados().lista.filter((p) => refs[p.g.ref]);
+}
+/* Cada pessoa num lugar so, pelo periodo mais urgente: Programar, Programadas, em dia (cinza ou verde) ou sem dados. */
+function qdFeContagem(pessoas) {
+  const c = { programar: [], programadas: [], emdia: [], semdata: [] };
+  pessoas.forEach((p) => {
+    const st = p.pior;
+    if (st.cor === 'semdata') c.semdata.push(p);
+    else if (st.cor === 'verde' || st.cor === 'cinza') c.emdia.push(p);
+    else (st.programada ? c.programadas : c.programar).push(p);
+  });
+  c.programar.sort(qdFePorPessoa);
+  c.programadas.sort(qdFePorPessoa);
+  return c;
+}
+/*
+ * O que o GSL NAO sabe das ferias do recorte: a aba FÉRIAS sem a coluna da data limite (ou sem nenhuma linha),
+ * quem do quadro nao tem linha ligada e quem tem como periodo mais urgente um sem DTA_LIMITEMAX ("sem dados").
+ * Nada disso pode virar "ninguem para programar".
+ */
+function qdFeDesconhecido() {
+  const pessoas = qdFePessoas(), comLinha = {};
+  pessoas.forEach((p) => { comLinha[p.g.ref] = true; });
+  const semLinha = qdRecorte(qdNaEmpresa()).filter((g) => !comLinha[g.ref]);
+  const semData = pessoas.filter((p) => p.pior.cor === 'semdata');
+  const ruim = qdFeAbaRuim();
+  return { aba: ruim ? ruim.curto : '', semLinha, semData, n: semLinha.length + semData.length };
+}
+/*
+ * A aba FÉRIAS que nao serve para os prazos: sem a coluna da data limite, sem Matricula e sem Nome (nenhuma linha
+ * lida) ou so com o cabecalho. Devolve o titulo e o que fazer (o cartao curto da aba) e o jeito curto de dizer
+ * ("a aba FÉRIAS esta ...", na Visao geral e no Copiar resumo); null se a aba serve.
+ */
+function qdFeAbaRuim() {
+  const lf = (DADOS.leitura && DADOS.leitura.ferias) || {}, aba = lf.aba || 'FÉRIAS', faltam = lf.faltam || [];
+  const cab = 'O cabeçalho precisa ter Matricula, Nome, pa_fim, DTA_LIMITE e DTA_LIMITEMAX, como sai do sistema.';
+  if (faltam.indexOf('limiteMax') !== -1) {
+    return { curto: 'sem a coluna DTA_LIMITEMAX', t: 'Não achei a coluna DTA_LIMITEMAX na aba ' + aba, frase: 'Sem ela, o GSL não sabe o prazo de ninguém. ' + cab };
+  }
+  if (lf.linhas === 0 && faltam.indexOf('matricula') !== -1 && faltam.indexOf('nome') !== -1) {
+    return { curto: 'sem as colunas Matricula e Nome', t: 'Não achei as colunas Matricula e Nome na aba ' + aba, frase: 'Sem elas, nenhuma linha foi lida. ' + cab };
+  }
+  if (lf.linhas === 0) return { curto: 'vazia', t: 'A aba ' + aba + ' está vazia', frase: 'Só tem o cabeçalho: cole a extração do sistema embaixo dele e use Atualizar dados.' };
+  return null;
+}
+/* A proxima pessoa a entrar em "Programar" (a de "pode sair a partir de" mais perto), entre quem esta em dia. */
+function qdFeProxima(pessoas) {
+  return pessoas.filter((p) => p.pior.k === 'emdia').sort((a, b) => a.pior.L.localeCompare(b.pior.L) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g)))[0] || null;
+}
+
+function qdFerias() {
+  if (QD.feVista !== 'lista' && QD.feVista !== 'calendario') QD.feVista = lerLocal(QD_FE_CHAVE_VISTA) === 'calendario' ? 'calendario' : 'lista';
+  const estado = qdFeAbaEstado();
+  if (estado) return estado;
+  const ninguem = !qdRecorte(qdNaEmpresa()).length;
+  return `<section class="bq-card qd-fe" aria-labelledby="qd-fe-tit">
+    ${qdFeCab(true)}
+    ${qdFeFaltam()}
+    ${ninguem ? `<p class="qd-fe-vazio">Ninguém neste filtro. <button class="qd-link" onclick="qdLimpar()">Limpar filtros</button></p>`
+      : `<div id="qd-fe-corpo">${qdFeCorpo()}</div>${qdFeRodape()}`}
+  </section>`;
+}
+/* O que muda com a busca e com Lista | Calendario (a busca redesenha so isto: o cursor fica no campo). */
+function qdFeCorpo() {
+  if (String(QD.feBusca || '').trim()) return qdFeBuscaLista();
+  const pessoas = qdFePessoas();
+  return QD.feVista === 'calendario' ? qdFeCalendario(pessoas) : qdFeLista(qdFeContagem(pessoas), pessoas);
+}
+function qdFeRedesenharCorpo() {
+  const alvo = el('qd-fe-corpo'); if (!alvo) return;
+  const foco = qdGuardarFoco();
+  alvo.innerHTML = qdFeCorpo();
+  qdDevolverFoco(foco);
+}
+function qdFeCab(completo) {
+  const P = qdFeP();
+  const vista = (k, ico, rot) => `<button class="qd-pill" aria-pressed="${QD.feVista === k}" onclick="qdFeVista(${jsArg(k)})">${ico}${rot}</button>`;
+  return `<header class="qd-fe-cab">
+    <div class="qd-fe-cab-tit"><h2 id="qd-fe-tit">Programação de férias</h2>
+      ${completo && P.aviso ? `<p class="qd-fe-sub">O aviso de férias é dado ${qdPlural(P.aviso, 'dia', 'dias')} antes da saída.</p>` : ''}</div>
+    ${completo ? `<div class="qd-seg pequeno qd-fe-vista" role="group" aria-label="Ver como">${vista('lista', QD_FE_ICO.lista, 'Lista')}${vista('calendario', QD_FE_ICO.cal, 'Calendário')}</div>` : ''}
+  </header>
+  ${completo ? `<label class="qd-fe-busca"><span class="qd-fe-so-leitor">Buscar pelo nome</span>
+    <input type="search" id="qd-fe-busca" value="${esc(QD.feBusca || '')}" placeholder="Buscar pelo nome" autocomplete="off" spellcheck="false"
+      oninput="QD.feBusca=this.value;clearTimeout(QD.tFeBusca);QD.tFeBusca=setTimeout(qdFeRedesenharCorpo,150)"
+      onkeydown="if(event.key==='Enter')qdFeBuscaEnter()"></label>` : ''}`;
+}
+/* Sem a aba, ou com a aba que nao serve (vazia, sem a data limite, sem Matricula e Nome): o cartao curto, com o que fazer. */
+function qdFeAbaEstado() {
+  const ruim = DADOS.ferias ? qdFeAbaRuim() : { t: 'Falta a aba FÉRIAS na planilha',
+    frase: 'Extraia as férias do sistema (com Matricula, Nome, pa_fim, DTA_LIMITE e DTA_LIMITEMAX), cole numa aba chamada FÉRIAS desta planilha e use Atualizar dados.' };
+  if (!ruim) return '';
+  return `<section class="bq-card qd-fe" aria-labelledby="qd-fe-tit">${qdFeCab(false)}
+    <div class="qd-fe-estado">${QD_ICONES.grave}<b>${esc(ruim.t)}</b><p>${esc(ruim.frase)}</p>
+      ${DADOS.podeConfigurar ? '<p><button class="icone-botao" onclick="qdFeParametros()">Parâmetros das férias</button></p>' : ''}</div>
+  </section>`;
+}
+/* Coluna que falta na aba FÉRIAS sem tirar a data limite (Matricula, Nome, pa_fim): parte das ferias fica sem dados. */
+function qdFeFaltam() {
+  const lf = (DADOS.leitura && DADOS.leitura.ferias) || {};
+  const rot = { matricula: 'Matricula', nome: 'Nome', paFim: 'pa_fim' };
+  const f = (lf.faltam || []).filter((k) => k !== 'limiteMax').map((k) => rot[k] || k);
+  if (!f.length) return '';
+  return `<p class="qd-fe-aviso">${QD_ICONES.atencao}<span>Não achei ${f.length === 1 ? 'a coluna ' + esc(f[0]) : 'as colunas ' + f.map(esc).join(', ')} na aba
+    ${esc(lf.aba || 'FÉRIAS')}: parte das férias pode ficar sem dados. <button class="qd-link" onclick="qdIrConferencia('FERIAS_ABA')">ver na Conferência</button></span></p>`;
+}
+
+/* LISTA: Programar e Programadas (grupo vazio some) e a linha de quem esta de ferias agora. */
+function qdFeLista(c, pessoas) {
+  return (c.programar.length ? qdFeGrupo('programar', 'Programar', 'escolha a data de saída', c.programar) : qdFeNinguem(pessoas)) +
+    (c.programadas.length ? qdFeGrupo('programadas', 'Programadas', 'entregue o aviso e confirme a saída', c.programadas) : '') +
+    qdFeAgoraLinha();
+}
+function qdFeGrupo(gr, titulo, frase, lista) {
+  const mostra = (QD.feTodos || {})[gr] ? lista : lista.slice(0, QD_FE_LIMITE);
+  return `<section class="qd-fe-grupo" aria-labelledby="qd-fe-g-${gr}">
+    <div class="qd-fe-grupo-cab"><h3 id="qd-fe-g-${gr}">${titulo} <span class="qd-fe-n bq-num">${qdN(lista.length)}</span></h3>
+      <span class="qd-fe-grupo-frase">${frase}</span></div>
+    <ul class="qd-fe-itens">${mostra.map((p) => qdFeItem(p)).join('')}</ul>
+    ${lista.length > mostra.length ? `<button class="qd-mais" onclick="qdFeMostrarTodos(${jsArg(gr)})">Mostrar todos (${qdN(lista.length)})</button>` : ''}
+  </section>`;
+}
+/* Ninguem para programar: a linha diz quem e o proximo (e, se ha gente sem dados, que e "entre quem tem as datas"). */
+function qdFeNinguem(pessoas) {
+  const d = qdFeDesconhecido(), prox = qdFeProxima(pessoas);
+  return `<p class="qd-fe-ninguem">${d.n ? '' : QD_ICONES.ok}<span><b>Ninguém para programar agora${d.n ? ' entre quem tem as datas' : ''}</b>${prox
+    ? ` · próximo: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button>, que pode sair a partir de ${qdFeDMS(prox.pior.L)}` : ''}</span></p>`;
+}
+/* A folhinha: a data que importa (mes na faixa de cima, na cor da situacao; o dia grande; o dia da semana embaixo). */
+function qdFeFolha(iso) {
+  return `<span class="qd-fe-folha" aria-hidden="true"><span class="qd-fe-folha-mes">${QD_FE_MES[Number(iso.slice(5, 7)) - 1]}</span><span class="qd-fe-folha-dia">${Number(iso.slice(8, 10))}</span><span class="qd-fe-folha-sem">${qdFeSemana(iso).slice(0, 3)}</span></span>`;
+}
+/* O texto colorido da situacao: um quadradinho na cor e o texto numa tinta da mesma cor (com contraste). */
+const qdFeSt = (st) => `<span class="qd-fe-st qd-fe-${st.cor}"><i aria-hidden="true"></i>${esc(st.txt)}</span>`;
+/*
+ * A linha de baixo, so com o que o texto colorido nao diz: sem programacao, a outra data; programada, a saida, os
+ * dias e a volta (ou o aviso, ou o limite maximo que ela passou).
+ */
+function qdFeDetalhe(st) {
+  const pr = st.prog, hoje = qdHoje(), dm = qdFeDM;
+  if (st.feita) return 'Saiu em ' + dm(pr.inicio) + ' · ' + qdPlural(pr.dias, 'dia', 'dias');
+  if (st.programada) {
+    const I = pr.inicio, d = qdPlural(pr.dias, 'dia', 'dias'), volta = 'volta em ' + dm(qdSomarDias(I, pr.dias));
+    if (I <= hoje) return 'Saída em ' + dm(I) + ' (' + qdFeEm(I) + ') · ' + d + ' · ' + volta;
+    if (st.k === 'sai' || st.k === 'breve') return d + ' · ' + volta;
+    return 'Sai em ' + dm(I) + ' (' + qdFeEm(I) + ') · ' + d + (st.k === 'depois' && st.M ? ' · limite máximo para sair: ' + dm(st.M) : '');
+  }
+  if (st.k === 'vencido' || st.k === 'hoje' || st.k === 'ja') return st.L ? (st.L <= hoje ? 'pode sair desde ' : 'pode sair a partir de ') + dm(st.L) : '';
+  return st.M ? 'limite máximo para sair: ' + dm(st.M) : '';
+}
+/* Etiquetas da pessoa, so quando valem. */
+function qdFeEtiquetas(p) {
+  const g = p.g, st = p.pior, html = [], txt = [];
+  const tag = (h, dica, t) => { html.push(`<span class="qd-fe-tag"${dica ? ` title="${esc(dica)}"` : ''}>${h}</span>`); txt.push(t); };
+  if (g.situacao === 'FERIAS' && st.k !== 'deferias') tag(QD_FE_ICO.sol + 'de férias agora', 'Pelo STATUS da GERAL.', 'De férias agora pelo STATUS da GERAL.');
+  if (g.situacao === 'AFASTADO') tag('afastado', 'As férias ficam para depois da volta.', 'Afastado: as férias ficam para depois da volta.');
+  if (qdFeSaiu(g)) tag('consta como desligado', 'Está na CDESLIGADOS e ainda ativo na GERAL: confira na Conferência.',
+    'Consta como desligado: está na CDESLIGADOS e ainda ativo na GERAL.');
+  const outros = p.periodos.filter((x) => x !== st && !x.feita && x.cor !== 'semdata').length;
+  if (outros) tag('+' + qdPlural(outros, 'período', 'períodos'), 'Veja a ficha.', 'Mais ' + qdPlural(outros, 'período', 'períodos') + ' na ficha.');
+  if (st.cor !== 'semdata' && p.periodos.some((x) => x.cor === 'semdata')) tag('período sem data', 'Outro período desta pessoa está sem DTA_LIMITEMAX na aba FÉRIAS: veja a ficha.',
+    'Outro período sem data limite na aba FÉRIAS.');
+  return { html: html.join(''), txt: txt.length ? txt.join(' ') + ' ' : '' };
+}
+/*
+ * Os botoes de uma situacao (so para quem programa): Programar; ou Confirmar saida (do dia do inicio em diante) e
+ * Reprogramar. Cheio so o que resolve agora (Confirmar saida; na ficha, Programar): a lista nao vira uma parede de botoes.
+ */
+function qdFeBotoes(st, ref, naFicha) {
+  if (!qdFePodeProgramar() || st.feita) return '';
+  const f = st.f, b = [], args = Number(ref) + ',' + Number(f.linha) + (naFicha ? ',true' : '');
+  if (st.programada) {
+    if (st.prog.inicio <= qdHoje()) b.push(`<button class="qd-fe-bt forte" onclick="qdFeConfirmar(${jsArg(st.prog.id)})">Confirmar saída</button>`);
+    b.push(`<button class="qd-fe-bt" onclick="qdFeProgramar(${args})">Reprogramar</button>`);
+    if (naFicha) b.push(`<button class="qd-fe-bt" onclick="qdFeCancelar(${args})">Cancelar programação</button>`);
+  } else b.push(`<button class="qd-fe-bt${naFicha ? ' forte' : ''}" onclick="qdFeProgramar(${args})">Programar</button>`);
+  return `<span class="qd-fe-acoes">${b.join('')}</span>`;
+}
+/*
+ * Uma pessoa: a folhinha (a data que importa), o nome, o turno e a funcao, e embaixo o texto colorido e a outra
+ * data. A linha abre a ficha (os outros periodos estao la); os botoes ficam do lado (embaixo, no celular).
+ */
+function qdFeItem(p) {
+  const st = p.pior, g = p.g, nome = qdNomeTxt(g) || 'Sem nome';
+  const tags = qdFeEtiquetas(p), det = qdFeDetalhe(st);
+  const rot = nome + ', ' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ': ' + st.txt + (det ? '; ' + det : '') + '. ' + tags.txt + 'Abrir a ficha.';
+  return `<li class="qd-fe-item qd-fe-${st.cor}">
+    <button class="qd-fe-abre${st.data ? '' : ' sem-folha'}" onclick="qdFicha(${Number(g.ref)})" aria-label="${esc(rot)}">
+      ${st.data ? qdFeFolha(st.data) : ''}
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(nome)}</span>${qdEq(g.equipe, g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(g))}</span>${tags.html}</span>
+      <span class="qd-fe-quando">${qdFeSt(st)}${det ? `<span class="qd-fe-det">${esc(det)}</span>` : ''}</span>
+    </button>${qdFeBotoes(st, g.ref)}
+  </li>`;
+}
+/* Quem nao tem linha na aba FÉRIAS (a busca e a lista de quem esta de ferias agora): sem folhinha e sem botao. */
+function qdFeItemSemLinha(g, txt) {
+  const nome = qdNomeTxt(g) || 'Sem nome';
+  return `<li class="qd-fe-item qd-fe-semdata">
+    <button class="qd-fe-abre sem-folha" onclick="qdFicha(${Number(g.ref)})" aria-label="${esc(nome + ', ' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ': ' + txt + '. Abrir a ficha.')}">
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(nome)}</span>${qdEq(g.equipe, g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(g))}</span></span>
+      <span class="qd-fe-quando"><span class="qd-fe-st qd-fe-semdata"><i aria-hidden="true"></i>${esc(txt)}</span></span>
+    </button>
+  </li>`;
+}
+
+/* BUSCA pelo nome (sem acento nem maiuscula, cada palavra em qualquer ordem) ou pelo RH, no recorte dos filtros. */
+function qdFeBuscar(q) {
+  const palavras = qdChaveNome(q).split(' ').filter(Boolean), num = String(q).replace(/\D+/g, '');
+  const soNumero = /^\s*\d+\s*$/.test(q);
+  return qdRecorte(qdNaEmpresa()).filter((g) => {
+    const n = qdChaveNome(g.nome);
+    return (palavras.length && palavras.every((w) => n.indexOf(w) !== -1)) || (soNumero && num.length >= 3 && qdChaveCod(g.rh).indexOf(num) !== -1);
+  }).sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+}
+function qdFeBuscaLista() {
+  const q = String(QD.feBusca || '').trim(), achados = qdFeBuscar(q), porRef = qdFeriasDados().porRef;
+  const filtro = QD.equipe !== '*' || QD.funcao;
+  if (!achados.length) {
+    return `<p class="qd-fe-vazio">Ninguém com «${esc(q)}» ${filtro ? 'neste filtro' : 'no quadro'}.${filtro ? ' <button class="qd-link" onclick="qdLimpar()">Limpar filtros</button>' : ''}</p>`;
+  }
+  const mostra = achados.slice(0, 60);
+  return `<section class="qd-fe-grupo" aria-labelledby="qd-fe-g-busca">
+    <div class="qd-fe-grupo-cab"><h3 id="qd-fe-g-busca">Busca <span class="qd-fe-n bq-num">${qdN(achados.length)}</span></h3>
+      <span class="qd-fe-grupo-frase">todos com «${esc(q)}», em qualquer situação</span></div>
+    <ul class="qd-fe-itens">${mostra.map((g) => porRef[g.ref] ? qdFeItem(porRef[g.ref]) : qdFeItemSemLinha(g, 'Sem linha na aba FÉRIAS')).join('')}</ul>
+    ${achados.length > mostra.length ? `<p class="qd-fe-vazio">e mais ${qdN(achados.length - mostra.length)}: escreva mais do nome.</p>` : ''}
+  </section>`;
+}
+/* Enter com um resultado so abre a ficha. */
+function qdFeBuscaEnter() {
+  clearTimeout(QD.tFeBusca);
+  const l = String(QD.feBusca || '').trim() ? qdFeBuscar(String(QD.feBusca).trim()) : [];
+  if (l.length === 1) qdFicha(l[0].ref); else qdFeRedesenharCorpo();
+}
+
+/* De ferias agora (pelo STATUS da GERAL) e cumpridas nos ultimos 60 dias: uma linha recolhida, que abre a lista. */
+function qdFeAgoraLinha() {
+  const refs = {};
+  qdRecorte(qdNaEmpresa()).forEach((g) => { refs[g.ref] = true; });
+  const deFerias = qdRecorte(qdNaEmpresa()).filter((g) => g.situacao === 'FERIAS').sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+  const cumpridas = qdFeriasDados().cumpridas.filter((c) => refs[c.g.ref]);
+  if (!deFerias.length && !cumpridas.length) return '';
+  const aberto = !!QD.feAgora, porRef = qdFeriasDados().porRef;
+  const cumprida = (c) => `<li class="qd-fe-item qd-fe-verde">
+    <button class="qd-fe-abre" onclick="qdFicha(${Number(c.g.ref)})" aria-label="${esc((qdNomeTxt(c.g) || 'Sem nome') + ': férias cumpridas, saiu em ' + pnDataLonga(c.x.inicio) + '. Abrir a ficha.')}">
+      ${qdFeFolha(c.x.inicio)}
+      <span class="qd-fe-quem"><span class="qd-fe-nome">${esc(qdNomeTxt(c.g) || 'Sem nome')}</span>${qdEq(c.g.equipe, c.g.equipeBruta)}<span class="qd-fe-funcao">${qdRotFuncao(qdFuncaoTela(c.g))}</span></span>
+      <span class="qd-fe-quando"><span class="qd-fe-st qd-fe-verde"><i aria-hidden="true"></i>Férias cumpridas</span><span class="qd-fe-det">saiu em ${qdFeDM(c.x.inicio)} · ${qdPlural(c.x.dias, 'dia', 'dias')}${c.x.pelaAba ? ' · período fechado na aba FÉRIAS' : ''}</span></span>
+    </button></li>`;
+  return `<div class="qd-fe-agora">
+    <button class="qd-link qd-fe-agora-bt" aria-expanded="${aberto}" onclick="QD.feAgora=!QD.feAgora;qdFeRedesenharCorpo()">${QD_FE_ICO.sol}<span><b class="bq-num">${qdN(deFerias.length)}</b> de férias agora · <b class="bq-num">${qdN(cumpridas.length)}</b> ${cumpridas.length === 1 ? 'cumprida' : 'cumpridas'} nos últimos 60 dias</span></button>
+    ${aberto ? `<ul class="qd-fe-itens">${deFerias.map((g) => porRef[g.ref] ? qdFeItem(porRef[g.ref]) : qdFeItemSemLinha(g, 'De férias agora pelo STATUS da GERAL')).join('')}${cumpridas.map(cumprida).join('')}</ul>` : ''}
+  </div>`;
+}
+
+/*
+ * RODAPE: quantos estao em dia, quem esta sem dados (a lista abre aqui; o detalhe esta na Conferencia), o Excel, os
+ * Parametros (so quem pode) e a legenda das cores. Embaixo, a frase de quem ja marcou as ferias no sistema.
+ */
+function qdFeRodape() {
+  const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido();
+  const inc = qdMemo().inc.filter((x) => /^FERIAS_/.test(x.tipo) && x.tipo !== 'FERIAS_ABA');
+  const linhas = inc.filter((x) => x.tipo !== 'FERIAS_SEM_DADOS');
+  // quem esta sem linha tem o item dele na Conferencia; quem tem um periodo sem data, nao (esta na lista que abre aqui)
+  const semLinhaConf = d.semLinha.length && inc.length > linhas.length;
+  const conf = (tipo) => `<span aria-hidden="true">·</span><button class="qd-link" onclick="qdIrConferencia(${jsArg(tipo)})">ver na Conferência</button>`;
+  const partes = [`<span class="qd-fe-rod-item">${QD_FE_ICO.emdia}<span><b class="bq-num">${qdN(c.emdia.length)}</b> em dia</span></span>`];
+  if (d.n) {
+    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<button class="qd-link" aria-expanded="${!!QD.feSemDados}" onclick="QD.feSemDados=!QD.feSemDados;qdDesenhar()"><b class="bq-num">${qdN(d.n)}</b> sem dados de férias</button>${semLinhaConf ? conf('FERIAS_SEM_DADOS') : ''}</span>`);
+  }
+  if (linhas.length && !semLinhaConf) {
+    partes.push(`<span class="qd-fe-rod-item">${QD_FE_ICO.sem}<span><b class="bq-num">${qdN(linhas.length)}</b> ${linhas.length === 1 ? 'linha' : 'linhas'} da aba FÉRIAS para conferir</span>${conf(linhas[0].tipo)}</span>`);
+  }
+  return `<footer class="qd-fe-rodape">
+    <div class="qd-fe-rod-linha">${partes.join('')}
+      <span class="qd-fe-rod-acoes"><button class="qd-link" onclick="qdFeBaixar()">Baixar Excel</button>${DADOS.podeConfigurar ? '<button class="qd-link" onclick="qdFeParametros()">Parâmetros</button>' : ''}</span></div>
+    ${QD.feSemDados && d.n ? qdFeSemDados(d) : ''}
+    <p class="qd-fe-legenda">${QD_FE_LEGENDA.map(([cor, t]) => `<span class="qd-fe-${cor}"><i aria-hidden="true"></i>${t}</span>`).join('')}</p>
+    <p class="qd-fe-rod-dica">Marcou férias no sistema? Cole a extração nova na aba FÉRIAS e use Atualizar dados.</p>
+  </footer>`;
+}
+/* Quem esta sem dados de ferias (aberto pelo rodape): o nome abre a ficha. */
+function qdFeSemDados(d) {
+  const itens = d.semLinha.map((g) => [g, 'sem linha na aba FÉRIAS']).concat(d.semData.map((p) => [p.g, 'período sem data limite na aba FÉRIAS']))
+    .sort((a, b) => qdNomeTxt(a[0]).localeCompare(qdNomeTxt(b[0])));
+  const mostra = itens.slice(0, 50);
+  return `<ul class="qd-fe-semdados">${mostra.map(([g, t]) => `<li><button class="qd-link" onclick="qdFicha(${Number(g.ref)})">${esc(qdFeNomeOuId(g))}</button>
+      ${qdEq(g.equipe, g.equipeBruta)}<span>${qdRotFuncao(qdFuncaoTela(g))} · ${t}${qdFeSaiu(g) ? ' · consta como desligado' : ''}</span></li>`).join('')}
+    ${itens.length > mostra.length ? `<li><span>e mais ${qdN(itens.length - mostra.length)}</span></li>` : ''}</ul>`;
+}
+
+/*
+ * CALENDARIO: a grade do mes, no desenho da tela Calendario. Cada pessoa uma vez, no dia que importa (a data
+ * programada; sem programacao, o "pode sair a partir de" ou, quando aperta, o limite maximo), na cor da situacao.
+ * O vermelho com a data ja passada nao cai num dia que ja foi: fica numa faixa acima da grade, em qualquer mes.
+ */
+const qdFePassou = (p) => p.pior.cor === 'vermelho' && p.pior.data && p.pior.data < qdHoje();
+function qdFePorDia(pessoas, ym) {
+  const porDia = {};
+  pessoas.forEach((p) => {
+    const st = p.pior;
+    if (!st.data || st.feita || st.cor === 'semdata' || qdFePassou(p)) return;
+    if (st.data.slice(0, 7) === ym) (porDia[st.data] = porDia[st.data] || []).push(p);
+  });
+  Object.keys(porDia).forEach((d) => porDia[d].sort((a, b) => qdFeRank(a.pior) - qdFeRank(b.pior) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g))));
+  return porDia;
+}
+function qdFeCalendario(pessoas) {
+  const hoje = qdHoje(), mesHoje = hoje.slice(0, 7);
+  if (!QD.feMes) QD.feMes = mesHoje;
+  const ym = QD.feMes, ano = Number(ym.slice(0, 4)), mes = Number(ym.slice(5, 7)) - 1;
+  const nDias = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate(), ini = new Date(Date.UTC(ano, mes, 1)).getUTCDay();
+  const porDia = qdFePorDia(pessoas, ym);
+  const semanas = [];
+  for (let s = 0; s < Math.ceil((ini + nDias) / 7); s++) {
+    const cel = [];
+    for (let i = 0; i < 7; i++) {
+      const iso = new Date(Date.UTC(ano, mes, s * 7 + i - ini + 1)).toISOString().slice(0, 10), n = Number(iso.slice(8, 10));
+      if (iso.slice(0, 7) !== ym) { cel.push(`<td class="qd-fe-dia fora"><div class="qd-fe-dia-cab" aria-hidden="true"><span class="qd-fe-dia-n">${n}</span></div></td>`); continue; }
+      const evs = porDia[iso] || [], cor = evs.length ? evs[0].pior.cor : '';
+      const cabe = evs.length > 3 ? 2 : 3, ehHoje = iso === hoje;
+      const dica = qdFeSemana(iso) + ', ' + qdFeDM(iso) + (ehHoje ? ' (hoje)' : '') + ': ' + qdPlural(evs.length, 'pessoa', 'pessoas') + ' — ver quem';
+      cel.push(`<td class="qd-fe-dia${iso < hoje ? ' passado' : ''}${ehHoje ? ' hoje' : ''}${cor ? ' tem-cor qd-fe-' + cor : ''}${QD.feDia === iso ? ' escolhido' : ''}"${ehHoje ? ' aria-current="date"' : ''}>
+        <div class="qd-fe-dia-cab"><span class="qd-fe-dia-n">${n}</span>${ehHoje ? '<span class="qd-fe-hoje">hoje</span>' : ''}</div>
+        ${evs.length ? `<ul class="qd-fe-pilulas">${evs.slice(0, cabe).map((p) => `<li>${qdFePilula(p)}</li>`).join('')}</ul>` : ''}
+        ${evs.length > cabe ? `<button class="qd-fe-mais" data-dia="${iso}" onclick="qdFeDia(${jsArg(iso)})">+${evs.length - cabe} no dia</button>` : ''}
+        ${evs.length ? `<button class="qd-fe-dia-bt" data-dia="${iso}" onclick="qdFeDia(${jsArg(iso)})" aria-label="${esc(dica)}">${evs.slice(0, 3).map((p) => `<i class="qd-fe-ponto qd-fe-${p.pior.cor}"></i>`).join('')}${evs.length > 3 ? '<b>+' + (evs.length - 3) + '</b>' : ''}</button>` : ''}
+      </td>`);
+    }
+    semanas.push('<tr>' + cel.join('') + '</tr>');
+  }
+  const passou = pessoas.filter(qdFePassou).sort(qdFePorPessoa), mostraP = passou.slice(0, 6);
+  return `<div class="qd-fe-cal-cab">
+      <div class="qd-fe-cal-tit"><h3 id="qd-fe-mes-tit">${qdFeMesLongo(ym)}</h3><span>cada pessoa no dia que importa<span class="qd-fe-so-estreito"> · toque no dia para ver quem</span></span></div>
+      <div class="qd-fe-setas">
+        ${ym === mesHoje ? '' : `<button class="qd-fe-hoje-bt" onclick="QD.focoDepois='.qd-fe-seta.ant';qdFeIrMes(${jsArg(mesHoje)})">Hoje</button>`}
+        <button class="qd-fe-seta ant" onclick="qdFeMesRel(-1)" aria-label="Mês anterior">‹</button>
+        <button class="qd-fe-seta prox" onclick="qdFeMesRel(1)" aria-label="Próximo mês">›</button>
+      </div>
+    </div>
+    ${passou.length ? `<p class="qd-fe-vencidos">${QD_ICONES.grave}<b>Data já passou</b>${mostraP.map((p) => `<span><button class="qd-link" onclick="qdFicha(${Number(p.g.ref)})"
+        title="${esc((qdNomeTxt(p.g) || 'Sem nome') + ': ' + p.pior.txt + (qdFeSaiu(p.g) ? '. Consta como desligado.' : ''))}">${esc(qdFeNomeCurto(p.g.nome))}</button> (${qdFeDM(p.pior.data)})</span>`).join('')}${passou.length > mostraP.length
+        ? `<button class="qd-link" onclick="QD.focoDepois='#qd-fe-g-programar';qdFeVista('lista')">e mais ${passou.length - mostraP.length} na lista</button>` : ''}</p>` : ''}
+    <table class="qd-fe-mes" aria-labelledby="qd-fe-mes-tit">
+      <thead><tr>${QD_FE_SEMANA.map(([l, k], i) => `<th scope="col" abbr="${QD_FE_SEMANA_LONGA[i]}"><span class="qd-fe-longo">${l}</span><span class="qd-fe-curto" aria-hidden="true">${k}</span></th>`).join('')}</tr></thead>
+      <tbody>${semanas.join('')}</tbody>
+    </table>
+    <p class="qd-fe-cal-dica">A data programada; sem programação, a partir de quando pode sair ou, se apertar, o limite máximo.<span class="qd-fe-so-largo"> Toque no nome para abrir a ficha.</span></p>
+    ${qdFeDiaLista(porDia, hoje)}`;
+}
+/* Pilula = nome curto na cor da situacao (o nome inteiro, o turno e o texto vao na dica e no leitor de tela). Clique: a ficha. */
+function qdFePilula(p) {
+  const st = p.pior, g = p.g, nome = qdFeNomePilula(g.nome);
+  const rot = nome + ' — ' + (qdNomeTxt(g) || 'Sem nome') + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + '): ' + st.txt + '.' + (qdFeSaiu(g) ? ' Consta como desligado.' : '');
+  return `<button class="qd-fe-pil qd-fe-${st.cor}" title="${esc(rot)}" aria-label="${esc(rot)}" onclick="qdFicha(${Number(g.ref)})"><span class="qd-fe-pil-nome">${esc(nome)}</span></button>`;
+}
+/* A lista de um dia (o "+N no dia"; no estreito, o toque no dia), embaixo da grade. */
+function qdFeDiaLista(porDia, hoje) {
+  const iso = QD.feDia;
+  if (!iso || iso.slice(0, 7) !== QD.feMes) return '';
+  const evs = porDia[iso] || [], sem = qdFeSemana(iso);
+  return `<div class="qd-fe-dia-lista" id="qd-fe-dia-lista">
+    <h4>${sem[0].toUpperCase() + sem.slice(1)}, ${qdFeDM(iso)}${iso === hoje ? ' (hoje)' : ''} <button class="qd-link" onclick="qdFeFecharDia()">fechar</button></h4>
+    ${evs.length ? `<ul class="qd-fe-itens">${evs.map((p) => qdFeItem(p)).join('')}</ul>` : '<p class="qd-fe-vazio">Ninguém neste dia.</p>'}
+  </div>`;
+}
+
+/* --- acoes da tela --- */
+function qdFeVista(v) { QD.feVista = v; QD.feDia = ''; gravarLocal(QD_FE_CHAVE_VISTA, v); qdDesenhar(); }
+function qdFeIrMes(m) { QD.feMes = m; QD.feDia = ''; qdDesenhar(); }
+function qdFeMesRel(n) { qdFeIrMes(qdFeSomarMes(QD.feMes || qdHoje().slice(0, 7), n)); }
+function qdFeMostrarTodos(gr) { QD.feTodos = Object.assign({}, QD.feTodos, { [gr]: true }); qdFeRedesenharCorpo(); }
+function qdFeDia(iso) {
+  QD.feDia = QD.feDia === iso ? '' : iso;
+  if (QD.feDia) QD.focoDepois = '#qd-fe-dia-lista h4';
+  qdDesenhar();
+  const x = QD.feDia && el('qd-fe-dia-lista');
+  if (x) { try { x.scrollIntoView({ block: 'nearest' }); } catch (e) {} }
+}
+/* Fecha a lista do dia e devolve o foco ao botao do dia que a abriu (o do dia no celular, o "+N no dia" no computador). */
+function qdFeFecharDia() {
+  const iso = QD.feDia;
+  QD.feDia = '';
+  const vis = Array.from(document.querySelectorAll('.qd-fe-mes [data-dia="' + iso + '"]')).find((b) => b.offsetParent !== null);
+  QD.focoDepois = vis ? '.qd-fe-mes .' + vis.className.split(' ')[0] + '[data-dia="' + iso + '"]' : '#qd-fe-mes-tit';
+  qdDesenhar();
+}
+/* Contador da aba (o CD inteiro): quem esta no vermelho ou no laranja (■ com algum vermelho; so laranja, ▲). Some com a aba aberta. */
+function qdFeSeloAba() {
+  if (!DADOS.ferias || QD.aba === 'ferias') return '';
+  const l = qdFeriasDados().lista, v = l.filter((p) => p.pior.cor === 'vermelho').length, n = l.filter(qdFeUrgente).length;
+  if (!n) return '';
+  const rot = (n === 1 ? '1 pessoa do CD pede' : qdN(n) + ' pessoas do CD pedem') + ' atenção agora nas férias (vermelho ou laranja)';
+  return `<span class="qd-contador ${v ? 'grave' : 'atencao'}" role="img" aria-label="${rot}" title="${rot}">${v ? '■' : '▲'} ${n}</span>`;
+}
+
+/*
+ * PROGRAMAR (so quem pode trocar a planilha do Quadro; o servidor confere tudo de novo). A janela diz o periodo e as
+ * duas datas; o inicio vai de "pode sair a partir de" ate o limite maximo (o ultimo dia para comecar: a volta pode
+ * passar dele). O limite que ja passou nao barra: e o quanto antes. Embaixo, a volta e o ultimo dia do aviso, ao
+ * vivo; o aviso que ja nao cabe e so um alerta. Da ficha, Voltar volta para a ficha.
+ */
+function qdFeSituacaoDe(ref, linha) {
+  const p = qdFeriasDados().porRef[ref];
+  return p ? { p, st: p.periodos.find((x) => x.f.linha === linha) } : {};
+}
+function qdFeProgramar(ref, linha, daFicha) {
+  const { p, st } = qdFeSituacaoDe(ref, linha);
+  if (!st) return;
+  QD.feAlvo = { ref, linha, daFicha: !!daFicha };
+  const f = st.f, pr = st.programada ? st.prog : null, P = qdFeP(), hoje = qdHoje(), nome = qdNomeTxt(p.g) || 'Sem nome';
+  const passou = !!st.M && st.M < hoje;
+  // sem programacao: o primeiro dia com o aviso inteiro (e de quando pode sair em diante); se passar do limite, o primeiro possivel
+  let sug = pr ? pr.inicio : [st.L, qdSomarDias(hoje, P.aviso)].filter(Boolean).sort().pop();
+  if (!pr && st.M && !passou && sug > st.M) sug = [st.L, hoje].filter(Boolean).sort().pop();
+  if (!pr && st.M && !passou && sug > st.M) sug = st.M;
+  abrirJanela((pr ? 'Reprogramar' : 'Programar') + ' férias — ' + nome, `<div class="qd-fe-prog">
+    <p class="qd-fe-prog-fatos"><span>Período aquisitivo: ${pnDataLonga(f.paInicio)} a ${pnDataLonga(f.paFim)}</span>
+      <span>Pode sair a partir de: <b>${st.L ? pnDataLonga(st.L) : '—'}</b></span>
+      <span>Limite máximo para sair: <b>${st.M ? pnDataLonga(st.M) : 'sem data na aba FÉRIAS'}</b></span></p>
+    ${passou ? `<p class="qd-fe-prog-alerta">O limite máximo para sair já passou (${pnDataLonga(st.M)}): programe o quanto antes.</p>` : ''}
+    <div class="qd-fe-prog-campos">
+      <div class="campo"><label for="fe-inicio">Início das férias</label>
+        <input id="fe-inicio" type="date"${st.L ? ` min="${st.L}"` : ''}${st.M && !passou ? ` max="${st.M}"` : ''} value="${esc(sug || '')}" oninput="qdFeVivo()" onchange="qdFeVivo()"></div>
+      <div class="campo"><label for="fe-dias">Dias</label>
+        <input id="fe-dias" type="number" inputmode="numeric" min="5" max="30" step="1" value="${pr ? Number(pr.dias) : 30}" oninput="qdFeVivo()"></div>
+    </div>
+    <div class="campo"><label for="fe-obs">Observação <span class="qd-fe-opc">(opcional)</span></label>
+      <input id="fe-obs" maxlength="300" value="${esc(pr ? pr.observacao : '')}"></div>
+    <p class="qd-fe-prog-vivo" id="fe-vivo" aria-live="polite"></p>
+    <p class="qd-fe-prog-alerta" id="fe-alerta" hidden></p>
+    <p class="qd-fe-erro" id="fe-erro" role="alert" hidden></p>
+  </div>`, `<button class="botao secundario" onclick="qdFeVoltar()">Voltar</button>
+    <button class="botao" onclick="qdFeSalvarProgramacao()">Salvar programação</button>`);
+  qdFeVivo();
+}
+/* A volta (inicio + dias) e o ultimo dia do aviso, enquanto a pessoa escolhe. */
+function qdFeVivo() {
+  const vivo = el('fe-vivo'), alerta = el('fe-alerta');
+  if (!vivo) return;
+  const P = qdFeP(), i = val('fe-inicio'), d = Number(val('fe-dias')), ok = qdIsoValido(i), dias = Number.isInteger(d) && d >= 5 && d <= 30 ? d : 0;
+  vivo.textContent = !ok ? 'Escolha o início para ver a volta e o aviso.'
+    : [dias ? 'Volta em ' + pnDataLonga(qdSomarDias(i, dias)) : '', P.aviso ? 'entregar o aviso até ' + pnDataLonga(qdSomarDias(i, -P.aviso)) : ''].filter(Boolean).join(' · ');
+  const naoCabe = ok && P.aviso > 0 && qdSomarDias(i, -P.aviso) < qdHoje();
+  alerta.hidden = !naoCabe;
+  alerta.textContent = naoCabe ? 'O aviso de ' + qdPlural(P.aviso, 'dia', 'dias') + ' já não cabe antes desse início.' : '';
+}
+function qdFeVoltar() {
+  const a = QD.feAlvo;
+  if (a && a.daFicha) qdFicha(a.ref); else fecharJanela();
+}
+/* As mesmas conferencias do servidor, com as mesmas frases, antes de ir a ele. */
+function qdFeSalvarProgramacao() {
+  const a = QD.feAlvo || {}, { p, st } = qdFeSituacaoDe(a.ref, a.linha);
+  if (!st) { fecharJanela(); return; }
+  const inicio = val('fe-inicio'), t = String(val('fe-dias')).trim(), dias = t === '' ? 30 : Number(t), nome = qdNomeTxt(p.g) || 'Essa pessoa';
+  let erro = '';
+  if (!qdIsoValido(inicio)) erro = 'Escolha a data de início das férias.';
+  else if (!Number.isInteger(dias) || dias < 5 || dias > 30) erro = 'Dias de férias: use um número inteiro de 5 a 30.';
+  else if (st.L && inicio < st.L) erro = nome + ' só pode sair de férias a partir de ' + pnDataLonga(st.L) + '.';
+  else if (st.M && inicio > st.M && st.M >= qdHoje()) erro = 'A data passa do limite máximo para sair (' + pnDataLonga(st.M) + '). Escolha uma data até lá.';
+  const caixa = el('fe-erro');
+  caixa.textContent = erro; caixa.hidden = !erro;
+  if (erro) return;
+  const f = st.f;
+  qdFeGravar('programarFerias', { matricula: f.matricula || '', nome: f.nome || '', paFim: f.paFim || '', limiteMax: f.limiteMax || '',
+    inicio, dias, observacao: val('fe-obs') });
+}
+function qdFeConfirmar(id) { qdFeGravar('confirmarFerias', { id }); }
+/* Cancelar a programacao (a confirmada volta a programada: o servidor decide pela situacao gravada). */
+function qdFeDesfazer(id) { qdFeGravar('cancelarProgramacaoFerias', { id }); }
+/* Cancelar (da ficha): a janela pergunta antes. */
+function qdFeCancelar(ref, linha) {
+  const { p, st } = qdFeSituacaoDe(ref, linha);
+  if (!st || !st.programada) return;
+  QD.feAlvo = { ref, linha, daFicha: true };
+  abrirJanela('Cancelar programação', `<p class="qd-fe-pergunta">Cancelar a programação das férias de <b>${esc(qdNomeTxt(p.g) || 'Sem nome')}</b>
+    (início em ${pnDataLonga(st.prog.inicio)}, ${qdPlural(st.prog.dias, 'dia', 'dias')})? O período volta para “Programar”.</p>`,
+    `<button class="botao secundario" onclick="qdFeVoltar()">Voltar</button>
+    <button class="botao perigo" onclick="qdFeDesfazer(${jsArg(st.prog.id)})">Cancelar programação</button>`);
+}
+/*
+ * Grava pela porta de sempre (agir). No computador que barra a conversa com o Google, a gravacao vai pela pagina e
+ * ela recarrega: a marca na aba do navegador (2 min, so de quem gravou) faz o Quadro voltar na aba Ferias, com a busca.
+ */
+const QD_FE_CHAVE_VOLTA = 'gsl_ferias_volta';
+function qdFeGravar(acao, params) {
+  try { sessionStorage.setItem(QD_FE_CHAVE_VOLTA, JSON.stringify({ de: QD.de, ate: Date.now() + 120000, busca: QD.feBusca || '' })); } catch (e) {}
+  const limpa = () => { try { sessionStorage.removeItem(QD_FE_CHAVE_VOLTA); } catch (e) {} };
+  return agir(acao, params).then(limpa, limpa);
+}
+function qdFeRetomar(quem) {
+  let v = null;
+  try { v = JSON.parse(sessionStorage.getItem(QD_FE_CHAVE_VOLTA) || 'null'); sessionStorage.removeItem(QD_FE_CHAVE_VOLTA); } catch (e) { v = null; }
+  if (v && v.de === quem && v.ate > Date.now()) { QD.aba = 'ferias'; QD.feBusca = String(v.busca || ''); }
+}
+
+/* Excel: todos os periodos do recorte, do mais urgente para o menos. */
+function qdFeBaixar() {
+  const linhas = [['NOME', 'RH', 'EQUIPE', 'FUNÇÃO', 'PA INÍCIO', 'PA FIM', 'PODE SAIR A PARTIR DE', 'LIMITE MÁXIMO PARA SAIR', 'PROGRAMADA PARA', 'DIAS',
+    'VOLTA EM', 'SITUAÇÃO', 'DIAS ATÉ O LIMITE MÁXIMO']];
+  const todos = [], hoje = qdHoje(), dt = (iso) => iso ? pnDataLonga(iso) : '';
+  qdFePessoas().forEach((p) => p.periodos.forEach((st) => todos.push({ p, st })));
+  todos.sort((a, b) => qdFePorUrgencia(a.st, b.st) || qdNomeTxt(a.p.g).localeCompare(qdNomeTxt(b.p.g)));
+  todos.forEach(({ p, st }) => {
+    const g = p.g, f = st.f, pr = st.prog;
+    linhas.push([qdFeNomeOuId(g), g.rh || '', g.equipe || g.equipeBruta || '', qdFuncaoTela(g), dt(f.paInicio), dt(f.paFim), dt(st.L), dt(st.M),
+      pr ? dt(pr.inicio) : '', pr ? Number(pr.dias) : '', pr ? dt(qdSomarDias(pr.inicio, Number(pr.dias))) : '', st.txt, st.M ? qdDias(hoje, st.M) : '']);
+  });
+  const sufixo = qdChaveFuncao(qdRotuloRecorte()).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  pnBaixarXlsx('ferias-quadro-cd-' + hoje + (sufixo ? '-' + sufixo : '') + '.xlsx', [{ nome: 'Férias', linhas }]);
+}
+
+/* PARAMETROS DAS FERIAS: so quem pode trocar a planilha do Quadro. Valem para esta filial; o servidor confere. */
+function qdFeParametros() {
+  const P = qdFeP(), D = QD_FE_PADRAO;
+  const campo = (id, rot, v, min, max, dica) => `<div class="campo"><label for="${id}">${rot}</label>
+    <input id="${id}" type="number" inputmode="numeric" min="${min}" max="${max}" step="1" value="${esc(v)}">${dica ? `<p class="dica">${dica}</p>` : ''}</div>`;
+  abrirJanela('Parâmetros das férias', `<div class="qd-fe-param">
+    <p class="dica">Valem para esta filial e para todo mundo que vê o Quadro. O GSL usa duas datas da aba FÉRIAS: a partir de quando a pessoa pode sair (DTA_LIMITE) e o limite máximo para sair (DTA_LIMITEMAX, o último dia para começar).</p>
+    <h4>Aba FÉRIAS</h4>
+    <div class="campo"><label for="fp-cc">Centro(s) de custo do CD</label><input id="fp-cc" value="${esc(P.cc.join(', '))}">
+      <p class="dica">Separe com vírgula. Linha da FÉRIAS com esse centro e sem par na GERAL vai para a Conferência; as dos outros centros são de outros setores.</p></div>
+    ${campo('fp-digitos', 'Quantos números do fim do RH formam a matrícula', P.digitos, 1, 8, 'Com 3, o RH 100123 da GERAL é a matrícula 123 da FÉRIAS.')}
+    <h4>Programação</h4>
+    ${campo('fp-aviso', 'Aviso de férias: dias antes da saída', P.aviso, 0, 120, '“Entregar o aviso até” = início menos este número. Sem programação e com o limite máximo mais perto que isso: vermelho.')}
+    ${campo('fp-janela', 'Entra em “Programar”: dias antes de poder sair', P.janela, 0, 400, 'Antes disso, a pessoa está em dia (cinza).')}
+    ${campo('fp-urgente', 'Urgente (laranja): limite máximo em até quantos dias', P.urgente, 0, 400, 'Para quem ainda não tem data programada. Pelo menos o aviso de férias.')}
+    ${campo('fp-tolerancia', 'Confirmar a saída: dias de tolerância depois do início', P.tolerancia, 0, 60, 'Depois disso sem confirmar, a linha fica vermelha.')}
+    <p class="dica">Padrão: centro de custo ${esc(D.cc.join(', '))} · ${D.digitos} números · aviso de ${D.aviso} dias · “Programar” ${D.janela} dias antes · urgente com ${D.urgente} dias · ${D.tolerancia} dias para confirmar.</p></div>`, `
+    <button class="botao secundario" onclick="qdFeSalvarParametros(true)">Voltar ao padrão</button>
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="qdFeSalvarParametros(false)">Salvar</button>`);
+}
+function qdFeSalvarParametros(padrao) {
+  const p = padrao ? { padrao: true } : { cc: val('fp-cc'), digitos: val('fp-digitos'), aviso: val('fp-aviso'), janela: val('fp-janela'),
+    urgente: val('fp-urgente'), tolerancia: val('fp-tolerancia') };
+  agir('salvarParametrosFerias', p).catch(() => {});
+}
+
+/*
+ * FICHA: a secao Ferias, um bloco por periodo em aberto (do mais antigo para o mais novo), com a linha do tempo
+ * (periodo aquisitivo -> pode sair -> limite maximo, a programacao e hoje), as datas, a situacao e os botoes.
+ */
+function qdFeFichaSecao(ref) {
+  if (!DADOS.ferias) return '';
+  const g = qdGeral().find((x) => x.ref === ref);
+  if (!g || !g.ativo) return '';
+  const fd = qdFeriasDados(), p = fd.porRef[ref];
+  const fechadas = fd.cumpridas.filter((c) => c.g.ref === ref && c.x.pelaAba);
+  const nota = (fechadas.length ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}${fechadas.map((c) => 'Férias cumpridas: saiu em ' + pnDataLonga(c.x.inicio) +
+    ' (o período já saiu da aba FÉRIAS).').join(' ')}</p>` : '') + (g.situacao === 'FERIAS' ? `<p class="qd-fe-ficha-nota">${QD_FE_ICO.sol}De férias agora pelo STATUS da GERAL.</p>` : '');
+  if (!p) return `<h4>Férias</h4>${nota}<p class="qd-fe-vazio">Sem linha na aba FÉRIAS: o GSL não sabe as datas das férias desta pessoa (veja a Conferência).</p>`;
+  const periodos = p.periodos.slice().sort((a, b) => String(a.f.paFim || a.M || '').localeCompare(String(b.f.paFim || b.M || '')));
+  return `<h4>Férias · ${qdPlural(periodos.length, 'período em aberto', 'períodos em aberto')}</h4>${nota}
+    <ul class="qd-fe-ficha">${periodos.map((st) => qdFeFichaPeriodo(st, ref)).join('')}</ul>`;
+}
+function qdFeFichaPeriodo(st, ref) {
+  const f = st.f, pr = st.prog, hoje = qdHoje(), aba = esc((DADOS.ferias || {}).aba || 'FÉRIAS');
+  const ini = f.paInicio || (f.paFim ? qdSomarDias(f.paFim, -364) : (st.L ? qdSomarDias(st.L, -365) : ''));
+  const fimProg = pr ? qdSomarDias(pr.inicio, Number(pr.dias)) : '';
+  const fim = [st.M, fimProg, st.L, f.paFim].filter(Boolean).sort().pop() || '';
+  let tempo = '';
+  if (ini && fim && fim > ini) {
+    const total = qdDias(ini, fim), pos = (d) => Math.max(0, Math.min(100, qdDias(ini, d) / total * 100));
+    const seg = (cls, de, ate) => de && ate && ate > de ? `<i class="${cls}" style="left:${pos(de)}%;width:${Math.max(0.8, pos(ate) - pos(de))}%"></i>` : '';
+    const hojePos = qdDias(ini, hoje) / total * 100;
+    const rot = 'Período aquisitivo ' + pnDataLonga(f.paInicio || ini) + ' a ' + pnDataLonga(f.paFim) + '; pode sair a partir de ' + pnDataLonga(st.L) +
+      '; limite máximo para sair ' + pnDataLonga(st.M) + (pr ? '; programada para ' + pnDataLonga(pr.inicio) + ', ' + qdPlural(Number(pr.dias), 'dia', 'dias') : '') + '.';
+    tempo = `<div class="qd-fe-tempo" role="img" aria-label="${esc(rot)}">
+      ${seg('aq', ini, f.paFim || st.L)}${seg('livre', st.L, st.M)}${pr ? seg('prog', pr.inicio, fimProg) : ''}
+      ${hojePos >= 0 && hojePos <= 100 ? `<b class="qd-fe-tempo-hoje" style="left:${hojePos}%"><span>hoje</span></b>` : ''}
+    </div>`;
+  }
+  const quando = st.M ? (st.M < hoje ? 'venceu ' + qdFeEm(st.M) : qdFeEm(st.M)) : '';
+  return `<li class="qd-fe-${st.cor}">
+    <div class="qd-fe-ficha-cab">${qdFeSt(st)}<span>linha ${f.linha} da aba ${aba}</span></div>
+    ${tempo}
+    <dl class="qd-fe-ficha-datas">
+      <div><dt>PA início</dt><dd>${pnDataLonga(f.paInicio)}</dd></div>
+      <div><dt>PA fim</dt><dd>${pnDataLonga(f.paFim)}</dd></div>
+      <div><dt>Pode sair a partir de</dt><dd>${qdFeDMAS(st.L)}</dd></div>
+      <div><dt>Limite máximo para sair</dt><dd>${st.M ? `<b>${pnDataLonga(st.M)}</b> · ${quando}` : 'sem data na aba FÉRIAS'}</dd></div>
+    </dl>
+    ${pr ? `<p class="qd-fe-ficha-prog">${st.feita ? 'Saiu' : 'Programada para'} <b>${pnDataLonga(pr.inicio)}</b> (${qdFeSemana(pr.inicio)}) · ${qdPlural(Number(pr.dias), 'dia', 'dias')} · volta em ${pnDataLonga(fimProg)}${
+      st.feita && pr.confirmadaEm ? ' · saída confirmada em ' + pnDataLonga(pr.confirmadaEm) : ''}${pr.observacao ? `<span class="qd-fe-obs">${esc(pr.observacao)}</span>` : ''}</p>` : ''}
+    ${qdFeBotoes(st, ref, true)}${st.feita && qdFePodeProgramar() ? `<span class="qd-fe-acoes"><button class="qd-fe-bt" onclick="qdFeDesfazer(${jsArg(pr.id)})">Desfazer confirmação</button></span>` : ''}
+  </li>`;
+}
+
+/* VISAO GERAL: um cartao curto na coluna do lado, so com o que pede acao (segue os filtros). */
+function qdFeCartaoGeral() {
+  if (!DADOS.ferias) return '';
+  const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido(), hoje = qdHoje();
+  const urg = c.programar.concat(c.programadas).filter(qdFeUrgente), v = urg.filter((p) => p.pior.cor === 'vermelho').length;
+  const prox = pessoas.filter((p) => p.pior.programada && p.pior.prog.inicio >= hoje)
+    .sort((a, b) => a.pior.prog.inicio.localeCompare(b.pior.prog.inicio) || qdNomeTxt(a.g).localeCompare(qdNomeTxt(b.g)))[0];
+  const bt = (n, rot) => `<button onclick="qdAba('ferias')"><b class="bq-num">${qdN(n)}</b><span>${rot}</span></button>`;
+  return `<div class="bq-card qd-fe-geral">
+    <div class="qd-fe-card-cab"><h2>Férias</h2><button class="qd-link" onclick="qdAba('ferias')">Ver férias →</button></div>
+    <p class="bq-sub">Programação pela aba FÉRIAS.</p>
+    ${d.aba ? `<p class="qd-fe-geral-prox">${QD_ICONES.grave} A aba FÉRIAS está ${d.aba}: o GSL não sabe o prazo de ninguém.</p>` : `<div class="qd-fe-geral-n">
+      ${bt(c.programar.length, 'para programar')}
+      ${bt(c.programadas.length, c.programadas.length === 1 ? 'programada' : 'programadas')}
+    </div>
+    ${urg.length ? `<p class="qd-fe-geral-prox"><span class="qd-fe-st qd-fe-${v ? 'vermelho' : 'laranja'}"><i aria-hidden="true"></i>${qdPlural(urg.length, 'pede', 'pedem')} atenção agora</span> (vermelho ou laranja)</p>` : ''}
+    ${c.programar.length + c.programadas.length ? '' : `<p class="qd-fe-geral-prox">${d.n ? '' : QD_ICONES.ok + ' '}Ninguém para programar agora${d.n ? ' entre quem tem as datas' : ''}.</p>`}
+    ${prox ? `<p class="qd-fe-geral-prox">Próxima saída: <button class="qd-link" onclick="qdFicha(${Number(prox.g.ref)})">${esc(qdFeNomeOuId(prox.g))}</button> ${qdEq(prox.g.equipe, prox.g.equipeBruta)}
+      em <b>${qdFeDMS(prox.pior.prog.inicio)}</b> (${qdFeEm(prox.pior.prog.inicio)}).</p>` : ''}
+    ${d.n ? `<p class="qd-fe-geral-prox">${QD_FE_ICO.sem} <b>${qdN(d.n)} sem dados de férias</b>${d.semLinha.length
+      ? ` (<button class="qd-link" onclick="qdIrConferencia('FERIAS_SEM_DADOS')">ver na Conferência</button>)` : ''}</p>` : ''}`}
+  </div>`;
+}
+
+/* Linha das ferias no Copiar resumo (fora da aba Ferias). */
+function qdFeResumoLinha() {
+  if (!DADOS.ferias) return '';
+  const c = qdFeContagem(qdFePessoas()), d = qdFeDesconhecido(), urg = c.programar.concat(c.programadas).filter(qdFeUrgente).length;
+  if (d.aba) return 'Férias: a aba FÉRIAS está ' + d.aba + ' (o GSL não sabe os prazos)';
+  return 'Férias: ' + qdN(c.programar.length) + ' para programar, ' + qdPlural(c.programadas.length, 'programada', 'programadas') +
+    (urg ? ', ' + qdPlural(urg, 'pede', 'pedem') + ' atenção agora' : '') + (d.n ? ', ' + qdN(d.n) + ' sem dados de férias' : '');
+}
+/* Copiar resumo na aba Ferias: as listas por situacao, para mandar no WhatsApp. */
+function qdFeResumoTexto() {
+  const filial = (SESSAO && SESSAO.filial && SESSAO.filial.nome) || '';
+  const pessoas = qdFePessoas(), c = qdFeContagem(pessoas), d = qdFeDesconhecido();
+  const saiu = (g) => qdFeSaiu(g) ? ' (consta como desligado)' : '';
+  const quem = (g) => '- ' + qdFeNomeOuId(g) + ' (' + (g.equipe || 'sem turno') + ', ' + qdFuncaoTela(g) + ')';
+  const bloco = (titulo, linhas) => linhas.length ? [titulo + ' (' + linhas.length + ')'].concat(linhas.slice(0, 40), linhas.length > 40 ? ['- e mais ' + (linhas.length - 40)] : []) : [];
+  const titulo = 'Férias — Quadro do CD' + (filial ? ' — ' + filial : '') + ' — ' + pnDataLonga(qdHoje()) + (qdRotuloRecorte() ? ' — ' + qdRotuloRecorte() : '');
+  if (d.aba) return [titulo, 'A aba FÉRIAS está ' + d.aba + ': o GSL não sabe o prazo de ninguém.'].join('\n');
+  const deFerias = qdRecorte(qdNaEmpresa()).filter((g) => g.situacao === 'FERIAS').sort((a, b) => qdNomeTxt(a).localeCompare(qdNomeTxt(b)));
+  const porRef = qdFeriasDados().porRef;
+  const desc = d.semLinha.map((g) => quem(g) + ' — sem linha na aba FÉRIAS' + saiu(g)).concat(d.semData.map((p) => quem(p.g) + ' — período sem data limite na aba FÉRIAS' + saiu(p.g)));
+  return [titulo]
+    .concat(bloco('PROGRAMAR', c.programar.map((p) => quem(p.g) + ' — ' + p.pior.txt + saiu(p.g))))
+    .concat(bloco('PROGRAMADAS', c.programadas.map((p) => quem(p.g) + ' — ' + p.pior.txt + ' · ' + qdFeDetalhe(p.pior) + saiu(p.g))))
+    .concat(c.programar.length + c.programadas.length ? [] : ['Ninguém para programar agora' + (d.n ? ' entre quem tem as datas' : '') + '.'])
+    .concat(bloco('DE FÉRIAS AGORA', deFerias.map((g) => quem(g) + (porRef[g.ref] && porRef[g.ref].pior.k === 'deferias' ? ' — ' + porRef[g.ref].pior.txt : ''))))
+    .concat(d.n ? ['SEM DADOS DE FÉRIAS (' + d.n + ')'].concat(desc.slice(0, 10), desc.length > 10 ? ['- e mais ' + (desc.length - 10)] : []) : []).join('\n');
+}
+
+/* ------------------------------------------------------------------ */
+/* VISAO GERAL — o CD e os turnos em 10 segundos                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * DESFALQUE = funcao de um turno com gente de ferias ou afastada (pelo
+ * STATUS) e com pouca gente disponivel: ninguem (d = 0) ou metade ou menos
+ * (c >= 2 e d/c <= 0,5). Sem meta inventada: so a proporcao de hoje.
+ */
+function qdDesfalques(lista) {
+  const cel = {};
+  lista.filter((g) => g.equipe).forEach((g) => {
+    const k = g.equipe + '|' + qdFuncaoTela(g);
+    const x = cel[k] = cel[k] || { e: g.equipe, f: qdFuncaoTela(g), c: 0, d: 0, fora: [] };
+    x.c++;
+    if (g.situacao === 'ATIVO') x.d++; else x.fora.push(g);
+  });
+  return Object.keys(cel).map((k) => cel[k]).filter((x) => x.c - x.d > 0 && (x.d === 0 || (x.c >= 2 && x.d / x.c <= 0.5)))
+    .sort((a, b) => a.d / a.c - b.d / b.c || b.fora.length - a.fora.length || a.f.localeCompare(b.f));
+}
+
+function qdVisaoGeral() {
+  return `${qdRegua()}
+    <div class="qd-geral">
+      <div class="bq-card qd-mapa-card">${qdMapa()}</div>
+      <div class="qd-geral-lado">
+        <div class="bq-card" id="qd-desfalques">${qdDesfalquesCard()}</div>
+        ${qdFeCartaoGeral()}
+        <div class="bq-card">${qdMov90()}</div>
+      </div>
+    </div>`;
+}
+
+/*
+ * CARTOES: o CD inteiro (o unico numero heroi) e os quatro turnos, em ordem
+ * fixa. A Funcao reconta; a Equipe so destaca (anel no escolhido, os outros a
+ * 50%). O medidor do turno e a fatia do CD (n / N): disponibilidade fica
+ * escrita, porque ela vive entre 93% e 95% e um medidor sempre cheio nao diz nada.
+ */
+function qdRegua() {
+  const escopo = qdRecorte(qdNaEmpresa(), 'equipe');
+  const total = qdConta(escopo);
+  const j90 = qdJanela(90);
+  const desF = qdRecorte(DADOS.des || [], 'equipe'), admF = qdRecorte(DADOS.adm || [], 'equipe');
+  const sai90 = (lista) => lista.filter((d) => qdDentro(d.data, j90)).length;
+  const refs = {};
+  escopo.forEach((g) => { refs[g.ref] = true; });
+  const graves = qdMemo().inc.filter((x) => x.tipo === 'DESLIGADO_ATIVO' && x.gravidade === 'grave' && refs[x.ref]);
+  const semTurno = escopo.filter((g) => !g.equipe).length;
+  const desf = qdDesfalques(escopo);
+  const cd = `<button class="qd-cartao cd${QD.equipe === '*' ? '' : ' apagado'}" onclick="qdEquipe('*')" aria-pressed="${QD.equipe === '*'}">
+    <span class="bq-rot">CD inteiro${QD.funcao ? ' · ' + (QD.funcao === QD_SEM_FUNCAO ? 'Sem função' : esc(QD.funcao)) : ''}</span>
+    <span class="qd-heroi">${qdN(total.n)}</span><span class="qd-heroi-leg">${total.n === 1 ? 'pessoa no quadro' : 'pessoas no quadro'}</span>
+    <span class="qd-cartao-linha">${qdContaTxt(total) || 'ninguém nesta função'}</span>
+    <span class="qd-cartao-linha">↓ ${qdPlural(sai90(desF), 'saída', 'saídas')} · ↑ ${qdPlural(admF.filter((a) => qdDentro(a.data, j90)).length, 'entrada', 'entradas')} em 90 dias</span>
+    ${graves.length || semTurno ? `<span class="qd-cartao-selos">${graves.length ? qdSelo('grave', 'inclui ' + (graves.length === 1 ? '1 desligado ainda ativo' : graves.length + ' desligados ainda ativos')) : ''}${semTurno ? qdSelo('atencao', 'inclui ' + semTurno + ' sem turno definido') : ''}</span>` : ''}
+  </button>`;
+  const turnos = QD_EQUIPES.map((e) => {
+    const deles = escopo.filter((g) => g.equipe === e);
+    const c = qdConta(deles);
+    const pct = total.n ? Math.round(c.n / total.n * 100) : 0;
+    const escolhido = QD.equipe === e;
+    const lideres = deles.filter((g) => qdLider(qdFuncaoDe(g))).length;
+    const lider = QD.funcao || e === 'ADM' ? ''
+      : (lideres ? `Liderança <b>${lideres}</b> · 1 para cada ${Math.round((c.n - lideres) / lideres)}` : (c.n >= 10 ? '<span class="qd-fraca">sem liderança na DESCRIÇÃO</span>' : ''));
+    const k = graves.filter((x) => x.equipe === e).length;
+    const q = desf.filter((x) => x.e === e).length;
+    const vazio = !c.n;
+    return `<button class="qd-cartao turno${(QD.equipe !== '*' && !escolhido) || vazio ? ' apagado' : ''}${escolhido ? ' escolhido' : ''}" style="--qd-cor:${qdCor(e)};--qd-trilho:${QD_TRILHO[e]}"
+        onclick="qdEquipe(${jsArg(e)})" aria-pressed="${escolhido}">
+      <span class="qd-cartao-topo">${qdEq(e)}</span>
+      <span class="qd-cartao-n">${qdN(c.n)} <small>${c.n === 1 ? 'pessoa' : 'pessoas'}</small></span>
+      <span class="qd-medidor" title="${qdN(c.n)} de ${qdN(total.n)} pessoas do CD (${pct}%)"><i style="width:${pct}%"></i></span>
+      <span class="qd-cartao-pct bq-num">${pct}%<span class="qd-so-largo"> do CD</span></span>
+      <span class="qd-cartao-linha">${vazio ? 'ninguém nesta função' : qdContaTxt(c)}</span>
+      ${lider ? `<span class="qd-cartao-linha qd-so-largo">${lider}</span>` : ''}
+      <span class="qd-cartao-linha">↓ ${qdPlural(sai90(desF.filter((d) => d.equipe === e)), 'saída', 'saídas')} em 90 dias</span>
+      ${k || q ? `<span class="qd-cartao-selos">${k ? qdSelo('grave', k === 1 ? '1 desligado ainda ativo' : k + ' desligados ainda ativos') : ''}${q ? qdSelo('atencao', q === 1 ? '1 função com desfalque' : q + ' funções com desfalque') : ''}</span>` : ''}
+    </button>`;
+  }).join('');
+  return `<div class="qd-regua">${cd}${turnos}</div>`;
+}
+
+/*
+ * MAPA DE CALOR Funcao × Turno (o grafico de que o usuario mais gosta). Uma
+ * rampa so (azul, mais = mais forte), em mosaico; a escala e cada celula
+ * vem do CD inteiro e nao mudam com o filtro: a Equipe deixa a coluna dela
+ * inteira (as outras a 35%) e esconde as linhas que tem 0 nela; a Funcao
+ * deixa a linha inteira. Tres grupos: operacao, Lideranca (o "1 para cada N"
+ * dos cartoes) e Administrativo (so no ADM; comeca recolhido). A coluna Total
+ * leva a barrinha em ardosia (serie unica). Quem esta sem turno fica fora do
+ * mapa, com a nota. Toque na celula: o Quadro por turno daquela celula.
+ */
+function qdMapa() {
+  const todos = qdNaEmpresa().filter((g) => g.equipe);
+  const semTurno = qdRecorte(qdNaEmpresa(), 'equipe').filter((g) => !g.equipe).length;
+  const cel = {}, det = {}, totF = {}, totE = {};
+  todos.forEach((g) => {
+    const f = qdFuncaoTela(g), k = f + '|' + g.equipe;
+    cel[k] = (cel[k] || 0) + 1; totF[f] = (totF[f] || 0) + 1; totE[g.equipe] = (totE[g.equipe] || 0) + 1;
+    det[k] = det[k] || { d: 0, f: 0, a: 0 };
+    det[k][g.situacao === 'FERIAS' ? 'f' : (g.situacao === 'AFASTADO' ? 'a' : 'd')]++;
+  });
+  if (!todos.length) return '<h2>Função × Turno</h2><p class="bq-vazio">Ninguém com turno definido na GERAL.</p>';
+  const max = Math.max(1, ...Object.keys(cel).map((k) => cel[k]));
+  const funcoes = Object.keys(totF);
+  const temTurno = (f) => QD_TURNOS.some((e) => cel[f + '|' + e]);
+  const ordem = (a, b) => totF[b] - totF[a] || a.localeCompare(b);
+  const operacao = funcoes.filter((f) => temTurno(f) && !qdLider(f)).sort(ordem);
+  const lideranca = funcoes.filter((f) => temTurno(f) && qdLider(f)).sort(ordem);
+  const administrativo = funcoes.filter((f) => !temTurno(f)).sort(ordem);
+  const eqEscolhida = QD.equipe !== '*' ? QD.equipe : null;
+  const visivel = (f) => !eqEscolhida || eqEscolhida === '' || cel[f + '|' + eqEscolhida];
+  // a funcao escolhida vale para as duas grafias (com e sem acento), como no filtro
+  const kSel = QD.funcao ? qdChaveFuncao(QD.funcao) : '';
+  const admAberto = QD.admAberto || QD.equipe === 'ADM' || (kSel && administrativo.some((f) => qdChaveFuncao(f) === kSel));
+  const maxTot = Math.max(1, ...funcoes.map((f) => totF[f]));
+  const linha = (f, idBotao) => {
+    const escolhida = kSel && qdChaveFuncao(f) === kSel;
+    return `<tr class="${escolhida ? 'escolhida' : ''}${kSel && !escolhida ? ' apagada' : ''}">
+    <th scope="row"><button${idBotao ? ' id="' + idBotao + '"' : ''} class="qd-link qd-mapa-funcao" onclick="qdFuncao(${jsArg(f)})">${qdRotFuncao(f)}</button></th>
+    ${QD_EQUIPES.map((e) => {
+      const v = cel[f + '|' + e] || 0, x = det[f + '|' + e];
+      const i = v ? Math.min(5, Math.ceil(v / max * 5)) : 0;
+      const apagada = eqEscolhida !== null && e !== eqEscolhida;
+      if (!v) return `<td class="c vazio${apagada ? ' apagada' : ''}">–</td>`;
+      const dica = `${v} no quadro · ${qdContaTxt({ n: v, d: x.d, f: x.f, a: x.a })} — ${e} · ${f === QD_SEM_FUNCAO ? 'Sem função' : f}${totE[e] ? ' · ' + Math.round(v / totE[e] * 100) + '% do turno' : ''}`;
+      return `<td class="c q${i}${apagada ? ' apagada' : ''}"><button title="${esc(dica)}" aria-label="${esc(dica)}"
+          onclick="qdVerPessoas(${jsArg(e)},${jsArg(f)},'empresa')">${v}</button></td>`;
+    }).join('')}
+    <td class="t"><span class="qd-mapa-tot"><i style="width:${Math.max(3, totF[f] / maxTot * 100)}%"></i></span><b class="bq-num">${totF[f]}</b></td></tr>`;
+  };
+  const grupo = (rot, lista, idPrimeiro) => lista.filter(visivel).length ? `<tr class="qd-mapa-sep"><th colspan="${QD_EQUIPES.length + 2}">${rot}</th></tr>` +
+    lista.filter(visivel).map((f, i) => linha(f, i === 0 ? idPrimeiro : '')).join('') : '';
+  const somaAdm = administrativo.reduce((t, f) => t + totF[f], 0);
+  const admLinhas = !administrativo.length || !administrativo.filter(visivel).length ? '' : (admAberto ? grupo('Administrativo', administrativo, 'qd-adm-1')
+    : `<tr class="qd-mapa-recolhido"><th scope="row"><button class="qd-link" onclick="QD.admAberto=true;QD.focoDepois='#qd-adm-1';qdDesenhar()" aria-expanded="false">Administrativo · ${qdPlural(administrativo.length, 'função', 'funções')} <span aria-hidden="true">▾</span></button></th>
+        ${QD_EQUIPES.map((e) => `<td class="c soma${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}">${e === 'ADM' ? somaAdm : '–'}</td>`).join('')}<td class="t"><b class="bq-num">${somaAdm}</b></td></tr>`);
+  const corpo = operacao.filter(visivel).map((f) => linha(f, '')).join('') + grupo('Liderança', lideranca, '') + admLinhas;
+  return `<h2>Função × Turno</h2>
+    <p class="bq-sub">Pessoas no quadro por função e turno — quanto mais forte o azul, mais gente (veja a escala). Toque num número para ver quem é.</p>
+    <div class="bq-rolagem"><table class="qd-mapa">
+      <thead><tr><th>Função</th>${QD_EQUIPES.map((e) => `<th class="n${QD.equipe === e ? ' escolhida' : ''}${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}"><button class="qd-link" onclick="qdEquipe(${jsArg(e)})" title="${esc(e)}"><span class="qd-eq"><i style="background:${qdCor(e)}"></i>${e === 'ADM' ? 'ADM' : esc(e.slice(0, 2))}</span></button></th>`).join('')}<th class="n">Total</th></tr></thead>
+      <tbody>${corpo || `<tr><td colspan="${QD_EQUIPES.length + 2}" class="bq-vazio">Ninguém nesta equipe.</td></tr>`}</tbody>
+      <tfoot><tr><th scope="row">Total</th>${QD_EQUIPES.map((e) => `<td class="c${eqEscolhida !== null && e !== eqEscolhida ? ' apagada' : ''}">${totE[e] || '–'}</td>`).join('')}<td class="t"><b class="bq-num">${todos.length}</b></td></tr></tfoot>
+    </table></div>
+    <div class="bq-escala"><span>menos</span><i class="q1"></i><i class="q2"></i><i class="q3"></i><i class="q4"></i><i class="q5"></i><span>mais · célula mais cheia: ${max}</span></div>
+    ${semTurno ? `<p class="qd-nota${QD.equipe === '' ? ' destaque' : ''}">${qdSelo('atencao', qdPlural(semTurno, 'pessoa sem turno definido', 'pessoas sem turno definido'))} fica${semTurno > 1 ? 'm' : ''} fora do mapa —
+      <button class="qd-link" onclick="qdIrConferencia('EQUIPE')">ver na Conferência</button>.</p>` : ''}`;
+}
+
+/* DESFALQUES DE HOJE: onde o quadro esta fino agora, pela coluna STATUS. Sempre atencao (ambar), nunca vermelho. */
+function qdDesfalquesCard() {
+  const escopo = qdRecorte(qdNaEmpresa());
+  const lista = qdDesfalques(escopo);
+  const c = qdConta(escopo), F = c.f + c.a;
+  const mostra = QD.desfalquesTodos ? lista : lista.slice(0, 5);
+  const resumo = F ? `<p class="qd-desf-resumo">Fora do posto: ${qdPlural(F, 'pessoa', 'pessoas')} — ${[c.f ? c.f + ' de férias' : '', c.a ? qdPlural(c.a, 'afastado', 'afastados') : ''].filter(Boolean).join(' · ')} ·
+      <button class="qd-link" onclick="qdVerPessoas(QD.equipe,QD.funcao,'foradoposto')">ver quem →</button></p>` : '';
+  return `<h2>Desfalques de hoje</h2>
+    <p class="bq-sub">Funções com gente de férias ou afastada e metade ou menos disponível, segundo o STATUS da GERAL.</p>
+    ${!F ? '<p class="qd-desf-vazio">Ninguém de férias ou afastado.</p>' : (!lista.length ? '<p class="qd-desf-vazio">Nenhuma função desfalcada.</p>'
+      : `<ul class="qd-desf">${mostra.map((x) => `<li><button class="qd-desf-item" onclick="qdVerPessoas(${jsArg(x.e)},${jsArg(x.f)},'empresa')">
+        <span class="qd-desf-quem">${QD_ICONES.atencao}${qdEq(x.e)}<span class="qd-desf-funcao">${qdRotFuncao(x.f)}</span></span>
+        <span class="qd-desf-n bq-num">${x.d} de ${x.c} disponíve${x.c === 1 ? 'l' : 'is'}</span>
+        <span class="qd-desf-nomes">${x.fora.slice(0, 3).map((g) => esc(qdNomeTxt(g) || 'Sem nome') + ' (' + QD_SITUACAO[g.situacao].toLowerCase() + ')').join(' · ')}${x.fora.length > 3 ? ' · +' + (x.fora.length - 3) : ''}</span>
+      </button></li>`).join('')}</ul>
+      ${lista.length > mostra.length ? `<button class="qd-link" onclick="QD.focoDepois='.qd-desf > li:nth-child(${mostra.length + 1})';QD.desfalquesTodos=true;qdDesenhar()">ver mais ${lista.length - mostra.length}</button>` : ''}`)}
+    ${resumo}`;
+}
+
+/* MOVIMENTACAO · 90 DIAS: quanto mudou e para que lado, contra os 90 dias anteriores, e a tendencia de 6 meses. */
+function qdMov90() {
+  const des = qdRecorte(DADOS.des || []), adm = qdRecorte(DADOS.adm || []);
+  const j = qdJanela(90);
+  const s = des.filter((d) => qdDentro(d.data, j));
+  const algumaData = (DADOS.adm || []).some((a) => a.data);
+  const e = adm.filter((a) => qdDentro(a.data, j)).length, semData = adm.filter((a) => !a.data).length;
+  const efetivo = qdRecorte(qdNaEmpresa()).length;
+  const t = efetivo ? s.length / efetivo / 3 * 100 : null;
+  const motivos = {};
+  s.forEach((d) => { const k = qdMotivoChave(d.motivo); if (k !== '-') motivos[k] = (motivos[k] || 0) + 1; });
+  const ks = Object.keys(motivos).sort((a, b) => motivos[b] - motivos[a] || a.localeCompare(b));
+  const topo = ks.filter((k) => motivos[k] === motivos[ks[0]]).slice(0, 2);
+  const vol = s.filter((d) => qdTipo(d.tipo) === 'vol').length;
+  const frase = !s.length ? 'Nenhuma saída nos últimos 90 dias.'
+    : (vol ? qdPlural(vol, 'pediu', 'pediram') + ' para sair (' + Math.round(vol / s.length * 100) + '%)' : 'Nenhuma saída voluntária') +
+      (topo.length ? ' · motivo mais citado: <b>' + topo.map((k) => esc(qdMotivoRotulo(k))).join(' e ') + '</b> (' + motivos[topo[0]] + ')' : '') + '.';
+  const meses = qdUltimosMeses(6), em = {}, sm = {}, sv = {};
+  if (algumaData) adm.forEach((a) => { if (a.mes) em[a.mes] = (em[a.mes] || 0) + 1; });
+  des.forEach((d) => { if (d.mes) { sm[d.mes] = (sm[d.mes] || 0) + 1; if (qdTipo(d.tipo) === 'vol') sv[d.mes] = (sv[d.mes] || 0) + 1; } });
+  return `<h2>Movimentação · últimos 90 dias</h2>
+    <p class="bq-sub">Comparado com os 90 dias anteriores${qdRotuloRecorte() ? ' · ' + esc(qdRotuloRecorte()) : ''}.</p>
+    <div class="qd-mini-kpis">
+      <div><span class="bq-rot">Saídas</span><b>${s.length}</b>${qdDelta(90, s.length, des)}</div>
+      <div><span class="bq-rot">Entradas</span><b>${algumaData ? e : '—'}</b>${semData ? `<small>${qdPlural(semData, 'admitido sem data', 'admitidos sem data')}</small>` : ''}</div>
+      <div><span class="bq-rot">Turnover de saída</span><b>${t === null ? '—' : qdPct(t)}</b><small>ao mês · saídas ÷ ${qdN(efetivo)} no quadro hoje</small></div>
+    </div>
+    <p class="qd-mov90-txt">${frase}</p>
+    ${meses.some((m) => em[m] || sm[m]) ? qdEspelho(meses, em, sm, sv, { mini: true, algumaData }) : ''}
+    <button class="qd-link" onclick="QD.periodo=90;QD.mes='';QD.motivo='';QD.limiteMov=30;qdAba('mov')">Ver movimentação →</button>`;
+}
+
+function bqTrocarFonte() {
+  abrirJanela('Planilha do Quadro do CD', `
+    <div class="campo"><label>Link da planilha (abas GERAL, CADMITIDOS e CDESLIGADOS)</label><input id="bq-link2" value="${esc(DADOS.fonte ? DADOS.fonte.url : '')}"></div>
+    <p class="dica">A conta que implantou o GSL precisa ter acesso de leitura a essa planilha.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir('salvarFonteQuadro',{link:val('bq-link2')}).catch(()=>{})">Salvar</button>`);
+}
+
+/* =====================================================================
+   ESTOQUE — o de TI (tela Estoque de TI) e o da limpeza (aba Estoque da
+   Limpeza CD), com o MESMO desenho e as mesmas funcoes (4.2.2). EST diz
+   qual estoque esta na tela: de onde vem o dado, que acao do servidor
+   chamar e como chamar as coisas. Os nomes das acoes vao "assados" no
+   HTML de cada botao — uma janela aberta continua falando com o estoque
+   em que foi aberta.
+   ===================================================================== */
+let ABA_EST = 'itens';      // itens (Estoque) | painel (Resumo) | movimentos | inventario
+const EST_TI = {
+  chave: 'TI', dados: () => DADOS, repintar: () => pintarAbaEst(DADOS),
+  acoes: { salvar: 'salvarItemEstoque', excluir: 'excluirItemEstoque', importar: 'importarItensEstoque',
+           movimentar: 'movimentarEstoque', estornar: 'estornarMovimento', inventario: 'inventarioEstoque',
+           historico: 'historicoItemEstoque' },
+  t: { nome: 'Estoque de TI', coluna: 'Material de Informática CD/Loja', material: 'Material de Informática',
+       novo: 'Novo item', exemplo: 'Mouse USB', codigo: 'TI-0001', guardado: 'Ex.: Armário da TI, prateleira 2',
+       busca: 'Procurar material (ex.: mouse, toner, cabo)…', destino: 'Ex.: Recebimento, Loja, Financeiro',
+       serie: 'Nº de série ou patrimônio (opcional)', seriePh: 'separe vários por vírgula',
+       dicaItem: 'O mesmo material serve para o CD e para a loja. Ao chegar no <b>estoque mínimo</b>, ele aparece no alerta do topo da tela.',
+       lote: ['Mouse USB', 'Periféricos', 'Logitech', 'M90', 'un', '5', 'Armário TI', '12', '(vazio = TI-0001…)', '15'] },
+  filtro: { busca: '', categoria: '', situacao: '' },
+  mov: { tipo: '', item: '', destino: '', mes: '', busca: '' },
+  destinosExtras: () => []
+};
+const EST_LP = {
+  chave: 'LP', dados: () => (DADOS && DADOS.estoque) || {}, repintar: () => pintarAbaLP(DADOS),
+  acoes: { salvar: 'salvarItemLimpeza', excluir: 'excluirItemLimpeza', importar: 'importarItensLimpeza',
+           movimentar: 'movimentarLimpeza', estornar: 'estornarLimpeza', inventario: 'inventarioLimpeza',
+           historico: 'historicoItemLimpeza' },
+  t: { nome: 'Estoque da limpeza', coluna: 'Produto de limpeza', material: 'Produto de limpeza',
+       novo: 'Novo produto', exemplo: 'Detergente neutro 5L', codigo: 'LP-0001', guardado: 'Ex.: Almoxarifado da limpeza',
+       busca: 'Procurar produto (ex.: detergente, papel toalha, saco de lixo)…', destino: 'Ex.: Z3, banheiros, refeitório',
+       serie: 'Lote / validade (opcional)', seriePh: 'Ex.: lote 2309, validade 03/2027',
+       dicaItem: 'Ao chegar no <b>estoque mínimo</b>, o produto aparece no alerta do topo do estoque e na Gestão.',
+       lote: ['Detergente neutro 5L', 'Químicos e detergentes', 'Ypê', 'Galão 5 L', 'galão', '2', 'Almoxarifado', '6', '(vazio = LP-0001…)', '8'] },
+  filtro: { busca: '', categoria: '', situacao: '' },
+  mov: { tipo: '', item: '', destino: '', mes: '', busca: '' },
+  // Na limpeza, as zonas do CD tambem servem de destino da saida.
+  destinosExtras: () => ((DADOS && DADOS.zonas) || []).filter((z) => z.ativo).map((z) => z.zona + (z.descricao ? ' — ' + z.descricao : ''))
+};
+let EST = EST_TI;
+const estD = () => EST.dados();
+const estRepintar = () => EST.repintar();
+const estAcao = (nome) => jsArg(EST.acoes[nome]);     // o nome da acao, pronto para o onclick
+const estDestinos = (d) => [...new Set(((d.listas && d.listas.destinos) || []).concat(EST.destinosExtras()))];
+const EST_ROTULO = { OK: ['ok', 'Normal'], REPOR: ['atencao', 'Repor'], ZERADO: ['alerta', 'Zerado'], INATIVO: ['neutro', 'Inativo'] };
+const EST_TIPO_CHIP = { ENTRADA: 'ok', DEVOLUCAO: 'ok', SAIDA: 'atencao', BAIXA: 'alerta', AJUSTE: 'neutro' };
+const EST_TIPO_NOME = { ENTRADA: 'Entrada', SAIDA: 'Saída', DEVOLUCAO: 'Devolução', BAIXA: 'Baixa', AJUSTE: 'Ajuste' };
+
+function estItem(codigo) { return (estD().itens || []).find((i) => i.codigo === codigo) || null; }
+
+function pintarEstoque(r) {
+  EST = EST_TI;
+  const d = r.dados, p = d.permissoes;
+  const ativos = d.itens.filter((i) => i.ativo);
+  el('subtitulo-pagina').textContent = ativos.length + ' item(ns) no catálogo · ' + d.totalMovimentos + ' movimentação(ões)';
+  el('acoes-topo').innerHTML =
+    (p.movimentar ? `<button class="botao secundario" onclick="estFormMov('SAIDA')">Registrar saída</button>
+                     <button class="botao" onclick="estFormMov('ENTRADA')">Registrar entrada</button>` : '') +
+    (p.cadastrar ? `<button class="botao secundario" onclick="estFormItem()">Novo item</button>` : '');
+  const abas = [['itens', 'Estoque'], ['painel', 'Resumo'], ['movimentos', 'Movimentações']]
+    .concat(p.cadastrar ? [['inventario', 'Inventário']] : []);
+  if (!abas.some((a) => a[0] === ABA_EST)) ABA_EST = 'itens';
+  el('pagina').innerHTML = (pnPodeEditar('estoque') ? '' : pnSoVer('Estoque de TI')) + pnAbas(abas, ABA_EST, 'trocarAbaEst') + '<div id="conteudo-est"></div>';
+  pintarAbaEst(d);
+}
+
+function trocarAbaEst(aba) {
+  ABA_EST = aba;
+  document.querySelectorAll('.abas .aba').forEach((b) => b.classList.toggle('ativa', b.dataset.aba === aba));
+  pintarAbaEst(DADOS);
+}
+
+function pintarAbaEst(d) {
+  const alvo = el('conteudo-est'); if (!alvo) return;
+  try {
+    if (!d.itens.length && ABA_EST !== 'movimentos') {
+      alvo.innerHTML = `<div class="cartao pn-vazio-grande"><strong>Nenhum item cadastrado ainda.</strong>
+        Cadastre um por um em <b>Novo item</b>, ou copie a lista de uma planilha e cole em <b>Colar da planilha</b>
+        — nome, categoria, marca, modelo, unidade, mínimo, local e saldo inicial, nessa ordem.<br><br>
+        ${d.permissoes.cadastrar ? `<button class="botao" onclick="estFormItem()">Novo item</button>
+          <button class="botao secundario" onclick="estFormLote()">Colar da planilha</button>` : ''}</div>`;
+      return;
+    }
+    if (ABA_EST === 'itens') alvo.innerHTML = estItens(d);
+    else if (ABA_EST === 'movimentos') alvo.innerHTML = estMovimentos(d);
+    else if (ABA_EST === 'inventario') alvo.innerHTML = estInventario(d);
+    else alvo.innerHTML = estPainel(d);
+  } catch (e) { alvo.innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`; }
+}
+
+const estChip = (sit) => { const c = EST_ROTULO[sit] || EST_ROTULO.OK; return `<span class="pn-chip ${c[0]}">${c[1]}</span>`; };
+const estQtd = (n, un) => `<span class="pn-num">${pnNum(n, Number.isInteger(Number(n)) ? 0 : 2)}</span> <span class="pn-mini">${esc(un || '')}</span>`;
+
+/* ---------- PAINEL ---------- */
+function estPainel(d) {
+  const ativos = d.itens.filter((i) => i.ativo);
+  const repor = ativos.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO')
+    .sort((a, b) => (a.saldo - a.minimo) - (b.saldo - b.minimo));
+  const mes = d.hoje.slice(0, 7);
+  const doMes = d.movimentos.filter((m) => (m.data || '').slice(0, 7) === mes && !m.estornado);
+  const unidades = ativos.reduce((s, i) => s + Math.max(0, i.saldo), 0);
+  const saidasMes = doMes.filter((m) => m.tipo === 'SAIDA');
+  const porDestino = {};
+  saidasMes.forEach((m) => { const k = m.destino || '(sem destino)'; porDestino[k] = (porDestino[k] || 0) + m.quantidade; });
+  const porCat = {};
+  ativos.forEach((i) => { porCat[i.categoria] = (porCat[i.categoria] || 0) + Math.max(0, i.saldo); });
+  const ordenar = (o) => Object.keys(o).map((k) => [k, o[k]]).sort((a, b) => b[1] - a[1]);
+
+  return `
+    <div class="grade grade-kpi" style="margin-bottom:16px">
+      ${pnKpi(ativos.length, 'Itens no catálogo', 'azul', ordenar(porCat).length + ' categoria(s)')}
+      ${pnKpi(pnNum(unidades), 'Unidades em estoque', 'verde', 'soma de todos os saldos')}
+      ${pnKpi(repor.length, 'Precisam de reposição', repor.length ? 'vermelho' : 'verde',
+        ativos.filter((i) => i.situacao === 'ZERADO').length + ' zerado(s)')}
+      ${pnKpi(saidasMes.reduce((s, m) => s + m.quantidade, 0), 'Unidades entregues no mês', 'amarelo', saidasMes.length + ' saída(s) · ' + pnRotuloMes(mes))}
+    </div>
+    <div class="pn-grade duas" style="margin-bottom:14px">
+      <div class="cartao">
+        <div class="cartao-titulo">Precisa repor</div>
+        ${repor.length ? `<table><thead><tr><th>Item</th><th class="numero">Estoque</th><th class="numero">Mínimo</th><th class="numero">Ideal</th><th></th></tr></thead><tbody>
+          ${repor.slice(0, 12).map((i) => `<tr><td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
+            <td class="numero" style="color:${i.saldo <= 0 ? 'var(--alerta)' : 'var(--laranja-escuro)'};font-weight:700">${estQtd(i.saldo, i.unidade)}</td>
+            <td class="numero">${pnNum(i.minimo)}</td>
+            <td class="numero">${i.ideal ? pnNum(i.ideal) : '—'}</td>
+            <td>${d.permissoes.movimentar ? `<button class="icone-botao" onclick="estEntradaRapida(${jsArg(i.codigo)})">+ Entrada</button>` : ''}</td></tr>`).join('')}
+          </tbody></table>${repor.length > 12 ? `<p class="dica">E mais ${repor.length - 12}. Veja todos em Estoque › Repor.</p>` : ''}`
+        : '<div class="vazio">Nenhum item abaixo do mínimo. 👍</div>'}
+        <p class="dica">Entra aqui o item com saldo igual ou abaixo do estoque mínimo cadastrado, e o que zerou.</p>
+      </div>
+      <div class="cartao">
+        <div class="cartao-titulo">Últimas movimentações</div>
+        ${d.movimentos.length ? `<table><tbody>${d.movimentos.slice(0, 10).map((m) => {
+          const i = estItem(m.item);
+          return `<tr><td style="white-space:nowrap">${pnData(m.data)}</td>
+            <td><span class="pn-chip ${EST_TIPO_CHIP[m.tipo]}">${EST_TIPO_NOME[m.tipo]}</span></td>
+            <td>${esc(i ? i.nome : m.item)}<div class="lp-sub">${esc(m.destino || m.documento || m.observacao || '')}</div></td>
+            <td class="numero pn-num" style="font-weight:700">${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</td></tr>`;
+        }).join('')}</tbody></table>` : '<div class="vazio">Nenhuma movimentação ainda.</div>'}
+      </div>
+    </div>
+    <div class="pn-grade duas">
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Para onde foi — saídas de ${pnRotuloMes(mes)}</div>
+        ${pnBarras(ordenar(porDestino), 'azul')}</div>
+      <div class="cartao pn-barras-largas"><div class="cartao-titulo">Unidades em estoque por categoria</div>
+        ${pnBarras(ordenar(porCat).filter((x) => x[1] > 0), 'amarela')}</div>
+    </div>`;
+}
+
+/* ---------- ITENS ---------- */
+function estItens(d) {
+  const f = EST.filtro;
+  const cont = { '': d.itens.filter((i) => i.ativo).length, REPOR: 0, ZERADO: 0, INATIVO: 0 };
+  d.itens.forEach((i) => { if (cont[i.situacao] !== undefined) cont[i.situacao]++; });
+  const lista = d.itens.filter((i) => {
+    if (f.situacao) { if (i.situacao !== f.situacao) return false; }
+    else if (!i.ativo) return false;
+    if (f.categoria && i.categoria !== f.categoria) return false;
+    if (f.busca && (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) === -1) return false;
+    return true;
+  });
+  const chip = (id, nome) => `<button class="lp-filtro ${f.situacao === id ? 'ativo' : ''}" onclick="EST.filtro.situacao=${jsArg(id)};estRepintar()">${nome}<b>${cont[id]}</b></button>`;
+  const p = d.permissoes;
+  const alerta = d.itens.filter((i) => i.ativo && (i.situacao === 'REPOR' || i.situacao === 'ZERADO'));
+  return `${alerta.length ? `<div class="est-alerta" onclick="EST.filtro.situacao='REPOR';estRepintar()">
+      <b>⚠ ${alerta.length} ${alerta.length === 1 ? 'item chegou' : 'itens chegaram'} ao estoque mínimo:</b>
+      ${alerta.slice(0, 8).map((i) => `${esc(i.nome)} (${pnNum(i.saldo)}${i.minimo ? ' de mín. ' + pnNum(i.minimo) : ''})`).join(' · ')}${alerta.length > 8 ? ' …' : ''}
+    </div>` : ''}
+    <div class="cartao">
+    <div class="campo-busca est-busca-grande"><input id="est-busca" placeholder="${esc(EST.t.busca)}" value="${esc(f.busca)}"
+        oninput="EST.filtro.busca=this.value.toLowerCase().trim();estRefiltrarItens()"></div>
+    <div class="lp-filtros">
+      ${chip('', 'Ativos')}${chip('REPOR', 'Repor')}${chip('ZERADO', 'Zerados')}${chip('INATIVO', 'Inativos')}
+      <select style="width:auto" onchange="EST.filtro.categoria=this.value;estRepintar()">
+        <option value="">Todas as categorias</option>${d.listas.categorias.map((c) => `<option ${f.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      ${p.cadastrar ? '<button class="icone-botao" onclick="estFormLote()">Colar da planilha</button>' : ''}
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button class="botao secundario" onclick="estExportarExcel()">Exportar Excel</button>
+        <button class="botao secundario" onclick="estExportarPdf()">Exportar PDF</button></span>
+    </div>
+    <div class="pn-tabela-rolagem" id="est-tabela-itens">${estTabelaItens(lista, p)}</div>
+  </div>`;
+}
+
+/* Busca digitada nao redesenha a caixa (senao perde o foco a cada letra). */
+function estRefiltrarItens() {
+  const f = EST.filtro, d = estD();
+  const lista = d.itens.filter((i) => (f.situacao ? i.situacao === f.situacao : i.ativo) &&
+    (!f.categoria || i.categoria === f.categoria) &&
+    (!f.busca || (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) !== -1));
+  el('est-tabela-itens').innerHTML = estTabelaItens(lista, d.permissoes);
+}
+
+function estTabelaItens(lista, p) {
+  return `<table><thead><tr><th>${esc(EST.t.coluna)}</th>
+    <th class="numero">Estoque</th><th class="numero">Estoque mínimo</th><th class="numero">Estoque ideal</th>
+    <th>Situação</th><th></th></tr></thead><tbody>
+    ${lista.map((i) => `<tr class="${i.situacao === 'REPOR' || i.situacao === 'ZERADO' ? 'est-linha-alerta' : ''}">
+      <td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc([i.codigo, i.categoria, i.marca, i.modelo, i.local].filter(Boolean).join(' · '))}</div></td>
+      <td class="numero" style="font-size:16px;font-weight:700;${i.saldo <= 0 ? 'color:var(--alerta)' : ''}">${estQtd(i.saldo, i.unidade)}</td>
+      <td class="numero">${i.minimo ? pnNum(i.minimo) : '—'}</td>
+      <td class="numero">${i.ideal ? pnNum(i.ideal) : '—'}${i.faltaIdeal ? `<div class="lp-sub">faltam ${pnNum(i.faltaIdeal, Number.isInteger(i.faltaIdeal) ? 0 : 2)}</div>` : ''}</td>
+      <td>${estChip(i.situacao)}</td>
+      <td style="white-space:nowrap">
+        ${p.movimentar && i.ativo ? `<button class="botao est-mais" onclick="estEntradaRapida(${jsArg(i.codigo)})">+ Entrada</button>
+          <button class="botao secundario est-menos" onclick="estSaidaRapida(${jsArg(i.codigo)})" ${i.saldo <= 0 ? 'disabled' : ''}>− Saída</button>` : ''}
+        <button class="icone-botao" onclick="estHistorico(${jsArg(i.codigo)})">Histórico</button>
+        ${p.cadastrar ? `<button class="icone-botao" onclick="estFormItem(${jsArg(i.id)})">Editar</button>` : ''}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="vazio">Nada encontrado.${p.cadastrar ? ' <button class="icone-botao" onclick="estFormItem()">Cadastrar novo</button>' : ''}</td></tr>`}
+  </tbody></table>`;
+}
+
+/* ---------- EXPORTAR (Excel e PDF) — mesma funcao da tela de Nobreaks ---------- */
+function estDadosRelatorio() {
+  const d = estD(), f = EST.filtro;
+  const itens = d.itens.filter((i) => (f.situacao ? i.situacao === f.situacao : i.ativo) &&
+    (!f.categoria || i.categoria === f.categoria) &&
+    (!f.busca || (i.codigo + ' ' + i.nome + ' ' + i.marca + ' ' + i.modelo + ' ' + i.local).toLowerCase().indexOf(f.busca) !== -1))
+    .slice().sort((a, b) => a.nome.localeCompare(b.nome));
+  const filtro = [f.situacao ? (EST_ROTULO[f.situacao] || [, f.situacao])[1] : 'Itens ativos', f.categoria, f.busca ? 'busca "' + f.busca + '"' : '']
+    .filter(Boolean).join(' · ');
+  const movs = d.movimentos.slice();
+  return { d, itens, movs, filtro };
+}
+
+function estExportarExcel() {
+  const r = estDadosRelatorio();
+  // a situacao sai no tom do chip da tela (Normal verde, Repor laranja, Zerado vermelho, Inativo cinza)
+  const sit = (i) => { const x = EST_ROTULO[i.situacao] || [, i.situacao]; return x[0] ? { v: x[1], tom: PN_TOM_DO_CHIP[x[0]] } : x[1]; };
+  const titulo = [[EST.t.nome + ' — ' + r.filtro], ['Filial: ' + ((SESSAO && SESSAO.filial && SESSAO.filial.nome) || '') + ' · gerado em ' + new Date().toLocaleString('pt-BR')], []];
+  const estoque = [[EST.t.material, 'Código', 'Categoria', 'Marca', 'Modelo', 'Unidade', 'Estoque', 'Estoque mínimo', 'Estoque ideal', 'Falta p/ ideal', 'Situação', 'Local']]
+    .concat(r.itens.map((i) => [i.nome, i.codigo, i.categoria, i.marca, i.modelo, i.unidade, Number(i.saldo) || 0,
+      i.minimo || '', i.ideal || '', i.faltaIdeal || '', sit(i), i.local]));
+  const movs = [['Data', 'Tipo', EST.t.material, 'Código', 'Quantidade', 'Setor', 'Usuário', 'Documento', 'Observação', 'Estornado']]
+    .concat(r.movs.map((m) => { const i = estItem(m.item); return [pnDataLonga(m.data), EST_TIPO_NOME[m.tipo] || m.tipo, i ? i.nome : m.item, m.item,
+      Number(m.efeito) || 0, m.destino || '', m.solicitante || '', m.documento || '', m.observacao || '', m.estornado ? { v: 'SIM', tom: 'cinza' } : '']; }));
+  pnBaixarXlsx(EST.t.nome + ' ' + r.d.hoje + '.xlsx',
+    [{ nome: 'Estoque', linhas: titulo.concat(estoque) }, { nome: 'Movimentações', linhas: titulo.concat(movs) }]);
+}
+
+function estExportarPdf() {
+  const r = estDadosRelatorio();
+  const alerta = r.itens.filter((i) => i.situacao === 'REPOR' || i.situacao === 'ZERADO');
+  // a situacao na etiqueta do tom do chip da tela (a mesma cor do Excel)
+  const sit = (i) => { const x = EST_ROTULO[i.situacao] || [, i.situacao]; return x[0] ? `<span class="tom ${PN_TOM_DO_CHIP[x[0]]}">${esc(x[1])}</span>` : esc(x[1]); };
+  const linha = (i) => `<tr class="${i.situacao === 'REPOR' || i.situacao === 'ZERADO' ? 'alerta' : ''}"><td><b>${esc(i.nome)}</b></td><td>${esc(i.codigo)}</td><td>${esc(i.categoria)}</td>
+    <td>${pnNum(i.saldo, Number.isInteger(Number(i.saldo)) ? 0 : 2)} ${esc(i.unidade)}</td><td>${i.minimo ? pnNum(i.minimo) : '—'}</td><td>${i.ideal ? pnNum(i.ideal) : '—'}</td>
+    <td>${i.faltaIdeal ? pnNum(i.faltaIdeal) : '—'}</td><td>${sit(i)}</td><td class="oc">${esc(i.local || '')}</td></tr>`;
+  const movs = r.movs.slice(0, 300).map((m) => { const i = estItem(m.item); return `<tr${m.estornado ? ' style="text-decoration:line-through;color:#999"' : ''}><td>${pnDataLonga(m.data)}</td>
+    <td>${EST_TIPO_NOME[m.tipo] || esc(m.tipo)}</td><td>${esc(i ? i.nome : m.item)}</td><td><b>${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</b></td>
+    <td class="oc">${esc(m.destino || '')}</td><td class="oc">${esc(m.solicitante || '')}</td><td class="oc">${esc(m.documento || m.observacao || '')}</td></tr>`; }).join('');
+  const cab = '<tr><th>' + esc(EST.t.material) + '</th><th>Código</th><th>Categoria</th><th>Estoque</th><th>Mínimo</th><th>Ideal</th><th>Falta p/ ideal</th><th>Situação</th><th>Local</th></tr>';
+  pnImprimirRelatorio('Relatório — ' + EST.t.nome, r.filtro, `
+    ${alerta.length ? `<h2>No estoque mínimo ou zerados (${alerta.length})</h2><table><thead>${cab}</thead><tbody>${alerta.map(linha).join('')}</tbody></table>` : ''}
+    <h2>Estoque (${r.itens.length} itens)</h2>
+    <table><thead>${cab}</thead><tbody>${r.itens.map(linha).join('')}</tbody></table>
+    <h2>Movimentações recentes</h2>
+    <table><thead><tr><th>Data</th><th>Tipo</th><th>${esc(EST.t.material)}</th><th>Qtd</th><th>Setor</th><th>Usuário</th><th>Documento / obs.</th></tr></thead><tbody>${movs}</tbody></table>
+    <p class="nota">Em vermelho: itens que chegaram ao estoque mínimo ou zeraram. Movimentações riscadas foram estornadas.</p>`);
+}
+
+/* ---------- MOVIMENTACOES ---------- */
+function estMovimentos(d) {
+  const f = EST.mov;
+  const meses = [...new Set(d.movimentos.map((m) => (m.data || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+  const lista = d.movimentos.filter((m) => {
+    if (f.tipo && m.tipo !== f.tipo) return false;
+    if (f.item && m.item !== f.item) return false;
+    if (f.destino && m.destino !== f.destino) return false;
+    if (f.mes && (m.data || '').slice(0, 7) !== f.mes) return false;
+    if (f.busca) {
+      const i = estItem(m.item);
+      const t = (m.item + ' ' + (i ? i.nome : '') + ' ' + m.destino + ' ' + m.solicitante + ' ' + m.documento + ' ' + m.serie + ' ' + m.observacao).toLowerCase();
+      if (t.indexOf(f.busca) === -1) return false;
+    }
+    return true;
+  });
+  return `<div class="cartao">
+    <div class="lp-filtros">
+      <select style="width:auto" onchange="EST.mov.tipo=this.value;estRepintar()"><option value="">Todos os tipos</option>
+        ${d.listas.tipos.map((t) => `<option value="${t.id}" ${f.tipo === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select>
+      <select style="width:auto;max-width:260px" onchange="EST.mov.item=this.value;estRepintar()"><option value="">Todos os itens</option>
+        ${d.itens.map((i) => `<option value="${esc(i.codigo)}" ${f.item === i.codigo ? 'selected' : ''}>${esc(i.nome)}</option>`).join('')}</select>
+      <select style="width:auto;max-width:220px" onchange="EST.mov.destino=this.value;estRepintar()"><option value="">Todos os destinos</option>
+        ${d.listas.destinos.map((x) => `<option ${f.destino === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select style="width:auto" onchange="EST.mov.mes=this.value;estRepintar()"><option value="">Todos os meses</option>
+        ${meses.map((m) => `<option value="${m}" ${f.mes === m ? 'selected' : ''}>${pnRotuloMes(m)}</option>`).join('')}</select>
+      <span class="campo-busca"><input placeholder="Buscar série, patrimônio, NF, pessoa" value="${esc(f.busca)}"
+        onchange="EST.mov.busca=this.value.toLowerCase().trim();estRepintar()"></span>
+      <span class="pn-mini">${lista.length} lançamento(s)</span>
+    </div>
+    <div class="pn-tabela-rolagem"><table><thead><tr><th>Data</th><th>Tipo</th><th>Item</th><th class="numero">Qtd.</th>
+      <th>Destino / solicitante</th><th>Documento · série</th><th>Observação</th><th></th></tr></thead><tbody>
+      ${lista.slice(0, 300).map((m) => {
+        const i = estItem(m.item);
+        return `<tr><td style="white-space:nowrap">${pnDataLonga(m.data)}</td>
+          <td><span class="pn-chip ${EST_TIPO_CHIP[m.tipo]}">${EST_TIPO_NOME[m.tipo]}</span></td>
+          <td><strong>${esc(i ? i.nome : m.item)}</strong><div class="lp-sub">${esc(m.item)}</div></td>
+          <td class="numero pn-num" style="font-weight:700;color:${m.efeito < 0 ? 'var(--laranja-escuro)' : 'var(--verde)'}">${m.efeito > 0 ? '+' : ''}${pnNum(m.efeito, Number.isInteger(m.efeito) ? 0 : 2)}</td>
+          <td>${esc(m.destino || '—')}${m.solicitante ? `<div class="lp-sub">${esc(m.solicitante)}</div>` : ''}</td>
+          <td>${esc(m.documento || '—')}${m.serie ? `<div class="lp-sub">${esc(m.serie)}</div>` : ''}</td>
+          <td style="max-width:260px">${esc(m.observacao)}<div class="lp-sub">${esc((m.por || '').split('@')[0])}</div></td>
+          <td>${d.permissoes.cadastrar && !/^ESTORNO/.test(m.observacao) && !m.estornado ? `<button class="icone-botao" onclick="estFormEstorno(${jsArg(m.id)})">Estornar</button>` : (m.estornado ? '<span class="pn-mini">estornado</span>' : '')}</td></tr>`;
+      }).join('') || '<tr><td colspan="8" class="vazio">Nenhuma movimentação com esses filtros.</td></tr>'}
+    </tbody></table></div>
+    ${lista.length > 300 ? '<p class="dica">Mostrando as 300 mais recentes. Use os filtros para achar as demais.</p>' : ''}
+    <p class="dica">Esta lista cobre os últimos ${d.diasMovimentos || 90} dias. O histórico completo de cada item está no botão
+      <b>Histórico</b>, na aba Estoque.</p>
+    <p class="dica">Lançamento errado não se apaga: <b>Estornar</b> lança o movimento contrário e o histórico mostra os dois.</p>
+  </div>`;
+}
+
+/* ---------- INVENTARIO ---------- */
+function estInventario(d) {
+  const ativos = d.itens.filter((i) => i.ativo);
+  return `<div class="cartao">
+    <p class="dica" style="margin:0 0 12px">Conte o que está fisicamente no estoque e digite na coluna <b>Contado</b>.
+      Só os itens preenchidos e diferentes do sistema viram ajuste. Deixe em branco o que não contou.
+      Item movimentado por outra pessoa depois que esta tela abriu fica de fora — o aviso diz quais contar de novo.</p>
+    <div class="pn-linha" style="margin-bottom:10px">
+      <span class="campo-busca"><input placeholder="Filtrar a lista" oninput="estFiltrarInventario(this.value)"></span>
+    </div>
+    <div class="pn-tabela-rolagem"><table id="est-inv"><thead><tr><th>Item</th><th>Local</th><th class="numero">No sistema</th>
+      <th class="numero">Contado</th><th class="numero">Diferença</th></tr></thead><tbody>
+      ${ativos.map((i) => `<tr data-busca="${esc((i.codigo + ' ' + i.nome + ' ' + i.local + ' ' + i.categoria).toLowerCase())}">
+        <td><strong>${esc(i.nome)}</strong><div class="lp-sub">${esc(i.codigo)} · ${esc(i.categoria)}</div></td>
+        <td>${esc(i.local || '—')}</td>
+        <td class="numero">${estQtd(i.saldo, i.unidade)}</td>
+        <td class="numero"><input inputmode="decimal" style="width:90px;text-align:right" data-codigo="${esc(i.codigo)}" data-saldo="${i.saldo}"
+          oninput="estDiferenca(this)"></td>
+        <td class="numero pn-num" data-dif></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="campo" style="margin-top:12px"><label>Observação do inventário (opcional)</label><input id="est-inv-obs" placeholder="Ex.: inventário mensal de setembro"></div>
+    <div style="display:flex;justify-content:flex-end"><button class="botao" onclick="estAplicarInventario()">Aplicar contagem</button></div>
+  </div>`;
+}
+function estFiltrarInventario(t) {
+  const q = String(t || '').toLowerCase().trim();
+  document.querySelectorAll('#est-inv tbody tr').forEach((tr) => { tr.style.display = !q || tr.dataset.busca.indexOf(q) !== -1 ? '' : 'none'; });
+}
+function estDiferenca(inp) {
+  const td = inp.closest('tr').querySelector('[data-dif]');
+  const n = pnLerNumero(inp.value);
+  if (n === null) { td.textContent = ''; return; }
+  const dif = n - Number(inp.dataset.saldo);
+  td.textContent = (dif > 0 ? '+' : '') + pnNum(dif, Number.isInteger(dif) ? 0 : 2);
+  td.style.color = dif === 0 ? 'var(--tinta-fraca)' : (dif < 0 ? 'var(--alerta)' : 'var(--verde)');
+  td.style.fontWeight = '700';
+}
+function estAplicarInventario() {
+  const contagens = [...document.querySelectorAll('#est-inv input[data-codigo]')]
+    .filter((i) => i.value.trim() !== '')
+    // saldoVisto: o saldo que a tela mostrava. Se mudou no servidor, o item nao e ajustado (ver acaoInventarioEstoque).
+    .map((i) => ({ codigo: i.dataset.codigo, contado: pnLerNumero(i.value), saldoVisto: Number(i.dataset.saldo) }));
+  if (!contagens.length) return avisar('Preencha a contagem de pelo menos um item.', true);
+  if (contagens.some((c) => c.contado === null)) return avisar('Há contagem que não é número.', true);
+  agir(EST.acoes.inventario, { contagens: contagens, observacao: val('est-inv-obs') }, 'Inventário aplicado')
+    .then((r) => { if (r && r.mudaram && r.mudaram.length) avisar(r.recado, true); })
+    .catch(() => {});
+}
+
+/* ---------- JANELAS ---------- */
+function estFormItem(id) {
+  const d = estD();
+  const i = id ? d.itens.find((x) => x.id === id) : null;
+  abrirJanela(i ? 'Editar ' + i.nome : EST.t.novo, `
+    <div class="campo-duplo">
+      <div class="campo"><label>Nome</label><input id="ei-nome" value="${esc(i ? i.nome : '')}" placeholder="Ex.: ${esc(EST.t.exemplo)}"></div>
+      <div class="campo"><label>Código (vazio = automático)</label><input id="ei-codigo" value="${esc(i ? i.codigo : '')}" placeholder="${esc(EST.t.codigo)}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Categoria</label><input id="ei-cat" list="ei-cats" value="${esc(i ? i.categoria : '')}">
+        <datalist id="ei-cats">${d.listas.categorias.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div class="campo"><label>Unidade</label><select id="ei-un">${d.listas.unidades.map((u) => `<option ${i && i.unidade === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Marca</label><input id="ei-marca" value="${esc(i ? i.marca : '')}"></div>
+      <div class="campo"><label>Modelo</label><input id="ei-modelo" value="${esc(i ? i.modelo : '')}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Estoque mínimo</label><input id="ei-min" inputmode="decimal" value="${i && i.minimo ? i.minimo : ''}" placeholder="avisa quando chegar nisso"></div>
+      <div class="campo"><label>Estoque ideal</label><input id="ei-ideal" inputmode="decimal" value="${i && i.ideal ? i.ideal : ''}" placeholder="quanto deveria ter"></div>
+    </div>
+    <div class="campo"><label>Onde fica guardado (opcional)</label><input id="ei-local" value="${esc(i ? i.local : '')}" placeholder="${esc(EST.t.guardado)}"></div>
+    <p class="dica">${EST.t.dicaItem}</p>
+    ${i ? '' : `<div class="campo"><label>Saldo inicial (opcional)</label><input id="ei-saldo" inputmode="decimal" placeholder="quanto tem hoje — vira uma entrada"></div>`}
+    <div class="campo"><label>Observação</label><input id="ei-obs" value="${esc(i ? i.observacao : '')}"></div>
+    ${i ? `<label class="marcador"><input type="checkbox" id="ei-ativo" ${i.ativo ? 'checked' : ''}> Item em uso (aparece nas listas)</label>` : ''}`, `
+    ${i ? `<button class="botao perigo" onclick="estConfirmarRemover(${jsArg(i.id)})">Remover</button>` : ''}
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir(${estAcao('salvar')},{id:${jsArg(i ? i.id : '')},nome:val('ei-nome'),codigo:val('ei-codigo'),categoria:val('ei-cat'),
+      unidade:val('ei-un'),marca:val('ei-marca'),modelo:val('ei-modelo'),minimo:val('ei-min'),ideal:val('ei-ideal'),local:val('ei-local'),
+      saldoInicial:val('ei-saldo'),observacao:val('ei-obs'),ativo:${i ? "marcado('ei-ativo')" : 'true'}},'Salvo').catch(()=>{})">Salvar</button>`);
+}
+
+/*
+ * REMOVER (20/10) — "quando eu disser que e para excluir, ele tem que excluir". Antes o Remover ia
+ * direto ao servidor e o item com movimentacao so era desativado. Agora a janela diz quantas
+ * movimentacoes vao junto (a contagem vem do servidor: a tela so leva ~90 dias) e a pessoa escolhe:
+ * Excluir (o item e as movimentacoes dele) ou Desativar (tira de uso, o historico fica).
+ * Estoque.gs de antes (colado pela metade): sem a contagem, o texto fala das movimentacoes sem numero.
+ */
+function estConfirmarRemover(id) {
+  const i = (estD().itens || []).find((x) => x.id === id);
+  if (!i) return;
+  const n = typeof i.movimentacoes === 'number' ? i.movimentacoes : -1;
+  const quais = n < 0 ? 'as movimentações dele: saem' : (n === 1 ? 'a única movimentação dele: ela sai' : 'as ' + n + ' movimentações dele: saem');
+  abrirJanela('Excluir “' + i.nome + '”?', !n
+    ? `<p style="margin:0 0 12px;line-height:1.7"><b>${esc(i.nome)}</b> (${esc(i.codigo)}) não tem movimentações. Excluir apaga o item do cadastro.</p>`
+    : `<p style="margin:0 0 12px;line-height:1.7">Excluir apaga o item e ${quais} do saldo, do histórico e dos relatórios.
+        ${i.ativo ? 'Para só tirar o item de uso e manter o histórico, desative o item.' : 'O item já está desativado: deixando assim, o histórico continua guardado.'}</p>`, `
+    <button class="botao secundario" onclick="estFormItem(${jsArg(i.id)})">Voltar</button>
+    ${n && i.ativo ? `<button class="botao secundario" onclick="agir(${estAcao('excluir')},{id:${jsArg(i.id)},desativar:true},'Item desativado').catch(()=>{})">Desativar (manter o histórico)</button>` : ''}
+    <button class="botao perigo" onclick="agir(${estAcao('excluir')},{id:${jsArg(i.id)},excluirMovimentos:true},'Item excluído').catch(()=>{})">${n ? 'Excluir mesmo assim' : 'Excluir'}</button>`);
+}
+
+function estFormLote() {
+  abrirJanela('Cadastrar colando da planilha', `
+    <p style="margin:0 0 10px;line-height:1.7;color:var(--tinta-media)">Na planilha, deixe as colunas nesta ordem,
+      selecione as linhas, copie (<b>Ctrl+C</b>) e cole aqui (<b>Ctrl+V</b>). Só o nome é obrigatório; a linha de títulos é ignorada.</p>
+    <div class="pn-tabela-rolagem" style="margin-bottom:10px"><table><thead><tr>
+      <th>Nome</th><th>Categoria</th><th>Marca</th><th>Modelo</th><th>Unidade</th><th>Mínimo</th><th>Local</th><th>Saldo inicial</th><th>Código</th><th>Ideal</th></tr></thead>
+      <tbody><tr>${EST.t.lote.map((x, n) => `<td${n === 8 ? ' class="pn-mini"' : ''}>${esc(x)}</td>`).join('')}</tr></tbody></table></div>
+    <div class="campo"><label>Linhas copiadas</label><textarea id="el-texto" rows="8" style="font-family:monospace;font-size:12px"></textarea></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir(${estAcao('importar')},{texto:val('el-texto')}).catch(()=>{})">Cadastrar</button>`);
+}
+
+/*
+ * ENTRADA RAPIDA — chegou material: so a quantidade (e a data, que ja vem
+ * com hoje). Enter confirma.
+ */
+function estEntradaRapida(codigo) {
+  const i = estItem(codigo); if (!i) return;
+  abrirJanela('Entrada — ' + i.nome, `
+    <p style="margin:0 0 12px">Estoque agora: <b>${pnNum(i.saldo)} ${esc(i.unidade)}</b>${i.minimo ? ' · mínimo ' + pnNum(i.minimo) : ''}${i.ideal ? ' · ideal ' + pnNum(i.ideal) : ''}</p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Quantas chegaram</label><input id="er-qtd" inputmode="decimal" value="1"
+        onkeydown="if (event.key === 'Enter') el('er-ok').click()"></div>
+      <div class="campo"><label>Data</label><input type="date" id="er-data" value="${estD().hoje}"></div>
+    </div>
+    <div class="campo"><label>NF, pedido ou fornecedor (opcional)</label><input id="er-doc"
+      onkeydown="if (event.key === 'Enter') el('er-ok').click()"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" id="er-ok" onclick="agir(${estAcao('movimentar')},{tipo:'ENTRADA',item:${jsArg(codigo)},quantidade:val('er-qtd'),data:val('er-data'),documento:val('er-doc')}).catch(()=>{})">Somar ao estoque</button>`);
+  setTimeout(() => { const c = el('er-qtd'); if (c) { c.focus(); c.select(); } }, 60);
+}
+
+/* SAIDA RAPIDA — quantos, quando e para onde (setor e/ou usuario). */
+function estSaidaRapida(codigo) {
+  const i = estItem(codigo); if (!i) return;
+  const d = estD();
+  abrirJanela('Saída — ' + i.nome, `
+    <p style="margin:0 0 12px">Estoque agora: <b>${pnNum(i.saldo)} ${esc(i.unidade)}</b>${i.minimo ? ' · mínimo ' + pnNum(i.minimo) : ''}</p>
+    <div class="campo-duplo">
+      <div class="campo"><label>Quantidade</label><input id="es-qtd" inputmode="decimal" value="1"></div>
+      <div class="campo"><label>Data da saída</label><input type="date" id="es-data" value="${d.hoje}"></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Setor</label><input id="es-setor" list="es-setores" placeholder="${esc(EST.t.destino)}">
+        <datalist id="es-setores">${estDestinos(d).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></div>
+      <div class="campo"><label>Usuário que recebeu</label><input id="es-usuario" list="es-usuarios" placeholder="Nome de quem recebeu">
+        <datalist id="es-usuarios">${(d.listas.solicitantes || []).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></div>
+    </div>
+    <div class="campo"><label>Observação / chamado (opcional)</label><input id="es-obs"></div>
+    <p class="dica">Informe o setor, o usuário ou os dois — é o que diz onde cada item está.</p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir(${estAcao('movimentar')},{tipo:'SAIDA',item:${jsArg(codigo)},quantidade:val('es-qtd'),data:val('es-data'),
+      destino:val('es-setor'),solicitante:val('es-usuario'),observacao:val('es-obs')}).catch(()=>{})">Registrar saída</button>`);
+  setTimeout(() => { const c = el('es-qtd'); if (c) { c.focus(); c.select(); } }, 60);
+}
+
+function estFormMov(tipo, codigo) {
+  const d = estD();
+  const ativos = d.itens.filter((i) => i.ativo);
+  if (!ativos.length) return avisar('Cadastre primeiro o que entra no estoque (' + EST.t.novo + ').', true);
+  const titulos = { ENTRADA: 'Registrar entrada', SAIDA: 'Registrar saída', DEVOLUCAO: 'Registrar devolução', BAIXA: 'Registrar baixa' };
+  abrirJanela(titulos[tipo] || 'Movimentação', `
+    <div class="campo-duplo">
+      <div class="campo"><label>Tipo</label><select id="em-tipo" onchange="estAjustarFormMov()">
+        ${['ENTRADA', 'SAIDA', 'DEVOLUCAO', 'BAIXA'].map((t) => `<option value="${t}" ${t === tipo ? 'selected' : ''}>${EST_TIPO_NOME[t]}</option>`).join('')}</select></div>
+      <div class="campo"><label>Data</label><input type="date" id="em-data" value="${d.hoje}"></div>
+    </div>
+    <div class="campo"><label>Item</label><select id="em-item" onchange="estAjustarFormMov()">
+      ${ativos.map((i) => `<option value="${esc(i.codigo)}" ${i.codigo === codigo ? 'selected' : ''}>${esc(i.nome)} — ${esc(i.codigo)} (saldo ${pnNum(i.saldo)} ${esc(i.unidade)})</option>`).join('')}</select></div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Quantidade</label><input id="em-qtd" inputmode="decimal" value="1"></div>
+      <div class="campo"><label id="em-rot-destino">Setor</label><input id="em-destino" list="em-destinos" placeholder="${esc(EST.t.destino)}">
+        <datalist id="em-destinos">${estDestinos(d).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></div>
+    </div>
+    <div class="campo-duplo">
+      <div class="campo"><label>Usuário que recebeu</label><input id="em-solic" list="em-solics">
+        <datalist id="em-solics">${(d.listas.solicitantes || []).map((x) => `<option value="${esc(x)}">`).join('')}</datalist></div>
+      <div class="campo"><label>NF, pedido ou chamado</label><input id="em-doc"></div>
+    </div>
+    <div class="campo"><label>${esc(EST.t.serie)}</label><input id="em-serie" placeholder="${esc(EST.t.seriePh)}"></div>
+    <div class="campo"><label>Observação</label><input id="em-obs"></div>
+    <p class="dica" id="em-saldo"></p>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao" onclick="agir(${estAcao('movimentar')},{tipo:val('em-tipo'),data:val('em-data'),item:val('em-item'),quantidade:val('em-qtd'),
+      destino:val('em-destino'),solicitante:val('em-solic'),documento:val('em-doc'),serie:val('em-serie'),observacao:val('em-obs')}).catch(()=>{})">Registrar</button>`);
+  estAjustarFormMov();
+}
+
+function estAjustarFormMov() {
+  const tipo = val('em-tipo'), i = estItem(val('em-item'));
+  const rot = { ENTRADA: 'Origem (fornecedor, outra filial) — opcional', SAIDA: 'Setor',
+    DEVOLUCAO: 'Devolvido por (setor ou pessoa)', BAIXA: 'Motivo / onde estava' }[tipo];
+  if (el('em-rot-destino')) el('em-rot-destino').textContent = rot;
+  if (el('em-saldo') && i) el('em-saldo').innerHTML = `Saldo atual de <b>${esc(i.nome)}</b>: <b>${pnNum(i.saldo)} ${esc(i.unidade)}</b>` +
+    (i.minimo ? ` · mínimo ${pnNum(i.minimo)}` : '') + (i.local ? ` · guardado em ${esc(i.local)}` : '');
+}
+
+function estFormEstorno(id) {
+  const m = estD().movimentos.find((x) => x.id === id);
+  const i = estItem(m.item);
+  abrirJanela('Estornar lançamento', `
+    <p style="margin:0 0 12px;line-height:1.7"><b>${EST_TIPO_NOME[m.tipo]}</b> de ${pnDataLonga(m.data)} ·
+      ${esc(i ? i.nome : m.item)} · ${m.efeito > 0 ? '+' : ''}${m.efeito}<br>
+      <span class="pn-mini">O GSL lança o movimento contrário, com a data de hoje. O original continua no histórico.</span></p>
+    <div class="campo"><label>Motivo</label><input id="es-motivo" placeholder="Ex.: lançado no item errado"></div>`, `
+    <button class="botao secundario" onclick="fecharJanela()">Cancelar</button>
+    <button class="botao perigo" onclick="agir(${estAcao('estornar')},{id:${jsArg(id)},motivo:val('es-motivo')},'Lançamento estornado').catch(()=>{})">Estornar</button>`);
+}
+
+/*
+ * Historico completo do item — vem do servidor na hora (a tela so leva ~90
+ * dias). O saldo corrido parte do saldo-base que o servidor calcula, entao
+ * a ultima linha sempre bate com o saldo atual.
+ */
+let EST_HIST_PEDIDO = 0;
+async function estHistorico(codigo) {
+  const i = estItem(codigo);
+  const pedido = ++EST_HIST_PEDIDO;
+  const titulo = 'Histórico · ' + (i ? i.nome : codigo);
+  const rodape = '<button class="botao" onclick="fecharJanela()">Fechar</button>';
+  abrirJanela(titulo, '<div class="vazio">Carregando o histórico…</div>', rodape);
+  let r;
+  try { r = await executarAcaoSrv(EST.acoes.historico, { codigo: codigo }); }
+  catch (e) {
+    if (pedido === EST_HIST_PEDIDO) el('janela-corpo').innerHTML = `<div class="erro-caixa">${esc(e.message || e)}</div>`;
+    return;
+  }
+  // Janela fechada ou outro historico pedido no meio: nao escreve por cima.
+  if (pedido !== EST_HIST_PEDIDO || el('janela').classList.contains('oculto')) return;
+  let saldo = Number(r.saldoBase) || 0;
+  const linhas = (r.movimentos || []).slice().reverse().map((m) => { saldo += m.efeito; return { m: m, saldo: saldo }; }).reverse();
+  const casas = (n) => (Number.isInteger(n) ? 0 : 2);
+  abrirJanela(titulo, `
+    <p class="pn-mini" style="margin:0 0 10px">${esc(codigo)} · saldo atual <b>${pnNum(r.saldo, casas(r.saldo))} ${esc(r.unidade || '')}</b></p>
+    ${linhas.length ? `<div class="pn-tabela-rolagem" style="max-height:55vh;overflow:auto"><table><thead><tr><th>Data</th><th>Tipo</th>
+      <th class="numero">Qtd.</th><th class="numero">Saldo</th><th>Destino · doc.</th></tr></thead><tbody>
+      ${linhas.map((x) => `<tr><td>${pnDataLonga(x.m.data)}</td><td><span class="pn-chip ${EST_TIPO_CHIP[x.m.tipo]}">${EST_TIPO_NOME[x.m.tipo]}</span></td>
+        <td class="numero pn-num">${x.m.efeito > 0 ? '+' : ''}${pnNum(x.m.efeito, casas(x.m.efeito))}</td>
+        <td class="numero pn-num"><b>${pnNum(x.saldo, casas(x.saldo))}</b></td>
+        <td>${esc([x.m.destino, x.m.documento, x.m.serie].filter(Boolean).join(' · ') || x.m.observacao || '—')}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="vazio">Nenhuma movimentação deste item.</div>'}
+    <p class="dica">${r.total > linhas.length
+      ? `Mostrando os ${linhas.length} lançamentos mais recentes de ${r.total}; o saldo corrido já parte do que havia antes deles (${pnNum(r.saldoBase, casas(r.saldoBase))}).`
+      : `Todos os ${r.total} lançamento(s) deste item.`}</p>`, rodape);
+}

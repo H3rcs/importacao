@@ -1,0 +1,2913 @@
+/* GSL Bartofil — Carga.html (montado por ferramentas/montar-local.js; nao edite aqui) */
+
+/*
+ * SITUACAO DE CARGA — A TELA.
+ *
+ * Abas: Visao geral (um cartao por deposito, o equilibrio entre depositos, prioridades, cargas
+ * paradas, a tabela de cargas com filtros e a linha do tempo dos envios), Supervisao (Grandeza ·
+ * Nobre Grandeza · Pesaveis · Blocado lado a lado, com o pool de paleteiras que os quatro dividem),
+ * uma aba por deposito, Equipe (o quadro de alocacao inteiro) e Historico.
+ *
+ * AO VIVO: enquanto a tela esta aberta e visivel, a cada ~12 s ela pergunta a geracao
+ * (acaoGeracaoCarga, tres numeros) e so busca a tela de novo quando alguem mexeu. Sem ninguem mexer
+ * no computador por 45 min a pergunta para (a sessao acaba como sempre) — menos no Modo TV.
+ * Mover pessoa e mudar paleteira sao OTIMISTAS: a tela muda na hora e volta se o servidor recusar.
+ */
+const BUILD_CARGA_TELA = '2026.11.26';
+const CG = {
+  aba: lerLocal('gsl_carga_aba') || 'cargas', filtro: 'todas', fDep: '', fBox: '', fVeic: '', fGargalo: '', ordem: 'prioridade', busca: '',
+  turno: cgTurnoGuardado(), funcao: '', buscaPessoa: '',
+  dados: null, g: '', timer: 0, pendentes: 0, arrastando: null,
+  tv: false, tvGiro: 0, leitura: null, observador: null, desenhadoEm: 0,
+  /* fase 2: hist = o envio antigo aberto (so leitura) por cima do vivo; vivo = os dados de agora */
+  hist: null, vivo: null, comparacao: null, compararDe: '', compararPara: 'atual', alertasTodos: false, poolAberto: true
+};
+/* O filtro de turno guardado: 'agora' (padrao), A, B, C, ADM ou '' (todos). O valor da versao anterior ("1° TURNO") vira 'agora'. */
+function cgTurnoGuardado() { const v = lerLocal('gsl_carga_turno2'); return ['agora', 'A', 'B', 'C', 'ADM', 'outros', 'todos'].indexOf(v) !== -1 ? v : 'agora'; }
+const CG_GRUPO = ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'];
+const CG_CURTO = { GRANDEZA: 'GRA', MIUDEZA: 'MIU', BLOCADO: 'BLO', PESAVEIS: 'PES', NOBRE: 'NOB', NOBRE_GRANDEZA: 'NGR' };
+const CG_ESTADO_NOME = { LIVRE: 'Livre', USO: 'Em uso', MANUTENCAO: 'Em manutenção' };
+
+/* ---------------- ICONES (SVG desenhados aqui) ---------------- */
+const CG_SVG = {
+  paleteira: '<svg class="cg-ico-paleteira" viewBox="0 0 64 42" aria-hidden="true">' +
+    '<path d="M8.5 4.5h9" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" fill="none"/>' +
+    '<path d="M13 5.5l6.4 19" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>' +
+    '<rect x="15" y="21.5" width="11" height="10" rx="2.6" fill="currentColor"/>' +
+    '<path d="M23 29.2h35.5a2.6 2.6 0 0 1 0 5.2H23z" fill="currentColor"/>' +
+    '<circle cx="20.5" cy="35.4" r="4.6" fill="currentColor"/><circle cx="20.5" cy="35.4" r="1.7" class="cg-ico-furo"/>' +
+    '<circle cx="54.5" cy="37.2" r="2.6" fill="currentColor"/></svg>',
+  carrinho: '<svg class="cg-ico-carrinho" viewBox="0 0 48 44" aria-hidden="true">' +
+    '<path d="M3.5 6.5h6M6.5 6.5v26" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>' +
+    '<rect x="10" y="9.5" width="32" height="23" rx="3" stroke="currentColor" stroke-width="2.8" fill="none"/>' +
+    '<path d="M10 17.5h32M10 25h32M21 9.5v23M31 9.5v23" stroke="currentColor" stroke-width="1.6" opacity=".55"/>' +
+    '<circle cx="15" cy="37.5" r="3.8" fill="currentColor"/><circle cx="37" cy="37.5" r="3.8" fill="currentColor"/></svg>',
+  pessoa: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="9.5" r="6"/><path d="M4.5 30c0-7.2 5.1-11.6 11.5-11.6S27.5 22.8 27.5 30z"/></svg>',
+  chave: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0 5 5L22 13.6l-2.4 2.4-2.3-2.3-7.9 7.9a2 2 0 0 1-2.8-2.8l7.9-7.9-2.3-2.3 2.4-2.4z" fill="currentColor"/></svg>',
+  pdf: '<svg viewBox="0 0 40 48" aria-hidden="true"><path d="M6 2h20l12 12v30a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="currentColor" opacity=".12"/><path d="M6 2h20l12 12v30a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M26 2v12h12" fill="none" stroke="currentColor" stroke-width="2.4"/><text x="20" y="36" text-anchor="middle" font-size="10" font-weight="700" fill="currentColor" font-family="Poppins,Inter,sans-serif">PDF</text></svg>',
+  caminhao: '<svg viewBox="0 0 48 32" aria-hidden="true"><path d="M2 6a2 2 0 0 1 2-2h24a2 2 0 0 1 2 2v18H2z" fill="currentColor" opacity=".9"/><path d="M30 10h8.5l6.5 7.5V24H30z" fill="currentColor" opacity=".7"/><circle cx="11" cy="25.5" r="4.2" fill="currentColor"/><circle cx="37" cy="25.5" r="4.2" fill="currentColor"/></svg>',
+  tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  enviar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  balanca: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 21h14M4 7h16M7 7l-3 7a3 3 0 0 0 6 0zM17 7l-3 7a3 3 0 0 0 6 0z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  checkout: '<svg class="cg-ico-checkout" viewBox="0 0 56 44" aria-hidden="true">' +
+    '<rect x="4" y="22" width="48" height="6" rx="2" fill="currentColor"/>' +
+    '<path d="M9 28v12M47 28v12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/>' +
+    '<rect x="10" y="4" width="20" height="14" rx="2.4" fill="none" stroke="currentColor" stroke-width="2.8"/>' +
+    '<path d="M20 18v4" stroke="currentColor" stroke-width="2.8"/>' +
+    '<path d="M36 12l8-4 2.4 4.6-8 4z" fill="currentColor"/><path d="M38.6 16.6l-1.8 5.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>' +
+    '<path d="M14 9h12M14 13h8" stroke="currentColor" stroke-width="1.8" opacity=".6"/></svg>',
+  relogio: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  alca: '<svg viewBox="0 0 12 20" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/><circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></g></svg>'
+};
+
+/* ---------------- FORMATOS ---------------- */
+const cgN = (n) => Number(n || 0).toLocaleString('pt-BR');
+const cgPct = (p) => (p == null ? '—' : Math.round(p) + '%');
+function cgMinDe(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(iso || ''));
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) / 60000 : 0;
+}
+function cgMinAgora() { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) / 60000; }
+function cgHora(iso) { const m = /T(\d{2}):(\d{2})/.exec(String(iso || '')); return m ? m[1] + ':' + m[2] : ''; }
+function cgDataBr(iso, comSeg) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(iso || ''));
+  return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] + (comSeg && m[6] ? ':' + m[6] : '') : String(iso || '');
+}
+function cgDiaHora(iso) {
+  const hoje = new Date();
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
+  if (!m) return '';
+  const mesmoDia = +m[1] === hoje.getFullYear() && +m[2] === hoje.getMonth() + 1 && +m[3] === hoje.getDate();
+  return (mesmoDia ? 'hoje' : 'em ' + m[3] + '/' + m[2]) + ' às ' + m[4] + ':' + m[5];
+}
+function cgDuracao(min) {
+  if (min == null || !isFinite(min)) return '—';
+  min = Math.max(0, Math.round(min));
+  if (min < 1) return 'menos de 1 min';
+  if (min < 60) return min + ' min';
+  if (min >= 48 * 60) return Math.round(min / 1440) + ' dias';
+  const h = Math.floor(min / 60), r = min % 60;
+  return h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : '');
+}
+function cgIdade() { const s = CG.dados && CG.dados.snapshot; return s && !CG.hist ? Math.max(0, cgMinAgora() - cgMinDe(s.emitido)) : null; }
+function cgHoraMais(iso, min) {
+  if (min == null || !isFinite(min)) return '';
+  const d = new Date((cgMinDe(iso) + min) * 60000);
+  return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+}
+function cgTitulo(t) { return String(t || '').toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()); }
+function cgNomeCurto(nome) {
+  const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (p.length < 2) return cgTitulo(p[0] || '');
+  const ult = p.slice(1).filter((x) => !/^(DA|DE|DO|DAS|DOS|E)$/i.test(x)).pop();
+  return cgTitulo(p[0]) + (ult ? ' ' + ult.charAt(0).toUpperCase() + '.' : '');
+}
+function cgTurnoCurto(eq) { const m = /^(\d)/.exec(String(eq || '')); return m ? m[1] + 'T' : (/ADM/i.test(eq) ? 'ADM' : ''); }
+function cgHoraAgora() { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function cgIdadeTexto(min) { return min == null ? '' : (min < 1 ? 'agora' : 'há ' + cgDuracao(min)); }
+
+/* ---------------- CELULAS E CARGAS (no cliente) ---------------- */
+function cgPartesCli(c) {
+  if (c === 'X') return { x: true, a: 0, b: 0 };
+  if (c === '-') return { nada: true, a: 0, b: 0 };
+  const m = /^(\d+)\/(\d+)$/.exec(c || '');
+  if (m) return { a: +m[1], b: +m[2], completa: +m[1] >= +m[2] };
+  return { vazia: true, a: 0, b: 0 };
+}
+const cgOkCli = (c) => { const p = cgPartesCli(c); return !!(p.x || p.completa || p.nada || p.vazia); };
+/*
+ * Estado de uma carga (no CD inteiro ou num deposito). So contam os depositos que TEM trabalho na carga:
+ * a celula "-" nao entra (nem como pendente, nem como pronta). % da carga = media do andamento das
+ * celulas (SEP e CONF) desses depositos: X vale 1, a/b vale a/b. Pronta = todas X (ou a = b).
+ * Gargalo: o deposito mais atrasado entre os que ainda nao terminaram.
+ */
+function cgEstadoCarga(c, idDep) {
+  const deps = idDep ? [idDep] : Object.keys(c.s || {});
+  let n = 0, soma = 0, pronta = true, algo = false, gargalo = '', gargaloPct = 101;
+  deps.forEach((d) => {
+    let nd = 0, sd = 0, ok = true;
+    ((c.s && c.s[d]) || ['', '']).forEach((v) => {
+      const p = cgPartesCli(v);
+      if (p.nada || p.vazia) return;
+      nd++;
+      if (p.x) { sd += 1; algo = true; return; }
+      sd += p.a / p.b;
+      if (p.a > 0) algo = true;
+      if (!p.completa) ok = false;
+    });
+    if (!nd) return;
+    n += nd; soma += sd;
+    if (!ok) { pronta = false; const pd = sd / nd * 100; if (pd < gargaloPct) { gargaloPct = pd; gargalo = d; } }
+  });
+  if (!n) return { estado: 'sem', pct: 100, gargalo: '', gargaloPct: null };
+  return { estado: pronta ? 'pronta' : (algo ? 'andamento' : 'naoIniciada'), pct: soma / n * 100, gargalo: gargalo, gargaloPct: gargalo ? gargaloPct : null };
+}
+function cgParadaMin(c, idDep) {
+  const ult = cgMinDe(CG.dados.snapshot.emitido);
+  if (idDep) return c.um && c.um[idDep] ? Math.max(0, ult - c.um[idDep]) : 0;
+  const ms = Object.keys(c.um || {}).filter((d) => c.s[d] && (!cgOkCli(c.s[d][0]) || !cgOkCli(c.s[d][1]))).map((d) => c.um[d]);
+  return ms.length ? Math.max(0, ult - Math.max.apply(null, ms)) : 0;
+}
+
+/* ---------------- EQUIPE E EQUIPAMENTOS ---------------- */
+function cgLugarDe(k) { return (CG.dados.equipe || []).find((p) => p.k === k) || null; }
+function cgPessoa(k) {
+  const a = cgLugarDe(k), q = (CG.dados.pessoas || []).find((p) => p.k === k);
+  return Object.assign({}, a || {}, q || {}, { k: k });
+}
+function cgContagem() {
+  if (CG.dados.contagemFixa) return CG.dados.contagemFixa;
+  const c = {};
+  (CG.dados.depositos || []).forEach((d) => { c[d.id] = { sep: 0, conf: 0, andares: [0, 0, 0, 0, 0] }; });
+  (CG.dados.equipe || []).forEach((p) => {
+    const x = c[p.dep]; if (!x) return;
+    if (p.papel === 'CONFERENTE') x.conf++; else { x.sep++; if (p.andar >= 0 && p.andar < 5) x.andares[p.andar]++; }
+  });
+  return c;
+}
+const cgPaleteiras = () => (CG.dados.equipamentos || []).filter((e) => e.tipo === 'PALETEIRA');
+const cgCarrinhos = () => (CG.dados.equipamentos || []).filter((e) => e.tipo === 'CARRINHO');
+function cgDepInfo(id) { return (CG.dados.depositos || []).find((x) => x.id === id) || { id: id, nome: cgNomeDep(id) }; }
+function cgNomeDep(id) {
+  const lista = (CG.dados.depositos || []).concat((CG.dados.snapshot && CG.dados.snapshot.depositos) || []);
+  const d = lista.find((x) => x.id === id);
+  return d ? d.nome : (CG_DEPS_NOMES[id] || id);
+}
+
+/* ---------------- INDICADORES DE UM DEPOSITO ---------------- */
+function cgIndDep(id) {
+  const d = CG.dados, s = d.snapshot;
+  const r = (s && s.resumo && s.resumo.dep && s.resumo.dep[id]) || null;
+  const ind = (d.indicadores && d.indicadores.porDep && d.indicadores.porDep[id]) || {};
+  const eq = cgContagem()[id] || { sep: 0, conf: 0, andares: [] };
+  const info = cgDepInfo(id);
+  const out = { id: id, r: r, ind: ind, eq: eq, info: info };
+  if (info.equip === 'PALETEIRA') {
+    const c = cgConsumo().PALETEIRA, x = c.porDep[id] || { pessoas: 0, com: 0, sem: 0 };
+    out.equip = { com: x.com, sem: x.sem }; out.livres = c.livres;
+  } else if (info.equip === 'CARRINHO') {
+    out.equip = cgCarrinhos();
+    out.livres = out.equip.filter((e) => e.estado === 'LIVRE').length;
+  } else { out.equip = []; out.livres = 0; }
+  if (!r) { out.status = { k: 'vazio', t: 'Sem situação' }; return out; }
+  out.pend = r.cargas - r.concluidas;
+  // Com a equipe de agora: o ritmo por pessoa medido nas ultimas horas vezes quem esta alocado agora
+  const rs = ind.porPessoaSep && eq.sep ? ind.porPessoaSep * eq.sep : null;
+  const rc = ind.porPessoaConf && eq.conf ? ind.porPessoaConf * eq.conf : null;
+  const eS = r.restSep <= 0 ? 0 : (rs ? r.restSep / rs * 60 : null), eC = r.restConf <= 0 ? 0 : (rc ? r.restConf / rc * 60 : null);
+  out.etaEquipe = eS == null || eC == null ? null : Math.max(eS, eC);
+  out.porSeparador = eq.sep ? r.restSep / eq.sep : null;
+  const eqb = d.indicadores && d.indicadores.equilibrio;
+  out.pctPond = eqb && eqb.porDep[id] ? eqb.porDep[id].pct : null;
+  if (!r.cargas) out.status = { k: 'vazio', t: 'Sem cargas' };
+  else if (!out.pend) out.status = { k: 'ok', t: 'Concluído' };
+  else if (ind.maisParadaMin >= 90 && !ind.ritmoSep && !ind.ritmoConf && ind.horasRitmo) out.status = { k: 'alerta', t: 'Parado' };
+  else if (r.h24Pend) out.status = { k: 'atencao', t: r.h24Pend + (r.h24Pend === 1 ? ' carga 24 h' : ' cargas 24 h') };
+  else out.status = { k: 'andamento', t: 'Em andamento' };
+  return out;
+}
+
+/* ---------------- PINTAR ---------------- */
+function pintarCarga(r) {
+  CG.vivo = r.dados || {};
+  CG.dados = CG.vivo;
+  CG.g = CG.dados.g || '';
+  if (CG.hist) cgAplicarHistorico();
+  const abas = cgAbas().map((a) => a[0]);
+  if (abas.indexOf(CG.aba) === -1) CG.aba = 'cargas';
+  document.documentElement.classList.add('cg-ativo');
+  cgVigiarSaida();
+  cgLigarRelogio();
+  const s = CG.dados.snapshot;
+  el('subtitulo-pagina').textContent = s ? (CG.hist ? 'Histórico: situação de ' : 'Relatório emitido ') + cgDiaHora(s.emitido) + ' · ' + (CG.dados.filial || '') : (CG.dados.filial || '');
+  el('acoes-topo').innerHTML = '';
+  cgDesenhar();
+  CG.desenhadoEm = Date.now();
+}
+
+function cgDesenhar() {
+  const pagina = el('pagina');
+  if (!pagina || !CG.dados) return;
+  // A busca que esta sendo digitada nao perde o foco quando a tela redesenha (ao vivo)
+  const foco = document.activeElement && document.activeElement.id && pagina.contains(document.activeElement) ? document.activeElement : null;
+  const sel = foco && typeof foco.selectionStart === 'number' ? [foco.selectionStart, foco.selectionEnd] : null;
+  const digitando = foco && foco.classList.contains('cg-ctl-cel') && foco.tagName === 'INPUT' && foco.value !== foco.getAttribute('data-antes') ? foco.value : null;
+  const rolo = el('cg-ctl-rolo'), roloXY = rolo ? [rolo.scrollLeft, rolo.scrollTop] : null;
+  const rolagem = window.scrollY;
+  const d = CG.dados;
+  const abas = cgAbas();
+  pagina.innerHTML = `<div class="cg${CG.tv ? ' cg-modo-tv' : ''}${CG.hist ? ' cg-em-historico' : ''}" id="cg">
+    ${cgHeroHtml()}
+    ${CG.hist ? cgFaixaHistoricoHtml() : cgFaixaIdadeHtml() + cgFaixasDoTurnoHtml()}
+    <nav class="cg-abas" role="tablist" aria-label="Situação de carga">
+      ${abas.map(([id, nome]) => {
+        const dep = (d.depositos || []).some((x) => x.id === id) ? cgIndDep(id) : null;
+        const ponto = dep && dep.r ? `<i class="cg-ponto st-${dep.status.k}" aria-hidden="true"></i>` : '';
+        const marca = cgMarcaDaAba(id);
+        return `<button type="button" role="tab" class="cg-aba${CG.aba === id ? ' ativa' : ''}${id === 'supervisao' || id === 'todos' ? ' grupo' : ''}" aria-selected="${CG.aba === id}" data-aba="${esc(id)}" onclick="cgIrAba(${jsArg(id)})">${ponto}${esc(nome)}${marca}</button>`;
+      }).join('')}
+    </nav>
+    <div class="cg-corpo" id="cg-corpo">${cgCorpoHtml()}</div>
+  </div>`;
+  if (roloXY && el('cg-ctl-rolo')) { el('cg-ctl-rolo').scrollLeft = roloXY[0]; el('cg-ctl-rolo').scrollTop = roloXY[1]; }
+  if (foco) { const f = el(foco.id); if (f) { if (digitando != null) f.value = digitando; f.focus(); if (sel) { try { f.setSelectionRange(sel[0], sel[1]); } catch (e) {} } } }
+  if (CG.desenhadoEm) window.scrollTo(0, rolagem);
+  cgAtualizarPainelDoca();
+}
+function cgIrAba(id) {
+  CG.aba = id; gravarLocal('gsl_carga_aba', id); cgDesenhar();
+  const a = document.querySelector('.cg-aba.ativa'); if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+function cgCorpoHtml() {
+  if (CG.aba === 'equipe') return cgEquipeHtml();
+  if (CG.aba === 'historico') return cgHistoricoHtml();
+  if (CG.aba === 'supervisao') return cgSupervisaoHtml();
+  if (CG.aba === 'sequencia') return cgSequenciaHtml();
+  if (CG.aba === 'todos') return cgTodosHtml();
+  if (CG.aba === 'boxes') return cgBoxesHtml();
+  if (CG.aba === 'escala') return cgEscalaHtml();
+  if (CG.aba === 'turnos') return cgTurnosHtml();
+  if (CG.aba === 'cargas') return CG.dados.snapshot ? cgTabelaHtml() + cgCargasTravadasHtml() : cgSemSnapshotHtml();
+  if (CG.aba !== 'geral') return cgDepositoHtml(CG.aba);
+  return cgGeralHtml();
+}
+
+/* ---------------- CABECALHO ---------------- */
+function cgHeroHtml() {
+  const d = CG.dados, s = d.snapshot, pode = d.podeEditar;
+  const botoes = `<div class="cg-hero-acoes">
+      ${pode && !CG.hist ? `<button type="button" class="cg-btn cg-btn-primario" onclick="cgAbrirEnvio()">${CG_SVG.enviar}<span>Enviar situação (PDF)</span></button>` : ''}
+      ${CG.hist ? `<button type="button" class="cg-btn cg-btn-primario" onclick="cgSairHistorico()">${CG_SVG.relogio}<span>Voltar para agora</span></button>` : ''}
+      <button type="button" class="cg-btn cg-btn-vidro" onclick="cgModoTv()" title="Tela cheia para a TV do CD">${CG_SVG.tv}<span>${CG.tv ? 'Sair do modo TV' : 'Modo TV'}</span></button>
+    </div>`;
+  if (!s) {
+    return `<section class="cg-hero cg-hero-vazio">
+      <div class="cg-hero-topo">
+        <div><div class="cg-sobre">Situação de carga · ${esc(d.filial || '')}</div>
+          <h2 class="cg-hero-titulo">Nenhuma situação de carga enviada ainda</h2>
+          <p class="cg-hero-sub">${pode ? 'Envie o PDF "Situação de Expedição das Cargas em Processo": o GSL lê as cargas, os depósitos e o andamento de cada um.' : 'Assim que alguém enviar o PDF da situação de carga, os indicadores aparecem aqui.'}</p></div>
+        ${botoes}
+      </div>
+      ${pode ? `<button type="button" class="cg-soltar-grande" onclick="cgAbrirEnvio()" ondragover="cgSobre(event)" ondragleave="cgSaiu(event)" ondrop="cgSoltouNaTela(event)">
+        <span class="cg-soltar-ico">${CG_SVG.pdf}</span><b>Arraste o PDF aqui</b><span>ou clique para escolher o arquivo</span></button>` : ''}
+    </section>`;
+  }
+  const res = s.resumo || {};
+  let sf = 0, st = 0, cf = 0, ct = 0, rs = 0, rc = 0, eta = 0, etaOk = true;
+  Object.keys(res.dep || {}).forEach((k) => {
+    const x = res.dep[k]; sf += x.sepFeitas; st += x.sepTotal; cf += x.confFeitas; ct += x.confTotal; rs += x.restSep; rc += x.restConf;
+    const i = d.indicadores && d.indicadores.porDep[k];
+    if (i) { if (i.etaMin == null && (x.restSep || x.restConf)) etaOk = false; else eta = Math.max(eta, i.etaMin || 0); }
+  });
+  const pSep = st ? sf / st * 100 : 100, pConf = ct ? cf / ct * 100 : 100;
+  const idade = cgIdade();
+  const eqb = d.indicadores && d.indicadores.equilibrio && d.indicadores.equilibrio.cd;
+  const kpi = (rot, val, extra, cls) => `<div class="cg-kpi ${cls || ''}"><span class="cg-kpi-rot">${rot}</span><span class="cg-kpi-val">${val}</span>${extra ? `<span class="cg-kpi-extra">${extra}</span>` : ''}</div>`;
+  const barra = (p, cls) => `<span class="cg-kpi-barra"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p)).toFixed(1)}%"></i></span>`;
+  return `<section class="cg-hero">
+    <div class="cg-hero-topo">
+      <div>
+        <div class="cg-sobre">Situação de carga · ${esc(d.filial || '')}${CG.tv ? ` · <span class="cg-relogio" id="cg-relogio">${cgHoraAgora()}</span>` : ''}</div>
+        <h2 class="cg-hero-titulo"><span class="cg-num">${cgN(res.total)}</span> ${res.total === 1 ? 'carga' : 'cargas'} em processo</h2>
+        <p class="cg-hero-sub">Emitida em ${esc(cgDataBr(s.emitido, true))} · enviada por ${esc(s.por || '—')} ${esc(cgDiaHora(s.enviado))}
+          ${CG.hist ? '<span class="cg-fresco velho">histórico</span>' : `<span class="cg-fresco ${idade > 60 ? 'velho' : 'novo'}" id="cg-fresco">${cgIdadeTexto(idade)}</span>`}</p>
+      </div>
+      ${botoes}
+    </div>
+    <div class="cg-kpis">
+      ${kpi('Prontas para expedir', `<span class="cg-num">${cgN(res.prontas)}</span><small>de ${cgN(res.total)}</small>`, barra(res.total ? res.prontas / res.total * 100 : 0, 'verde'))}
+      ${kpi('24 horas pendentes', `<span class="cg-num">${cgN(res.h24Pend)}</span>`, res.h24 ? 'de ' + res.h24 + (res.h24 === 1 ? ' carga 24 h' : ' cargas 24 h') : 'nenhuma carga 24 h', res.h24Pend ? 'amarelo' : '')}
+      ${kpi('Separação', `<span class="cg-num">${cgPct(pSep)}</span>`, barra(pSep, 'azul') + `<span>${cgN(rs)} lotes faltam</span>`)}
+      ${kpi('Conferência', `<span class="cg-num">${cgPct(pConf)}</span>`, barra(pConf, 'cor-conf') + `<span>${cgN(rc)} lotes faltam</span>`)}
+      ${kpi('Equilíbrio', `<span class="cg-num">${eqb && eqb.spread != null ? cgN(eqb.spread) + '<small>pp</small>' : '—'}</span>`,
+        eqb && eqb.texto ? `<span class="cg-eq-pilula eq-${eqb.status}">${esc(eqb.texto)}</span>` : '', 'equilibrio')}
+      ${kpi('Previsão para zerar', `<span class="cg-num">${!rs && !rc ? 'Pronto' : (etaOk ? cgDuracao(eta) : '—')}</span>`,
+        !rs && !rc ? 'nada pendente' : (etaOk ? 'às ' + cgHoraMais(s.emitido, eta) + ', no ritmo atual' : 'o ritmo aparece a partir do 2º envio'))}
+    </div>
+  </section>`;
+}
+function cgFaixaIdadeHtml() {
+  const idade = cgIdade();
+  if (idade == null || idade <= 60) return '';
+  return `<div class="cg-faixa" role="status"><span class="cg-faixa-ico" aria-hidden="true">⏱</span>
+    <span>A situação de carga tem <b>${cgDuracao(idade)}</b>. Os indicadores ficam melhores com o PDF mais recente.</span>
+    ${CG.dados.podeEditar ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgAbrirEnvio()">Enviar PDF novo</button>' : ''}</div>`;
+}
+
+/* ---------------- EQUILIBRIO ENTRE DEPOSITOS ---------------- */
+function cgEquilibrioHtml(qual, titulo) {
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio;
+  if (!eqb) return '';
+  const g = eqb[qual];
+  if (!g || !g.deps || g.deps.length < 2) {
+    return `<section class="cg-cartao cg-equilibrio"><header class="cg-cartao-cab"><h3>${CG_SVG.balanca}${esc(titulo)}</h3><span class="cg-eq-pilula eq-sem">Só um depósito com trabalho</span></header></section>`;
+  }
+  const lim = eqb.limites;
+  const linhas = g.deps.slice().sort((a, b) => eqb.porDep[a].pct - eqb.porDep[b].pct).map((id) => {
+    const x = eqb.porDep[id], dv = g.desvios[id];
+    const tag = id === g.atrasado ? '<span class="cg-eq-tag atras">mais atrasado</span>' : (id === g.adiantado ? '<span class="cg-eq-tag frente">mais adiantado</span>' : '');
+    return `<div class="cg-eq-linha${id === g.atrasado ? ' atras' : ''}${id === g.adiantado ? ' frente' : ''}">
+      <span class="cg-eq-nome">${esc(cgNomeDep(id))}${tag}</span>
+      <span class="cg-eq-trilho"><i style="width:${Math.max(0, Math.min(100, x.pct)).toFixed(1)}%"></i><b class="cg-eq-media" style="left:${g.media.toFixed(1)}%" title="média ${cgPct(g.media)}"></b></span>
+      <span class="cg-eq-pct cg-num">${cgPct(x.pct)}</span>
+      <span class="cg-eq-desvio cg-num ${dv < 0 ? 'neg' : 'pos'}">${dv > 0 ? '+' : ''}${cgN(dv)} pp</span>
+      <span class="cg-eq-gente">${x.sep} sep · ${x.conf} conf · ${cgN(x.restante)} lotes</span>
+    </div>`;
+  }).join('');
+  const sug = g.sugestao;
+  return `<section class="cg-cartao cg-equilibrio eq-${g.status}" aria-label="${esc(titulo)}">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.balanca}${esc(titulo)}</h3>
+      <span class="cg-eq-resumo"><span class="cg-eq-pilula eq-${g.status}">${esc(g.texto)}</span><b class="cg-num">${cgN(g.spread)} pp</b><small>entre o mais adiantado e o mais atrasado · média ${cgPct(g.media)}</small></span></header>
+    <div class="cg-eq-linhas">${linhas}</div>
+    ${sug ? `<div class="cg-eq-sugestao"><span aria-hidden="true">➜</span><b>${esc(sug.texto)}</b>
+      <span>para ${esc(cgNomeDep(sug.para))} andar junto com os outros.</span>
+      ${CG.dados.podeEditar ? `<button type="button" class="cg-link" onclick="cgIrAba(${jsArg(qual === 'supervisao' && CG_GRUPO.indexOf(sug.para) !== -1 ? 'supervisao' : 'equipe')})">Rebalancear</button>` : ''}</div>` : ''}
+    <p class="cg-nota">% concluído = lotes de separação e conferência feitos ÷ total (cada lote de carga de 24 horas vale ${cgN(lim.peso24h)}×). Equilibrado até ${cgN(lim.equilibrado)} pp · atenção até ${cgN(lim.atencao)} pp — os limites ficam em Configuração › Outros parâmetros.</p>
+  </section>`;
+}
+function cgCargasTravadasHtml(ids) {
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio;
+  if (!eqb) return '';
+  const lista = (eqb.cargas || []).filter((c) => !ids || c.atrasados.some((a) => ids.indexOf(a.dep) !== -1) || c.prontos.some((p) => ids.indexOf(p) !== -1));
+  return `<section class="cg-cartao">
+    <header class="cg-cartao-cab"><h3>Cargas travadas por um depósito</h3><span class="cg-selo ${lista.length ? 'alerta' : 'ok'}">${lista.length ? lista.length + (lista.length === 1 ? ' carga' : ' cargas') : 'nenhuma'}</span></header>
+    ${lista.length ? `<ul class="cg-lista">${lista.slice(0, 8).map((c) => `<li class="cg-item">
+      <span class="cg-item-nro">${esc(c.n)}${c.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+      <span class="cg-item-nome">${esc(c.nm || '—')}<small>pronta em ${esc(c.prontos.map(cgNomeDep).join(', '))}</small></span>
+      <span class="cg-item-trava">${c.atrasados.map((a) => `<span class="cg-trava">${esc(cgNomeDep(a.dep))} <b class="cg-num">${cgPct(a.pct)}</b></span>`).join('')}</span></li>`).join('')}</ul>` :
+      '<p class="cg-vazio-txt">Nenhuma carga com um depósito pronto e outro com metade ou menos.</p>'}
+  </section>`;
+}
+
+/* ---------------- VISAO GERAL ---------------- */
+function cgGeralHtml() {
+  const d = CG.dados, s = d.snapshot;
+  if (!s) return cgSemSnapshotHtml();
+  const deps = s.depositos || d.depositos;
+  const h24 = (s.cargas || []).filter((c) => c.h && cgEstadoCarga(c).estado !== 'pronta');
+  const paradas = [];
+  deps.forEach((x) => { const i = d.indicadores && d.indicadores.porDep[x.id]; ((i && i.paradas) || []).forEach((p) => paradas.push(Object.assign({ dep: x.id }, p))); });
+  paradas.sort((a, b) => b.parada - a.parada);
+  const topParadas = paradas.filter((p) => p.parada >= 30).slice(0, 6);
+  return `
+    <div class="cg-grade-dep">${deps.map((x) => cgCartaoDepHtml(x.id)).join('')}</div>
+    <div class="cg-duas largo">
+      ${cgEquilibrioHtml('cd', 'Equilíbrio entre depósitos · CD')}
+      <div class="cg-pilha">${cgPoolsHtml()}</div>
+    </div>
+    <div class="cg-duas">
+      <section class="cg-cartao">
+        <header class="cg-cartao-cab"><h3>Prioridade 24 horas</h3><span class="cg-selo ${h24.length ? 'amarelo' : 'ok'}">${h24.length ? h24.length + ' pendente' + (h24.length === 1 ? '' : 's') : 'em dia'}</span></header>
+        ${h24.length ? `<ul class="cg-lista">${h24.slice(0, 8).map(cgItemCargaHtml).join('')}</ul>` : '<p class="cg-vazio-txt">Nenhuma carga de 24 horas por terminar.</p>'}
+      </section>
+      ${cgCargasTravadasHtml()}
+    </div>
+    <section class="cg-cartao">
+      <header class="cg-cartao-cab"><h3>Paradas há mais tempo</h3><span class="cg-selo ${topParadas.length ? 'alerta' : 'ok'}">${topParadas.length ? 'sem mudar entre envios' : 'tudo andando'}</span></header>
+      ${topParadas.length ? `<ul class="cg-lista colunas">${topParadas.map((p) => `<li class="cg-item">
+        <span class="cg-item-nro">${esc(p.n)}${p.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(p.nm || '—')}<small>${esc(cgNomeDep(p.dep))} · ${cgCelHtml(p.s[0], 'sep')} ${cgCelHtml(p.s[1], 'conf')}</small></span>
+        <span class="cg-item-tempo alerta">${cgDuracao(p.parada)}</span></li>`).join('')}</ul>` :
+        `<p class="cg-vazio-txt">${(d.indicadores && d.indicadores.envios > 1) ? 'Nenhuma carga parada há 30 min ou mais.' : 'Aparece a partir do segundo envio: o GSL compara um PDF com o anterior.'}</p>`}
+    </section>
+    ${cgLinhaTempoHtml()}`;
+}
+function cgSemSnapshotHtml() {
+  return `<div class="cg-vazio">
+    <div class="cg-vazio-ico">${CG_SVG.caminhao}</div>
+    <h3>A situação de carga ainda não chegou</h3>
+    <p>Enquanto isso, a equipe e os equipamentos já funcionam: aloque as pessoas na aba <b>Equipe</b> ou em cada depósito.</p>
+  </div><div class="cg-grade-pools">${cgPoolsHtml()}</div>`;
+}
+function cgCartaoDepHtml(id) {
+  const i = cgIndDep(id), r = i.r;
+  if (!r) return '';
+  const nome = cgNomeDep(id);
+  const barra = (rot, p, cls) => `<div class="cg-mini-barra"><span>${rot}</span><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(p)}</b></div>`;
+  const equip = i.info.equip === 'PALETEIRA' ? `<span class="cg-equip-mini${i.equip.sem ? ' falta' : ''}" title="Paleteiras em uso aqui (uma por separador) · livres no pool">${CG_SVG.paleteira}<b class="cg-num">${i.equip.com}</b><small>${i.equip.sem ? ' faltam ' + i.equip.sem : '+' + i.livres + ' livres'}</small></span>`
+    : (i.info.equip === 'CARRINHO' ? `<span class="cg-equip-mini" title="Carrinhos livres">${CG_SVG.carrinho}<b class="cg-num">${i.livres}</b><small>/${i.equip.length}</small></span>` : '');
+  return `<button type="button" class="cg-dep-cartao st-${i.status.k}" onclick="cgIrAba(${jsArg(id)})" aria-label="${esc(nome)}: ${esc(i.status.t)}">
+    <div class="cg-dep-topo"><span class="cg-dep-nome">${esc(nome)}</span><span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span></div>
+    <div class="cg-dep-numeros">
+      <div><b class="cg-num">${cgN(i.pend)}</b><span>por terminar</span></div>
+      <div><b class="cg-num">${cgN(r.concluidas)}</b><span>prontas</span></div>
+      <div><b class="cg-num">${cgN(r.restSep + r.restConf)}</b><span>lotes</span></div>
+    </div>
+    ${barra('Sep.', i.ind.pctSep, 'azul')}
+    ${barra('Conf.', i.ind.pctConf, 'cor-conf')}
+    <div class="cg-dep-rodape">
+      <span class="cg-equipe-mini" title="Separadores e conferentes alocados">${CG_SVG.pessoa}<b class="cg-num">${i.eq.sep}</b>&nbsp;sep · <b class="cg-num">${i.eq.conf}</b>&nbsp;conf</span>
+      ${equip}
+      <span class="cg-eta" title="Previsão para zerar no ritmo atual">${i.pend ? (i.ind.etaMin == null ? 'sem ritmo' : '⏱ ' + cgDuracao(i.ind.etaMin)) : '✓ pronto'}</span>
+    </div>
+  </button>`;
+}
+function cgCelHtml(v, lado) {
+  const p = cgPartesCli(v);
+  if (p.x) return `<span class="cg-cel ok ${lado}" title="pronto">✓</span>`;
+  if (p.nada) return `<span class="cg-cel nada ${lado}" title="nada neste depósito">–</span>`;
+  if (p.vazia) return `<span class="cg-cel vazia ${lado}" title="não lida">?</span>`;
+  return `<span class="cg-cel frac ${lado}${p.completa ? ' ok' : ''}" title="${p.a} de ${p.b} lotes"><span class="cg-num">${p.a}/${p.b}</span><i style="width:${(p.b ? p.a / p.b * 100 : 0).toFixed(0)}%"></i></span>`;
+}
+function cgItemCargaHtml(c) {
+  const e = cgEstadoCarga(c);
+  const faltam = Object.keys(c.s || {}).filter((dd) => !cgOkCli(c.s[dd][0]) || !cgOkCli(c.s[dd][1])).map(cgNomeDep);
+  return `<li class="cg-item"><span class="cg-item-nro">${esc(c.n)} <i class="cg-24">24 h</i>${cgLojaTagHtml(c.n)}</span>
+    <span class="cg-item-nome">${esc(c.nm || '—')}<small>${c.v ? esc(c.v) + ' · ' : ''}${c.bx ? 'box ' + esc(c.bx) + ' · ' : ''}falta ${esc(faltam.join(', ') || '—')}</small></span>
+    <span class="cg-item-tempo"><span class="cg-anel" style="--p:${e.pct.toFixed(0)}"><b>${Math.round(e.pct)}%</b></span></span></li>`;
+}
+
+/* ---------------- TABELA DE CARGAS ---------------- */
+const CG_ORDENS = [['prioridade', 'Prioridade: 24 h e gargalo'], ['menor', 'Menor % primeiro'], ['maior', 'Maior % primeiro'], ['numero', 'Número da carga']];
+const CG_FILTROS = [['todas', 'Todas'], ['h24', '24 horas'], ['naoIniciada', 'Não iniciadas'], ['andamento', 'Em andamento'], ['quase', 'Quase prontas'], ['pronta', 'Prontas'], ['parada', 'Paradas']];
+function cgCargasFiltradas(idDep) {
+  const s = CG.dados.snapshot, dep = idDep || CG.fDep, q = cgNorm(CG.busca);
+  return (s.cargas || []).filter((c) => {
+    const e = cgEstadoCarga(c, dep || null);
+    if (dep && e.estado === 'sem') return false;
+    if (CG.fBox && String(c.bx) !== CG.fBox) return false;
+    if (CG.fVeic && (c.v || '(sem veículo)') !== CG.fVeic) return false;
+    if (q && cgNorm(c.n + ' ' + c.nm + ' ' + c.v).indexOf(q) === -1) return false;
+    switch (CG.filtro) {
+      case 'h24': return !!c.h;
+      case 'naoIniciada': return e.estado === 'naoIniciada';
+      case 'andamento': return e.estado === 'andamento';
+      case 'quase': return e.estado === 'andamento' && e.pct >= 80;
+      case 'pronta': return e.estado === 'pronta';
+      case 'parada': return e.estado !== 'pronta' && cgParadaMin(c, dep || null) >= 60;
+      default: return true;
+    }
+  }).filter((c) => !CG.fGargalo || cgEstadoCarga(c).gargalo === CG.fGargalo).map((c) => ({ c: c, e: cgEstadoCarga(c, dep || null) })).sort((x, y) => {
+    const a = x.c, b = y.c, pa = x.e.estado === 'pronta', pb = y.e.estado === 'pronta';
+    if (CG.ordem === 'numero') return String(a.n).localeCompare(String(b.n));
+    if (CG.ordem === 'menor') return (pa - pb) || (x.e.pct - y.e.pct) || String(a.n).localeCompare(String(b.n));
+    if (CG.ordem === 'maior') return (pa - pb) || (y.e.pct - x.e.pct) || String(a.n).localeCompare(String(b.n));
+    return (b.h - a.h) || (pa - pb) || ((x.e.gargaloPct == null ? 101 : x.e.gargaloPct) - (y.e.gargaloPct == null ? 101 : y.e.gargaloPct)) || String(a.n).localeCompare(String(b.n));
+  }).map((x) => x.c);
+}
+function cgTabelaHtml(idDep) {
+  const s = CG.dados.snapshot, deps = s.depositos || [];
+  const lista = cgCargasFiltradas(idDep);
+  const boxes = Array.from(new Set((s.cargas || []).map((c) => String(c.bx || '')).filter(Boolean))).sort((a, b) => +a - +b);
+  const veics = Array.from(new Set((s.cargas || []).map((c) => c.v || '(sem veículo)'))).sort();
+  const opc = (l, atual, todos, pre) => `<option value="">${todos}</option>` + l.map((v) => `<option value="${esc(v)}"${v === atual ? ' selected' : ''}>${esc((pre || '') + v)}</option>`).join('');
+  const depsCols = idDep ? deps.filter((x) => x.id === idDep) : deps;
+  return `<section class="cg-cartao cg-tabela-cartao">
+    <header class="cg-cartao-cab"><h3>Cargas${idDep ? ' com ' + esc(cgNomeDep(idDep)) : ''}</h3><span class="cg-conta" id="cg-conta">${lista.length} de ${(s.cargas || []).length}</span></header>
+    <div class="cg-filtros">
+      <div class="cg-chips" role="group" aria-label="Filtro">${CG_FILTROS.map(([k, t]) => `<button type="button" class="cg-chip${CG.filtro === k ? ' ativo' : ''}" onclick="cgFiltrar('filtro', ${jsArg(k)})">${t}</button>`).join('')}</div>
+      <div class="cg-filtros-linha">
+        <label class="cg-busca"><span class="sr">Buscar carga</span><input id="cg-busca" type="search" placeholder="Buscar nº ou nome da carga" value="${esc(CG.busca)}" oninput="cgBuscar(this.value)" autocomplete="off"></label>
+        ${idDep ? '' : `<select id="cg-f-dep" aria-label="Depósito" onchange="cgFiltrar('fDep', this.value)"><option value="">Todos os depósitos</option>${deps.map((x) => `<option value="${esc(x.id)}"${CG.fDep === x.id ? ' selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>`}
+        <select id="cg-f-box" aria-label="Box" onchange="cgFiltrar('fBox', this.value)">${opc(boxes, CG.fBox, 'Todos os boxes', 'Box ')}</select>
+        <select id="cg-f-veic" aria-label="Veículo" onchange="cgFiltrar('fVeic', this.value)">${opc(veics, CG.fVeic, 'Todos os veículos')}</select>
+        ${idDep ? '' : `<select id="cg-f-gargalo" aria-label="Gargalo" onchange="cgFiltrar('fGargalo', this.value)"><option value="">Gargalo em qualquer depósito</option>${deps.map((x) => `<option value="${esc(x.id)}"${CG.fGargalo === x.id ? ' selected' : ''}>Gargalo: ${esc(x.nome)}</option>`).join('')}</select>`}
+        <select id="cg-ordem" aria-label="Ordem" onchange="cgFiltrar('ordem', this.value)">${CG_ORDENS.map(([k, t]) => `<option value="${k}"${CG.ordem === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="cg-tabela${idDep ? ' um-dep' : ''}" role="table" aria-label="Cargas" style="--cols:${depsCols.length}">
+      <div class="cg-tr cg-th" role="row"><span role="columnheader">Carga</span>${depsCols.map((x) => `<span role="columnheader" class="cg-th-dep" title="${esc(x.nome)}">${esc(idDep ? 'Separação · Conferência' : x.nome)}</span>`).join('')}<span role="columnheader">Progresso</span></div>
+      <div id="cg-linhas">${cgLinhasHtml(lista, depsCols, idDep)}</div>
+    </div>
+  </section>`;
+}
+function cgLinhasHtml(lista, depsCols, idDep) {
+  if (!lista.length) return '<p class="cg-vazio-txt">Nenhuma carga neste filtro.</p>';
+  return lista.slice(0, 400).map((c) => {
+    const e = cgEstadoCarga(c, idDep || null);
+    const parada = e.estado !== 'pronta' ? cgParadaMin(c, idDep || null) : 0;
+    return `<div class="cg-tr${c.h ? ' h24' : ''} est-${e.estado}" role="row" data-carga="${esc(c.n)}">
+      <span class="cg-td-carga" role="cell"><span class="cg-td-linha1"><b class="cg-num">${esc(c.n)}</b>${c.h ? '<i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-td-nome">${esc(c.nm || '—')}</span>
+        <small>${esc(c.v || 'sem veículo')}${c.bx ? ' · box <b>' + esc(c.bx) + '</b>' : ''}${cgChipPatio(c.n)}${!idDep && e.gargalo ? ` · <span class="cg-gargalo-txt">gargalo: ${esc(cgNomeDep(e.gargalo))}</span>` : ''}${parada >= 60 ? ` · <span class="cg-parada">parada há ${cgDuracao(parada)}</span>` : ''}</small></span>
+      ${depsCols.map((x) => { const par = (c.s && c.s[x.id]) || ['', '']; const g = !idDep && e.gargalo === x.id; return `<span class="cg-td-dep${par[0] === '-' && par[1] === '-' ? ' sem' : ''}${g ? ' gargalo' : ''}" role="cell" data-dep="${esc(CG_CURTO[x.id] || x.nome)}"${g ? ' title="Gargalo desta carga"' : ''}>${par[0] === '-' && par[1] === '-' ? '<span class="cg-cel nada" title="nada deste depósito nesta carga">–</span>' : cgCelHtml(par[0], 'sep') + cgCelHtml(par[1], 'conf')}</span>`; }).join('')}
+      <span class="cg-td-prog" role="cell"><span class="cg-trilho"><i class="${e.estado === 'pronta' ? 'verde' : 'azul'}" style="width:${e.pct.toFixed(1)}%"></i></span><b class="cg-num">${Math.round(e.pct)}%</b></span>
+    </div>`;
+  }).join('') + (lista.length > 400 ? `<p class="cg-vazio-txt">Mostrando 400 de ${lista.length}. Use a busca ou os filtros.</p>` : '');
+}
+function cgFiltrar(campo, valor) { CG[campo] = campo === 'filtro' && CG.filtro === valor ? 'todas' : valor; cgDesenhar(); }
+let CG_BUSCA_T = 0;
+function cgBuscar(v) {
+  CG.busca = v;
+  clearTimeout(CG_BUSCA_T);
+  CG_BUSCA_T = setTimeout(() => {
+    const s = CG.dados.snapshot; if (!s) return;
+    const idDep = (CG.dados.depositos || []).some((x) => x.id === CG.aba) ? CG.aba : '';
+    const depsCols = idDep ? s.depositos.filter((x) => x.id === idDep) : s.depositos;
+    const lista = cgCargasFiltradas(idDep);
+    const alvo = el('cg-linhas'); if (alvo) alvo.innerHTML = cgLinhasHtml(lista, depsCols, idDep);
+    const conta = el('cg-conta'); if (conta) conta.textContent = lista.length + ' de ' + (s.cargas || []).length;
+  }, 120);
+}
+
+/* ---------------- LINHA DO TEMPO ---------------- */
+function cgLinhaTempoHtml(completo) {
+  const h = (CG.dados.historico || []).slice().reverse();
+  if (!h.length) return '';
+  const W = 640, H = 150, pad = 30;
+  const t0 = cgMinDe(h[0].emitido), t1 = cgMinDe(h[h.length - 1].emitido);
+  const x = (iso) => (t1 === t0 ? W / 2 : pad + (cgMinDe(iso) - t0) / (t1 - t0) * (W - pad * 2));
+  const y = (p) => H - 22 - (Math.max(0, Math.min(100, p)) / 100) * (H - 40);
+  const linha = (campo) => h.map((s, i) => (i ? 'L' : 'M') + x(s.emitido).toFixed(1) + ' ' + y(s[campo]).toFixed(1)).join(' ');
+  const grade = [0, 50, 100].map((p) => `<line x1="${pad}" x2="${W - pad}" y1="${y(p)}" y2="${y(p)}" class="cg-grade-linha"/><text x="${pad - 6}" y="${y(p) + 3}" class="cg-grade-txt" text-anchor="end">${p}%</text>`).join('');
+  const pontos = h.map((s) => `<circle cx="${x(s.emitido).toFixed(1)}" cy="${y(s.pctSep).toFixed(1)}" r="3.6" class="cg-ponto-sep"><title>${esc(cgDataBr(s.emitido))} · separação ${cgPct(s.pctSep)}</title></circle><circle cx="${x(s.emitido).toFixed(1)}" cy="${y(s.pctConf).toFixed(1)}" r="3.6" class="cg-ponto-conf"><title>${esc(cgDataBr(s.emitido))} · conferência ${cgPct(s.pctConf)}</title></circle>`).join('');
+  const rot = h.length > 1 ? `<text x="${pad}" y="${H - 4}" class="cg-grade-txt">${esc(cgHora(h[0].emitido))}</text><text x="${W - pad}" y="${H - 4}" class="cg-grade-txt" text-anchor="end">${esc(cgHora(h[h.length - 1].emitido))}</text>` : '';
+  return `<section class="cg-cartao">
+    <header class="cg-cartao-cab"><h3>Linha do tempo dos envios</h3><span class="cg-legenda"><i class="sep"></i>Separação <i class="conf"></i>Conferência</span></header>
+    ${h.length > 1 ? `<svg class="cg-grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento da separação e da conferência a cada envio">${grade}
+      <path d="${linha('pctSep')}" class="cg-linha-sep"/><path d="${linha('pctConf')}" class="cg-linha-conf"/>${pontos}${rot}</svg>` : '<p class="cg-vazio-txt">O gráfico começa no segundo envio: cada PDF novo vira um ponto da linha.</p>'}
+    <ol class="cg-envios">${h.slice().reverse().slice(0, completo ? 60 : 5).map((s, i) => `<li><span class="cg-envio-hora cg-num">${esc(cgDiaHora(s.emitido))}</span>
+      <span>${cgN(s.total)} cargas · ${cgN(s.prontas)} prontas${s.h24Pend ? ' · <b class="cg-24t">' + s.h24Pend + ' de 24 h</b>' : ''}</span>
+      <span class="cg-envio-pct">sep. <b>${cgPct(s.pctSep)}</b> · conf. <b>${cgPct(s.pctConf)}</b></span>
+      <span class="cg-envio-por">${esc(s.por)}${i === 0 && completo && CG.dados.podeEditar ? ` <button type="button" class="cg-link perigo" onclick="cgDesfazerEnvio(${jsArg(s.id)})">Desfazer este envio</button>` : ''}</span></li>`).join('')}</ol>
+  </section>`;
+}
+function cgHistoricoHtml() { return CG.dados.snapshot ? cgEnviosHtml() + cgLinhaTempoHtml(false) : cgSemSnapshotHtml(); }
+function cgDesfazerEnvio(id) {
+  abrirJanela('Desfazer o último envio', '<p>A situação de carga mais recente sai do GSL e a anterior volta a valer. Use quando o PDF enviado estava errado.</p>',
+    `<button class="botao secundario" onclick="fecharJanela()">Voltar</button><button class="botao" onclick="agir('excluirSituacaoCarga', { id: ${esc(JSON.stringify(String(id)))} })">Desfazer envio</button>`);
+}
+
+/* ---------------- SUPERVISAO (Grandeza · Nobre Grandeza · Pesaveis · Blocado) ---------------- */
+function cgSupervisaoHtml() {
+  const d = CG.dados;
+  const ids = CG_GRUPO.filter((id) => (d.depositos || []).some((x) => x.id === id));
+  return `${d.snapshot ? cgEquilibrioHtml('supervisao', 'Equilíbrio da supervisão · Grandeza · Nobre Grandeza · Pesáveis · Blocado') : ''}
+    ${cgPoolEquipHtml('PALETEIRA')}
+    <div class="cg-sup">
+      <div class="cg-sup-colunas">${ids.map((id) => cgColunaSupHtml(id)).join('')}</div>
+      <aside class="cg-sup-lado">${cgPoolHtml()}</aside>
+    </div>
+    ${d.snapshot ? cgCargasTravadasHtml(ids) : ''}`;
+}
+function cgColunaSupHtml(id) {
+  const i = cgIndDep(id), r = i.r;
+  const dep = cgDepInfo(id);
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio && CG.dados.indicadores.equilibrio.supervisao;
+  const marca = eqb && eqb.atrasado === id ? '<span class="cg-eq-tag atras">mais atrasado</span>' : (eqb && eqb.adiantado === id && eqb.status !== 'equilibrado' ? '<span class="cg-eq-tag frente">mais adiantado</span>' : '');
+  return `<section class="cg-cartao cg-sup-col${eqb && eqb.atrasado === id && eqb.status !== 'equilibrado' ? ' atras' : ''}" data-dep="${esc(id)}">
+    <header class="cg-sup-cab"><h3>${esc(dep.nome)}</h3>${r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
+    ${marca}
+    ${r ? `<div class="cg-sup-pct"><b class="cg-num">${cgPct(i.pctPond)}</b><span>concluído</span></div>
+      <div class="cg-mini-barra"><span>Sep.</span><span class="cg-trilho"><i class="azul" style="width:${(i.ind.pctSep || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctSep)}</b></div>
+      <div class="cg-mini-barra"><span>Conf.</span><span class="cg-trilho"><i class="cor-conf" style="width:${(i.ind.pctConf || 0).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(i.ind.pctConf)}</b></div>
+      <dl class="cg-sup-dl"><div><dt>Faltam</dt><dd class="cg-num">${cgN(r.restSep + r.restConf)}</dd></div><div><dt>Cargas</dt><dd class="cg-num">${cgN(i.pend)}</dd></div>
+        <div><dt>Previsão</dt><dd class="cg-num">${i.pend ? (i.ind.etaMin == null ? '—' : cgDuracao(i.ind.etaMin)) : 'Pronto'}</dd></div></dl>` : '<p class="cg-vazio-txt">Sem situação de carga.</p>'}
+    <div class="cg-zonas">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
+    ${cgLinhaEquipDepHtml(id)}
+  </section>`;
+}
+
+/* ---------------- UM DEPOSITO ---------------- */
+function cgDepositoHtml(id) {
+  const d = CG.dados, dep = cgDepInfo(id), i = cgIndDep(id), r = i.r, ind = i.ind, s = d.snapshot;
+  const num = (v, rot, cls) => `<div class="cg-num-bloco ${cls || ''}"><b class="cg-num">${v}</b><span>${rot}</span></div>`;
+  const anel = (p, rot, cls) => `<div class="cg-anel-grande ${cls}" style="--p:${Math.max(0, Math.min(100, p || 0)).toFixed(0)}"><div><b class="cg-num">${cgPct(p)}</b><span>${rot}</span></div></div>`;
+  const indicadores = r ? `<section class="cg-cartao cg-dep-painel">
+      <header class="cg-cartao-cab"><h3>${esc(dep.nome)}${dep.grupo ? ' <small class="cg-grupo-tag">supervisão G · NG · P · B</small>' : ''}</h3><span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span></header>
+      <div class="cg-dep-grade">
+        <div class="cg-aneis">${anel(ind.pctSep, 'separado', 'azul')}${anel(ind.pctConf, 'conferido', 'cor-conf')}</div>
+        <div class="cg-nums">
+          ${num(cgN(r.cargas), 'cargas com ' + esc(dep.nome))}${num(cgN(r.concluidas), 'prontas', 'verde')}
+          ${num(cgN(r.emSep), 'em separação')}${num(cgN(r.emConf), 'em conferência')}
+          ${num(cgN(r.naoIniciadas), 'não iniciadas')}${num(cgN(r.h24Pend), '24 h pendentes', r.h24Pend ? 'amarelo' : '')}
+        </div>
+        <div class="cg-ritmo">
+          <div class="cg-ritmo-linha"><span>Faltam</span><b class="cg-num">${cgN(r.restSep)}</b><small>lotes de separação</small><b class="cg-num">${cgN(r.restConf)}</b><small>de conferência</small></div>
+          <div class="cg-ritmo-linha"><span>Ritmo</span>${ind.ritmoSep == null ? '<small>aparece a partir do 2º envio</small>' :
+            `<b class="cg-num">${cgN(ind.ritmoSep)}</b><small>lotes sep./h</small><b class="cg-num">${cgN(ind.ritmoConf)}</b><small>lotes conf./h</small>${ind.cargasHora != null ? `<b class="cg-num">${cgN(ind.cargasHora)}</b><small>cargas/h</small>` : ''}`}</div>
+          <div class="cg-ritmo-linha cg-realce"><span>Previsão</span><b class="cg-num">${i.pend ? (ind.etaMin == null ? '—' : cgDuracao(ind.etaMin)) : 'Pronto'}</b><small>${i.pend && ind.etaMin != null ? 'no ritmo atual · às ' + cgHoraMais(s.emitido, ind.etaMin) : (i.pend ? 'sem ritmo medido' : 'nada pendente')}</small></div>
+          ${i.pend ? `<div class="cg-ritmo-linha"><span>Com a equipe</span><b class="cg-num">${i.etaEquipe == null ? '—' : cgDuracao(i.etaEquipe)}</b><small>${i.etaEquipe == null ? (ind.porPessoaSep ? 'aloque separadores e conferentes' : 'ritmo por pessoa ainda não medido') : `com ${i.eq.sep} sep. e ${i.eq.conf} conf. agora (${cgN(ind.porPessoaSep)} lotes/h por separador)`}</small></div>` : ''}
+        </div>
+      </div>
+    </section>` : '';
+  const paradas = ind.paradas || [];
+  return `<div class="cg-dep-layout">
+    <div class="cg-dep-principal">
+      ${indicadores}
+      ${dep.andares ? cgFlowrackHtml(dep) : cgEquipeDepHtml(dep)}
+      ${dep.equip === 'PALETEIRA' ? cgPoolEquipHtml('PALETEIRA', id) : (dep.equip === 'CARRINHO' ? cgCarrinhosHtml() : '')}
+      ${cgPoolEquipHtml('CHECKOUT', id)}
+      ${r && paradas.length && d.indicadores && d.indicadores.envios > 1 ? `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Por terminar — a mais parada primeiro</h3></header><ul class="cg-lista">${paradas.slice(0, 8).map((p) => `<li class="cg-item">
+        <span class="cg-item-nro">${esc(p.n)}${p.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(p.nm || '—')}<small>${cgCelHtml(p.s[0], 'sep')} ${cgCelHtml(p.s[1], 'conf')} · na fila há ${cgDuracao(p.fila)}</small></span>
+        <span class="cg-item-tempo ${p.parada >= 60 ? 'alerta' : ''}">${p.parada ? 'parada ' + cgDuracao(p.parada) : 'mudou agora'}</span></li>`).join('')}</ul></section>` : ''}
+      ${s ? cgTabelaHtml(id) : ''}
+    </div>
+    <aside class="cg-dep-lado">${CG.hist ? '' : cgPoolHtml()}</aside>
+  </div>`;
+}
+
+/* ---------------- ZONAS E BONECOS ---------------- */
+function cgZonas(dep) {
+  const z = [];
+  if (dep.andares) for (let a = dep.andares - 1; a >= 0; a--) z.push({ dep: dep.id, papel: 'SEPARADOR', andar: a, nome: (CG.dados.andares || [])[a] || ('Andar ' + a) });
+  else z.push({ dep: dep.id, papel: 'SEPARADOR', andar: -1, nome: 'Separadores' });
+  z.push({ dep: dep.id, papel: 'CONFERENTE', andar: -1, nome: 'Conferentes' });
+  return z;
+}
+function cgNaZona(z) {
+  return (CG.dados.equipe || []).filter((p) => p.dep === z.dep && p.papel === z.papel && (z.andar < 0 || p.andar === z.andar) &&
+    (z.rua == null || (p.rua || 0) === z.rua))
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+}
+function cgBonecoHtml(p, lugar) {
+  const pode = CG.dados.podeEditar;
+  const faltou = !lugar && cgFaltou(p.k);
+  const papel = faltou ? 'faltou' : (lugar ? (lugar.papel === 'CONFERENTE' ? 'conf' : 'sep') : 'livre');
+  const semEquip = lugar ? cgSemEquip(p.k) : '';
+  const reg = cgRegimeCli(p), folga = !lugar && !faltou && cgEscalaCli(p).folgaHoje && reg.grade;
+  const z = lugar ? cgZonaDaFuncaoCli(p.funcao) : null;
+  const outra = lugar && p.funcao && (!z || z.papel !== lugar.papel || (z.dep && z.dep !== lugar.dep));
+  const tt = [cgTitulo(p.nome), p.funcao ? cgTitulo(p.funcao) + (outra ? ' → ' + cgNomeDep(lugar.dep) + ' / ' + CG_PAPEL_TXT[lugar.papel][0] : '') : '', p.equipe, reg.grade ? CG_GRADE_TXT[reg.grade] : '',
+    faltou ? 'FALTOU neste turno' : '', folga ? 'de folga hoje (escala 5x2)' : '', semEquip ? 'sem ' + semEquip : ''].filter(Boolean).join(' · ');
+  const arrasta = pode && !faltou;
+  return `<div class="cg-boneco ${papel}${semEquip ? ' sem-equip' : ''}${folga ? ' folga' : ''}${outra ? ' outra-funcao' : ''}" ${arrasta ? `draggable="true" ondragstart="cgArrastar(event, 'pessoa', ${jsArg(p.k)})" ondragend="cgSoltouFim()"` : ''}
+      data-k="${esc(p.k)}" title="${esc(tt)}" ${pode ? `role="button" tabindex="0" onclick="cgMenuPessoa(${jsArg(p.k)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cgMenuPessoa(${jsArg(p.k)})}"` : ''}>
+    <span class="cg-boneco-fig">${CG_SVG.pessoa}${reg.sub || cgTurnoCurto(p.equipe) ? `<i>${esc(reg.sub || cgTurnoCurto(p.equipe))}</i>` : ''}${faltou ? '<b class="cg-boneco-x" aria-hidden="true">✕</b>' : ''}${semEquip ? `<b class="cg-boneco-sem" aria-hidden="true">!</b>` : ''}</span>
+    <span class="cg-boneco-nome">${esc(cgNomeCurto(p.nome))}</span>
+    ${faltou ? '<span class="cg-boneco-tag">faltou</span>' : ''}${folga ? '<span class="cg-boneco-tag folga">folga hoje</span>' : ''}
+    ${outra ? `<span class="cg-boneco-fun" title="${esc(cgTitulo(p.funcao))}">${esc(cgFuncaoCurta(p.funcao))}</span>` : ''}
+  </div>`;
+}
+function cgZonaHtml(z, compacta) {
+  const gente = cgNaZona(z), pode = CG.dados.podeEditar;
+  return `<div class="cg-zona ${z.papel === 'CONFERENTE' ? 'conf' : 'sep'}${z.andar >= 0 ? ' andar' : ''}${compacta ? ' compacta' : ''}" data-dep="${esc(z.dep)}" data-papel="${esc(z.papel)}" data-andar="${z.andar}"${z.rua != null ? ` data-rua="${z.rua}"` : ''}
+      ${pode ? `ondragover="cgSobreZona(event, 'pessoa')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPessoa(event, ${jsArg(z.dep)}, ${jsArg(z.papel)}, ${z.andar}${z.rua != null ? ', ' + z.rua : ''})"` : ''}>
+    <div class="cg-zona-cab"><span>${esc(z.nome)}</span><b class="cg-num">${gente.length}</b></div>
+    <div class="cg-zona-gente">${gente.map((p) => cgBonecoHtml(p, p)).join('') || `<span class="cg-zona-vazia">${pode ? 'Arraste alguém para cá' : 'Ninguém alocado'}</span>`}</div>
+  </div>`;
+}
+function cgEquipeDepHtml(dep) {
+  const i = cgIndDep(dep.id);
+  return `<section class="cg-cartao cg-equipe-dep">
+    <header class="cg-cartao-cab"><h3>Equipe ${dep.andares ? 'do flowrack — pessoas por andar' : 'agora'}</h3>
+      <span class="cg-selo neutro">${i.eq.sep} separador${i.eq.sep === 1 ? '' : 'es'} · ${i.eq.conf} conferente${i.eq.conf === 1 ? '' : 's'}</span></header>
+    <div class="cg-zonas${dep.andares ? ' predio' : ' lado'}">${cgZonas(dep).map((z) => cgZonaHtml(z)).join('')}</div>
+    ${i.r && i.r.restSep && i.eq.sep ? `<p class="cg-nota">${cgN(Math.round(i.porSeparador))} lotes de separação por separador alocado.</p>` : ''}
+  </section>`;
+}
+
+/* ---------------- DISPONIVEIS (o Quadro do CD) ---------------- */
+function cgDisponiveis() {
+  const alocados = {};
+  (CG.dados.equipe || []).forEach((p) => { alocados[p.k] = true; });
+  const q = cgNorm(CG.buscaPessoa);
+  const noTurno = cgTurnoAgoraCli().ativos, iso = cgIsoLocalAgora();
+  return (CG.dados.pessoas || []).filter((p) => !alocados[p.k] && p.situacao === 'ATIVO' && cgPassaTurno(p, noTurno, iso) &&
+    (!CG.funcao || p.funcao === CG.funcao) && (!q || cgNorm(p.nome).indexOf(q) !== -1))
+    .sort((a, b) => (cgFaltou(a.k) - cgFaltou(b.k)) || cgPesoFuncao(a.funcao) - cgPesoFuncao(b.funcao) || String(a.nome).localeCompare(String(b.nome)));
+}
+/*
+ * 8.16: o turno da pessoa e o da escala (o Recebimento do Turno A e horario ADM). "No turno agora" = em servico
+ * pela escala 5x2 (dentro do horario e num dia de trabalho); quem esta de folga hoje so aparece com "Folga hoje".
+ */
+function cgPassaTurno(p, noTurno, iso) {
+  const t = cgRegimeCli(p).turno;
+  if (CG.turno === 'todos' || !CG.turno) return true;
+  if (CG.turno === 'agora') { const e = cgEscalaCli(p, iso).estado; return e === 'servico' || (CG.verFolga && e === 'folga'); }
+  if (CG.turno === 'outros') return ['A', 'B', 'C', 'ADM'].indexOf(t) === -1;
+  return t === CG.turno;
+}
+function cgPesoFuncao(f) { const t = cgNorm(f); return /SEPARAD/.test(t) ? 0 : /CONFER/.test(t) ? 1 : /PALETEIR|EMPILHAD|AUXILIAR|REPOSIT|ARMAZEN/.test(t) ? 2 : 3; }
+function cgPoolHtml(faixa) {
+  const d = CG.dados, pessoas = d.pessoas || [];
+  const contaFun = {};
+  pessoas.forEach((p) => { if (p.funcao) contaFun[p.funcao] = (contaFun[p.funcao] || 0) + 1; });
+  const funcoes = Object.keys(contaFun).sort((a, b) => cgPesoFuncao(a) - cgPesoFuncao(b) || contaFun[b] - contaFun[a]);
+  const lista = cgDisponiveis(), pode = d.podeEditar;
+  const ta = cgTurnoAgoraCli(), nf = cgFaltasAtivas().length;
+  const chip = (v, rot) => `<button type="button" class="cg-chip${CG.turno === v ? ' ativo' : ''}" onclick="cgFiltroPessoa('turno', ${jsArg(v)})">${rot}</button>`;
+  return `<section class="cg-cartao cg-pool${pode ? ' editavel' : ''}${faixa ? ' faixa' : ''}" ${pode ? `ondragover="cgSobreZona(event, 'pessoa')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPessoa(event, '', '', -1)"` : ''}>
+    <header class="cg-cartao-cab"><h3>Disponíveis</h3><span class="cg-pool-cab-dir">${nf ? `<span class="cg-selo alerta cg-faltas-hoje" title="Faltas neste turno">✕ ${nf} ${nf === 1 ? 'falta' : 'faltas'} hoje</span>` : ''}<span class="cg-selo neutro cg-pool-conta">${lista.length}</span>${faixa ? `<button type="button" class="cg-link" onclick="CG.poolAberto=!CG.poolAberto;cgDesenhar()">${CG.poolAberto ? 'Recolher' : 'Mostrar'}</button>` : ''}</span></header>
+    ${faixa && !CG.poolAberto ? '' : `${d.avisoQuadro ? `<p class="cg-aviso">${esc(d.avisoQuadro)}</p>` : ''}
+    <div class="cg-chips pequenos" role="group" aria-label="Turno">
+      ${chip('agora', 'No turno agora · ' + (ta.ativos.join(' + ') || '—'))}${['A', 'B', 'C'].map((t) => chip(t, 'Turno ' + t)).join('')}${chip('ADM', 'ADM')}${chip('outros', 'Outros')}${chip('todos', 'Todos')}
+    </div>
+    ${CG.turno === 'agora' ? cgFolgaHojeHtml() : ''}
+    ${CG.turno === 'agora' && ta.passagem ? `<p class="cg-pool-passagem">⇄ Passagem de turno: ${esc(ta.passagem.sai)} sai às ${esc(ta.passagem.ate)}, ${esc(ta.passagem.entra)} já entrou — as duas equipes aparecem (1T = A, 2T = B, 3T = C).</p>` : ''}`}
+    <div class="cg-pool-filtros">
+      <label class="cg-busca"><span class="sr">Buscar pessoa</span><input id="cg-busca-pessoa${faixa ? '-f' : ''}" type="search" placeholder="Buscar pelo nome" value="${esc(CG.buscaPessoa)}" oninput="cgBuscarPessoa(this.value)" autocomplete="off"></label>
+      <select aria-label="Função" onchange="cgFiltroPessoa('funcao', this.value)"><option value="">Todas as funções</option>${funcoes.map((f) => `<option value="${esc(f)}"${CG.funcao === f ? ' selected' : ''}>${esc(cgTitulo(f))} (${contaFun[f]})</option>`).join('')}</select>
+    </div>
+    ${faixa && !CG.poolAberto ? '' : `<div class="cg-pool-gente">${cgPoolGenteHtml(lista)}</div>
+    ${pode ? '<p class="cg-nota">Arraste para um depósito ou toque na pessoa para escolher onde ela fica (ou marcar que faltou).</p>' : ''}`}
+  </section>`;
+}
+function cgPoolGenteHtml(lista) {
+  if (!lista.length) return `<p class="cg-vazio-txt">${(CG.dados.pessoas || []).length ? 'Ninguém disponível neste filtro.' : 'Sem a lista do Quadro do CD.'}</p>`;
+  // em grupos: separadores, conferentes e o resto do CD (carregamento e apoio — tambem podem ser alocados)
+  const g = { SEPARADOR: [], CONFERENTE: [], OUTROS: [] };
+  lista.forEach((p) => { const z = cgZonaDaFuncaoCli(p.funcao); g[z ? z.papel : 'OUTROS'].push(p); });
+  return [['SEPARADOR', 'Separadores'], ['CONFERENTE', 'Conferentes'], ['OUTROS', 'Carregamento e apoio']].filter((x) => g[x[0]].length)
+    .map((x) => `<div class="cg-pool-grupo" data-grupo="${x[0]}"><h4>${x[1]} <span class="cg-num">${g[x[0]].length}</span></h4><div class="cg-pool-grupo-gente">${g[x[0]].map((p) => cgBonecoHtml(p, null)).join('')}</div></div>`).join('');
+}
+/* Quem e do turno de agora mas esta de folga hoje pela escala 5x2 (fica fora da lista; o chip mostra). */
+function cgFolgaHojeHtml() {
+  const alocados = {}, iso = cgIsoLocalAgora();
+  (CG.dados.equipe || []).forEach((p) => { alocados[p.k] = true; });
+  const n = (CG.dados.pessoas || []).filter((p) => !alocados[p.k] && p.situacao === 'ATIVO' && cgEscalaCli(p, iso).estado === 'folga').length;
+  if (!n && !CG.verFolga) return '';
+  return `<p class="cg-pool-folga"><button type="button" class="cg-chip${CG.verFolga ? ' ativo' : ''}" aria-pressed="${!!CG.verFolga}" onclick="CG.verFolga=!CG.verFolga;cgDesenhar()">Folga hoje (5x2): ${n}${CG.verFolga ? ' · mostrando' : ' · mostrar'}</button></p>`;
+}
+function cgFiltroPessoa(campo, v) { CG[campo] = v; if (campo === 'turno') gravarLocal('gsl_carga_turno2', v); cgDesenhar(); }
+let CG_BUSCA_P = 0;
+function cgBuscarPessoa(v) {
+  CG.buscaPessoa = v;
+  clearTimeout(CG_BUSCA_P);
+  CG_BUSCA_P = setTimeout(() => {
+    const lista = cgDisponiveis();
+    document.querySelectorAll('.cg-pool-gente').forEach((x) => { x.innerHTML = cgPoolGenteHtml(lista); });
+    document.querySelectorAll('.cg-pool-conta').forEach((x) => { x.textContent = lista.length; });
+  }, 120);
+}
+
+/* ---------------- QUADRO DA EQUIPE ---------------- */
+function cgEquipeHtml() {
+  const d = CG.dados, total = (d.equipe || []).length;
+  const turnos = Array.from(new Set((d.equipe || []).map((p) => p.equipe).filter(Boolean))).sort();
+  return `<div class="cg-quadro">
+    <aside class="cg-quadro-lado">${cgPoolHtml()}</aside>
+    <div class="cg-quadro-principal">
+      <div class="cg-quadro-topo"><span><b class="cg-num">${total}</b> ${total === 1 ? 'pessoa alocada' : 'pessoas alocadas'}${turnos.length ? ' · ' + turnos.map(esc).join(', ') : ''}${cgFaltasAtivas().length ? ` · <b class="cg-txt-alerta">${cgFaltasAtivas().length} ${cgFaltasAtivas().length === 1 ? 'falta' : 'faltas'} hoje</b>` : ''}</span>
+        <span class="cg-quadro-botoes">${d.podeEditar ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgAlocarPelaFuncao()">Alocar pela função</button>' : ''}
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgIrAba('escala')">Escala 5x2</button>
+        ${d.podeEditar && total ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgLimparAlocacao()">Limpar alocação do turno</button>' : ''}</span></div>
+      ${cgAutoNotaHtml()}
+      ${cgEquipamentosResumoHtml()}
+      <div class="cg-quadro-deps">${(d.depositos || []).map((dep) => {
+        const i = cgIndDep(dep.id);
+        return `<section class="cg-cartao cg-quadro-dep">
+          <header class="cg-cartao-cab"><h3>${esc(dep.nome)}</h3>${i.r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
+          ${i.r ? `<p class="cg-quadro-carga">${cgN(i.r.restSep)} lotes de separação · ${cgN(i.r.restConf)} de conferência</p>` : ''}
+          <div class="cg-zonas${dep.andares ? ' predio' : ''}">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
+        </section>`;
+      }).join('')}</div>
+    </div>
+  </div>`;
+}
+function cgLimparAlocacao() {
+  const eq = CG.dados.equipe || [], ta = cgTurnoAgoraCli();
+  const turnos = ['A', 'B', 'C', 'ADM'].filter((t) => eq.some((p) => cgTurnoDaEquipeCli(p.equipe) === t));
+  abrirJanela('Limpar alocação', `<p>As pessoas voltam para <b>Disponíveis</b> (troca de turno). Escolha de quem:</p>
+    <div class="cg-opcoes">${turnos.map((t) => `<button type="button" class="cg-opcao" onclick="agir('limparAlocacaoCarga', { turno: ${jsArg(t)} })">Só o ${t === 'ADM' ? 'ADM' : 'turno ' + t}${['A', 'B', 'C'].indexOf(t) !== -1 && ta.ativos.indexOf(t) === -1 ? ' (já saiu)' : ''} <small>${eq.filter((p) => cgTurnoDaEquipeCli(p.equipe) === t).length} pessoas</small></button>`).join('')}
+    <button type="button" class="cg-opcao" onclick="agir('limparAlocacaoCarga', {})">Todo mundo <small>${eq.length} pessoas</small></button></div>`,
+    '<button class="botao secundario" onclick="fecharJanela()">Voltar</button>');
+}
+
+/* ---------------- ARRASTAR (pessoa ou paleteira) ---------------- */
+function cgArrastar(ev, tipo, chave) {
+  CG.arrastando = { tipo: tipo, chave: String(chave) };
+  try { ev.dataTransfer.setData('text/plain', 'gsl-' + tipo + ':' + chave); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+  document.documentElement.classList.add('cg-arrastando', 'cg-arrastando-' + tipo);
+}
+function cgSoltouFim() {
+  CG.arrastando = null;
+  document.documentElement.classList.remove('cg-arrastando', 'cg-arrastando-pessoa', 'cg-arrastando-paleteira', 'cg-arrastando-carreg');
+  document.querySelectorAll('.sobre').forEach((z) => z.classList.remove('sobre'));
+}
+function cgSobreZona(ev, tipo) {
+  if (!CG.arrastando || CG.arrastando.tipo !== tipo) return;
+  ev.preventDefault(); ev.stopPropagation();
+  try { ev.dataTransfer.dropEffect = 'move'; } catch (e) {}
+  ev.currentTarget.classList.add('sobre');
+}
+function cgSaiuZona(ev) { if (!ev.currentTarget.contains(ev.relatedTarget)) ev.currentTarget.classList.remove('sobre'); }
+function cgArrastado(ev, tipo) {
+  let a = CG.arrastando && CG.arrastando.tipo === tipo ? CG.arrastando.chave : '';
+  try { const t = ev.dataTransfer.getData('text/plain'); if (t.indexOf('gsl-' + tipo + ':') === 0) a = t.slice(tipo.length + 5); } catch (e) {}
+  return a;
+}
+function cgSoltouPessoa(ev, dep, papel, andar, rua) {
+  const k = cgArrastado(ev, 'pessoa');
+  if (!k) return;
+  ev.preventDefault(); ev.stopPropagation();
+  cgSoltouFim();
+  cgMover(k, dep ? { dep: dep, papel: papel, andar: andar, rua: rua } : null);
+}
+function cgMenuPessoa(k) {
+  if (!CG.dados.podeEditar) return;
+  const p = cgPessoa(k), aqui = cgLugarDe(k), deps = CG.dados.depositos || [];
+  const falta = cgFaltou(k);
+  if (falta) {
+    const f = cgFaltasAtivas().find((x) => x.k === k) || {};
+    abrirJanela(cgNomeCurto(p.nome) + ' faltou', `<div class="cg-mover"><p class="cg-mover-quem"><b>${esc(cgTitulo(p.nome))}</b><span>${esc(p.equipe || '')} · falta marcada${f.porNome ? ' por ' + esc(f.porNome) : ''}${f.em ? ' às ' + esc(String(f.em).slice(11, 16)) : ''}</span></p>
+      <p class="cg-nota">Enquanto a falta valer (até o fim do turno dela), a pessoa não pode ser alocada.</p>
+      <button type="button" class="cg-opcao" onclick="fecharJanela(); cgMarcarFalta(${jsArg(k)}, false)">Desfazer a falta</button></div>`,
+      '<button class="botao secundario" onclick="fecharJanela()">Fechar</button>');
+    return;
+  }
+  const igual = (z) => aqui && aqui.dep === z.dep && aqui.papel === z.papel && (z.andar < 0 || aqui.andar === z.andar);
+  abrirJanela('Onde ' + cgNomeCurto(p.nome) + ' fica?', `<div class="cg-mover">
+    <p class="cg-mover-quem"><b>${esc(cgTitulo(p.nome))}</b><span>${esc([p.funcao ? cgTitulo(p.funcao) : '', p.equipe].filter(Boolean).join(' · '))}${aqui ? ' · agora em ' + esc(cgNomeDep(aqui.dep)) : ''}</span></p>
+    ${cgEscalaDaPessoaHtml(p)}
+    ${deps.map((dep) => `<div class="cg-mover-dep"><span class="cg-mover-nome">${esc(dep.nome)}</span><div class="cg-mover-zonas">${cgZonas(dep).map((z) =>
+      `<button type="button" class="cg-opcao${igual(z) ? ' atual' : ''}" ${igual(z) ? 'disabled' : ''} onclick="fecharJanela(); cgMover(${jsArg(k)}, { dep: ${jsArg(z.dep)}, papel: ${jsArg(z.papel)}, andar: ${z.andar} })">${esc(z.andar >= 0 ? z.nome : (z.papel === 'CONFERENTE' ? 'Conferente' : 'Separador'))}</button>`).join('')}</div></div>`).join('')}
+    ${aqui ? `<button type="button" class="cg-opcao tirar" onclick="fecharJanela(); cgMover(${jsArg(k)}, null)">Voltar para disponíveis</button>` : ''}
+    <button type="button" class="cg-opcao faltou" onclick="fecharJanela(); cgMarcarFalta(${jsArg(k)}, true)">✕ Faltou hoje${aqui ? ' (sai da alocação)' : ''}</button>
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button>');
+}
+function cgEscalaDaPessoaHtml(p) {
+  const e = cgEscalaCli(p), reg = e.reg;
+  if (!reg.grade) return '';
+  const est = { servico: 'em serviço agora', folga: 'de folga hoje', fora: e.folgaHoje ? 'fora do horário (hoje é folga)' : 'fora do horário', sem: '' }[e.estado];
+  return `<p class="cg-mover-escala"><span>Escala: <b>${esc(CG_GRADE_TXT[reg.grade])}</b>${est ? ' · ' + est : ''}</span>${cgBotoesSubturnoHtml(p, true)}</p>`;
+}
+function cgMover(k, destino) {
+  const p = cgPessoa(k), antes = (CG.dados.equipe || []).slice(), atual = cgLugarDe(k);
+  const rua = destino && destino.rua != null ? destino.rua : null;
+  if (destino && atual && atual.dep === destino.dep && atual.papel === destino.papel && (destino.andar < 0 || atual.andar === destino.andar) && (rua == null || (atual.rua || 0) === rua)) return;
+  if (!destino && !atual) return;
+  if (destino && cgFaltou(k)) { avisar(cgNomeCurto(p.nome) + ' está marcado como falta neste turno. Desfaça a falta para alocar.', true); return; }
+  const params = { pessoa: { k: k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '' },
+    destino: destino ? { dep: destino.dep, papel: destino.papel, andar: destino.andar >= 0 ? destino.andar : '', rua: rua || '' } : null };
+  cgAoVivo('moverPessoaCarga', params, () => {
+    const lista = (CG.dados.equipe || []).filter((x) => x.k !== k);
+    const mesmo = atual && destino && atual.dep === destino.dep && atual.papel === destino.papel;
+    if (destino) lista.push({ k: k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '', dep: destino.dep, papel: destino.papel, andar: destino.andar >= 0 ? destino.andar : -1,
+      rua: rua || 0, desde: mesmo ? atual.desde : '' });
+    CG.dados.equipe = lista;
+  }, () => { CG.dados.equipe = antes; }, destino ? cgNomeCurto(p.nome) + ' → ' + cgNomeDep(destino.dep) + (destino.andar >= 0 ? ' (' + (CG.dados.andares || [])[destino.andar] + ')' : '') : cgNomeCurto(p.nome) + ' voltou para disponíveis');
+}
+
+/* ---------------- CARRINHOS (Miudeza) — as paleteiras e os check-outs estao na fase 2 (cgPoolEquipHtml) ---------------- */
+function cgCarrinhosHtml() {
+  const car = cgCarrinhos(), pode = CG.dados.podeEditar;
+  const n = (est) => car.filter((e) => e.estado === est).length;
+  return `<section class="cg-cartao cg-equip-cartao">
+    <header class="cg-cartao-cab"><h3>${CG_SVG.carrinho}Carrinhos</h3>
+      <span class="cg-equip-resumo"><b class="cg-num">${n('LIVRE')}</b> ${n('LIVRE') === 1 ? 'livre' : 'livres'} · ${n('USO')} em uso${n('MANUTENCAO') ? ` · <span class="alerta">${n('MANUTENCAO')} em manutenção</span>` : ''}</span></header>
+    <div class="cg-equips">${car.map((e) => cgIconeEquipHtml(e, false)).join('') || '<p class="cg-vazio-txt">Nenhum carrinho cadastrado.</p>'}</div>
+    <div class="cg-equip-rodape">
+      <span class="cg-legenda-equip"><i class="livre"></i>Livre <i class="uso"></i>Em uso <i class="manutencao"></i>Manutenção</span>
+      ${pode ? `<span class="cg-qtd" role="group" aria-label="Quantidade de carrinhos"><button type="button" onclick="cgQuantidade('CARRINHO', -1)" aria-label="Um carrinho a menos">−</button><b class="cg-num">${car.length}</b><button type="button" onclick="cgQuantidade('CARRINHO', 1)" aria-label="Um carrinho a mais">+</button></span>` : ''}
+    </div>
+    ${pode ? '<p class="cg-nota">Toque para mudar: livre → em uso → manutenção.</p>' : ''}
+  </section>`;
+}
+function cgEquipGirar(numero) {
+  const e = cgCarrinhos().find((x) => x.numero === numero);
+  if (!e) return;
+  cgEquipEstado('CARRINHO', numero, { LIVRE: 'USO', USO: 'MANUTENCAO', MANUTENCAO: 'LIVRE' }[e.estado] || 'LIVRE', '');
+}
+function cgEquipEstado(idPool, numero, estado, obs) {
+  const e = (CG.dados.equipamentos || []).find((x) => cgPoolDoEquip(x) === idPool && x.numero === numero);
+  if (!e || e.estado === estado) return;
+  const antes = { estado: e.estado, obs: e.obs }, pool = cgPoolInfo(idPool);
+  cgAoVivo('equipamentoCarga', { tipo: pool.tipo, dep: pool.tipo === 'CHECKOUT' ? pool.dep : '', numero: numero, estado: estado, obs: obs || '' },
+    () => { e.estado = estado; e.obs = estado === 'MANUTENCAO' ? (obs || '') : ''; },
+    () => { e.estado = antes.estado; e.obs = antes.obs; });
+}
+function cgQuantidade(idPool, delta) {
+  const pool = cgPoolInfo(idPool);
+  const lista = (CG.dados.equipamentos || []).filter((x) => cgPoolDoEquip(x) === idPool);
+  const atual = lista.length, qtd = Math.max(0, Math.min(60, atual + delta));
+  if (qtd === atual) return;
+  const antes = (CG.dados.equipamentos || []).slice();
+  cgAoVivo('quantidadeEquipamentoCarga', { tipo: pool.tipo, dep: pool.tipo === 'CHECKOUT' ? pool.dep : '', quantidade: qtd }, () => {
+    const outros = CG.dados.equipamentos.filter((x) => cgPoolDoEquip(x) !== idPool || x.numero <= qtd);
+    for (let n = atual + 1; n <= qtd; n++) outros.push({ id: '', tipo: pool.tipo, pool: idPool, numero: n, estado: 'LIVRE', dep: pool.dep, obs: '' });
+    CG.dados.equipamentos = outros;
+  }, () => { CG.dados.equipamentos = antes; });
+}
+
+/*
+ * GRAVACAO AO VIVO: a tela muda na hora (aplicar), o servidor confere e devolve o estado verdadeiro
+ * (equipe ou equipamentos, e a geracao nova). Recusou: volta como estava (desfazer).
+ * Canal barrado (HTTP 403): vai pelo agir, que grava pela pagina.
+ */
+async function cgAoVivo(acao, params, aplicar, desfazer, recado) {
+  if (CANAL_BARRADO) { try { await agir(acao, params, recado); return true; } catch (e) { return false; } }
+  aplicar(); cgDesenhar();
+  CG.pendentes++;
+  try {
+    const r = await executarAcaoSrv(acao, params);
+    if (r && r.ok === false) throw new Error(r.erro || 'Não foi possível gravar.');
+    if (r && r.equipe) CG.dados.equipe = r.equipe;
+    if (r && r.equipamentos) CG.dados.equipamentos = r.equipamentos;
+    ['sequencia', 'patio', 'faltas', 'passagens', 'subturnos', 'cadastro', 'automaticas'].forEach((k) => { if (r && r[k]) CG.dados[k] = r[k]; });
+    if (r && r.g) { CG.g = r.g; CG.dados.g = r.g; CG_VIVO.conhecer(r.g); }
+    esquecerTela('carga');
+    if (paginaAtual === 'carga') cgDesenhar();
+    if (r && r.recado) avisar(r.recado); else if (recado) avisar(recado);
+    return r || true;
+  } catch (e) {
+    desfazer();
+    if (paginaAtual === 'carga') cgDesenhar();
+    if (!(await painelSaiu(e, 'carga'))) avisar(explicarErro(e), true);
+    return false;
+  } finally { CG.pendentes--; }
+}
+
+/*
+ * ---------------- AO VIVO: O ADAPTADOR ----------------
+ * Toda a pergunta "alguem mexeu?" passa por este objeto, e so por ele: iniciar(g, aoMudar),
+ * parar(), conhecer(g) (a propria tela gravou e ja sabe a geracao nova) e passo() (chamado pelo
+ * relogio da tela). Hoje ele pergunta ao servidor a geracao (acaoGeracaoCarga: tres numeros das
+ * tabelas CARGA_*) e, quando ela muda, chama aoMudar(g). Se um dia o ao vivo for para outro
+ * servico (Firebase, por exemplo), troca-se so este objeto: a tela continua chamando os mesmos
+ * quatro metodos.
+ */
+const CG_VIVO = {
+  g: '', ligado: false, aoMudar: null, ultimo: 0, indo: false, intervalo: 12000, medidas: [],
+  iniciar(g, aoMudar) { this.g = g || ''; this.aoMudar = aoMudar; this.ligado = true; },
+  parar() { this.ligado = false; this.aoMudar = null; },
+  conhecer(g) { if (g) this.g = g; },
+  /* Uma pergunta, se ja deu o intervalo. intervalo = Infinity: nao pergunta (ninguem mexendo no computador). */
+  async passo(intervalo) {
+    if (!this.ligado || this.indo || !isFinite(intervalo) || Date.now() - this.ultimo < intervalo) return;
+    this.ultimo = Date.now(); this.indo = true;
+    try {
+      const t0 = Date.now();
+      const r = await executarAcaoSrv('geracaoCarga', {});
+      this.medidas.push(Date.now() - t0); if (this.medidas.length > 20) this.medidas.shift();
+      if (this.ligado && r && r.g && r.g !== this.g) { const g = r.g; if (this.aoMudar) await this.aoMudar(g); this.g = g; }
+    } catch (e) { /* ao vivo e silencioso: a proxima pergunta tenta de novo */ }
+    finally { this.indo = false; }
+  }
+};
+/* A geracao mudou: busca a tela de novo e redesenha (se ninguem estiver no meio de um arrasto ou de uma janela). */
+async function cgMudouLaFora() {
+  if (paginaAtual !== 'carga') return;
+  const params = paramsAtual || {};
+  const t = await carregarTelaSrv('carga', params);
+  CACHE_TELAS[chaveTela('carga', params)] = { resposta: t, quando: Date.now() };
+  const janelaAberta = el('janela') && !el('janela').classList.contains('oculto');
+  if (paginaAtual === 'carga' && !CG.pendentes && !CG.arrastando && !janelaAberta && !CG.seqArrasto) pintar('carga', t, true);
+}
+
+/* ---------------- O RELOGIO DA TELA ---------------- */
+function cgLigarRelogio() {
+  if (!CG_VIVO.ligado) CG_VIVO.iniciar(CG.g, cgMudouLaFora); else CG_VIVO.conhecer(CG.g);
+  if (!CG.timer) CG.timer = setInterval(cgTique, 1000);
+}
+function cgDesligar() {
+  if (CG.timer) { clearInterval(CG.timer); CG.timer = 0; }
+  CG_VIVO.parar();
+  document.documentElement.classList.remove('cg-ativo', 'cg-tv', 'cg-arrastando');
+  CG.tv = false; CG.desenhadoEm = 0;
+  if (CG.observador) { CG.observador.disconnect(); CG.observador = null; }
+}
+/* Saiu da tela (outra tela pintou por cima): o fundo calmo e a pergunta ao vivo param na hora. */
+function cgVigiarSaida() {
+  if (CG.observador || typeof MutationObserver === 'undefined' || !el('pagina')) return;
+  CG.observador = new MutationObserver(() => { if (!el('cg') || paginaAtual !== 'carga') cgDesligar(); });
+  CG.observador.observe(el('pagina'), { childList: true });
+}
+let CG_SEG = 0;
+async function cgTique() {
+  if (paginaAtual !== 'carga' || !SESSAO || !el('cg')) { cgDesligar(); return; }
+  if (++CG_SEG % 20 === 0) {
+    const f = el('cg-fresco'), idade = cgIdade();
+    if (f && idade != null) { f.textContent = cgIdadeTexto(idade); f.className = 'cg-fresco ' + (idade > 60 ? 'velho' : 'novo'); }
+    const rl = el('cg-relogio'); if (rl) rl.textContent = cgHoraAgora();
+  }
+  if (CG.tv && CG.tvGiro && Date.now() - CG.tvGiro > 25000 && !document.hidden) cgGirarTv();
+  if (document.hidden || CANAL_BARRADO || CG.pendentes || CG.arrastando) return;
+  const quieto = Date.now() - (typeof ULTIMA_ATIVIDADE === 'number' ? ULTIMA_ATIVIDADE : Date.now());
+  CG_VIVO.passo(CG.tv ? CG_VIVO.intervalo : (quieto > 45 * 60000 ? Infinity : (quieto > 10 * 60000 ? 60000 : CG_VIVO.intervalo)));
+}
+
+/* ---------------- MODO TV ---------------- */
+function cgModoTv() {
+  CG.tv = !CG.tv;
+  document.documentElement.classList.toggle('cg-tv', CG.tv);
+  CG.tvGiro = CG.tv ? Date.now() : 0;
+  if (CG.tv) avisar('Modo TV: a tela passa pelas cargas, o painel, todos os depósitos, a sequência, os boxes e cada depósito a cada 25 s. Esc sai.');
+  cgDesenhar();
+}
+function cgGirarTv() {
+  const s = CG.dados.snapshot;
+  const ordem = ['cargas', 'geral', 'todos', 'sequencia', 'boxes', 'supervisao'].concat(((s && s.depositos) || []).filter((d) => { const r = s.resumo.dep[d.id]; return r && r.cargas; }).map((d) => d.id));
+  CG.aba = ordem[(ordem.indexOf(CG.aba) + 1) % ordem.length];
+  CG.tvGiro = Date.now();
+  cgDesenhar();
+}
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && CG.tv && paginaAtual === 'carga') cgModoTv(); });
+
+/* ---------------- ENVIO DO PDF ---------------- */
+function cgSobre(ev) { if (!CG.dados || !CG.dados.podeEditar) return; ev.preventDefault(); ev.currentTarget.classList.add('sobre'); }
+function cgSaiu(ev) { ev.currentTarget.classList.remove('sobre'); }
+function cgSoltouNaTela(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('sobre');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  cgAbrirEnvio();
+  if (f) cgArquivoEscolhido(f);
+}
+function cgAbrirEnvio() {
+  CG.leitura = null;
+  abrirJanela('Enviar situação de carga', `<div class="cg-envio">
+    <label class="cg-soltar" id="cg-soltar" ondragover="cgSobre(event)" ondragleave="cgSaiu(event)" ondrop="cgSoltouNaJanela(event)">
+      <span class="cg-soltar-ico">${CG_SVG.pdf}</span>
+      <b>Arraste o PDF da situação de carga aqui</b>
+      <span>ou <u>escolha o arquivo</u> — "Situação de Expedição das Cargas em Processo"</span>
+      <input id="cg-arquivo" type="file" accept="application/pdf,.pdf" onchange="if(this.files[0]) cgArquivoEscolhido(this.files[0])">
+    </label>
+    <button type="button" class="cg-link" onclick="cgColarTexto()">O PDF não abre? Cole o texto do relatório</button>
+    <div id="cg-previa" class="cg-previa" aria-live="polite"></div>
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" id="cg-salvar" disabled onclick="cgSalvarLeitura()">Salvar situação</button>');
+}
+function cgSoltouNaJanela(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('sobre');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (f) cgArquivoEscolhido(f);
+}
+function cgColarTexto() {
+  const p = el('cg-previa'); if (!p) return;
+  p.innerHTML = `<label class="cg-rotulo" for="cg-texto">Abra o PDF, selecione tudo (Ctrl+A), copie e cole aqui:</label>
+    <textarea id="cg-texto" rows="7" placeholder="762480 TIM-B-XX-... BI-TRUCK 15 X X X X ..."></textarea>
+    <button type="button" class="botao secundario" onclick="cgLerTextoColado()">Ler o texto</button>`;
+}
+function cgLerTextoColado() { const r = cgLerTexto(val('cg-texto')); r.arquivo = 'texto colado'; cgMostrarPrevia(r); }
+
+/* pdf.js: da cdnjs na versao online; da pasta vendor na GSL-Local (o montar-local.js copia os mesmos arquivos). */
+let CG_PDFJS = null;
+function cgBasePdfJs() {
+  return MODO_LOCAL ? 'vendor/pdfjs-' + CG_PDFJS_VERSAO + '/' : 'https:\/\/cdnjs.cloudflare.com\/ajax\/libs\/pdf.js\/' + CG_PDFJS_VERSAO + '\/';
+}
+function cgScript(src) {
+  return new Promise((ok, falha) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => ok();
+    s.onerror = () => falha(new Error('Não consegui carregar o leitor de PDF. Confira a internet ou use "Cole o texto do relatório".'));
+    document.head.appendChild(s);
+  });
+}
+function cgCarregarPdfJs() {
+  if (window.pdfjsLib && window.pdfjsWorker) return Promise.resolve(window.pdfjsLib);
+  if (CG_PDFJS) return CG_PDFJS;
+  const base = cgBasePdfJs();
+  // O "trabalhador" do pdf.js roda nesta mesma pagina (a moldura do Google e o file:// nao abrem Worker de outro endereco): o relatorio tem 1 ou 2 paginas.
+  CG_PDFJS = cgScript(base + 'pdf.worker.min.js').then(() => cgScript(base + 'pdf.min.js')).then(() => {
+    if (!window.pdfjsLib) throw new Error('O leitor de PDF não abriu.');
+    try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; } catch (e) {}
+    return window.pdfjsLib;
+  }).catch((e) => { CG_PDFJS = null; throw e; });
+  return CG_PDFJS;
+}
+async function cgArquivoEscolhido(arquivo) {
+  const p = el('cg-previa');
+  if (!p) return;
+  if (!/\.pdf$/i.test(arquivo.name || '') && arquivo.type !== 'application/pdf') { p.innerHTML = '<p class="cg-erro">Escolha o PDF da situação de carga.</p>'; return; }
+  if (arquivo.size > 20 * 1024 * 1024) { p.innerHTML = '<p class="cg-erro">O arquivo tem mais de 20 MB: não parece a situação de carga.</p>'; return; }
+  p.innerHTML = '<p class="cg-lendo"><span class="cg-gira" aria-hidden="true"></span><span>Lendo o PDF…</span></p>';
+  try {
+    const lib = await cgCarregarPdfJs();
+    const bytes = new Uint8Array(await arquivo.arrayBuffer());
+    const doc = await lib.getDocument({ data: bytes, disableFontFace: true, isEvalSupported: false, verbosity: 0 }).promise;
+    const paginas = await cgPaginasDoPdf(doc, lib, (n, t) => { const x = p.querySelector('.cg-lendo span:last-child'); if (x) x.textContent = 'Lendo a página ' + n + ' de ' + t + '…'; });
+    const r = cgLerSituacao(paginas);
+    r.arquivo = arquivo.name || 'situacao.pdf';
+    cgMostrarPrevia(r);
+  } catch (e) {
+    p.innerHTML = `<p class="cg-erro">Não consegui ler este PDF: ${esc((e && e.message) || e)}</p>`;
+  }
+}
+function cgMostrarPrevia(r) {
+  CG.leitura = r;
+  const p = el('cg-previa'); if (!p) return;
+  const s = CG.dados && CG.dados.snapshot;
+  const ruins = r.problemas.filter((x) => !x.parcial), parciais = r.problemas.filter((x) => x.parcial);
+  const h24 = r.cargas.filter((c) => c.h24);
+  const porDep = r.depositos.map((dep) => {
+    const com = r.cargas.filter((c) => { const v = c.d[dep.id] || ['', '']; return !(v[0] === '-' && v[1] === '-') && (v[0] || v[1]); });
+    const prontas = com.filter((c) => cgOkCli(c.d[dep.id][0]) && cgOkCli(c.d[dep.id][1]));
+    return `<div class="cg-previa-dep"><b>${esc(CG_DEPS_NOMES[dep.id] || dep.nome)}</b><span class="cg-num">${com.length}</span><small>${prontas.length} prontas</small></div>`;
+  }).join('');
+  const emitido = r.emitidoEm;
+  p.innerHTML = `
+    ${r.cargas.length ? `<div class="cg-previa-ok"><span class="cg-previa-check" aria-hidden="true">✓</span><div><b>${r.cargas.length} ${r.cargas.length === 1 ? 'carga lida' : 'cargas lidas'}</b>
+      <span>${r.paginas ? r.paginas + (r.paginas === 1 ? ' página' : ' páginas') + ' · ' : ''}${emitido ? 'emitida em ' + esc(cgDataBr(emitido, true)) : 'sem a data de emissão'}${h24.length ? ' · ' + h24.length + (h24.length === 1 ? ' carga de 24 horas' : ' cargas de 24 horas') : ''}</span></div></div>
+      <div class="cg-previa-deps">${porDep}</div>` : '<p class="cg-erro">Nenhuma carga lida. Confira se o PDF é a "Situação de Expedição das Cargas em Processo".</p>'}
+    <label class="cg-rotulo" for="cg-emitido">Emitida em</label>
+    <input id="cg-emitido" type="datetime-local" step="1" value="${esc((emitido || '').slice(0, 19))}" onchange="cgConferirEmissao()" oninput="cgConferirEmissao()">
+    <p id="cg-velha" class="cg-erro oculto"></p>
+    ${ruins.length ? `<details class="cg-problemas" open><summary>${ruins.length} ${ruins.length === 1 ? 'linha não foi lida' : 'linhas não foram lidas'}</summary><ul>${ruins.slice(0, 30).map((x) => `<li><b>${esc(x.nro || 'pág. ' + x.pagina)}</b> ${esc(x.motivo)}<code>${esc(x.texto)}</code></li>`).join('')}</ul></details>` : ''}
+    ${parciais.length ? `<details class="cg-problemas"><summary>${parciais.length} ${parciais.length === 1 ? 'carga com célula sem leitura' : 'cargas com célula sem leitura'}</summary><ul>${parciais.slice(0, 30).map((x) => `<li><b>${esc(x.nro)}</b> ${esc(x.motivo)}</li>`).join('')}</ul></details>` : ''}
+    ${r.avisos.length ? `<ul class="cg-avisos">${r.avisos.slice(0, 8).map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+    ${r.cargas.length ? `<details class="cg-amostra"><summary>Conferir as cargas lidas</summary><div class="cg-amostra-lista">${r.cargas.slice(0, 300).map((c) => `<div><b>${esc(c.nro)}</b>${c.h24 ? ' <i class="cg-24">24 h</i>' : ''} ${esc(c.nome)} <small>${esc(c.veiculo)}${c.box ? ' · box ' + esc(c.box) : ''}</small><span>${r.depositos.map((dep) => esc((c.d[dep.id] || []).join(' '))).join(' | ')}</span></div>`).join('')}</div></details>` : ''}`;
+  cgConferirEmissao();
+}
+function cgEmitidoDaJanela() {
+  let v = val('cg-emitido');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) v += ':00';
+  return v;
+}
+function cgConferirEmissao() {
+  const r = CG.leitura, b = el('cg-salvar');
+  if (!r || !b) return;
+  const v = cgEmitidoDaJanela(), s = CG.dados && CG.dados.snapshot;
+  const velha = !!(s && v && cgMinDe(v) <= cgMinDe(s.emitido));
+  const aviso = el('cg-velha');
+  if (aviso) {
+    aviso.classList.toggle('oculto', !velha);
+    aviso.textContent = velha ? 'Esta situação é de ' + cgDataBr(v) + ', igual ou mais velha que a que está no GSL (' + cgDataBr(s.emitido) + '). Envie um PDF mais novo.' : '';
+  }
+  b.disabled = !r.cargas.length || !v || velha;
+}
+function cgSalvarLeitura() {
+  const r = CG.leitura;
+  if (!r) return;
+  agir('enviarSituacaoCarga', {
+    emitidoEm: cgEmitidoDaJanela(), arquivo: r.arquivo || '', paginas: r.paginas || 0,
+    depositos: r.depositos.map((d) => ({ id: d.id, nome: d.nome })),
+    naoLidas: r.problemas.filter((x) => !x.parcial).length,
+    cargas: r.cargas.map((c) => ({ nro: c.nro, nome: c.nome, veiculo: c.veiculo, box: c.box, h24: !!c.h24, d: c.d }))
+  }, 'Situação de carga salva').catch(() => {});
+}
+
+
+/*
+ * SITUACAO DE CARGA — FASE 2 (8.15): abas novas (Sequencia, Todos os depositos, Boxes e patio,
+ * Turnos), o historico de cada envio, a falta do dia, as paleteiras e os check-outs que acompanham
+ * as pessoas e o modelo do flowrack. Os dados vem do dadosCarga (Carga.gs) e cada gravacao passa
+ * pelo cgAoVivo (a geracao nova chega para todo mundo).
+ * REGRA DO HTMLSERVICE: nada de barra-barra nem barra-asterisco em texto, template ou regex.
+ */
+
+/* ---------------- ABAS ---------------- */
+function cgAbas() {
+  const d = CG.dados || {}, deps = (d.depositos || []).map((x) => [x.id, x.nome]);
+  if (CG.hist) return [['cargas', 'Cargas'], ['geral', 'Painel do CD'], ['todos', 'Todos os depósitos']].concat(deps).concat([['historico', 'Histórico']]);
+  return [['cargas', 'Cargas'], ['sequencia', 'Sequência'], ['geral', 'Painel do CD'], ['todos', 'Todos os depósitos'], ['supervisao', 'Supervisão G · NG · P · B']]
+    .concat(deps).concat([['boxes', 'Boxes e pátio'], ['equipe', 'Equipe'], ['escala', 'Escala 5x2'], ['turnos', 'Turnos'], ['historico', 'Histórico']]);
+}
+/* O numero pequeno da aba (o que pede atencao), sempre com o texto: a cor nunca e a unica pista. */
+function cgMarcaDaAba(id) {
+  const d = CG.dados;
+  if (CG.hist) return '';
+  let n = 0, t = '';
+  if (id === 'sequencia' && d.sequencia) { n = d.sequencia.alertas.fora + d.sequencia.alertas.deveria; t = 'fora de ordem ou atrasadas'; }
+  if (id === 'boxes' && d.patio) { n = cgAlertasPatio().filter((a) => a.grav !== 'info').length; t = 'alertas do pátio'; }
+  if (id === 'turnos') { const p = cgPassagemPendente(); if (p) { n = 1; t = p.texto; } }
+  if (id === 'equipe') { n = cgFaltasAtivas().length; t = 'faltas hoje'; }
+  if (id === 'escala') { n = cgPessoasAtivas().filter((p) => cgRegimeCli(p).aDefinir).length; t = 'sem subturno (A1/A2 · C1/C2)'; }
+  return n ? ` <span class="cg-aba-marca" title="${esc(n + ' ' + t)}">${n}<span class="sr"> ${esc(t)}</span></span>` : '';
+}
+
+/* ---------------- TURNOS (o relogio da tela) ---------------- */
+function cgMinDoDiaCli() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+function cgDiaCli(delta) {
+  const d = new Date(); d.setDate(d.getDate() + (delta || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function cgNoTurnoCli(t, min) { return t.cruza ? (min >= t.ini || min < t.fim) : (min >= t.ini && min < t.fim); }
+/* Quem esta em servico agora (o mesmo cgTurnosNoHorario_ do servidor, com o relogio da tela). */
+function cgTurnoAgoraCli(min) {
+  const turnos = (CG.vivo || CG.dados || {}).turnos || [];
+  if (min == null) min = cgMinDoDiaCli();
+  const ativos = turnos.filter((t) => cgNoTurnoCli(t, min));
+  const r = { ativos: ativos.map((t) => t.id), passagem: null, min: min };
+  if (ativos.length >= 2) {
+    const entra = ativos.slice().sort((a, b) => ((min - a.ini + 1440) % 1440) - ((min - b.ini + 1440) % 1440))[0];
+    const sai = ativos.filter((t) => t.id !== entra.id).sort((a, b) => ((a.fim - min + 1440) % 1440) - ((b.fim - min + 1440) % 1440))[0];
+    r.passagem = { sai: sai.id, entra: entra.id, ate: cgHoraMin(sai.fim) };
+  }
+  return r;
+}
+function cgHoraMin(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+function cgTurnoDaEquipeCli(eq) {
+  const t = cgNorm(eq).replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!t) return '';
+  if (/^ADM/.test(t)) return 'ADM';
+  let m = /^(\d)\s*O?\s*TURNO$/.exec(t) || /^TURNO\s*(\d)$/.exec(t) || /^T\s*(\d)$/.exec(t) || /^(\d)$/.exec(t);
+  if (m) return ['', 'A', 'B', 'C'][+m[1]] || '';
+  m = /^(?:TURNO\s*|T\s*)?([ABC])$/.exec(t);
+  return m ? m[1] : '';
+}
+function cgDiaDoTurnoCli(id) {
+  const t = ((CG.vivo || CG.dados || {}).turnos || []).find((x) => x.id === id);
+  if (!t || !t.cruza) return cgDiaCli(0);
+  return cgMinDoDiaCli() < t.fim ? cgDiaCli(-1) : cgDiaCli(0);
+}
+function cgFaltasAtivas() { return ((CG.vivo || CG.dados || {}).faltas || []).filter((f) => f.data === cgDiaDoTurnoCli(f.turno)); }
+function cgFaltou(k) { return cgFaltasAtivas().some((f) => f.k === k) ? 1 : 0; }
+function cgMarcarFalta(k, marcar) {
+  const p = cgPessoa(k);
+  const antes = { faltas: (CG.dados.faltas || []).slice(), equipe: (CG.dados.equipe || []).slice() };
+  cgAoVivo('presencaCarga', { pessoa: { k: k, nome: p.nome, equipe: p.equipe || '' }, falta: !!marcar }, () => {
+    if (marcar) {
+      CG.dados.faltas = (CG.dados.faltas || []).concat([{ k: k, nome: p.nome, equipe: p.equipe || '', turno: cgTurnoDaEquipeCli(p.equipe), data: cgDiaDoTurnoCli(cgTurnoDaEquipeCli(p.equipe)), porNome: (CG.dados.voce || {}).nome || '' }]);
+      CG.dados.equipe = (CG.dados.equipe || []).filter((x) => x.k !== k);
+    } else CG.dados.faltas = (CG.dados.faltas || []).filter((f) => !(f.k === k && f.data === cgDiaDoTurnoCli(f.turno)));
+  }, () => { CG.dados.faltas = antes.faltas; CG.dados.equipe = antes.equipe; });
+}
+/* A passagem que falta confirmar ou marcar ciente agora (na sobreposicao dos turnos). */
+function cgPassagemDeAgora() {
+  const ta = cgTurnoAgoraCli();
+  if (!ta.passagem) return null;
+  const data = cgDiaDoTurnoCli(ta.passagem.entra);
+  const reg = ((CG.vivo || CG.dados).passagens || []).find((p) => p.data === data && p.sai === ta.passagem.sai && p.entra === ta.passagem.entra) || null;
+  return { sai: ta.passagem.sai, entra: ta.passagem.entra, ate: ta.passagem.ate, data: data, reg: reg };
+}
+function cgPassagemPendente() {
+  const p = cgPassagemDeAgora();
+  if (!p) return null;
+  if (!p.reg) return { texto: 'passagem ' + p.sai + ' → ' + p.entra + ' por confirmar', p: p };
+  if (!p.reg.cienteEm) return { texto: 'passagem ' + p.sai + ' → ' + p.entra + ' aguardando ciente', p: p };
+  return null;
+}
+/* Faixas do topo: turno que terminou com gente alocada; passagem de turno por confirmar. */
+function cgFaixasDoTurnoHtml() {
+  const d = CG.dados, ta = cgTurnoAgoraCli();
+  let html = '';
+  const porTurno = {};
+  (d.equipe || []).forEach((p) => { const t = cgTurnoDaEquipeCli(p.equipe); if (['A', 'B', 'C'].indexOf(t) !== -1 && ta.ativos.indexOf(t) === -1) porTurno[t] = (porTurno[t] || 0) + 1; });
+  Object.keys(porTurno).sort().forEach((t) => {
+    const tr = (d.turnos || []).find((x) => x.id === t);
+    html += `<div class="cg-faixa cg-faixa-turno" role="status"><span class="cg-faixa-ico" aria-hidden="true">⇄</span>
+      <span>O <b>turno ${esc(t)}</b> terminou${tr ? ' às ' + esc(cgHoraMin(tr.fim)) : ''} e <b>${porTurno[t]} ${porTurno[t] === 1 ? 'pessoa dele ainda está alocada' : 'pessoas dele ainda estão alocadas'}</b>.</span>
+      ${d.podeEditar ? `<button type="button" class="cg-btn cg-btn-claro" onclick="agir('limparAlocacaoCarga', { turno: ${jsArg(t)} })">Limpar alocação do turno ${esc(t)}</button>` : ''}</div>`;
+  });
+  const pend = cgPassagemPendente();
+  if (pend && CG.aba !== 'turnos') {
+    html += `<div class="cg-faixa cg-faixa-passagem" role="status"><span class="cg-faixa-ico" aria-hidden="true">🤝</span>
+      <span><b>Passagem de turno ${esc(pend.p.sai)} → ${esc(pend.p.entra)}</b> (até ${esc(pend.p.ate)}): ${pend.p.reg ? 'confirmada por ' + esc(pend.p.reg.confirmadoNome) + ', falta o turno ' + esc(pend.p.entra) + ' marcar ciente.' : 'o turno ' + esc(pend.p.sai) + ' ainda não confirmou o resumo.'}</span>
+      <button type="button" class="cg-btn cg-btn-claro" onclick="cgIrAba('turnos')">Abrir a passagem</button></div>`;
+  }
+  return html;
+}
+
+/* ---------------- PALETEIRAS E CHECK-OUTS PELAS PESSOAS ---------------- */
+/*
+ * Os pools (8.16): as paleteiras do CD (separadores da Grandeza, Nobre Grandeza, Pesaveis e Blocado) e um pool
+ * de check-outs em cada deposito que confere com eles (Miudeza e Nobre). O mesmo CG_POOLS do servidor.
+ */
+const CG_POOLS_PADRAO = [
+  { id: 'PALETEIRA', tipo: 'PALETEIRA', dep: '', papel: 'SEPARADOR', deps: ['GRANDEZA', 'NOBRE_GRANDEZA', 'PESAVEIS', 'BLOCADO'], padrao: 12 },
+  { id: 'CARRINHO', tipo: 'CARRINHO', dep: 'MIUDEZA', papel: '', deps: [], padrao: 35 },
+  { id: 'CHECKOUT_MIUDEZA', tipo: 'CHECKOUT', dep: 'MIUDEZA', papel: 'CONFERENTE', deps: ['MIUDEZA'], padrao: 8 },
+  { id: 'CHECKOUT_NOBRE', tipo: 'CHECKOUT', dep: 'NOBRE', papel: 'CONFERENTE', deps: ['NOBRE'], padrao: 10 }
+];
+function cgPools() { return (CG.dados && CG.dados.pools && CG.dados.pools.length) ? CG.dados.pools : CG_POOLS_PADRAO; }
+function cgPoolsConsumo() { return cgPools().filter((x) => x.papel); }
+function cgPoolDoEquip(e) { return e.pool || (e.tipo === 'CHECKOUT' ? 'CHECKOUT_' + (e.dep || '') : e.tipo); }
+function cgPoolInfo(id) { return cgPools().find((x) => x.id === id) || CG_POOLS_PADRAO.find((x) => x.id === id) || { id: id, tipo: id, dep: '', papel: '', deps: [] }; }
+/* O pool que serve esta pessoa alocada (ou null). */
+function cgPoolDaPessoa(p) { return cgPoolsConsumo().find((x) => x.papel === p.papel && x.deps.indexOf(p.dep) !== -1) || null; }
+const CG_EQUIP_TXT = { PALETEIRA: ['Paleteira', 'paleteira', 'paleteiras', 'separador', 'separadores'], CHECKOUT: ['Check-out', 'check-out', 'check-outs', 'conferente', 'conferentes'], CARRINHO: ['Carrinho', 'carrinho', 'carrinhos'] };
+function cgDoDep(dep) { return (dep === 'NOBRE' ? 'do ' : 'da ') + cgNomeDep(dep); }
+function cgTituloPool(pool) { return pool.tipo === 'PALETEIRA' ? 'Paleteiras do CD' : (pool.tipo === 'CHECKOUT' ? 'Check-outs ' + cgDoDep(pool.dep) : 'Carrinhos'); }
+function cgNomeEquip(e) { return CG_EQUIP_TXT[e.tipo][0] + ' ' + e.numero + (e.tipo === 'CHECKOUT' && e.dep ? ' ' + cgDoDep(e.dep) : ''); }
+let CG_CONSUMO_MEMO = { chave: '', valor: null };
+/* O mesmo cgConsumoEquip_ do servidor: quem chegou por ultimo (desde) fica sem. Chave = id do pool. */
+function cgConsumo() {
+  const eq = CG.dados.equipe || [], equips = CG.dados.equipamentos || [];
+  const chave = eq.map((p) => p.k + p.dep + p.papel + (p.desde || '')).join('|') + '#' + equips.map((e) => cgPoolDoEquip(e) + e.numero + e.estado).join('|');
+  if (CG_CONSUMO_MEMO.chave === chave && CG_CONSUMO_MEMO.valor) return CG_CONSUMO_MEMO.valor;
+  const saida = {};
+  cgPoolsConsumo().forEach((pool) => {
+    const lista = equips.filter((e) => cgPoolDoEquip(e) === pool.id);
+    const manut = lista.filter((e) => e.estado === 'MANUTENCAO').length, disp = lista.length - manut;
+    const pessoas = eq.filter((p) => p.papel === pool.papel && pool.deps.indexOf(p.dep) !== -1)
+      .sort((a, b) => String(a.desde || '9999').localeCompare(String(b.desde || '9999')) || String(a.nome).localeCompare(String(b.nome)));
+    const porDep = {}, sem = {};
+    pessoas.forEach((p, i) => { const x = porDep[p.dep] = porDep[p.dep] || { pessoas: 0, com: 0, sem: 0 }; x.pessoas++; if (i < disp) x.com++; else { x.sem++; sem[p.k] = true; } });
+    saida[pool.id] = { pool: pool, total: lista.length, manutencao: manut, disponiveis: disp, pessoas: pessoas.length, emUso: Math.min(pessoas.length, disp),
+      livres: Math.max(0, disp - pessoas.length), falta: Math.max(0, pessoas.length - disp), porDep: porDep, sem: sem, ordem: pessoas };
+  });
+  CG_CONSUMO_MEMO = { chave: chave, valor: saida };
+  return saida;
+}
+function cgSemEquip(k) {
+  const c = cgConsumo();
+  const id = Object.keys(c).find((x) => c[x].sem[k]);
+  return id ? CG_EQUIP_TXT[c[id].pool.tipo][1] : '';
+}
+function cgIconeEquipHtml(e, estado, depUso, destaque) {
+  const pode = CG.dados.podeEditar, txt = CG_EQUIP_TXT[e.tipo];
+  const onde = estado === 'USO' ? 'em uso' + (depUso ? ' em ' + cgNomeDep(depUso) : '') : (estado === 'LIVRE' ? (e.tipo === 'CARRINHO' ? 'livre' : 'livre no pool') : 'em manutenção' + (e.obs ? ' (' + e.obs + ')' : ''));
+  const ico = e.tipo === 'CARRINHO' ? CG_SVG.carrinho : (e.tipo === 'CHECKOUT' ? CG_SVG.checkout : CG_SVG.paleteira);
+  const clique = e.tipo === 'CARRINHO' ? `cgEquipGirar(${e.numero})` : `cgMenuEquip(${jsArg(cgPoolDoEquip(e))}, ${e.numero})`;
+  const nome = cgNomeEquip(e);
+  return `<button type="button" class="cg-equip est-${estado.toLowerCase()}${destaque ? ' aqui' : ''}" ${pode ? `onclick="${clique}"` : 'disabled'}
+      data-tipo="${esc(e.tipo)}" data-pool="${esc(cgPoolDoEquip(e))}" data-numero="${e.numero}" title="${esc(nome + ': ' + onde + (pode ? ' — toque para mudar' : ''))}" aria-label="${esc(nome + ': ' + onde)}">
+    ${ico}<span class="cg-equip-num cg-num">${e.numero}</span>
+    ${e.tipo !== 'CARRINHO' ? `<span class="cg-equip-dep">${estado === 'USO' ? esc(e.tipo === 'CHECKOUT' ? 'uso' : (CG_CURTO[depUso] || depUso || 'uso')) : (estado === 'LIVRE' ? 'livre' : 'manut.')}</span>` : ''}
+    ${estado === 'MANUTENCAO' ? `<span class="cg-equip-chave">${CG_SVG.chave}</span>` : ''}</button>`;
+}
+/*
+ * Um pool (paleteiras do CD, check-outs da Miudeza ou do Nobre): cada equipamento funcionando vai para uma pessoa,
+ * na ordem de chegada. idPool pode ser o tipo antigo: 'CHECKOUT' com o deposito escolhe o pool daquele deposito.
+ */
+function cgPoolEquipHtml(idPool, dep) {
+  if (idPool === 'CHECKOUT') idPool = 'CHECKOUT_' + (dep || '');
+  const d = CG.dados, c = cgConsumo()[idPool], pode = d.podeEditar;
+  if (CG.hist || !c) return '';
+  const pool = c.pool, tipo = pool.tipo, txt = CG_EQUIP_TXT[tipo];
+  const lista = (d.equipamentos || []).filter((e) => cgPoolDoEquip(e) === idPool).sort((a, b) => a.numero - b.numero);
+  let i = 0;
+  const icones = lista.map((e) => {
+    if (e.estado === 'MANUTENCAO') return cgIconeEquipHtml(e, 'MANUTENCAO');
+    const p = c.ordem[i++];
+    return p ? cgIconeEquipHtml(e, 'USO', p.dep, dep && p.dep === dep && tipo === 'PALETEIRA') : cgIconeEquipHtml(e, 'LIVRE');
+  }).join('');
+  const aqui = dep && tipo === 'PALETEIRA' ? (c.porDep[dep] || { pessoas: 0, com: 0, sem: 0 }) : null;
+  const deps = Object.keys(c.porDep).filter((k) => c.porDep[k].sem);
+  const titulo = cgTituloPool(pool);
+  const onde = tipo === 'PALETEIRA' ? 'no CD' : (pool.dep === 'NOBRE' ? 'no Nobre' : 'na ' + cgNomeDep(pool.dep));
+  const falta = !c.falta ? '' : (tipo === 'PALETEIRA'
+    ? `<b>⚠ Faltam ${c.falta} ${c.falta === 1 ? txt[1] : txt[2]}</b>: ${deps.map((k) => esc(cgNomeDep(k)) + ' tem ' + c.porDep[k].sem + ' ' + (c.porDep[k].sem === 1 ? txt[3] : txt[4]) + ' sem ' + txt[1]).join(' · ')} (${c.pessoas} ${txt[4]} para ${c.disponiveis} ${c.disponiveis === 1 ? txt[1] : txt[2]} funcionando).`
+    : `<b>⚠ Faltam ${c.falta} ${c.falta === 1 ? txt[1] : txt[2]} ${onde}</b>: ${c.pessoas} ${txt[4]} para ${c.disponiveis} ${c.disponiveis === 1 ? txt[1] : txt[2]} funcionando.`);
+  return `<section class="cg-cartao cg-equip-pool${c.falta ? ' falta' : ''}" data-tipo="${tipo}" data-pool="${esc(idPool)}" aria-label="${esc(titulo)}">
+    <header class="cg-cartao-cab"><h3>${tipo === 'CHECKOUT' ? CG_SVG.checkout : CG_SVG.paleteira}${esc(titulo)}</h3>
+      <span class="cg-equip-resumo"><b class="cg-num">${c.emUso}</b> em uso · <b class="cg-num">${c.livres}</b> ${c.livres === 1 ? 'livre' : 'livres'}${c.manutencao ? ` · <span class="alerta">${c.manutencao} em manutenção</span>` : ''} · de ${c.total}
+      ${pode ? `<span class="cg-qtd" role="group" aria-label="Quantidade de ${txt[2]} ${onde}"><button type="button" onclick="cgQuantidade(${jsArg(idPool)}, -1)" aria-label="Um a menos">−</button><b class="cg-num">${c.total}</b><button type="button" onclick="cgQuantidade(${jsArg(idPool)}, 1)" aria-label="Um a mais">+</button></span>` : ''}</span></header>
+    ${falta ? `<p class="cg-equip-alerta" role="alert">${falta}</p>` : ''}
+    ${aqui ? `<p class="cg-equip-aqui">Aqui: <b>${aqui.pessoas}</b> ${aqui.pessoas === 1 ? txt[3] : txt[4]} — <b>${aqui.com}</b> com ${txt[1]}${aqui.sem ? `, <b class="cg-txt-alerta">${aqui.sem} sem</b>` : ''}.</p>` : ''}
+    <div class="cg-equips todas">${icones || `<p class="cg-vazio-txt">Nenhum${tipo === 'PALETEIRA' ? 'a paleteira' : ' check-out'} cadastrad${tipo === 'PALETEIRA' ? 'a' : 'o'}.</p>`}</div>
+    <p class="cg-nota">${tipo === 'PALETEIRA' ? 'Cada separador alocado na Grandeza, Nobre Grandeza, Pesáveis ou Blocado usa uma paleteira.' : 'Cada conferente alocado ' + onde + ' usa um check-out deste pool.'} Quem chegou por último fica sem. ${pode ? 'Toque num equipamento para marcar manutenção.' : ''}</p>
+  </section>`;
+}
+/* Os pools de consumo lado a lado (Supervisao, sem situacao). */
+function cgPoolsHtml() { return cgPoolsConsumo().map((x) => cgPoolEquipHtml(x.id)).join(''); }
+function cgMenuEquip(idPool, numero) {
+  const e = (CG.dados.equipamentos || []).find((x) => cgPoolDoEquip(x) === idPool && x.numero === numero);
+  if (!e || !CG.dados.podeEditar) return;
+  const nome = cgNomeEquip(e);
+  abrirJanela(nome, `<div class="cg-mover">
+    <p class="cg-mover-quem"><b>${esc(nome)}</b><span>${e.estado === 'MANUTENCAO' ? 'em manutenção' + (e.obs ? ': ' + esc(e.obs) : '') : 'funcionando (o uso acompanha as pessoas alocadas)'}</span></p>
+    ${e.estado === 'MANUTENCAO' ? `<button type="button" class="cg-opcao" onclick="fecharJanela(); cgEquipEstado(${jsArg(idPool)}, ${numero}, 'LIVRE')">Voltou a funcionar</button>` :
+      `<label class="cg-rotulo" for="cg-equip-obs">Motivo (opcional)</label><input id="cg-equip-obs" type="text" maxlength="120" placeholder="roda, bateria, leitor...">
+      <button type="button" class="cg-opcao tirar" onclick="const o = val('cg-equip-obs'); fecharJanela(); cgEquipEstado(${jsArg(idPool)}, ${numero}, 'MANUTENCAO', o)">Mandar para manutenção</button>`}
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button>');
+}
+/* Uma linha por deposito (Supervisao, Todos): o que as pessoas dele usam. */
+function cgLinhaEquipDepHtml(id) {
+  if (CG.hist) return '';
+  const c = cgConsumo(), info = cgDepInfo(id), partes = [];
+  if (info.equip === 'PALETEIRA' && c.PALETEIRA) { const x = c.PALETEIRA.porDep[id] || { com: 0, sem: 0 }; partes.push(`<span class="cg-eq-uso${x.sem ? ' falta' : ''}" title="Paleteiras (uma por separador)">${CG_SVG.paleteira}<b class="cg-num">${x.com}</b>${x.sem ? `<small>faltam ${x.sem}</small>` : ''}</span>`); }
+  if (info.equip === 'CARRINHO') { const car = (CG.dados.equipamentos || []).filter((e) => e.tipo === 'CARRINHO'); partes.push(`<span class="cg-eq-uso" title="Carrinhos livres">${CG_SVG.carrinho}<b class="cg-num">${car.filter((e) => e.estado === 'LIVRE').length}</b><small>livres de ${car.length}</small></span>`); }
+  const k = c['CHECKOUT_' + id];
+  if (k) partes.push(`<span class="cg-eq-uso${k.falta ? ' falta' : ''}" title="Check-outs ${esc(cgDoDep(id))} (um por conferente)">${CG_SVG.checkout}<b class="cg-num">${k.emUso}</b><small>${k.falta ? 'faltam ' + k.falta : 'de ' + k.disponiveis}</small></span>`);
+  return partes.length ? `<div class="cg-eq-linha-dep">${partes.join('')}</div>` : '';
+}
+/* A tira dos pools (Equipe, Todos): numeros e o alerta. */
+function cgEquipamentosResumoHtml() {
+  if (CG.hist) return '';
+  const c = cgConsumo();
+  const um = (id) => { const x = c[id], pool = x.pool, t = CG_EQUIP_TXT[pool.tipo];
+    return `<span class="cg-eq-tira${x.falta ? ' falta' : ''}" data-pool="${esc(id)}">${pool.tipo === 'CHECKOUT' ? CG_SVG.checkout : CG_SVG.paleteira}
+    <b>${pool.tipo === 'PALETEIRA' ? 'Paleteiras' : 'Check-outs ' + esc(CG_CURTO[pool.dep] || pool.dep)}</b> <span class="cg-num">${x.emUso}/${x.disponiveis}</span> em uso${x.manutencao ? ` · ${x.manutencao} manut.` : ''}${x.falta ? ` · <b class="cg-txt-alerta">faltam ${x.falta}</b>` : ` · ${x.livres} livres`}</span>`; };
+  return `<div class="cg-eq-tiras">${Object.keys(c).map(um).join('')}</div>`;
+}
+
+
+/* ---------------- SEQUENCIA DAS CARGAS ---------------- */
+const CG_SEQ_FLAG = {
+  emCurso: ['Em curso agora', 'curso'], deveria: ['Deveria ter começado', 'atencao'], fora: ['Fora de sequência', 'alerta'],
+  pulada: ['Pulada', 'atencao'], prioridade: ['24 h fora do topo', 'amarelo']
+};
+const CG_SEQ_ESTADO = { naoIniciada: 'não iniciada', andamento: 'em andamento', pronta: 'pronta', saiu: 'saiu do relatório', sem: 'sem lotes' };
+function cgSequenciaHtml() {
+  const d = CG.dados, q = d.sequencia, pode = d.podeEditar;
+  if (!q || !q.itens.length) return `<div class="cg-vazio"><div class="cg-vazio-ico">${CG_SVG.caminhao}</div><h3>A sequência aparece com a situação de carga</h3><p>Assim que o PDF chegar, as cargas entram aqui na ordem do relatório e o supervisor organiza a fila.</p></div>`;
+  const a = q.alertas;
+  const ultimoCurso = q.itens.map((x) => x.flags.indexOf('emCurso') !== -1).lastIndexOf(true);
+  const kpi = (n, rot, cls) => `<div class="cg-seq-kpi ${cls || ''}"><b class="cg-num">${n}</b><span>${rot}</span></div>`;
+  return `<section class="cg-cartao cg-seq-cab">
+      <header class="cg-cartao-cab"><h3>Sequência das cargas</h3>
+        <span class="cg-seq-mexida">${q.usada ? (q.mexida ? 'organizada por ' + esc(q.mexida.por.split('@')[0]) + ' ' + esc(cgDiaHora(cgIsoDoBr(q.mexida.em))) : 'organizada') : 'na ordem do relatório (ninguém mexeu ainda)'}</span></header>
+      <div class="cg-seq-kpis">
+        ${kpi(q.ativas, 'por fazer')}${kpi(q.nEmCurso, 'devem estar em andamento')}
+        ${kpi(a.deveria, 'deveriam ter começado', a.deveria ? 'atencao' : 'ok')}${kpi(a.fora, 'fora de sequência', a.fora ? 'alerta' : 'ok')}
+        ${kpi(a.prioridade, '24 h fora do topo', a.prioridade ? 'amarelo' : 'ok')}${kpi(q.prontas, 'prontas', 'ok')}
+      </div>
+      ${pode ? `<div class="cg-seq-acoes">
+        <button type="button" class="cg-btn cg-btn-claro" ${a.prioridade ? '' : 'disabled'} onclick="cgSeqOp('topo24')">⤒ Trazer prioridades (24 h) para o topo</button>
+        <button type="button" class="cg-btn cg-btn-claro" ${q.prontas || q.sairam ? '' : 'disabled'} onclick="cgSeqOp('limpar')">Tirar da fila as prontas e as que saíram</button>
+        <span class="cg-nota">Arraste pela alça ou use ↑ ↓ e "posição". As ${q.nEmCurso} primeiras por fazer devem estar em andamento (Turnos › Ajustes).</span></div>` :
+        `<p class="cg-nota">As ${q.nEmCurso} primeiras por fazer devem estar em andamento. "Fora de sequência": uma carga mais para trás andando com uma anterior ainda sem começar.</p>`}
+    </section>
+    <ol class="cg-seq-lista${pode ? ' editavel' : ''}" id="cg-seq-lista" aria-label="Sequência das cargas">
+      ${q.itens.map((x, i) => cgSeqItemHtml(x, i, q.itens.length) + (i === ultimoCurso && i < q.itens.length - 1 ? '<li class="cg-seq-corte" aria-hidden="true"><span>próximas da fila</span></li>' : '')).join('')}
+    </ol>`;
+}
+function cgIsoDoBr(t) { const m = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/.exec(String(t || '')); return m ? m[3] + '-' + m[2] + '-' + m[1] + 'T' + m[4] + ':' + m[5] : String(t || ''); }
+function cgSeqItemHtml(x, i, total) {
+  const pode = CG.dados.podeEditar, pat = cgPatioDe(x.n);
+  const flags = x.flags.filter((f) => CG_SEQ_FLAG[f]).map((f) => `<span class="cg-seq-flag f-${CG_SEQ_FLAG[f][1]}"${f === 'fora' && x.antesDe ? ` title="Andando antes da ${esc(x.antesDe)}, que ainda não começou"` : ''}>${CG_SEQ_FLAG[f][0]}${f === 'fora' && x.antesDe ? ' (antes da ' + esc(x.antesDe) + ')' : ''}</span>`).join('');
+  const pct = x.pct == null ? 0 : x.pct;
+  return `<li class="cg-seq-item est-${x.estado}${x.flags.indexOf('emCurso') !== -1 ? ' em-curso' : ''}${x.flags.indexOf('fora') !== -1 ? ' fora' : ''}${x.h ? ' h24' : ''}" data-n="${esc(x.n)}"
+      ${pode ? `draggable="true" ondragstart="cgSeqArrastar(event, ${jsArg(x.n)})" ondragend="cgSeqFim()" ondragover="cgSeqSobre(event)" ondragleave="cgSeqSaiu(event)" ondrop="cgSeqSoltou(event, ${jsArg(x.n)})"` : ''}>
+    ${pode ? `<span class="cg-seq-alca" aria-hidden="true">${CG_SVG.alca}</span>` : ''}
+    <b class="cg-seq-pos cg-num" aria-label="posição ${x.pos}">${x.pos}</b>
+    <div class="cg-seq-carga"><span class="cg-seq-l1"><b class="cg-num">${esc(x.n)}</b>${x.h ? '<i class="cg-24">24 h</i>' : ''}${cgLojaTagHtml(x.n)}${x.virtual && CG.dados.sequencia.usada ? '<i class="cg-seq-nova">nova</i>' : ''}</span>
+      <span class="cg-seq-nome">${esc(x.nm || '—')}</span>
+      <small>${esc(x.v || '')}${x.bx ? ' · box ' + esc(x.bx) : ''}${pat ? ' · pátio: ' + esc(pat.box ? 'box ' + pat.box : 'fila') + (pat.situacao ? ' (' + esc(pat.situacao) + ')' : '') : ''}${x.gargalo ? ' · <span class="cg-gargalo-txt">gargalo: ' + esc(cgNomeDep(x.gargalo)) + '</span>' : ''}</small></div>
+    <div class="cg-seq-prog"><span class="cg-trilho"><i class="${x.estado === 'pronta' ? 'verde' : 'azul'}" style="width:${pct.toFixed(1)}%"></i></span>
+      <span><b class="cg-num">${cgPctBaixo(x.pct)}</b> ${esc(CG_SEQ_ESTADO[x.estado] || x.estado)}</span></div>
+    <div class="cg-seq-flags">${flags}</div>
+    ${pode ? `<div class="cg-seq-botoes" role="group" aria-label="Mover a carga ${esc(x.n)}">
+      <button type="button" ${i ? '' : 'disabled'} onclick="cgSeqMover(${jsArg(x.n)}, 1)" title="Para o topo" aria-label="Para o topo">⤒</button>
+      <button type="button" ${i ? '' : 'disabled'} onclick="cgSeqMover(${jsArg(x.n)}, ${x.pos - 1})" title="Subir uma" aria-label="Subir uma">↑</button>
+      <button type="button" ${i < total - 1 ? '' : 'disabled'} onclick="cgSeqMover(${jsArg(x.n)}, ${x.pos + 1})" title="Descer uma" aria-label="Descer uma">↓</button>
+      <button type="button" class="cg-seq-ir" onclick="cgSeqPosicao(${jsArg(x.n)})" title="Mandar para a posição..." aria-label="Mandar para a posição">#</button></div>` : ''}
+  </li>`;
+}
+/* Otimista: a fila muda na hora; o servidor devolve a fila conferida (as marcas). */
+function cgSeqMover(n, para) {
+  const q = CG.dados.sequencia, itens = q.itens.slice(), i = itens.findIndex((x) => x.n === n);
+  if (i === -1) return;
+  para = Math.max(1, Math.min(itens.length, para));
+  if (para === i + 1) return;
+  const antes = itens.slice();
+  cgAoVivo('sequenciaCarga', { op: 'mover', carga: n, para: para }, () => {
+    const it = itens.splice(i, 1)[0];
+    itens.splice(para - 1, 0, it);
+    itens.forEach((x, k) => { x.pos = k + 1; });
+    q.itens = itens;
+  }, () => { q.itens = antes; antes.forEach((x, k) => { x.pos = k + 1; }); });
+}
+function cgSeqOp(op) {
+  const txt = op === 'topo24' ? 'As cargas de 24 horas por terminar sobem para o topo, na ordem em que estão.' : 'As cargas prontas e as que saíram do relatório saem da fila (a pronta não volta).';
+  abrirJanela(op === 'topo24' ? 'Prioridades para o topo' : 'Limpar a fila', `<p>${txt}</p>`,
+    `<button class="botao secundario" onclick="fecharJanela()">Voltar</button><button class="botao" onclick="fecharJanela(); cgAoVivo('sequenciaCarga', { op: ${jsArg(op)} }, () => {}, () => {})">Confirmar</button>`);
+}
+function cgSeqPosicao(n) {
+  const q = CG.dados.sequencia, x = q.itens.find((i) => i.n === n);
+  abrirJanela('Carga ' + n + ' para a posição...', `<form class="cg-form" onsubmit="event.preventDefault(); const v = Number(val('cg-seq-para')); fecharJanela(); cgSeqMover(${jsArg(n)}, v)">
+    <label class="cg-rotulo" for="cg-seq-para">Nova posição (1 a ${q.itens.length}; agora está na ${x ? x.pos : '?'})</label>
+    <input id="cg-seq-para" type="number" min="1" max="${q.itens.length}" value="${x ? x.pos : 1}" inputmode="numeric" autofocus></form>`,
+    `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="const v = Number(val('cg-seq-para')); fecharJanela(); cgSeqMover(${jsArg(n)}, v)">Mover</button>`);
+  setTimeout(() => { const i = el('cg-seq-para'); if (i) { i.focus(); i.select(); } }, 50);
+}
+function cgSeqArrastar(ev, n) {
+  CG.seqArrasto = n;
+  try { ev.dataTransfer.setData('text/plain', 'gsl-seq:' + n); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+  ev.currentTarget.classList.add('arrastando');
+}
+function cgSeqFim() {
+  CG.seqArrasto = null;
+  document.querySelectorAll('.cg-seq-item.arrastando, .cg-seq-item.antes, .cg-seq-item.depois').forEach((x) => x.classList.remove('arrastando', 'antes', 'depois'));
+}
+function cgSeqLado(ev) { const r = ev.currentTarget.getBoundingClientRect(); return ev.clientY < r.top + r.height / 2 ? 'antes' : 'depois'; }
+function cgSeqSobre(ev) {
+  if (!CG.seqArrasto) return;
+  ev.preventDefault();
+  const lado = cgSeqLado(ev);
+  ev.currentTarget.classList.toggle('antes', lado === 'antes');
+  ev.currentTarget.classList.toggle('depois', lado === 'depois');
+}
+function cgSeqSaiu(ev) { if (!ev.currentTarget.contains(ev.relatedTarget)) ev.currentTarget.classList.remove('antes', 'depois'); }
+function cgSeqSoltou(ev, alvo) {
+  const n = CG.seqArrasto;
+  if (!n) return;
+  ev.preventDefault();
+  const lado = cgSeqLado(ev);
+  cgSeqFim();
+  const itens = CG.dados.sequencia.itens;
+  const f = itens.findIndex((x) => x.n === n) + 1, t = itens.findIndex((x) => x.n === alvo) + 1;
+  if (!f || !t || n === alvo) return;
+  cgSeqMover(n, lado === 'antes' ? (t < f ? t : t - 1) : (t < f ? t + 1 : t));
+}
+
+/* ---------------- TODOS OS DEPOSITOS AO MESMO TEMPO ---------------- */
+function cgTodosHtml() {
+  const d = CG.dados, ids = (d.depositos || []).map((x) => x.id);
+  return `${!CG.tv && !CG.hist ? cgPoolHtml(true) : ''}
+    ${CG.hist ? '' : cgEquipamentosResumoHtml()}
+    <div class="cg-todos">${ids.map(cgColunaTodosHtml).join('')}</div>
+    ${d.snapshot ? cgEquilibrioHtml('cd', 'Equilíbrio entre os seis depósitos') : ''}`;
+}
+function cgColunaTodosHtml(id) {
+  const i = cgIndDep(id), r = i.r, dep = cgDepInfo(id);
+  const eqb = CG.dados.indicadores && CG.dados.indicadores.equilibrio, g = eqb && eqb.cd;
+  const dv = g && g.desvios && g.desvios[id] != null ? g.desvios[id] : null;
+  const tag = g && g.atrasado === id && g.status !== 'equilibrado' ? '<span class="cg-eq-tag atras">mais atrasado</span>' : (g && g.adiantado === id && g.status !== 'equilibrado' ? '<span class="cg-eq-tag frente">mais adiantado</span>' : '');
+  const barra = (rot, p, cls) => `<div class="cg-mini-barra"><span>${rot}</span><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(1)}%"></i></span><b class="cg-num">${cgPct(p)}</b></div>`;
+  return `<section class="cg-cartao cg-todos-col${g && g.atrasado === id && g.status !== 'equilibrado' ? ' atras' : ''}" data-dep="${esc(id)}">
+    <header class="cg-sup-cab"><h3>${esc(dep.nome)}</h3>${r ? `<span class="cg-status st-${i.status.k}">${esc(i.status.t)}</span>` : ''}</header>
+    ${tag}
+    ${r ? `<div class="cg-sup-pct"><b class="cg-num">${cgPct(i.pctPond)}</b><span>concluído${dv != null ? ` · <b class="${dv < 0 ? 'cg-txt-alerta' : 'cg-txt-ok'}">${dv > 0 ? '+' : ''}${cgN(dv)} pp</b> da média` : ''}</span></div>
+      ${barra('Sep.', i.ind.pctSep, 'azul')}${barra('Conf.', i.ind.pctConf, 'cor-conf')}
+      <dl class="cg-sup-dl"><div><dt>Faltam</dt><dd class="cg-num">${cgN(r.restSep + r.restConf)}</dd></div><div><dt>Cargas</dt><dd class="cg-num">${cgN(i.pend)}</dd></div>
+        <div><dt>Previsão</dt><dd class="cg-num">${i.pend ? (i.ind.etaMin == null ? '—' : cgDuracao(i.ind.etaMin)) : 'Pronto'}</dd></div></dl>` : '<p class="cg-vazio-txt">Sem situação de carga.</p>'}
+    <p class="cg-todos-gente">${CG_SVG.pessoa}<b class="cg-num">${i.eq.sep}</b> sep · <b class="cg-num">${i.eq.conf}</b> conf</p>
+    ${cgLinhaEquipDepHtml(id)}
+    ${CG.hist ? '' : `<div class="cg-zonas${dep.andares ? ' predio' : ''}">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>`}
+  </section>`;
+}
+
+/* ---------------- FLOWRACK DO NOBRE (o predio: terreo e 1o ao 4o andar, ruas por andar) ---------------- */
+function cgFlowrackHtml(dep) {
+  const d = CG.dados, ruas = (d.flowrack && d.flowrack.ruas) || [6, 6, 6, 6, 6], i = cgIndDep(dep.id), pode = d.podeEditar;
+  const naRua = (a, r) => cgNaZona({ dep: dep.id, papel: 'SEPARADOR', andar: a, rua: r });
+  const andares = [];
+  for (let a = dep.andares - 1; a >= 0; a--) {
+    const n = cgNaZona({ dep: dep.id, papel: 'SEPARADOR', andar: a }).length;
+    andares.push(`<div class="cg-fr-andar" data-andar="${a}">
+      <div class="cg-fr-rotulo"><span>${esc((d.andares || [])[a] || ('Andar ' + a))}</span><b class="cg-num">${n}</b><small>${n === 1 ? 'separador' : 'separadores'}</small></div>
+      <div class="cg-fr-corpo">
+        <div class="cg-fr-ruas" style="--ruas:${ruas[a]}">${Array.from({ length: ruas[a] }, (x, k) => k + 1).map((r) => {
+          const gente = naRua(a, r);
+          return `<div class="cg-zona cg-fr-rua sep andar" data-dep="${esc(dep.id)}" data-papel="SEPARADOR" data-andar="${a}" data-rua="${r}"
+            ${pode ? `ondragover="cgSobreZona(event, 'pessoa')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouPessoa(event, ${jsArg(dep.id)}, 'SEPARADOR', ${a}, ${r})"` : ''}>
+            <span class="cg-fr-rua-num">Rua ${r}</span><span class="cg-fr-rack" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <div class="cg-zona-gente">${gente.map((p) => cgBonecoHtml(p, p)).join('')}</div></div>`;
+        }).join('')}</div>
+        ${cgZonaHtml({ dep: dep.id, papel: 'SEPARADOR', andar: a, rua: 0, nome: 'No andar (sem rua)' }, true)}
+      </div>
+    </div>`);
+  }
+  return `<section class="cg-cartao cg-fr">
+    <header class="cg-cartao-cab"><h3>Flowrack do Nobre — térreo e quatro andares</h3>
+      <span class="cg-selo neutro">${i.eq.sep} separador${i.eq.sep === 1 ? '' : 'es'} · ${i.eq.conf} conferente${i.eq.conf === 1 ? '' : 's'}</span></header>
+    ${i.r ? `<div class="cg-fr-topo"><span>Nobre: <b class="cg-num">${cgPct(i.ind.pctSep)}</b> separado · <b class="cg-num">${cgPct(i.ind.pctConf)}</b> conferido · <b class="cg-num">${cgN(i.r.restSep)}</b> lotes de separação${i.eq.sep ? ' (' + cgN(Math.round(i.r.restSep / i.eq.sep)) + ' por separador)' : ''}</span>
+      <small>O relatório traz o andamento do Nobre inteiro: o andar de cada lote não vem no PDF.</small></div>` : ''}
+    <div class="cg-fr-predio">${andares.join('')}
+      <div class="cg-fr-chao">${cgZonaHtml({ dep: dep.id, papel: 'CONFERENTE', andar: -1, nome: 'Conferência do flowrack (térreo)' })}</div>
+    </div>
+    ${pode ? '<p class="cg-nota">Arraste para a rua do andar (ou para "No andar"). As ruas de cada andar ficam em Turnos › Ajustes.</p>' : ''}
+  </section>`;
+}
+
+
+/* ---------------- VEICULOS (desenho lateral, com a marca Bartofil) ---------------- */
+/*
+ * Um desenho por tipo, do mesmo jeito: cabine azul Bartofil, bau branco com o nome BARTOFIL e a faixa
+ * amarela e verde (a bandeira). O tamanho segue o tipo (LEVE menor, CARRETA maior): na doca, a largura
+ * do desenho e proporcional ao comprimento do veiculo.
+ */
+const CG_VEIC = {
+  LEVE: { nome: 'Leve / utilitário', bau: 46, alt: 26, cab: 20, eixos: 1, van: true },
+  VUC: { nome: 'VUC', bau: 54, alt: 30, cab: 22, eixos: 1 },
+  MEDIO: { nome: '3/4 (médio)', bau: 66, alt: 33, cab: 24, eixos: 1 },
+  TOCO: { nome: 'Toco', bau: 80, alt: 37, cab: 26, eixos: 1 },
+  TRUCK: { nome: 'Truck', bau: 96, alt: 39, cab: 26, eixos: 2 },
+  CARRETA: { nome: 'Carreta', bau: 138, alt: 42, cab: 30, eixos: 3, carreta: true },
+  OUTRO: { nome: 'Outro', bau: 70, alt: 33, cab: 24, eixos: 1, generico: true }
+};
+const CG_VEIC_MAX = 138 + 30 + 14;
+function cgTipoVeiculoCli(t) { return CG_VEIC[t] ? t : 'OUTRO'; }
+function cgVeiculoSvg(tipo, cls) {
+  const v = CG_VEIC[cgTipoVeiculoCli(tipo)];
+  const chao = 58, rr = 6.4, yr = chao - rr;
+  const x0 = 4, topo = yr - 4 - v.alt, base = yr - 4;
+  const W = x0 + v.bau + 2 + v.cab + 6;
+  const roda = (cx) => `<circle cx="${cx.toFixed(1)}" cy="${yr}" r="${rr}" class="vr"/><circle cx="${cx.toFixed(1)}" cy="${yr}" r="2.4" class="vc"/>`;
+  const fs = Math.min(v.alt * 0.34, v.bau / 6.4);
+  const logo = `<text x="${(x0 + v.bau / 2 + (v.van ? 0 : 3)).toFixed(1)}" y="${(topo + v.alt * 0.52).toFixed(1)}" class="vt" font-size="${fs.toFixed(1)}" text-anchor="middle">BARTOFIL</text>` +
+    `<rect x="${(x0 + v.bau / 2 - fs * 2.9).toFixed(1)}" y="${(topo + v.alt * 0.52 - fs * 0.8).toFixed(1)}" width="${(fs * 0.62).toFixed(1)}" height="${(fs * 0.84).toFixed(1)}" rx="1" class="va"/>`;
+  const faixa = (x, w) => `<rect x="${x}" y="${(base - 8.6).toFixed(1)}" width="${w}" height="3" class="va"/><rect x="${x}" y="${(base - 5.6).toFixed(1)}" width="${w}" height="3" class="vv"/>`;
+  let corpo = '';
+  if (v.van) {
+    const xf = x0 + v.bau;
+    corpo = `<path d="M${x0} ${base} V${topo + 3} Q${x0} ${topo} ${x0 + 3} ${topo} H${xf + 4} L${xf + v.cab - 2} ${topo + 12} Q${xf + v.cab + 2} ${topo + 14} ${xf + v.cab + 2} ${topo + 18} V${base} Z" class="vb"/>` +
+      `<path d="M${xf + 4} ${topo} L${xf + v.cab - 2} ${topo + 12} Q${xf + v.cab + 2} ${topo + 14} ${xf + v.cab + 2} ${topo + 18} V${base} H${xf - 2} V${topo} Z" class="vk"/>` +
+      `<path d="M${xf + 5} ${topo + 3} L${xf + v.cab - 3} ${topo + 12.5} H${xf + 3} V${topo + 3} Z" class="vj"/>` + faixa(x0 + 2, v.bau - 6) + logo +
+      roda(x0 + 11) + roda(xf + v.cab - 8);
+  } else {
+    const xb = x0, xc = x0 + v.bau + 2, cabTopo = base - (v.carreta ? 34 : 30);
+    corpo = `<rect x="${xb}" y="${topo}" width="${v.bau}" height="${v.alt}" rx="2.5" class="vb"/>` + faixa(xb + 2, v.bau - 4) + logo +
+      `<rect x="${xb - 1}" y="${base}" width="${v.bau + v.cab + 4}" height="3" rx="1.2" class="vch"/>` +
+      `<path d="M${xc} ${base} V${cabTopo + 4} Q${xc} ${cabTopo} ${xc + 4} ${cabTopo} H${xc + v.cab - 9} L${xc + v.cab} ${cabTopo + 12} V${base} Z" class="vk"/>` +
+      `<path d="M${xc + v.cab - 10} ${cabTopo + 3} L${xc + v.cab - 2.5} ${cabTopo + 12.5} H${xc + v.cab - 12} V${cabTopo + 3} Z" class="vj"/>` +
+      `<rect x="${xc + 2}" y="${base - 9}" width="${v.cab - 4}" height="2.6" class="va"/>` +
+      `<rect x="${xc + v.cab - 2}" y="${base - 5}" width="3.4" height="5" rx="1" class="vk"/>`;
+    if (v.carreta) corpo += roda(xb + 12) + roda(xb + 27) + roda(xb + 42) + roda(xc + 7) + roda(xc + v.cab - 7);
+    else if (v.eixos === 2) corpo += roda(xb + v.bau * 0.2) + roda(xb + v.bau * 0.2 + 14.5) + roda(xc + v.cab - 9);
+    else corpo += roda(xb + v.bau * 0.24) + roda(xc + v.cab - 9);
+    if (v.generico) corpo += `<text x="${xb + v.bau - 7}" y="${topo + 11}" class="vt" font-size="9" text-anchor="middle">?</text>`;
+  }
+  return `<svg class="cg-veic ${cls || ''}" viewBox="0 0 ${W.toFixed(0)} ${chao + 2}" style="width:${(W / CG_VEIC_MAX * 100).toFixed(1)}%" role="img" aria-label="${esc(v.nome)}">
+    <line x1="0" x2="${W.toFixed(0)}" y1="${chao + 0.6}" y2="${chao + 0.6}" class="vg"/>${corpo}</svg>`;
+}
+
+/* ---------------- BOXES E PATIO ---------------- */
+const CG_ETAPA_NOME = { FILA: 'No pátio', BOX: 'No box', CARREGANDO: 'Carregando', CARREGADA: 'Carregada' };
+const CG_BOX_EST = { LIVRE: 'Livre', RESERVADO: 'Reservado', OCUPADO: 'Ocupado', CARREGANDO: 'Carregando', BLOQUEADO: 'Bloqueado' };
+function cgPatioDe(n) { const P = CG.dados.patio; return P && P.porCarga ? P.porCarga[n] || null : null; }
+/* A loja da carga (o box do relatorio e de uma loja: CARGA_BOXES_LOJA) ou ''. */
+function cgLojaDe(n) { const P = CG.dados && CG.dados.patio; return P && P.lojaPorCarga ? P.lojaPorCarga[n] || '' : ''; }
+function cgLojaTagHtml(n) { const l = cgLojaDe(n); return l ? ` <i class="cg-loja-tag" title="Carga da Loja ${esc(l)}">Loja</i>` : ''; }
+function cgChipPatio(n) {
+  const x = cgPatioDe(n), tag = cgLojaTagHtml(n);
+  if (!x) return tag ? ' ·' + tag : '';
+  return ` · <span class="cg-chip-patio et-${x.etapa.toLowerCase()}">${x.etapa === 'CARREGADA' ? 'carregada' : (x.box ? 'box ' + x.box : 'no pátio')}${x.situacao && x.etapa !== 'CARREGADA' ? ' · ' + esc(x.situacao) : ''}</span>${tag}`;
+}
+/* Os alertas do servidor (o tempo do veiculo encostado nao gera mais aviso: 26/11). */
+function cgAlertasPatio() {
+  const P = CG.dados.patio;
+  if (!P) return [];
+  const peso = { alerta: 0, atencao: 1, info: 2 };
+  return (P.alertas || []).filter((a) => a.tipo !== 'permanencia').slice().sort((a, b) => (peso[a.grav] - peso[b.grav]) || ((b.h || 0) - (a.h || 0)));
+}
+const CG_ICO_AL = { alerta: '⛔', atencao: '⚠', info: 'ℹ' };
+function cgPatioAlertasHtml() {
+  const al = cgAlertasPatio();
+  if (!al.length) return '';
+  return `<section class="cg-cartao cg-patio-alertas"><header class="cg-cartao-cab"><h3>Conferência com a situação de carga</h3><span class="cg-selo ${al.some((a) => a.grav === 'alerta') ? 'alerta' : 'amarelo'}">${al.length} ${al.length === 1 ? 'aviso' : 'avisos'}</span></header>
+      <ul class="cg-alertas">${al.slice(0, CG.alertasTodos ? 200 : 8).map((a) => `<li class="g-${a.grav}"><span aria-hidden="true">${CG_ICO_AL[a.grav]}</span><span>${esc(a.texto)}</span></li>`).join('')}</ul>
+      ${al.length > 8 ? `<button type="button" class="cg-link" onclick="CG.alertasTodos=!CG.alertasTodos;cgDesenhar()">${CG.alertasTodos ? 'Mostrar menos' : 'Ver todos os ' + al.length}</button>` : ''}</section>`;
+}
+function cgPatioFilaHtml() {
+  const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
+  return `<section class="cg-cartao cg-patio-fila${pode ? ' editavel' : ''}" ${pode ? `ondragover="cgSobreZona(event, 'carreg')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouCarreg(event, 0)"` : ''}>
+      <header class="cg-cartao-cab"><h3>Pátio — fila sem box</h3><span class="cg-selo neutro">${P.fila.length}</span></header>
+      <div class="cg-patio-cartoes">${P.fila.map((x) => cgCartaoCarregHtml(x)).join('') || `<p class="cg-vazio-txt">${pode ? 'Ninguém esperando. Arraste uma carga de um box para cá para liberar o box.' : 'Ninguém esperando sem box.'}</p>`}</div>
+      ${pode && P.fila.length ? '<p class="cg-nota">Arraste uma carga para a doca (ou toque na doca e escolha o box).</p>' : ''}
+    </section>`;
+}
+function cgPatioSemRegistroHtml() {
+  const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
+  return P.semRegistro.length ? `<details class="cg-cartao cg-sem-registro"><summary><b>Cargas do relatório sem registro no pátio</b> <span class="cg-selo neutro">${P.semRegistro.length}</span></summary>
+      <ul class="cg-lista">${P.semRegistro.slice(0, 80).map((x) => `<li class="cg-item"><span class="cg-item-nro">${esc(x.n)}${x.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(x.nm || '—')}<small>${esc(x.v || 'sem veículo')}${x.bx ? ' · box ' + esc(x.bx) + ' no relatório' : ''} · ${Math.round(x.pct)}% ${esc(CG_SEQ_ESTADO[x.estado] || '')}</small></span>
+        ${pode ? `<button type="button" class="cg-btn cg-btn-claro" onclick="cgFormCarregamento('', { carga: ${jsArg(x.n)}, box: ${jsArg(x.bx || '')} })">+ Registrar</button>` : ''}</li>`).join('')}</ul></details>` : '';
+}
+function cgPatioCarregadasHtml() {
+  const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
+  return P.carregadas.length ? `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Carregadas nas últimas 24 h</h3><span class="cg-selo ok">${P.carregadas.length}</span></header>
+      <ul class="cg-lista">${P.carregadas.map((x) => `<li class="cg-item"><span class="cg-item-nro">${esc(x.n)}${x.loja ? ' <i class="cg-loja-tag">Loja</i>' : ''}</span>
+        <span class="cg-item-nome">${esc((x.pdf && x.pdf.nm) || x.veiculo || '—')}<small>${x.box ? 'box ' + x.box + ' · ' : ''}${esc(x.veiculo || CG_VEIC[cgTipoVeiculoCli(x.tipo)].nome)}${x.chegada ? ' · chegou ' + esc(cgHora(x.chegada)) : ''} · carregada ${esc(cgDiaHora(x.carregadaEm))}</small></span>
+        ${pode ? `<button type="button" class="cg-link" onclick="cgCarregOp(${jsArg(x.id)}, 'reabrir')">Reabrir</button>` : ''}</li>`).join('')}</ul></section>` : '';
+}
+/* A vista "Detalhes": os cartoes das docas (a vista antiga), com o patio, os avisos e as carregadas. */
+function cgPatioHtml() {
+  const d = CG.dados, P = d.patio, pode = d.podeEditar && !CG.hist;
+  if (!P) return '';
+  const c = P.contagem;
+  const kpi = (n, rot, cls) => `<div class="cg-seq-kpi ${cls || ''}"><b class="cg-num">${n}</b><span>${rot}</span></div>`;
+  return `<section class="cg-cartao cg-patio-cab">
+      <header class="cg-cartao-cab"><h3>${CG_SVG.caminhao}Boxes e pátio — detalhes</h3>
+        ${pode ? `<span class="cg-patio-botoes"><button type="button" class="cg-btn cg-btn-primario" onclick="cgFormCarregamento('')">+ Registrar carga</button>
+          <button type="button" class="cg-link" onclick="cgImportarBoxes()">Importar da planilha antiga</button></span>` : ''}</header>
+      <div class="cg-seq-kpis">${kpi(c.livres, 'boxes livres', 'ok')}${kpi(c.reservados, 'reservados')}${kpi(c.ocupados, 'com veículo')}${kpi(c.bloqueados, 'bloqueados', c.bloqueados ? 'atencao' : '')}
+        ${kpi(c.fila, 'no pátio (sem box)')}${kpi(c.carregadasHoje, 'carregadas (24 h)', 'ok')}</div>
+      <p class="cg-legenda-patio"><span class="lv">Livre</span><span class="rs">Reservado (veículo não chegou)</span><span class="oc">Ocupado</span><span class="cr">Carregando</span><span class="bl">Bloqueado</span></p>
+    </section>
+    ${cgPatioAlertasHtml()}
+    ${cgPatioFilaHtml()}
+    <div class="cg-docas" role="list" aria-label="Boxes">${cgMapaNaOrdem().map(cgDocaHtml).join('')}</div>
+    ${cgPatioSemRegistroHtml()}
+    ${cgPatioCarregadasHtml()}`;
+}
+/* As docas na ordem do CD (CARGA_BOXES_ORDEM: 26, 25 ... 1); as que ficaram fora da ordem vao para o fim. */
+function cgMapaNaOrdem() {
+  const P = CG.dados.patio, ordem = (P.ordem || []).filter((n) => n >= 1 && n <= P.mapa.length);
+  const vistos = {};
+  const lista = ordem.map((n) => { vistos[n] = 1; return P.mapa[n - 1]; });
+  return lista.concat(P.mapa.filter((b) => !vistos[b.numero]));
+}
+function cgLojaRotulo(b) { return b && b.loja ? 'Reservado · Loja ' + b.loja : ''; }
+function cgDocaHtml(b) {
+  const pode = CG.dados.podeEditar && !CG.hist;
+  const x0 = b.itens.find((x) => x.noBox) || b.itens.find((x) => !x.virtual) || null;
+  const est = b.estado.toLowerCase();
+  return `<div class="cg-doca est-${est}${b.loja ? ' loja' : ''}" role="listitem" data-box="${b.numero}" aria-label="Box ${b.numero}: ${esc(CG_BOX_EST[b.estado])}${b.loja ? ' · ' + esc(cgLojaRotulo(b)) : ''}"
+      ${pode && b.estado !== 'BLOQUEADO' ? `ondragover="cgSobreZona(event, 'carreg')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouCarreg(event, ${b.numero})"` : ''}>
+    <header class="cg-doca-cab"><button type="button" class="cg-doca-num" onclick="cgPainelDoca(${b.numero})" title="Abrir o box ${b.numero}">BOX <b class="cg-num">${b.numero}</b></button>
+      <span class="cg-doca-est">${esc(CG_BOX_EST[b.estado])}</span></header>
+    ${b.loja ? `<p class="cg-doca-loja">${esc(cgLojaRotulo(b))}</p>` : ''}
+    <div class="cg-doca-palco">${b.estado === 'BLOQUEADO' ? `<span class="cg-doca-bloq">⛔ ${esc(b.obs || 'bloqueado')}</span>` :
+      (x0 ? cgVeiculoSvg(x0.tipo, b.estado === 'RESERVADO' ? 'fantasma' : '') : `<span class="cg-doca-vazia">${b.itens.length ? 'sem veículo' : 'livre'}</span>`)}</div>
+    ${x0 ? `<p class="cg-doca-veic">${esc(x0.veiculo || '')}${x0.veiculo ? ' · ' : ''}${esc(CG_VEIC[cgTipoVeiculoCli(x0.tipo)].nome)}${x0.motorista ? ' · ' + esc(x0.motorista) : ''}</p>
+      <p class="cg-doca-tempo">${b.noBox ? `encostou às ${esc(cgHora(b.noBox))}` : (x0.previsao ? 'previsão ' + esc(x0.previsao) : 'aguardando o veículo')}</p>` : ''}
+    ${b.itens.map((x) => cgCargaNaDocaHtml(x)).join('')}
+  </div>`;
+}
+/* % sem arredondar para cima: 99,6% de uma carga que nao terminou aparece 99%, nunca 100%. */
+function cgPctBaixo(p) { return p == null ? '—' : (p >= 100 ? 100 : Math.floor(p)) + '%'; }
+function cgBarraMini(rot, p, cls) { return `<span class="cg-bm"><small>${rot}</small><span class="cg-trilho"><i class="${cls}" style="width:${Math.max(0, Math.min(100, p || 0)).toFixed(0)}%"></i></span><b class="cg-num">${cgPctBaixo(p)}</b></span>`; }
+/* A carga da loja que o relatorio ja poe no box da loja (sem registro): Carregada cria o registro ja carregado. */
+function cgLojaCarregada(n, box) { return cgAoVivo('carregamentoCarga', { op: 'salvar', carga: n, box: box, carregada: 'SIM' }, () => {}, () => {}); }
+function cgCargaDaLojaHtml(x) {
+  const pode = CG.dados.podeEditar && !CG.hist, p = x.pdf;
+  return `<div class="cg-doca-carga loja" data-n="${esc(x.n)}">
+    <span class="cg-doca-carga-cab"><b class="cg-num">${esc(x.n)}</b>${p && p.h ? '<i class="cg-24">24 h</i>' : ''}<i class="cg-loja-tag" title="Carga da Loja ${esc(x.loja)}">Loja</i>
+      <span class="cg-doca-pct">${p ? cgPctBaixo(p.pct) : ''}</span></span>
+    ${p && p.nm ? `<small class="cg-doca-gargalo">${esc(p.nm)}</small>` : ''}
+    ${p ? `<span class="cg-doca-barras">${cgBarraMini('sep', p.sep, 'azul')}${cgBarraMini('conf', p.conf, 'cor-conf')}</span>
+      <small class="cg-doca-gargalo">${p.estado === 'pronta' ? '✓ pronta' : (p.gargalo ? 'gargalo: ' + esc(cgNomeDep(p.gargalo)) : esc(CG_SEQ_ESTADO[p.estado] || ''))} · Loja ${esc(x.loja)}</small>` : ''}
+    ${pode ? `<span class="cg-doca-acoes"><button type="button" class="ok" onclick="cgLojaCarregada(${jsArg(x.n)}, ${x.box})">Carregada</button>
+      <button type="button" onclick="cgFormCarregamento('', { carga: ${jsArg(x.n)}, box: ${x.box} })">Registrar</button></span>` : ''}
+  </div>`;
+}
+function cgCargaNaDocaHtml(x) {
+  if (x.virtual) return cgCargaDaLojaHtml(x);
+  const pode = CG.dados.podeEditar && !CG.hist, p = x.pdf;
+  return `<div class="cg-doca-carga et-${x.etapa.toLowerCase()}" ${pode ? `draggable="true" ondragstart="cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()"` : ''} data-id="${esc(x.id)}">
+    <button type="button" class="cg-doca-carga-cab" onclick="cgMenuCarregamento(${jsArg(x.id)})"><b class="cg-num">${esc(x.n)}</b>${p && p.h ? '<i class="cg-24">24 h</i>' : ''}${x.loja ? `<i class="cg-loja-tag" title="Carga da Loja ${esc(x.loja)}">Loja</i>` : ''}${x.prio ? `<i class="cg-prio">prior. ${esc(x.prio)}</i>` : ''}
+      <span class="cg-doca-pct">${p ? cgPctBaixo(p.pct) : 'fora do PDF'}</span></button>
+    ${p ? `<span class="cg-doca-barras">${cgBarraMini('sep', p.sep, 'azul')}${cgBarraMini('conf', p.conf, 'cor-conf')}</span>
+      <small class="cg-doca-gargalo">${p.estado === 'pronta' ? '✓ pronta' : (p.gargalo ? 'gargalo: ' + esc(cgNomeDep(p.gargalo)) : esc(CG_SEQ_ESTADO[p.estado] || ''))}</small>` : ''}
+    ${x.situacao ? `<span class="cg-sit cat-${x.situacaoCat || 'outra'}">${esc(x.situacao)}</span>` : ''}
+    ${pode ? `<span class="cg-doca-acoes">${x.etapa === 'CARREGANDO' ? '' : (x.noBox ? `<button type="button" onclick="cgCarregOp(${jsArg(x.id)}, 'carregando')">Carregando</button>` : `<button type="button" onclick="cgCarregOp(${jsArg(x.id)}, 'chegou')">Chegou</button>`)}
+      <button type="button" class="ok" onclick="cgCarregOp(${jsArg(x.id)}, 'carregada')">Carregada</button>
+      <button type="button" class="mais" onclick="cgMenuCarregamento(${jsArg(x.id)})" aria-label="Mais ações da carga ${esc(x.n)}">⋯</button></span>` : ''}
+  </div>`;
+}
+function cgCartaoCarregHtml(x) {
+  const pode = CG.dados.podeEditar, p = x.pdf;
+  return `<div class="cg-carreg" ${pode ? `draggable="true" ondragstart="cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()"` : ''} data-id="${esc(x.id)}">
+    <div class="cg-carreg-veic">${cgVeiculoSvg(x.tipo, x.chegada ? '' : 'fantasma')}</div>
+    <button type="button" class="cg-doca-carga-cab" onclick="cgMenuCarregamento(${jsArg(x.id)})"><b class="cg-num">${esc(x.n)}</b>${p && p.h ? '<i class="cg-24">24 h</i>' : ''}${x.prio ? `<i class="cg-prio">prior. ${esc(x.prio)}</i>` : ''}
+      <span class="cg-doca-pct">${p ? cgPctBaixo(p.pct) : 'fora do PDF'}</span></button>
+    <small>${esc(x.veiculo || CG_VEIC[cgTipoVeiculoCli(x.tipo)].nome)}${x.chegada ? ' · no pátio desde ' + esc(cgHora(x.chegada)) : (x.previsao ? ' · previsão ' + esc(x.previsao) : '')}${p && p.bx ? ' · box ' + esc(p.bx) + ' no relatório' : ''}</small>
+    ${x.situacao ? `<span class="cg-sit cat-${x.situacaoCat || 'outra'}">${esc(x.situacao)}</span>` : ''}
+  </div>`;
+}
+function cgSoltouCarreg(ev, box) {
+  const id = cgArrastado(ev, 'carreg');
+  if (!id) return;
+  ev.preventDefault(); ev.stopPropagation();
+  cgSoltouFim();
+  document.documentElement.classList.remove('cg-arrastando-carreg');
+  cgCarregBox(id, box);
+}
+function cgAcharCarreg(id) {
+  const P = CG.dados.patio;
+  if (!id) return null;
+  let x = P.fila.find((i) => i.id === id);
+  if (x) return x;
+  P.mapa.some((b) => { x = b.itens.find((i) => i.id === id); return !!x; });
+  return x || P.carregadas.find((i) => i.id === id) || null;
+}
+function cgEstadoDoBox(b) {
+  if (b.estado === 'BLOQUEADO') return 'BLOQUEADO';
+  if (b.itens.some((x) => x.etapa === 'CARREGANDO')) return 'CARREGANDO';
+  if (b.itens.some((x) => x.noBox)) return 'OCUPADO';
+  return b.itens.length ? 'RESERVADO' : 'LIVRE';
+}
+/* Arrastar para um box (ou de volta ao patio): otimista. */
+function cgCarregBox(id, box) {
+  const P = CG.dados.patio, x = cgAcharCarreg(id);
+  if (!x || x.box === box) return;
+  const antes = JSON.stringify(P);
+  cgAoVivo('carregamentoCarga', { op: 'box', id: id, box: box }, () => {
+    P.fila = P.fila.filter((i) => i.id !== id);
+    P.mapa.forEach((b) => { b.itens = b.itens.filter((i) => i.id !== id); });
+    x.box = box;
+    if (!box) { x.etapa = 'FILA'; x.noBox = ''; P.fila.push(x); }
+    else { if (x.etapa === 'FILA') x.etapa = 'BOX'; x.noBox = x.chegada ? cgIsoLocalAgora() : ''; P.mapa[box - 1].itens.push(x); }
+    P.mapa.forEach((b) => { if (b.estado !== 'BLOQUEADO') b.estado = cgEstadoDoBox(b); b.noBox = b.itens.filter((i) => i.noBox).map((i) => i.noBox).sort()[0] || ''; });
+  }, () => { CG.dados.patio = JSON.parse(antes); });
+}
+function cgCarregOp(id, op, extra) {
+  return cgAoVivo('carregamentoCarga', Object.assign({ op: op, id: id }, extra || {}), () => {}, () => {});
+}
+function cgMenuCarregamento(id) {
+  const x = cgAcharCarreg(id);
+  if (!x) return;
+  const pode = CG.dados.podeEditar, P = CG.dados.patio, p = x.pdf;
+  const op = (rot, o, cls, ext) => `<button type="button" class="cg-opcao ${cls || ''}" onclick="fecharJanela(); cgCarregOp(${jsArg(id)}, ${jsArg(o)}${ext ? ', ' + ext : ''})">${rot}</button>`;
+  abrirJanela('Carga ' + x.n, `<div class="cg-mover cg-carreg-menu">
+    <div class="cg-carreg-menu-veic">${cgVeiculoSvg(x.tipo)}</div>
+    <p class="cg-mover-quem"><b>${esc(x.n)}${p ? ' · ' + esc(p.nm) : ''}</b><span>${esc(CG_ETAPA_NOME[x.etapa])}${x.box ? ' · box ' + x.box : ''} · ${esc(x.veiculo || '')} ${esc(CG_VEIC[cgTipoVeiculoCli(x.tipo)].nome)}${x.motorista ? ' · ' + esc(x.motorista) : ''}${x.chegada ? ' · chegou ' + esc(cgHora(x.chegada)) : ''}${x.previsao ? ' · horário de chegada ' + esc(x.previsao) : ''}${x.descricao ? ' · ' + esc(x.descricao) : ''}</span></p>
+    ${p ? `<p class="cg-carreg-menu-pdf">${cgBarraMini('separação', p.sep, 'azul')}${cgBarraMini('conferência', p.conf, 'cor-conf')}<small>${p.estado === 'pronta' ? '✓ pronta para expedir' : (p.gargalo ? 'gargalo: ' + esc(cgNomeDep(p.gargalo)) : '')}${p.bx ? ' · box ' + esc(p.bx) + ' no relatório' : ''}</small></p>` : '<p class="cg-nota">Esta carga não está na situação de carga mais recente.</p>'}
+    ${x.obs ? `<p class="cg-nota">${esc(x.obs)}</p>` : ''}
+    ${pode && x.etapa !== 'CARREGADA' ? `<div class="cg-mover-zonas">
+      ${x.noBox || x.etapa === 'CARREGANDO' ? '' : op('Chegou agora', 'chegou')}${x.box && x.etapa !== 'CARREGANDO' ? op('Carregando', 'carregando') : ''}${op('Carregada (libera o box)', 'carregada', 'ok')}
+      <button type="button" class="cg-opcao" onclick="fecharJanela(); cgFormCarregamento(${jsArg(id)})">Editar</button>
+      ${x.box ? op('Voltar ao pátio', 'box', '', '{ box: 0 }') : ''}</div>
+      <label class="cg-rotulo" for="cg-menu-box">Box</label>
+      <select id="cg-menu-box" onchange="const v = Number(this.value); fecharJanela(); cgCarregBox(${jsArg(id)}, v)">${cgOpcoesBox(x.box)}</select>
+      <label class="cg-rotulo" for="cg-menu-sit">Situação</label>
+      <select id="cg-menu-sit" onchange="const v = this.value; fecharJanela(); cgCarregOp(${jsArg(id)}, 'situacao', { situacao: v })"><option value="">(sem situação)</option>${P.situacoes.map((s) => `<option${s === x.situacao ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>
+      <button type="button" class="cg-link perigo" onclick="fecharJanela(); cgCarregOp(${jsArg(id)}, 'excluir')">Tirar do pátio (registro errado)</button>` : ''}
+    ${pode && x.etapa === 'CARREGADA' ? op('Reabrir (não foi carregada)', 'reabrir') : ''}
+    ${(x.hist || []).length ? `<details class="cg-carreg-hist"><summary>Histórico (${x.hist.length})</summary><ol>${x.hist.slice().reverse().map((h) => `<li><b>${esc(cgDataBr(h[0]))}</b> ${esc(h[1])}: ${esc(h[2])}</li>`).join('')}</ol></details>` : ''}
+  </div>`, '<button class="botao secundario" onclick="fecharJanela()">Fechar</button>');
+}
+function cgOpcoesBox(atual) {
+  const P = CG.dados.patio;
+  return `<option value="0"${!atual ? ' selected' : ''}>Pátio (sem box)</option>` + P.mapa.map((b) => `<option value="${b.numero}"${b.numero === atual ? ' selected' : ''}${b.estado === 'BLOQUEADO' ? ' disabled' : ''}>Box ${b.numero} — ${esc(CG_BOX_EST[b.estado])}${b.itens.length ? ' (' + b.itens.map((i) => i.n).join(', ') + ')' : ''}</option>`).join('');
+}
+function cgFormCarregamento(id, preset) {
+  const P = CG.dados.patio, x = id ? cgAcharCarreg(id) : null, v = Object.assign({}, x ? { carga: x.n, complemento: x.comp, prioridade: x.prio, box: x.box, veiculo: x.veiculo, tipo: x.tipo, motorista: x.motorista,
+    situacao: x.situacao, previsao: x.previsao, observacao: x.obs, descricao: x.descricao } : {}, preset || {});
+  const cargas = ((CG.vivo || CG.dados).snapshot || {}).cargas || [];
+  const tipoSel = cgTipoVeiculoCli(v.tipo || '');
+  abrirJanela(x ? 'Carga ' + x.n : 'Registrar carga no pátio', `<form class="cg-form cg-form-carreg" id="cg-form-carreg" onsubmit="event.preventDefault(); cgSalvarCarregamento(${jsArg(id || '')})">
+    <div class="cg-form-grade">
+      <label><span>Carga</span><input id="cgf-carga" list="cgf-cargas" required inputmode="numeric" autocomplete="off" value="${esc(v.carga || '')}" placeholder="763154 ou 154" ${x ? 'readonly' : ''}>
+        <datalist id="cgf-cargas">${cargas.slice(0, 400).map((c) => `<option value="${esc(c.n)}">${esc(c.nm)}</option>`).join('')}</datalist></label>
+      <label><span>Box</span><select id="cgf-box">${cgOpcoesBox(Number(v.box) || 0)}</select></label>
+      <label><span>Veículo (placa ou número)</span><input id="cgf-veiculo" maxlength="30" value="${esc(v.veiculo || '')}" autocomplete="off"></label>
+      <label><span>Motorista</span><input id="cgf-motorista" maxlength="80" list="cgl-motoristas" value="${esc(v.motorista || '')}" autocomplete="off" onchange="const m = cgMotoristaDoCadastro(this.value); if (m) { this.value = cgRotuloMotorista(m); if (m.placa && !val('cgf-veiculo')) el('cgf-veiculo').value = m.placa; }"></label>
+      <label><span>Descrição (destino)</span><input id="cgf-descricao" maxlength="80" list="cgl-destinos" value="${esc(v.descricao || '')}" autocomplete="off"></label>
+      <label><span>Observação (situação)</span><select id="cgf-situacao"><option value="">(sem situação)</option>${P.situacoes.map((s) => `<option${s === v.situacao ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
+      <label><span>Prioridade</span><input id="cgf-prioridade" maxlength="20" value="${esc(v.prioridade || '')}" placeholder="1, ALTA..."></label>
+      ${x ? '' : '<label><span>Chegada (se já chegou)</span><input id="cgf-chegada" type="time"></label>'}
+      <label><span>Horário de chegada</span><input id="cgf-previsao" type="time" value="${esc(v.previsao || '')}"></label>
+      <label><span>Complemento</span><input id="cgf-complemento" maxlength="40" value="${esc(v.complemento || '')}"></label>
+    </div>
+    <fieldset class="cg-tipos"><legend>Tipo de veículo</legend>${P.tipos.map((t) => `<label class="cg-tipo${t === tipoSel && (v.tipo || '') ? ' sel' : ''}"><input type="radio" name="cgf-tipo" value="${t}"${t === tipoSel && (v.tipo || '') ? ' checked' : ''} onchange="document.querySelectorAll('.cg-tipo').forEach((e) => e.classList.toggle('sel', e.contains(this)))">${cgVeiculoSvg(t)}<span>${esc(CG_VEIC[t].nome)}</span></label>`).join('')}</fieldset>
+    <label class="cg-rotulo" for="cgf-obs">Observação</label><textarea id="cgf-obs" rows="2" maxlength="300">${esc(v.observacao || '')}</textarea>
+    <p class="cg-nota">Sem tipo marcado, o GSL usa o veículo da situação de carga. Enter salva.</p>${cgCtlListasHtml()}
+    <button type="submit" class="oculto" aria-hidden="true" tabindex="-1"></button>
+  </form>`, `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" id="cgf-salvar" onclick="cgSalvarCarregamento(${jsArg(id || '')})">Salvar</button>`);
+  setTimeout(() => { const i = el(x ? 'cgf-box' : 'cgf-carga'); if (i) i.focus(); }, 50);
+}
+async function cgSalvarCarregamento(id) {
+  const tipo = (document.querySelector('input[name="cgf-tipo"]:checked') || {}).value || '';
+  const params = { op: 'salvar', id: id, carga: val('cgf-carga'), box: Number(val('cgf-box')) || 0, veiculo: val('cgf-veiculo'), motorista: val('cgf-motorista'),
+    situacao: val('cgf-situacao'), prioridade: val('cgf-prioridade'), previsao: val('cgf-previsao'), complemento: val('cgf-complemento'), observacao: val('cgf-obs'), tipo: tipo,
+    descricao: val('cgf-descricao') };
+  if (el('cgf-chegada')) params.chegada = val('cgf-chegada');
+  const b = el('cgf-salvar'); if (b) b.disabled = true;
+  const ok = await cgAoVivo('carregamentoCarga', params, () => {}, () => {});
+  if (ok) fecharJanela(); else if (b) b.disabled = false;
+}
+function cgMenuBox(n) { cgPainelDoca(n); }
+/*
+ * O PAINEL DE UMA DOCA (toque ou clique na coluna do quadro, ou no numero do cartao): o veiculo, as cargas com
+ * Chegou / Carregando / Carregada / editar, os avisos do box, a reserva da loja, registrar e bloquear. Fica
+ * aberto e se atualiza sozinho quando o patio muda (ao vivo ou depois de uma acao).
+ */
+function cgPainelDoca(n) {
+  const P = CG.dados.patio;
+  if (!P || !P.mapa[n - 1]) return;
+  abrirJanela('Box ' + n, cgPainelDocaHtml(n), '<button class="botao secundario" onclick="fecharJanela()">Fechar</button>');
+}
+function cgPainelDocaHtml(n) {
+  const P = CG.dados.patio, b = P.mapa[n - 1], pode = CG.dados.podeEditar && !CG.hist;
+  if (!b) return '';
+  const x0 = b.itens.find((x) => x.noBox) || b.itens.find((x) => !x.virtual) || null;
+  const al = cgAlertasPatio().filter((a) => a.box === n);
+  const est = b.estado.toLowerCase();
+  return `<div class="cg-mover cg-doca-painel" data-box="${n}">
+    <div class="cg-dp-topo"><span class="cg-dp-num cg-num">${n}</span><span class="cg-dp-est cg-sb-est-${est}">${esc(cgSbEstadoTexto(b))}</span>
+      ${b.loja ? `<span class="cg-dp-loja">${esc(cgLojaRotulo(b))}</span>` : ''}${b.estado === 'BLOQUEADO' && b.obs ? `<span class="cg-dp-loja">${esc(b.obs)}</span>` : ''}</div>
+    ${x0 ? `<div class="cg-dp-veic"><div class="cg-carreg-menu-veic">${cgVeiculoSvg(x0.tipo, b.estado === 'RESERVADO' ? 'fantasma' : '')}</div>
+      <p class="cg-mover-quem"><b>${esc(x0.veiculo || CG_VEIC[cgTipoVeiculoCli(x0.tipo)].nome)}</b><span>${esc(CG_VEIC[cgTipoVeiculoCli(x0.tipo)].nome)}${x0.motorista ? ' · ' + esc(x0.motorista) : ''}${b.noBox ? ' · encostou às ' + esc(cgHora(b.noBox)) : (x0.previsao ? ' · previsão ' + esc(x0.previsao) : ' · aguardando o veículo')}</span></p></div>` : ''}
+    ${al.length ? `<ul class="cg-alertas">${al.map((a) => `<li class="g-${a.grav}"><span aria-hidden="true">${CG_ICO_AL[a.grav]}</span><span>${esc(a.texto)}</span></li>`).join('')}</ul>` : ''}
+    <div class="cg-dp-cargas">${b.itens.map(cgCargaNaDocaHtml).join('') || `<p class="cg-nota">${b.estado === 'BLOQUEADO' ? 'Box bloqueado.' : 'Nenhuma carga neste box.'}</p>`}</div>
+    ${pode ? (b.estado === 'BLOQUEADO' ? `<button type="button" class="cg-opcao" onclick="fecharJanela(); cgAoVivo('boxCarga', { numero: ${n}, estado: 'LIVRE' }, () => {}, () => {})">Liberar o box</button>` :
+      `<button type="button" class="cg-opcao" onclick="fecharJanela(); cgFormCarregamento('', { box: ${n} })">+ Registrar carga neste box</button>
+      ${b.itens.some((x) => !x.virtual) ? '' : `<label class="cg-rotulo" for="cg-box-obs">Bloquear (motivo)</label><input id="cg-box-obs" maxlength="120" placeholder="porta quebrada, manutenção...">
+      <button type="button" class="cg-opcao tirar" onclick="const o = val('cg-box-obs'); fecharJanela(); cgAoVivo('boxCarga', { numero: ${n}, estado: 'BLOQUEADO', obs: o }, () => {}, () => {})">Bloquear o box</button>`}`) : ''}
+  </div>`;
+}
+/* Depois de redesenhar: o painel da doca aberto mostra o estado novo (o campo que esta sendo digitado fica). */
+function cgAtualizarPainelDoca() {
+  const j = el('janela'), p = j && !j.classList.contains('oculto') ? j.querySelector('.cg-doca-painel') : null;
+  if (!p || (document.activeElement && p.contains(document.activeElement) && document.activeElement.tagName === 'INPUT')) return;
+  el('janela-corpo').innerHTML = cgPainelDocaHtml(Number(p.dataset.box));
+}
+function cgImportarBoxes() {
+  abrirJanela('Importar da planilha antiga', `<div class="cg-envio"><p>Uma vez, para começar com o estado de hoje: o GSL <b>lê</b> as abas <b>Controle</b>, <b>Situação dos BOXs</b> e <b>Cadastro</b> e cria o pátio (box, carro, descrição, motorista, observação, horário de chegada) e os cadastros (motoristas, destinos, horários, observações). A carga marcada como carregada não entra; a que já está no GSL fica como está. <b>A planilha não é alterada.</b></p>
+    <label class="cg-rotulo" for="cg-imp-link">Link da planilha (a conta dona do GSL precisa ter acesso de leitura)</label>
+    <input id="cg-imp-link" type="url" placeholder="docs.google.com/spreadsheets/d/..."></div>`,
+    `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="agir('importarBoxesCarga', { link: val('cg-imp-link') })">Importar</button>`);
+}
+
+
+function cgIsoLocalAgora() {
+  const d = new Date(), z = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds());
+}
+
+/* ---------------- TURNOS E PASSAGEM DE TURNO ---------------- */
+function cgTurnosHtml() {
+  const d = CG.dados, ta = cgTurnoAgoraCli(), turnos = d.turnos || [], pode = d.podeEditar;
+  const faltas = cgFaltasAtivas();
+  return `<div class="cg-duas largo">
+      <section class="cg-cartao cg-turnos-agora">
+        <header class="cg-cartao-cab"><h3>${CG_SVG.relogio}Turnos agora · ${esc(cgHoraAgora())}</h3>
+          <span class="cg-turnos-ativos">${ta.ativos.length ? ta.ativos.map((t) => `<span class="cg-turno-chip t-${t}">Turno ${t}</span>`).join('') : '<span class="cg-selo">nenhum turno</span>'}${ta.passagem ? '<span class="cg-selo amarelo">⇄ passagem</span>' : ''}</span></header>
+        ${cgLinhaTurnosSvg(turnos, ta.min)}
+        <ul class="cg-turnos-lista">${turnos.map((t) => `<li><span class="cg-turno-chip t-${t.id}">Turno ${t.id}</span> ${esc(t.texto)}${t.cruza ? ' <small>(passa da meia-noite)</small>' : ''} · <small>${esc(t.equipe)} no Quadro do CD</small></li>`).join('')}</ul>
+        <p class="cg-nota">Os "Disponíveis" mostram quem é do turno em serviço agora (na sobreposição, os dois). ADM e quem não tem turno no Quadro aparecem nos chips ADM, Outros e Todos.</p>
+      </section>
+      ${cgPassagemHtml()}
+    </div>
+    <div class="cg-duas">
+      <section class="cg-cartao"><header class="cg-cartao-cab"><h3>Faltas deste turno</h3><span class="cg-selo ${faltas.length ? 'alerta' : 'ok'}">${faltas.length ? faltas.length + (faltas.length === 1 ? ' falta' : ' faltas') : 'ninguém'}</span></header>
+        ${faltas.length ? `<ul class="cg-lista">${faltas.map((f) => `<li class="cg-item"><span class="cg-item-nro cg-txt-alerta">✕</span>
+          <span class="cg-item-nome">${esc(cgTitulo(f.nome))}<small>${esc(f.equipe || '')} · marcada${f.porNome ? ' por ' + esc(f.porNome) : ''}${f.em ? ' às ' + esc(String(f.em).slice(11, 16)) : ''} · vale até o fim do turno</small></span>
+          ${pode ? `<button type="button" class="cg-link" onclick="cgMarcarFalta(${jsArg(f.k)}, false)">Desfazer</button>` : ''}</li>`).join('')}</ul>` :
+          '<p class="cg-vazio-txt">Nenhuma falta marcada. Toque numa pessoa (Equipe ou um depósito) e escolha "Faltou hoje".</p>'}
+      </section>
+      ${pode ? cgAjustesHtml() : ''}
+    </div>
+    ${cgPassagensHtml()}`;
+}
+function cgLinhaTurnosSvg(turnos, agora) {
+  const W = 640, x = (m) => 12 + m / 1440 * (W - 24);
+  const faixas = turnos.map((t, i) => {
+    const y = 14 + i * 22;
+    const seg = t.cruza ? [[t.ini, 1440], [0, t.fim]] : [[t.ini, t.fim]];
+    const maior = seg.slice().sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
+    const meio = Math.max(60, Math.min(W - 60, x((maior[0] + maior[1]) / 2)));
+    return seg.map((s) => `<rect x="${x(s[0]).toFixed(1)}" y="${y}" width="${(x(s[1]) - x(s[0])).toFixed(1)}" height="16" rx="5" class="cg-tl-${t.id}"/>`).join('') +
+      `<text x="${meio.toFixed(1)}" y="${y + 12}" class="cg-tl-txt${maior[1] - maior[0] < 200 ? ' fora' : ''}" text-anchor="middle">${t.id} ${esc(t.texto)}</text>`;
+  }).join('');
+  const horas = [0, 6, 12, 18, 24].map((h) => `<text x="${x(h * 60).toFixed(1)}" y="92" class="cg-grade-txt" text-anchor="middle">${String(h).padStart(2, '0')}h</text>`).join('');
+  return `<svg class="cg-tl" viewBox="0 0 ${W} 96" role="img" aria-label="Horário dos turnos e a hora de agora">${faixas}${horas}
+    <line x1="${x(agora).toFixed(1)}" x2="${x(agora).toFixed(1)}" y1="6" y2="82" class="cg-tl-agora"/><text x="${x(agora).toFixed(1)}" y="5" class="cg-tl-agora-txt" text-anchor="middle">agora</text></svg>`;
+}
+/* O retrato da passagem, ao vivo (o mesmo cgResumoPassagem_ do servidor). */
+function cgResumoPassagemCli() {
+  const d = CG.vivo || CG.dados, s = d.snapshot;
+  const abertas = ((s && s.cargas) || []).map((c) => { const e = cgEstadoCarga(c); return { n: c.n, nm: c.nm, h: c.h ? 1 : 0, bx: c.bx || '', pct: e.pct, estado: e.estado, gargalo: e.gargalo }; })
+    .filter((x) => x.estado === 'andamento' || x.estado === 'naoIniciada').sort((a, b) => (b.h - a.h) || (a.pct - b.pct) || String(a.n).localeCompare(String(b.n)));
+  const alocacao = {};
+  (d.depositos || []).forEach((x) => { alocacao[x.id] = { sep: 0, conf: 0 }; });
+  (d.equipe || []).forEach((p) => { const x = alocacao[p.dep]; if (x) x[p.papel === 'CONFERENTE' ? 'conf' : 'sep']++; });
+  const c = cgConsumo();
+  return { abertas: abertas.length, h24: abertas.filter((x) => x.h).length, cargas: abertas.slice(0, 20), alocacao: alocacao, pessoas: (d.equipe || []).length,
+    manutencao: (d.equipamentos || []).filter((e) => e.estado === 'MANUTENCAO').map((e) => ({ tipo: e.tipo, numero: e.numero, dep: e.tipo === 'CHECKOUT' ? e.dep : '', obs: e.obs || '' })),
+    faltam: Object.keys(c).reduce((o, k) => { o[k] = c[k].falta; return o; }, {}), faltas: cgFaltasAtivas().map((f) => ({ nome: f.nome, equipe: f.equipe })), emitido: s ? s.emitido : '' };
+}
+/* "2 paleteiras · 1 check-out na Miudeza" (aceita o resumo antigo, com um CHECKOUT so). */
+function cgFaltandoTxt(f) {
+  if (!f) return '';
+  const nome = { PALETEIRA: ['paleteira', 'paleteiras', ''], CHECKOUT: ['check-out', 'check-outs', ''], CHECKOUT_MIUDEZA: ['check-out', 'check-outs', ' na Miudeza'], CHECKOUT_NOBRE: ['check-out', 'check-outs', ' no Nobre'] };
+  return Object.keys(nome).filter((k) => f[k]).map((k) => f[k] + ' ' + nome[k][f[k] === 1 ? 0 : 1] + nome[k][2]).join(' · ');
+}
+function cgResumoPassagemHtml(re) {
+  if (!re) return '';
+  const deps = (CG.dados.depositos || []);
+  return `<div class="cg-pas-resumo">
+    <p class="cg-pas-numeros"><span><b class="cg-num">${re.abertas}</b> cargas abertas</span><span><b class="cg-num">${re.h24}</b> de 24 h</span><span><b class="cg-num">${re.pessoas}</b> pessoas alocadas</span>
+      <span><b class="cg-num">${re.manutencao.length}</b> em manutenção</span><span><b class="cg-num">${re.faltas.length}</b> ${re.faltas.length === 1 ? 'falta' : 'faltas'}</span>${re.emitido ? `<small>situação de ${esc(cgDataBr(re.emitido))}</small>` : ''}</p>
+    ${re.cargas.length ? `<ol class="cg-pas-cargas">${re.cargas.slice(0, 10).map((x) => `<li><b class="cg-num">${esc(x.n)}</b>${x.h ? '<i class="cg-24">24 h</i>' : ''} <span>${esc(x.nm || '')}</span>
+      <small>${Math.round(x.pct)}%${x.gargalo ? ' · gargalo ' + esc(cgNomeDep(x.gargalo)) : ''}</small></li>`).join('')}</ol>` : '<p class="cg-vazio-txt">Nenhuma carga aberta.</p>'}
+    <p class="cg-pas-aloc">${deps.map((x) => { const a = re.alocacao[x.id] || { sep: 0, conf: 0 }; return `<span>${esc(x.nome)} <b class="cg-num">${a.sep}</b>/<b class="cg-num">${a.conf}</b></span>`; }).join('')}<small>separadores / conferentes</small></p>
+    ${re.manutencao.length ? `<p class="cg-pas-linha"><b>Manutenção:</b> ${re.manutencao.map((e) => esc(cgNomeEquip(e) + (e.obs ? ' (' + e.obs + ')' : ''))).join(', ')}</p>` : ''}
+    ${cgFaltandoTxt(re.faltam) ? `<p class="cg-pas-linha cg-txt-alerta"><b>Faltando:</b> ${esc(cgFaltandoTxt(re.faltam))}</p>` : ''}
+    ${re.faltas.length ? `<p class="cg-pas-linha"><b>Faltas:</b> ${re.faltas.map((f) => esc(cgNomeCurto(f.nome))).join(', ')}</p>` : ''}
+  </div>`;
+}
+function cgPassagemHtml() {
+  const d = CG.dados, pode = d.podeEditar, p = cgPassagemDeAgora();
+  const ultima = (d.passagens || [])[0];
+  if (!p) {
+    const ta = cgTurnoAgoraCli(), prox = cgProximaPassagem();
+    return `<section class="cg-cartao cg-passagem"><header class="cg-cartao-cab"><h3>🤝 Passagem de turno</h3>${prox ? `<span class="cg-selo neutro">próxima: ${esc(prox.sai)} → ${esc(prox.entra)} às ${esc(prox.as)}</span>` : ''}</header>
+      <p class="cg-nota">Na sobreposição dos turnos, quem sai confirma o resumo (cargas abertas, gargalos, alocação, manutenção, faltas) e quem entra marca "Ciente".${ta.ativos.length ? ' Agora: turno ' + ta.ativos.join(' + ') + '.' : ''}</p>
+      ${ultima ? cgPassagemRegistroHtml(ultima, false) : ''}
+      ${pode ? `<details><summary>Registrar uma passagem fora do horário</summary><div class="cg-pas-manual">
+        <label>Sai <select id="cg-pas-sai">${['A', 'B', 'C'].map((t) => `<option>${t}</option>`).join('')}</select></label>
+        <label>Entra <select id="cg-pas-entra">${['B', 'C', 'A'].map((t) => `<option>${t}</option>`).join('')}</select></label>
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgConfirmarPassagem(val('cg-pas-sai'), val('cg-pas-entra'))">Confirmar o resumo de agora</button></div></details>` : ''}
+    </section>`;
+  }
+  const reg = p.reg;
+  return `<section class="cg-cartao cg-passagem ativa"><header class="cg-cartao-cab"><h3>🤝 Passagem do turno ${esc(p.sai)} para o ${esc(p.entra)}</h3>
+      <span class="cg-selo ${!reg ? 'amarelo' : (reg.cienteEm ? 'ok' : 'neutro')}">${!reg ? 'por confirmar' : (reg.cienteEm ? 'ciente' : 'aguardando ciente')}</span></header>
+    ${!reg ? `<p class="cg-nota">O turno ${esc(p.sai)} sai às ${esc(p.ate)}. Confira o resumo de agora e confirme; o turno ${esc(p.entra)} marca "Ciente".</p>
+      ${cgResumoPassagemHtml(cgResumoPassagemCli())}
+      ${pode ? `<label class="cg-rotulo" for="cg-pas-obs">Recado para o turno ${esc(p.entra)} (opcional)</label><textarea id="cg-pas-obs" rows="2" maxlength="400"></textarea>
+        <button type="button" class="cg-btn cg-btn-primario" onclick="cgConfirmarPassagem(${jsArg(p.sai)}, ${jsArg(p.entra)})">Confirmar a passagem (turno ${esc(p.sai)})</button>` : ''}` :
+      cgPassagemRegistroHtml(reg, pode)}
+  </section>`;
+}
+function cgPassagemRegistroHtml(reg, pode) {
+  return `<div class="cg-pas-reg">
+    <p class="cg-pas-quem">✔ Confirmada por <b>${esc(reg.confirmadoNome || reg.confirmadoPor)}</b> ${esc(cgDiaHora(reg.confirmadoEm))} (turno ${esc(reg.sai)} → ${esc(reg.entra)})
+      ${reg.cienteEm ? ` · <b>Ciente</b>: ${esc(reg.cienteNome || reg.cientePor)} ${esc(cgDiaHora(reg.cienteEm))}` : ' · <b class="cg-txt-alerta">falta o ciente</b>'}</p>
+    ${reg.obs ? `<p class="cg-pas-recado">“${esc(reg.obs)}”</p>` : ''}
+    ${cgResumoPassagemHtml(reg.resumo)}
+    ${pode && !reg.cienteEm ? `<button type="button" class="cg-btn cg-btn-primario" onclick="cgAoVivo('passagemCarga', { op: 'ciente', sai: ${jsArg(reg.sai)}, entra: ${jsArg(reg.entra)} }, () => {}, () => {})">Ciente (turno ${esc(reg.entra)})</button>
+      <button type="button" class="cg-link" onclick="cgConfirmarPassagem(${jsArg(reg.sai)}, ${jsArg(reg.entra)})">Confirmar de novo com o resumo de agora</button>` : ''}
+  </div>`;
+}
+function cgProximaPassagem() {
+  const turnos = (CG.vivo || CG.dados).turnos || [], min = cgMinDoDiaCli();
+  let melhor = null;
+  turnos.forEach((t) => {
+    const dist = (t.ini - min + 1440) % 1440;
+    const sai = turnos.find((o) => o.id !== t.id && cgNoTurnoCli(o, t.ini));
+    if (sai && (!melhor || dist < melhor.dist)) melhor = { dist: dist, sai: sai.id, entra: t.id, as: cgHoraMin(t.ini) };
+  });
+  return melhor;
+}
+function cgConfirmarPassagem(sai, entra) {
+  if (sai === entra) return avisar('Escolha turnos diferentes.', true);
+  cgAoVivo('passagemCarga', { op: 'confirmar', sai: sai, entra: entra, obs: el('cg-pas-obs') ? val('cg-pas-obs') : '' }, () => {}, () => {});
+}
+function cgPassagensHtml() {
+  const l = CG.dados.passagens || [];
+  if (!l.length) return '';
+  return `<section class="cg-cartao"><header class="cg-cartao-cab"><h3>Passagens anteriores</h3></header>
+    <ul class="cg-lista">${l.map((p) => `<li class="cg-item"><span class="cg-item-nro">${esc(p.sai)} → ${esc(p.entra)}</span>
+      <span class="cg-item-nome">${esc(p.data.split('-').reverse().join('/'))} · confirmada por ${esc(p.confirmadoNome || p.confirmadoPor)} às ${esc(String(p.confirmadoEm).slice(11, 16))}
+      <small>${p.resumo ? p.resumo.abertas + ' cargas abertas · ' + p.resumo.h24 + ' de 24 h · ' + p.resumo.pessoas + ' pessoas' : ''}${p.cienteEm ? ' · ciente: ' + esc(p.cienteNome || p.cientePor) + ' às ' + esc(String(p.cienteEm).slice(11, 16)) : ' · sem ciente'}${p.obs ? ' · “' + esc(p.obs) + '”' : ''}</small></span></li>`).join('')}</ul></section>`;
+}
+/* Os ajustes da tela (quem edita): turnos, boxes, a ordem das docas, os boxes das lojas, ruas do flowrack, cargas em andamento. */
+function cgAjustesHtml() {
+  const d = CG.dados, t = (id) => ((d.turnos || []).find((x) => x.id === id) || {}).texto || '';
+  const P = d.patio || {};
+  return `<section class="cg-cartao cg-ajustes"><header class="cg-cartao-cab"><h3>Ajustes da situação de carga</h3></header>
+    <form class="cg-form-grade" onsubmit="event.preventDefault(); cgSalvarAjustes()">
+      ${['A', 'B', 'C'].map((id) => `<label><span>Turno ${id}</span><input id="cg-aj-${id}" value="${esc(t(id).replace('–', '-'))}" placeholder="06:50-16:14"></label>`).join('')}
+      <label><span>Boxes no CD</span><input id="cg-aj-boxes" type="number" min="1" max="99" value="${P.n || 26}"></label>
+      <label><span>Ordem das docas (esquerda → direita)</span><input id="cg-aj-ordem" value="${esc(P.ordemTexto || '26-1')}" placeholder="26-1"></label>
+      <label class="largo"><span>Boxes reservados para as lojas</span><input id="cg-aj-lojas" value="${esc(P.lojasTexto || '')}" placeholder="1-2 = Feira de Santana; 3 = Vitória da Conquista"></label>
+      <label><span>Ruas por andar do flowrack</span><input id="cg-aj-ruas" value="${esc(((d.flowrack || {}).ruas || [6, 6, 6, 6, 6]).every((x, i, a) => x === a[0]) ? String(((d.flowrack || {}).ruas || [6])[0]) : ((d.flowrack || {}).ruas || []).join(','))}" placeholder="6 ou 6,6,6,8,8"></label>
+      <label><span>Cargas da sequência em andamento</span><input id="cg-aj-curso" type="number" min="1" max="30" value="${(d.sequencia && d.sequencia.nEmCurso) || 5}"></label>
+      <button type="submit" class="cg-btn cg-btn-claro">Salvar ajustes</button>
+    </form>
+    <p class="cg-nota">As situações do carregamento (a lista do pátio) ficam em Boxes › Cadastros. Boxes das lojas: a carga que vem no relatório com o box de uma loja fica sozinha nesse box, marcada "Loja", sem veículo e sem os avisos do pátio; "nenhum" desliga.</p></section>`;
+}
+function cgSalvarAjustes() {
+  agir('parametrosCarga', { turnos: { A: val('cg-aj-A'), B: val('cg-aj-B'), C: val('cg-aj-C') }, boxes: val('cg-aj-boxes'), ordemBoxes: val('cg-aj-ordem'), lojas: val('cg-aj-lojas'),
+    ruas: val('cg-aj-ruas'), emCurso: val('cg-aj-curso') }, 'Ajustes salvos').catch(() => {});
+}
+
+/* ---------------- HISTORICO: ABRIR UM ENVIO E COMPARAR ---------------- */
+function cgAplicarHistorico() {
+  const v = CG.vivo, h = CG.hist;
+  const cont = {};
+  (v.depositos || []).forEach((d) => { const e = ((h.snapshot.resumo || {}).equipe || {})[d.id] || {}; cont[d.id] = { sep: e.sep || 0, conf: e.conf || 0, andares: [0, 0, 0, 0, 0] }; });
+  CG.dados = Object.assign({}, v, { snapshot: h.snapshot, indicadores: h.indicadores, podeEditar: false, contagemFixa: cont, equipe: [], equipamentos: [], pessoas: [], sequencia: null, patio: null });
+}
+async function cgAbrirHistorico(id, comparar) {
+  try {
+    avisar('Abrindo a situação…');
+    const r = await executarAcaoSrv('snapshotCarga', { id: id, com: comparar ? 'atual' : '' });
+    if (r && r.ok === false) throw new Error(r.erro);
+    CG.hist = { snapshot: r.snapshot, indicadores: r.indicadores };
+    CG.comparacao = r.comparacao || null;
+    CG.dados = CG.vivo;
+    cgAplicarHistorico();
+    CG.aba = 'cargas'; CG.desenhadoEm = 0;
+    cgDesenhar(); window.scrollTo(0, 0);
+  } catch (e) { avisar(explicarErro(e), true); }
+}
+function cgSairHistorico() {
+  CG.hist = null; CG.dados = CG.vivo; CG.aba = 'historico'; cgDesenhar(); window.scrollTo(0, 0);
+}
+async function cgComparar(de, para) {
+  if (!de) return avisar('Escolha o envio.', true);
+  try {
+    const r = await executarAcaoSrv('snapshotCarga', { id: de, com: para || 'atual' });
+    if (r && r.ok === false) throw new Error(r.erro);
+    if (!r.comparacao) return avisar('Escolha dois envios diferentes.', true);
+    CG.comparacao = r.comparacao; CG.compararDe = de; CG.compararPara = para || 'atual';
+    cgDesenhar();
+    const c = el('cg-comparacao'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'start' });
+  } catch (e) { avisar(explicarErro(e), true); }
+}
+function cgFaixaHistoricoHtml() {
+  const s = CG.dados.snapshot;
+  return `<div class="cg-faixa cg-faixa-hist" role="status"><span class="cg-faixa-ico" aria-hidden="true">${CG_SVG.relogio}</span>
+    <span><b>Situação de ${esc(cgDataBr(s.emitido))} — histórico</b> (só leitura${s.drive ? ', guardada no Drive' : ''}). Enviada por ${esc(s.por || '—')}. A equipe é a que estava alocada naquele envio.</span>
+    <button type="button" class="cg-btn cg-btn-claro" onclick="CG.aba='historico';cgComparar(${jsArg(s.id)}, 'atual')">O que andou até agora</button>
+    <button type="button" class="cg-btn cg-btn-primario" onclick="cgSairHistorico()">Voltar para agora</button></div>`;
+}
+function cgEnviosHtml() {
+  const d = CG.dados, l = (CG.vivo || d).envios || [], atual = l[0];
+  const opc = (sel, comAtual) => (comAtual ? `<option value="atual"${sel === 'atual' ? ' selected' : ''}>Agora (o mais recente)</option>` : '') +
+    l.map((e) => `<option value="${esc(e.id)}"${sel === e.id ? ' selected' : ''}>${esc(cgDataBr(e.emitido))} · ${e.total} cargas</option>`).join('');
+  return `<section class="cg-cartao cg-envios-cartao">
+      <header class="cg-cartao-cab"><h3>Situações já lançadas</h3><span class="cg-selo neutro">${l.length} ${l.length === 1 ? 'envio' : 'envios'}</span></header>
+      <div class="cg-envios-tab" role="table" aria-label="Envios da situação de carga">
+        <div class="cg-env-tr cg-env-th" role="row"><span role="columnheader">Emitida</span><span role="columnheader">Enviada por</span><span role="columnheader">Cargas</span><span role="columnheader">Prontas</span><span role="columnheader">24 h</span><span role="columnheader">Sep. · Conf.</span><span role="columnheader"></span></div>
+        ${l.map((e, i) => `<div class="cg-env-tr${CG.hist && CG.hist.snapshot.id === e.id ? ' aberto' : ''}" role="row">
+          <span role="cell"><b class="cg-num">${esc(cgDataBr(e.emitido))}</b>${i === 0 ? ' <i class="cg-env-atual">atual</i>' : ''}${e.drive ? ' <i class="cg-env-drive" title="As cargas deste envio estão num arquivo do Drive: carregam ao abrir">Drive</i>' : ''}</span>
+          <span role="cell">${esc(e.por)}</span><span role="cell" class="cg-num">${cgN(e.total)}</span><span role="cell" class="cg-num">${cgN(e.prontas)}</span>
+          <span role="cell" class="cg-num">${e.h24Pend ? `<b class="cg-24t">${e.h24Pend}</b>` : '0'}</span><span role="cell" class="cg-num">${cgPct(e.pctSep)} · ${cgPct(e.pctConf)}</span>
+          <span role="cell" class="cg-env-botoes">${i ? `<button type="button" class="cg-btn cg-btn-claro" onclick="cgAbrirHistorico(${jsArg(e.id)})">Ver</button>
+            <button type="button" class="cg-link" onclick="cgComparar(${jsArg(e.id)}, 'atual')">Comparar com agora</button>` : '<small>é a de agora</small>'}${i === 0 && d.podeEditar && !CG.hist ? ` <button type="button" class="cg-link perigo" onclick="cgDesfazerEnvio(${jsArg(e.id)})">Desfazer</button>` : ''}</span></div>`).join('')}
+      </div>
+      ${l.length > 1 ? `<form class="cg-comparar" onsubmit="event.preventDefault(); cgComparar(val('cg-cmp-de'), val('cg-cmp-para'))">
+        <label><span>Comparar</span><select id="cg-cmp-de">${opc(CG.compararDe || (l[1] && l[1].id))}</select></label>
+        <label><span>com</span><select id="cg-cmp-para">${opc(CG.compararPara || 'atual', true)}</select></label>
+        <button type="submit" class="cg-btn cg-btn-claro">Comparar</button></form>` : ''}
+    </section>
+    ${CG.comparacao ? cgComparacaoHtml(CG.comparacao) : ''}`;
+}
+const CG_CMP = { concluiu: ['Ficou pronta', 'ok'], avancou: ['Avançou', 'azul'], parada: ['Não andou', 'atencao'], voltou: ['Voltou (relatório corrigido?)', 'atencao'], nova: ['Nova no relatório', 'neutro'], saiu: ['Saiu do relatório', 'neutro'], pronta: ['Já estava pronta', 'ok'] };
+function cgComparacaoHtml(c) {
+  const t = c.totais, deps = Object.keys(c.porDep);
+  const grupos = {};
+  c.cargas.forEach((x) => { (grupos[x.tipo] = grupos[x.tipo] || []).push(x); });
+  return `<section class="cg-cartao cg-comparacao" id="cg-comparacao">
+    <header class="cg-cartao-cab"><h3>O que andou de ${esc(cgDataBr(c.de))} até ${esc(cgDataBr(c.para))}</h3><span class="cg-selo neutro">${cgDuracao(c.horas * 60)}</span>
+      <button type="button" class="cg-link" onclick="CG.comparacao=null;cgDesenhar()">Fechar</button></header>
+    <div class="cg-seq-kpis">
+      <div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.sep)}</b><span>lotes separados</span></div><div class="cg-seq-kpi ok"><b class="cg-num">${cgN(t.conf)}</b><span>lotes conferidos</span></div>
+      <div class="cg-seq-kpi ok"><b class="cg-num">${t.concluidas}</b><span>cargas ficaram prontas</span></div><div class="cg-seq-kpi"><b class="cg-num">${t.avancaram}</b><span>avançaram</span></div>
+      <div class="cg-seq-kpi ${t.paradas ? 'atencao' : ''}"><b class="cg-num">${t.paradas}</b><span>não andaram</span></div><div class="cg-seq-kpi"><b class="cg-num">${t.novas} / ${t.sairam}</b><span>novas / saíram</span></div>
+    </div>
+    <div class="cg-cmp-deps">${deps.map((id) => { const x = c.porDep[id]; return `<div class="cg-cmp-dep"><b>${esc(x.nome || cgNomeDep(id))}</b>
+      <span class="cg-cmp-barra"><i class="antes" style="width:${(x.pctAntes || 0).toFixed(1)}%"></i><i class="depois" style="left:${(x.pctAntes || 0).toFixed(1)}%;width:${Math.max(0, (x.pctDepois || 0) - (x.pctAntes || 0)).toFixed(1)}%"></i></span>
+      <small>${cgPct(x.pctAntes)} → <b>${cgPct(x.pctDepois)}</b> · ${cgN(x.sep)} sep · ${cgN(x.conf)} conf · ${x.concluidas} prontas</small></div>`; }).join('')}</div>
+    ${Object.keys(CG_CMP).filter((k) => grupos[k]).map((k) => `<details class="cg-cmp-grupo"${k === 'concluiu' || k === 'parada' ? ' open' : ''}><summary><span class="cg-sit cat-${CG_CMP[k][1]}">${CG_CMP[k][0]}</span> <b>${grupos[k].length}</b></summary>
+      <ul class="cg-lista colunas">${grupos[k].slice(0, 60).map((x) => `<li class="cg-item"><span class="cg-item-nro">${esc(x.n)}${x.h ? ' <i class="cg-24">24 h</i>' : ''}</span>
+        <span class="cg-item-nome">${esc(x.nm || '—')}<small>${cgPctBaixo(x.antes)} → ${cgPctBaixo(x.depois)}</small></span></li>`).join('')}</ul></details>`).join('')}
+  </section>`;
+}
+
+/* =====================================================================
+ * FASE 3 (8.16): ESCALA 5x2 E SUBTURNOS, ALOCACAO AUTOMATICA E PELA FUNCAO,
+ * CHECK-OUTS POR DEPOSITO NA SEMANA, CONTROLE DOS BOXES (a planilha antiga
+ * dentro do GSL: grade Controle, Situacao dos BOXs, Cadastro, resumo,
+ * Excel/CSV e impressao). As regras da escala sao as mesmas do servidor
+ * (cgRegime_, cgSituacaoNaEscala_, cgZonaDaFuncao_ no Carga.gs): a tela
+ * calcula com o proprio relogio, porque os dados da tela ficam 10 min no cache.
+ * ===================================================================== */
+const CG_DIAS_5X2 = { A1: [2, 3, 4, 5, 6], A2: [1, 3, 4, 5, 6], A: [1, 2, 3, 4, 5, 6], C1: [2, 3, 4, 5, 6], C2: [1, 3, 4, 5, 6], C: [1, 2, 3, 4, 5, 6],
+  B: [1, 2, 3, 4, 5], ADM: [1, 2, 3, 4, 5] };
+const CG_SUBTURNOS = { A: ['A1', 'A2'], C: ['C1', 'C2'] };
+const CG_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const CG_GRADE_TXT = { A1: 'Turno A1 · folga domingo e segunda', A2: 'Turno A2 · folga domingo e terça', C1: 'Turno C1 · folga domingo e segunda', C2: 'Turno C2 · folga domingo e terça',
+  A: 'Turno A · subturno a definir (A1 ou A2)', C: 'Turno C · subturno a definir (C1 ou C2)', B: 'Turno B · segunda a sexta', ADM: 'Horário ADM · segunda a sexta' };
+const CG_PAPEL_TXT = { SEPARADOR: ['Separador', 'Separadores'], CONFERENTE: ['Conferente', 'Conferentes'] };
+
+function cgDadosVivos() { return CG.vivo || CG.dados || {}; }
+function cgMinDoIso(iso) { const m = /T(\d{2}):(\d{2})/.exec(String(iso || '')); return m ? +m[1] * 60 + +m[2] : 0; }
+function cgDiaSemanaCli(dia) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dia || '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() : -1; }
+function cgDiaMaisCli(dia, n) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dia || ''));
+  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (n || 0))).toISOString().slice(0, 10) : '';
+}
+function cgDiaCurto(dia) { return CG_SEMANA[cgDiaSemanaCli(dia)] + ' ' + String(dia).slice(8, 10) + '/' + String(dia).slice(5, 7); }
+function cgEhRecebimentoCli(f) {
+  const k = cgNorm(f).replace(/[^A-Z0-9]+/g, ' ').trim();
+  return /^DESCARREGADOR\b/.test(k) || /^REC(EBIMENTO)?\s+(DE\s+)?MERCADORIA/.test(k);
+}
+/* { turno: A|B|C|ADM|'', grade: chave de CG_DIAS_5X2, sub, adm, recebimento, aDefinir } */
+function cgRegimeCli(p) {
+  const t = cgTurnoDaEquipeCli(p.equipe), sub = String((cgDadosVivos().subturnos || {})[p.k] || '');
+  if (t === 'ADM') return { turno: 'ADM', grade: 'ADM', sub: '', adm: true };
+  if (t === 'A' && cgEhRecebimentoCli(p.funcao)) return { turno: 'ADM', grade: 'ADM', sub: '', adm: true, recebimento: true };
+  if (t === 'B') return { turno: 'B', grade: 'B', sub: '' };
+  if (t === 'A' || t === 'C') { const ok = CG_SUBTURNOS[t].indexOf(sub) !== -1; return { turno: t, grade: ok ? sub : t, sub: ok ? sub : '', aDefinir: !ok }; }
+  return { turno: '', grade: '', sub: '' };
+}
+function cgTurnoAdmCli() { return cgDadosVivos().turnoAdm || { id: 'ADM', nome: 'ADM', ini: 480, fim: 1068, cruza: false, texto: '08:00–17:48' }; }
+function cgHorarioRegimeCli(reg) { return reg.turno === 'ADM' ? cgTurnoAdmCli() : ((cgDadosVivos().turnos || []).find((t) => t.id === reg.turno) || null); }
+function cgTrabalhaCli(reg, dia) { const g = CG_DIAS_5X2[reg.grade]; return !!(g && g.indexOf(cgDiaSemanaCli(dia)) !== -1); }
+/* Como a pessoa esta num instante: servico, folga (no horario, mas o dia e de folga), fora (fora do horario) ou sem turno. */
+function cgEscalaCli(p, iso) {
+  const reg = cgRegimeCli(p), T = cgHorarioRegimeCli(reg);
+  if (!T) return { estado: 'sem', reg: reg, dia: '', folgaHoje: false };
+  iso = iso || cgIsoLocalAgora();
+  const min = cgMinDoIso(iso), hoje = String(iso).slice(0, 10);
+  const dia = T.cruza && min < T.fim ? cgDiaMaisCli(hoje, -1) : hoje;
+  const trabalha = cgTrabalhaCli(reg, dia);
+  if (!cgNoTurnoCli(T, min)) return { estado: 'fora', reg: reg, dia: dia, folgaHoje: !trabalha };
+  return { estado: trabalha ? 'servico' : 'folga', reg: reg, dia: dia, folgaHoje: !trabalha };
+}
+/* Funcao do Quadro -> deposito e papel ("Sep. grandeza I" -> Grandeza/Separador); outra funcao -> null. */
+function cgZonaDaFuncaoCli(f) {
+  const t = cgNorm(f).replace(/[^A-Z0-9]+/g, ' ').trim();
+  let papel = '';
+  if (/(^| )CONF(ERENTE|ERENCIA)?( |$)/.test(t)) papel = 'CONFERENTE';
+  else if (/(^| )SEP(ARADORA?|ARADORES|ARACAO)?( |$)/.test(t)) papel = 'SEPARADOR';
+  if (!papel) return null;
+  let dep = '';
+  if (/NOBRE/.test(t) && /GRAND/.test(t)) dep = 'NOBRE_GRANDEZA';
+  else if (/NOBRE/.test(t)) dep = 'NOBRE';
+  else if (/GRAND/.test(t)) dep = 'GRANDEZA';
+  else if (/MIUD/.test(t)) dep = 'MIUDEZA';
+  else if (/BLOC/.test(t)) dep = 'BLOCADO';
+  else if (/PESAV|PESAD/.test(t)) dep = 'PESAVEIS';
+  return { dep: dep, papel: papel };
+}
+function cgFuncaoCurta(f) {
+  let t = cgTitulo(f || '').replace(/\bAuxiliar\b/i, 'Aux.').replace(/\bOperador(a)?\b/i, 'Op.').replace(/\bExpedi[cç][aã]o\b/i, 'exp.').replace(/\bConferente\b/i, 'Conf.').replace(/\bSeparador(a)?\b/i, 'Sep.');
+  return t.length > 18 ? t.slice(0, 17) + '…' : t;
+}
+function cgPessoasAtivas() { return (cgDadosVivos().pessoas || []).filter((p) => !p.situacao || p.situacao === 'ATIVO'); }
+/* Quantos de cada zona ("DEP|PAPEL") trabalham no turno que comeca no dia. */
+function cgContaNoTurno(pessoas, turno, dia) {
+  const cont = {};
+  pessoas.forEach((p) => {
+    const z = cgZonaDaFuncaoCli(p.funcao);
+    if (!z) return;
+    const reg = cgRegimeCli(p);
+    if (reg.turno !== turno || !cgTrabalhaCli(reg, dia)) return;
+    const k = z.dep + '|' + z.papel;
+    cont[k] = (cont[k] || 0) + 1;
+  });
+  return cont;
+}
+/* A disponibilidade (o mesmo cgDisponibilidade_ do servidor): agora, os proximos turnos e o mapa das funcoes. */
+function cgDisponibilidadeCli(iso) {
+  const d = cgDadosVivos(), turnos = d.turnos || [], ativos = cgPessoasAtivas();
+  iso = iso || cgIsoLocalAgora();
+  const faltou = {};
+  cgFaltasAtivas().forEach((f) => { faltou[f.k] = true; });
+  const zonas = {}, mapa = {};
+  let aDefinir = 0;
+  ativos.forEach((p) => {
+    const z = cgZonaDaFuncaoCli(p.funcao);
+    const fk = cgNorm(p.funcao) || '(SEM FUNCAO)';
+    mapa[fk] = mapa[fk] || { funcao: p.funcao || '(sem função)', dep: z ? z.dep : '', papel: z ? z.papel : '', n: 0 };
+    mapa[fk].n++;
+    if (!z) return;
+    const e = cgEscalaCli(p, iso);
+    if (e.reg.aDefinir) aDefinir++;
+    const x = zonas[z.dep + '|' + z.papel] = zonas[z.dep + '|' + z.papel] || { servico: 0, folga: 0, falta: 0, fora: 0, total: 0 };
+    x.total++;
+    if (e.estado === 'servico') { if (faltou[p.k]) x.falta++; else x.servico++; } else if (e.estado === 'folga') x.folga++; else x.fora++;
+  });
+  const min = cgMinDoIso(iso), hoje = String(iso).slice(0, 10), prox = [];
+  for (let dd = 0; dd <= 1; dd++) turnos.forEach((t) => { const dia = cgDiaMaisCli(hoje, dd), ate = dd * 1440 + t.ini - min; if (ate > 0) prox.push({ turno: t.id, dia: dia, ini: t.ini, emMin: ate }); });
+  prox.sort((a, b) => a.emMin - b.emMin);
+  return { zonas: zonas, proximos: prox.slice(0, 3).map((x) => Object.assign(x, { zonas: cgContaNoTurno(ativos, x.turno, x.dia) })),
+    mapeamento: Object.keys(mapa).map((k) => mapa[k]).sort((a, b) => b.n - a.n), aDefinir: aDefinir };
+}
+/* Os sete dias da semana de hoje (segunda a domingo). */
+function cgSemanaDeHoje() {
+  const hoje = cgIsoLocalAgora().slice(0, 10), seg = cgDiaMaisCli(hoje, -((cgDiaSemanaCli(hoje) + 6) % 7));
+  return [0, 1, 2, 3, 4, 5, 6].map((i) => cgDiaMaisCli(seg, i));
+}
+/*
+ * CHECK-OUTS NA SEMANA (como o rCheckV da gerencia): por dia, quantos conferentes do deposito em cada turno e o
+ * pico — na passagem de turno os dois turnos estao la ao mesmo tempo (e o ADM, no horario dele). Conta em cada
+ * inicio e fim de turno; compara com os check-outs funcionando do deposito.
+ */
+function cgDemandaCheckout(dep) {
+  const ativos = cgPessoasAtivas().filter((p) => { const z = cgZonaDaFuncaoCli(p.funcao); return z && z.dep === dep && z.papel === 'CONFERENTE'; });
+  const turnos = (cgDadosVivos().turnos || []).concat([cgTurnoAdmCli()]);
+  const dias = cgSemanaDeHoje(), memo = {};
+  const n = (t, dia) => { const k = t + dia; if (memo[k] == null) memo[k] = ativos.filter((p) => { const r = cgRegimeCli(p); return r.turno === t && cgTrabalhaCli(r, dia); }).length; return memo[k]; };
+  const noInstante = (dia, min) => turnos.reduce((s, T) => s + (cgNoTurnoCli(T, min) ? n(T.id, T.cruza && min < T.fim ? cgDiaMaisCli(dia, -1) : dia) : 0), 0);
+  return dias.map((dia) => {
+    const amostras = [];
+    turnos.forEach((T) => {
+      amostras.push([dia, (T.ini + 1) % 1440]);
+      amostras.push(T.cruza ? [cgDiaMaisCli(dia, 1), (T.fim + 1439) % 1440] : [dia, (T.fim + 1439) % 1440]);
+    });
+    const pico = Math.max.apply(null, amostras.map((a) => noInstante(a[0], a[1])));
+    return { dia: dia, A: n('A', dia), B: n('B', dia), C: n('C', dia), ADM: n('ADM', dia), pico: pico };
+  });
+}
+
+/* ---------------- SUBTURNO (A1/A2, C1/C2) ---------------- */
+function cgSubturno(ks, sub) {
+  const d = CG.dados, antes = Object.assign({}, d.subturnos || {});
+  const pessoas = ks.map((k) => { const p = cgPessoa(k); return { k: k, nome: p.nome || '', equipe: p.equipe || '', funcao: p.funcao || '' }; });
+  return cgAoVivo('subturnoCarga', { pessoas: pessoas, subturno: sub }, () => {
+    d.subturnos = Object.assign({}, d.subturnos || {});
+    ks.forEach((k) => { if (sub) d.subturnos[k] = sub; else delete d.subturnos[k]; });
+  }, () => { d.subturnos = antes; });
+}
+function cgBotoesSubturnoHtml(p, fechar) {
+  const reg = cgRegimeCli(p);
+  if (!CG_SUBTURNOS[reg.turno] || reg.recebimento) return '';
+  const pode = CG.dados.podeEditar;
+  return `<span class="cg-seg" role="group" aria-label="Subturno de ${esc(cgNomeCurto(p.nome))}">${CG_SUBTURNOS[reg.turno].map((s) =>
+    `<button type="button" class="cg-seg-btn${reg.sub === s ? ' ativo' : ''}" aria-pressed="${reg.sub === s}" ${pode ? `onclick="${fechar ? 'fecharJanela(); ' : ''}cgSubturno([${jsArg(p.k)}], ${jsArg(reg.sub === s ? '' : s)})"` : 'disabled'} title="${esc(CG_GRADE_TXT[s])}">${s}</button>`).join('')}</span>`;
+}
+
+/* ---------------- ALOCACAO AUTOMATICA (a nota e o desfazer) ---------------- */
+function cgAutoNotaHtml() {
+  const d = cgDadosVivos(), pode = CG.dados.podeEditar;
+  if (CG.hist) return '';
+  const lista = (d.automaticas || []).filter((a) => a.qtd || a.tipo === 'ENTRADA').slice(0, 3);
+  if (!lista.length) return '';
+  return `<div class="cg-autos">${lista.map((a) => {
+    const pul = a.puladas || {}, extra = [];
+    if (pul.folga) extra.push(pul.folga + ' de folga na escala 5x2');
+    if (pul.falta) extra.push(pul.falta + (pul.falta === 1 ? ' falta' : ' faltas'));
+    if (pul.jaAlocada) extra.push(pul.jaAlocada + ' já ' + (pul.jaAlocada === 1 ? 'estava alocada' : 'estavam alocadas'));
+    if (pul.semDeposito) extra.push(pul.semDeposito + ' sem depósito no nome da função');
+    const txt = a.tipo === 'ENTRADA'
+      ? `<b>Alocação automática do Turno ${esc(a.turno)} às ${esc(cgHora(a.em))}</b>: ${a.qtd ? a.qtd + (a.qtd === 1 ? ' pessoa foi' : ' pessoas foram') + ' para o depósito da função' : 'ninguém para alocar'}${extra.length ? ' (' + esc(extra.join(', ')) + ')' : ''}.`
+      : `<b>Fim do Turno ${esc(a.turno)}</b>: ${a.qtd} ${a.qtd === 1 ? 'pessoa liberada' : 'pessoas liberadas'} da alocação às ${esc(cgHora(a.em))}.`;
+    return `<div class="cg-auto${a.desfeitaEm ? ' desfeita' : ''}" role="status" data-auto="${esc(a.id)}"><span class="cg-auto-ico" aria-hidden="true">${a.tipo === 'ENTRADA' ? '⚙' : '⇥'}</span>
+      <span>${txt}${a.desfeitaEm ? ` <small>Desfeita por ${esc(a.desfeitaPor)} às ${esc(cgHora(a.desfeitaEm))}.</small>` : ' <small>Quem você mover depois fica onde você pôs.</small>'}</span>
+      ${pode && !a.desfeitaEm && a.qtd ? `<button type="button" class="cg-btn cg-btn-claro" onclick="cgDesfazerAuto(${jsArg(a.id)})">Desfazer</button>` : ''}</div>`;
+  }).join('')}</div>`;
+}
+function cgDesfazerAuto(id) {
+  const a = (CG.dados.automaticas || []).find((x) => x.id === id);
+  if (!a) return;
+  abrirJanela('Desfazer a alocação automática', `<p>${a.tipo === 'ENTRADA' ? 'As pessoas que a alocação automática do <b>Turno ' + esc(a.turno) + '</b> pôs nos depósitos (e que continuam onde ela pôs) voltam para <b>Disponíveis</b>. Quem você já moveu fica.' : 'As pessoas do <b>Turno ' + esc(a.turno) + '</b> que saíram no fim do turno voltam para onde estavam.'}</p>`,
+    `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="fecharJanela(); cgAoVivo('desfazerAutoCarga', { id: ${jsArg(id)} }, () => {}, () => {})">Desfazer</button>`);
+}
+
+/* ---------------- ALOCAR PELA FUNCAO (quem esta no turno agora e ainda nao foi alocado) ---------------- */
+function cgCandidatosPelaFuncao() {
+  const d = CG.dados, iso = cgIsoLocalAgora();
+  const aloc = {};
+  (d.equipe || []).forEach((p) => { aloc[p.k] = true; });
+  const andares = {};
+  (d.equipe || []).forEach((p) => { if (p.papel === 'SEPARADOR' && p.andar >= 0) { andares[p.dep] = andares[p.dep] || []; andares[p.dep][p.andar] = (andares[p.dep][p.andar] || 0) + 1; } });
+  const itens = [], semDep = [];
+  cgPessoasAtivas().forEach((p) => {
+    if (aloc[p.k] || cgFaltou(p.k)) return;
+    const z = cgZonaDaFuncaoCli(p.funcao);
+    if (!z) return;
+    if (cgEscalaCli(p, iso).estado !== 'servico') return;
+    if (!z.dep) { semDep.push(p); return; }
+    const info = cgDepInfo(z.dep), destino = { dep: z.dep, papel: z.papel };
+    if (info.andares && z.papel === 'SEPARADOR') {
+      const a = andares[z.dep] = andares[z.dep] || [];
+      let menor = 0;
+      for (let i = 0; i < info.andares; i++) if ((a[i] || 0) < (a[menor] || 0)) menor = i;
+      a[menor] = (a[menor] || 0) + 1;
+      destino.andar = menor;
+    }
+    itens.push({ pessoa: { k: p.k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '' }, destino: destino });
+  });
+  return { itens: itens, semDep: semDep };
+}
+function cgAlocarPelaFuncao() {
+  const c = cgCandidatosPelaFuncao();
+  if (!c.itens.length) {
+    abrirJanela('Alocar pela função', `<p>Ninguém para alocar agora: quem está no turno${c.semDep.length ? ' e tem depósito no nome da função' : ''} já está alocado, de folga ou com falta.</p>${c.semDep.length ? `<p class="cg-nota">${c.semDep.length} ${c.semDep.length === 1 ? 'pessoa tem' : 'pessoas têm'} função sem depósito no nome (só "Separador" ou "Conferente"): arraste à mão.</p>` : ''}`,
+      '<button class="botao" onclick="fecharJanela()">Fechar</button>');
+    return;
+  }
+  const por = {};
+  c.itens.forEach((it) => { const x = por[it.destino.dep] = por[it.destino.dep] || { SEPARADOR: 0, CONFERENTE: 0 }; x[it.destino.papel]++; });
+  abrirJanela('Alocar pela função', `<p>Vão <b>${c.itens.length} ${c.itens.length === 1 ? 'pessoa' : 'pessoas'}</b> do turno de agora para o depósito da função (quem está de folga na escala 5x2, com falta ou já alocado fica de fora):</p>
+    <ul class="cg-lista-simples">${Object.keys(por).map((dep) => `<li><b>${esc(cgNomeDep(dep))}</b>: ${por[dep].SEPARADOR} ${por[dep].SEPARADOR === 1 ? 'separador' : 'separadores'} · ${por[dep].CONFERENTE} ${por[dep].CONFERENTE === 1 ? 'conferente' : 'conferentes'}</li>`).join('')}</ul>
+    ${c.semDep.length ? `<p class="cg-nota">${c.semDep.length} ${c.semDep.length === 1 ? 'pessoa fica' : 'pessoas ficam'} em Disponíveis: a função não diz o depósito.</p>` : ''}`,
+    `<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="fecharJanela(); cgAlocarLote()">Alocar</button>`);
+}
+function cgAlocarLote() {
+  const c = cgCandidatosPelaFuncao(), antes = (CG.dados.equipe || []).slice();
+  if (!c.itens.length) return;
+  cgAoVivo('alocarLoteCarga', { itens: c.itens }, () => {
+    CG.dados.equipe = (CG.dados.equipe || []).concat(c.itens.map((it) => ({ k: it.pessoa.k, nome: it.pessoa.nome, funcao: it.pessoa.funcao, equipe: it.pessoa.equipe,
+      dep: it.destino.dep, papel: it.destino.papel, andar: it.destino.andar >= 0 ? it.destino.andar : -1, rua: 0, desde: '' })));
+  }, () => { CG.dados.equipe = antes; });
+}
+
+/* ---------------- A ABA "ESCALA 5x2" ---------------- */
+function cgZonasDaEscala() {
+  const z = [];
+  (CG.dados.depositos || []).forEach((d) => { ['SEPARADOR', 'CONFERENTE'].forEach((p) => z.push({ k: d.id + '|' + p, dep: d.id, papel: p, nome: d.nome })); });
+  ['SEPARADOR', 'CONFERENTE'].forEach((p) => z.push({ k: '|' + p, dep: '', papel: p, nome: 'Depósito a definir' }));
+  return z;
+}
+function cgEscalaHtml() {
+  const d = CG.dados, disp = cgDisponibilidadeCli(), ta = cgTurnoAgoraCli(), adm = cgTurnoAdmCli();
+  const hoje = cgIsoLocalAgora().slice(0, 10), semana = cgSemanaDeHoje(), ativos = cgPessoasAtivas();
+  const zonas = cgZonasDaEscala().filter((z) => z.dep || disp.zonas[z.k]);
+  const temAlgo = Object.keys(disp.zonas).length;
+  const linhaAgora = (z) => {
+    const x = disp.zonas[z.k] || { servico: 0, folga: 0, falta: 0, fora: 0, total: 0 };
+    return `<td class="cg-num"><b>${x.servico}</b>${x.folga ? `<small class="cg-esc-folga">${x.folga} de folga</small>` : ''}${x.falta ? `<small class="cg-txt-alerta">${x.falta} ${x.falta === 1 ? 'falta' : 'faltas'}</small>` : ''}</td>`;
+  };
+  const tabelaDisp = `<div class="cg-rolo"><table class="cg-esc-tab">
+    <thead><tr><th scope="col">Depósito</th><th scope="col">Papel</th><th scope="col">Agora <small>${esc(ta.ativos.join(' + ') || 'fora de turno')}</small></th>
+      ${disp.proximos.map((p) => `<th scope="col">Turno ${esc(p.turno)} <small>${esc(cgDiaCurto(p.dia))} · ${esc(cgHoraMin(p.ini))}</small></th>`).join('')}</tr></thead>
+    <tbody>${zonas.map((z) => `<tr class="${z.papel === 'CONFERENTE' ? 'conf' : 'sep'}"><th scope="row">${esc(z.nome)}</th><td>${CG_PAPEL_TXT[z.papel][1]}</td>${linhaAgora(z)}
+      ${disp.proximos.map((p) => `<td class="cg-num">${p.zonas[z.k] || 0}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  // a semana: em cada dia, quantos de cada turno (A, B, C) trabalham
+  const contas = {};
+  semana.forEach((dia) => { ['A', 'B', 'C'].forEach((t) => { contas[t + dia] = cgContaNoTurno(ativos, t, dia); }); });
+  const tabelaSemana = `<div class="cg-rolo"><table class="cg-esc-tab cg-esc-semana">
+    <thead><tr><th scope="col">Depósito · papel</th>${semana.map((dia) => `<th scope="col" class="${dia === hoje ? 'hoje' : ''}">${esc(cgDiaCurto(dia))}${dia === hoje ? ' <small>hoje</small>' : ''}</th>`).join('')}</tr></thead>
+    <tbody>${zonas.map((z) => `<tr class="${z.papel === 'CONFERENTE' ? 'conf' : 'sep'}"><th scope="row">${esc(z.nome)} <small>${CG_PAPEL_TXT[z.papel][1]}</small></th>
+      ${semana.map((dia) => `<td class="${dia === hoje ? 'hoje' : ''}"><span class="cg-esc-abc">${['A', 'B', 'C'].map((t) => `<span><i>${t}</i><b class="cg-num">${contas[t + dia][z.k] || 0}</b></span>`).join('')}</span></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  return `<section class="cg-cartao cg-escala-topo">
+      <header class="cg-cartao-cab"><h3>Escala 5x2 — quem está disponível</h3>
+        <span class="cg-selo ${disp.aDefinir ? 'amarelo' : 'ok'}">${disp.aDefinir ? disp.aDefinir + ' sem subturno (A1/A2 · C1/C2)' : 'subturnos definidos'}</span></header>
+      ${cgAutoNotaHtml()}
+      <p class="cg-esc-regras"><span><b>A1</b> e <b>C1</b>: folga domingo e segunda</span><span><b>A2</b> e <b>C2</b>: folga domingo e terça</span><span>A e C: quarta a sábado os dois</span><span><b>B</b>: segunda a sexta</span><span><b>Recebimento</b> do Turno A e <b>ADM</b>: ${esc(adm.texto)}, segunda a sexta</span><span>O C que começa às 23:00 é do dia em que começou</span></p>
+      ${temAlgo ? tabelaDisp : '<p class="cg-vazio-txt">Nenhuma função de separação ou conferência no Quadro do CD.</p>'}
+      ${d.podeEditar ? `<p class="cg-esc-acoes"><button type="button" class="cg-btn cg-btn-primario" onclick="cgAlocarPelaFuncao()">Alocar pela função (turno de agora)</button><span class="cg-nota">Na entrada de cada turno o GSL já faz isso sozinho; o botão serve para quem chegou depois.</span></p>` : ''}
+    </section>
+    <section class="cg-cartao"><header class="cg-cartao-cab"><h3>Semana — separadores e conferentes por turno</h3><span class="cg-selo neutro">pela escala 5x2</span></header>
+      ${temAlgo ? tabelaSemana : ''}
+      <p class="cg-nota">Cada célula: quantos trabalham no Turno A, B e C naquele dia (o Recebimento e o ADM ficam fora: horário administrativo).</p></section>
+    ${cgCheckoutsSemanaHtml()}
+    ${cgSubturnosHtml()}
+    ${cgMapaFuncoesHtml(disp)}`;
+}
+function cgCheckoutsSemanaHtml() {
+  const c = cgConsumo(), hoje = cgIsoLocalAgora().slice(0, 10);
+  const pools = cgPoolsConsumo().filter((x) => x.tipo === 'CHECKOUT');
+  return `<section class="cg-cartao cg-esc-check"><header class="cg-cartao-cab"><h3>${CG_SVG.checkout}Check-outs na semana — conferentes x equipamentos</h3></header>
+    <div class="cg-esc-check-grade">${pools.map((pool) => {
+      const dem = cgDemandaCheckout(pool.dep), x = c[pool.id] || { disponiveis: 0, total: 0, manutencao: 0 };
+      return `<div class="cg-esc-check-dep"><h4>${esc(cgTituloPool(pool))} <small>${x.disponiveis} funcionando de ${x.total}${x.manutencao ? ' · ' + x.manutencao + ' em manutenção' : ''}</small></h4>
+        <div class="cg-rolo"><table class="cg-esc-tab"><thead><tr><th scope="col">Dia</th><th scope="col">A</th><th scope="col">B</th><th scope="col">C</th><th scope="col">ADM</th><th scope="col">Pico na passagem</th><th scope="col">Situação</th></tr></thead>
+        <tbody>${dem.map((l) => { const falta = l.pico - x.disponiveis; return `<tr class="${l.dia === hoje ? 'hoje' : ''}${falta > 0 ? ' falta' : ''}"><th scope="row">${esc(cgDiaCurto(l.dia))}</th>
+          <td class="cg-num">${l.A}</td><td class="cg-num">${l.B}</td><td class="cg-num">${l.C}</td><td class="cg-num">${l.ADM}</td><td class="cg-num"><b>${l.pico}</b></td>
+          <td>${falta > 0 ? `<span class="cg-txt-alerta">⚠ faltam ${falta}</span>` : `<span class="cg-esc-ok">✓ ok${x.disponiveis - l.pico ? ', sobram ' + (x.disponiveis - l.pico) : ''}</span>`}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+    }).join('')}</div>
+    <p class="cg-nota">Cada conferente da Miudeza e do Nobre usa um check-out do próprio depósito. O pico soma os turnos que estão juntos na passagem (e o ADM no horário dele). As quantidades se mudam no próprio depósito (− / +).</p></section>`;
+}
+function cgSubturnosHtml() {
+  const d = CG.dados, pode = d.podeEditar, f = CG.escFiltro || 'A', q = cgNorm(CG.escBusca || '');
+  const sel = CG.escSel || (CG.escSel = {});
+  const lista = cgPessoasAtivas().filter((p) => { const r = cgRegimeCli(p); return CG_SUBTURNOS[r.turno] && !r.recebimento; })
+    .filter((p) => { const r = cgRegimeCli(p); return (f === 'sem' ? !r.sub : r.turno === f) && (!q || cgNorm(p.nome).indexOf(q) !== -1 || cgNorm(p.funcao).indexOf(q) !== -1); })
+    .sort((a, b) => String(cgRegimeCli(a).sub || 'Z').localeCompare(String(cgRegimeCli(b).sub || 'Z')) || String(a.nome).localeCompare(String(b.nome)));
+  const marcadas = Object.keys(sel).filter((k) => sel[k]);
+  const turnoSel = f === 'C' ? 'C' : (f === 'A' ? 'A' : '');
+  const conta = (t) => cgPessoasAtivas().filter((p) => { const r = cgRegimeCli(p); return !r.recebimento && (t === 'sem' ? CG_SUBTURNOS[r.turno] && !r.sub : r.turno === t); }).length;
+  const chip = (v, rot) => `<button type="button" class="cg-chip${f === v ? ' ativo' : ''}" aria-pressed="${f === v}" onclick="CG.escFiltro=${jsArg(v)}; CG.escSel={}; cgDesenhar()">${rot}</button>`;
+  return `<section class="cg-cartao cg-subturnos"><header class="cg-cartao-cab"><h3>Subturnos — A1/A2 e C1/C2</h3><span class="cg-selo neutro">${lista.length}</span></header>
+    <div class="cg-chips pequenos" role="group" aria-label="Turno">${chip('A', 'Turno A · ' + conta('A'))}${chip('C', 'Turno C · ' + conta('C'))}${chip('sem', 'Sem subturno · ' + conta('sem'))}</div>
+    <div class="cg-sub-barra">
+      <label class="cg-busca"><span class="sr">Buscar na escala</span><input id="cg-esc-busca" type="search" placeholder="Buscar pelo nome ou função" value="${esc(CG.escBusca || '')}" oninput="cgEscBuscar(this.value)" autocomplete="off"></label>
+      ${pode ? `<span class="cg-sub-lote" role="group" aria-label="Marcar as selecionadas">
+        <button type="button" class="cg-link" onclick="cgEscSelTodas(true)">Selecionar todas</button>${marcadas.length ? `<button type="button" class="cg-link" onclick="cgEscSelTodas(false)">Limpar seleção</button>` : ''}
+        <b class="cg-sub-n">${marcadas.length} ${marcadas.length === 1 ? 'selecionada' : 'selecionadas'}</b>
+        ${(turnoSel ? CG_SUBTURNOS[turnoSel] : ['A1', 'A2', 'C1', 'C2']).map((s) => `<button type="button" class="cg-btn cg-btn-claro" ${marcadas.length ? '' : 'disabled'} onclick="cgEscAplicar(${jsArg(s)})">→ ${s}</button>`).join('')}
+        <button type="button" class="cg-btn cg-btn-claro" ${marcadas.length ? '' : 'disabled'} onclick="cgEscAplicar('')">Sem subturno</button></span>` : ''}
+    </div>
+    <ul class="cg-sub-lista">${lista.slice(0, 400).map((p) => { const r = cgRegimeCli(p); return `<li class="${sel[p.k] ? 'sel' : ''}">
+      ${pode ? `<input type="checkbox" id="cg-sub-${esc(p.k)}" ${sel[p.k] ? 'checked' : ''} onchange="cgEscSel(${jsArg(p.k)}, this.checked)">` : ''}
+      <label for="cg-sub-${esc(p.k)}"><b>${esc(cgTitulo(p.nome))}</b><small>${esc(cgTitulo(p.funcao || ''))} · ${esc(p.equipe || '')}</small></label>
+      ${cgBotoesSubturnoHtml(p)}<span class="cg-sub-txt">${r.sub ? esc(CG_GRADE_TXT[r.sub].replace(/^Turno \w+ · /, '')) : 'a definir'}</span></li>`; }).join('') || '<li class="cg-vazio-txt">Ninguém neste filtro.</li>'}</ul>
+    <p class="cg-nota">${pode ? 'Toque em A1/A2 (ou C1/C2) para marcar; toque de novo para tirar. Para várias pessoas: marque as caixas e use os botões acima.' : 'Somente leitura.'} Sem subturno, a pessoa conta como de segunda a sábado.</p></section>`;
+}
+let CG_ESC_T = 0;
+function cgEscBuscar(v) { CG.escBusca = v; clearTimeout(CG_ESC_T); CG_ESC_T = setTimeout(cgDesenhar, 200); }
+function cgEscSel(k, sim) { CG.escSel = CG.escSel || {}; if (sim) CG.escSel[k] = true; else delete CG.escSel[k]; cgDesenhar(); }
+function cgEscSelTodas(sim) {
+  CG.escSel = {};
+  if (sim) document.querySelectorAll('.cg-sub-lista input[type="checkbox"]').forEach((i) => { CG.escSel[i.id.slice(7)] = true; });
+  cgDesenhar();
+}
+async function cgEscAplicar(sub) {
+  const ks = Object.keys(CG.escSel || {}).filter((k) => CG.escSel[k]);
+  if (!ks.length) return;
+  const ok = await cgSubturno(ks, sub);
+  if (ok) { CG.escSel = {}; cgDesenhar(); }
+}
+function cgMapaFuncoesHtml(disp) {
+  const m = disp.mapeamento;
+  return `<details class="cg-cartao cg-esc-mapa"><summary><b>Função do Quadro → depósito e papel</b> <span class="cg-selo neutro">${m.length} funções</span></summary>
+    <div class="cg-rolo"><table class="cg-esc-tab"><thead><tr><th scope="col">Função</th><th scope="col">Pessoas</th><th scope="col">Vai para</th></tr></thead>
+    <tbody>${m.map((x) => `<tr><th scope="row">${esc(cgTitulo(x.funcao))}</th><td class="cg-num">${x.n}</td><td>${x.papel ? (x.dep ? esc(cgNomeDep(x.dep)) + ' · ' : '<span class="cg-esc-folga">depósito a definir</span> · ') + CG_PAPEL_TXT[x.papel][0] : '<span class="cg-esc-folga">alocação à mão (qualquer depósito)</span>'}</td></tr>`).join('')}</tbody></table></div>
+    <p class="cg-nota">A leitura da função é tolerante: "Sep. grandeza I", "Separador nobre", "Conf. miudeza II"... Qualquer pessoa do CD (carregamento, aux. expedição, repositor) pode ser alocada à mão como separador ou conferente — conta na equipe e usa paleteira ou check-out como os outros.</p></details>`;
+}
+
+/* =====================================================================
+ * BOXES: Patio e docas · Controle (a grade da planilha) · Situacao dos BOXs · Cadastros
+ * ===================================================================== */
+const CG_BOX_VISTAS = [['mapa', 'Situação dos BOXs'], ['controle', 'Controle'], ['detalhes', 'Detalhes'], ['cadastros', 'Cadastros']];
+function cgBoxVista() { const v = CG.boxVista || lerLocal('gsl_carga_boxvista2'); return CG_BOX_VISTAS.some((x) => x[0] === v) ? v : 'mapa'; }
+function cgIrBoxVista(v) { CG.boxVista = v; gravarLocal('gsl_carga_boxvista2', v); cgDesenhar(); }
+function cgBoxesHtml() {
+  const P = CG.dados.patio;
+  if (!P) return '';
+  const v = cgBoxVista();
+  return `${cgResumoBoxesHtml()}
+    <nav class="cg-box-nav" aria-label="Boxes">
+      <span class="cg-chips" role="group" aria-label="Vista">${CG_BOX_VISTAS.map(([id, nome]) => `<button type="button" class="cg-chip${v === id ? ' ativo' : ''}" aria-pressed="${v === id}" data-vista="${id}" onclick="cgIrBoxVista(${jsArg(id)})">${esc(nome)}</button>`).join('')}</span>
+      <span class="cg-box-nav-dir"><button type="button" class="cg-btn cg-btn-claro" onclick="cgExportarControle('xlsx')" title="Controle, Situação dos BOXs e resumo">Excel</button>
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgExportarControle('csv')">CSV</button>
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgImprimirBoxes()">Imprimir</button></span>
+    </nav>
+    ${v === 'controle' ? cgControleHtml() : (v === 'detalhes' ? cgPatioHtml() : (v === 'cadastros' ? cgCadastrosHtml() : cgMapaBoxesHtml()))}`;
+}
+/* Todas as linhas do Controle: as abertas (nos boxes e no patio) e as carregadas nas ultimas 24 h. */
+function cgLinhasControle() {
+  const P = CG.dados.patio, vistos = {}, out = [];
+  if (!P) return out;
+  const add = (x) => { if (!x || x.virtual || vistos[x.id]) return; vistos[x.id] = true; out.push(x); };
+  (P.mapa || []).forEach((b) => b.itens.forEach(add));
+  (P.fila || []).forEach(add);
+  (P.carregadas || []).forEach(add);
+  return out;
+}
+/* A "tabela dinamica" da planilha: caminhoes (pelo CARRO), cargas, boxes e tipos de veiculo. */
+function cgResumoControle(linhas) {
+  const P = CG.dados.patio, cam = {};
+  linhas.forEach((x) => {
+    const k = cgNorm(x.veiculo) || ('#' + x.n);
+    const c = cam[k] = cam[k] || { todas: true, tipo: x.tipo };
+    if (x.etapa !== 'CARREGADA') c.todas = false;
+    if (!c.tipo && x.tipo) c.tipo = x.tipo;
+  });
+  const ks = Object.keys(cam), porTipo = {};
+  ks.forEach((k) => { const t = cgTipoVeiculoCli(cam[k].tipo); porTipo[t] = (porTipo[t] || 0) + 1; });
+  return { caminhoes: ks.length, carregados: ks.filter((k) => cam[k].todas).length, cargas: linhas.length, carregadas: linhas.filter((x) => x.etapa === 'CARREGADA').length,
+    livres: P ? P.contagem.livres : 0, ocupados: P ? P.contagem.ocupados : 0, porTipo: porTipo };
+}
+function cgResumoBoxesHtml() {
+  const r = cgResumoControle(cgLinhasControle());
+  const kpi = (n, rot, cls) => `<div class="cg-seq-kpi ${cls || ''}"><b class="cg-num">${n}</b><span>${rot}</span></div>`;
+  const tipos = Object.keys(r.porTipo).sort((a, b) => r.porTipo[b] - r.porTipo[a]);
+  return `<section class="cg-cartao cg-box-resumo" aria-label="Resumo dos boxes">
+    <div class="cg-seq-kpis">${kpi(r.caminhoes, 'total de caminhões')}${kpi(r.carregados, 'caminhões carregados', 'ok')}${kpi(r.cargas, 'total de cargas')}${kpi(r.carregadas, 'cargas carregadas', 'ok')}
+      ${kpi(r.livres, 'boxes livres', 'ok')}${kpi(r.ocupados, 'boxes ocupados', r.ocupados ? 'amarelo' : '')}</div>
+    ${tipos.length ? `<p class="cg-box-tipos"><span>Caminhões por tipo:</span>${tipos.map((t) => `<span class="cg-box-tipo"><b class="cg-num">${r.porTipo[t]}</b> ${esc(CG_VEIC[t].nome)}</span>`).join('')}</p>` : ''}
+  </section>`;
+}
+
+/* ---------------- CONTROLE: a grade com as colunas da planilha ---------------- */
+const CG_CTL = [
+  { k: 'carga', t: 'CARGA', w: 92, im: 'numeric', lista: 'cgl-cargas', v: (x) => x.n, campo: 'n' },
+  { k: 'complemento', t: 'COMPLEMENTO', w: 110, v: (x) => x.comp, campo: 'comp' },
+  { k: 'prioridade', t: 'PRIORIDADE', w: 92, v: (x) => x.prio, campo: 'prio' },
+  { k: 'box', t: 'BOX', w: 58, im: 'numeric', v: (x) => (x.box ? String(x.box) : ''), campo: 'box' },
+  { k: 'veiculo', t: 'CARRO', w: 96, v: (x) => x.veiculo, campo: 'veiculo' },
+  { k: 'descricao', t: 'DESCRIÇÃO', w: 170, lista: 'cgl-destinos', v: (x) => x.descricao, campo: 'descricao' },
+  { k: 'motorista', t: 'MOTORISTA', w: 230, lista: 'cgl-motoristas', v: (x) => x.motorista, campo: 'motorista' },
+  { k: 'carregada', t: 'CARREGADA?', w: 96, sel: ['NÃO', 'SIM'], v: (x) => (x.etapa === 'CARREGADA' ? 'SIM' : 'NÃO') },
+  { k: 'situacao', t: 'OBSERVAÇÃO', w: 180, lista: 'cgl-situacoes', v: (x) => x.situacao, campo: 'situacao' },
+  { k: 'previsao', t: 'HORÁRIO CHEGADA', w: 104, lista: 'cgl-horarios', im: 'numeric', v: (x) => x.previsao, campo: 'previsao' }
+];
+function cgCtlEstado() { return CG.ctl || (CG.ctl = { busca: '', carregadas: true, ordem: '', dir: 1 }); }
+function cgCompara(a, b) {
+  a = a == null ? '' : String(a); b = b == null ? '' : String(b);
+  if (a === '' || b === '') return (a === '') - (b === '');
+  const na = Number(a), nb = Number(b);
+  return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
+}
+function cgCtlLinhasVisiveis() {
+  const e = cgCtlEstado(), q = cgNorm(e.busca);
+  let ls = cgLinhasControle();
+  if (!e.carregadas) ls = ls.filter((x) => x.etapa !== 'CARREGADA');
+  if (q) ls = ls.filter((x) => CG_CTL.some((c) => cgNorm(c.v(x)).indexOf(q) !== -1) || cgNorm(x.pdf && x.pdf.nm).indexOf(q) !== -1);
+  const col = CG_CTL.find((c) => c.k === e.ordem);
+  return ls.slice().sort(col ? (a, b) => e.dir * cgCompara(col.v(a), col.v(b)) || String(a.n).localeCompare(String(b.n))
+    : (a, b) => ((a.etapa === 'CARREGADA') - (b.etapa === 'CARREGADA')) || ((a.box || 999) - (b.box || 999)) || String(a.n).localeCompare(String(b.n)));
+}
+function cgCtlOrdenar(k) { const e = cgCtlEstado(); if (e.ordem === k) { if (e.dir > 0) e.dir = -1; else { e.ordem = ''; e.dir = 1; } } else { e.ordem = k; e.dir = 1; } cgDesenhar(); }
+let CG_CTL_T = 0;
+function cgCtlBuscar(v) { cgCtlEstado().busca = v; clearTimeout(CG_CTL_T); CG_CTL_T = setTimeout(cgDesenhar, 220); }
+function cgCtlCelHtml(x, c, i, j, pode) {
+  const v = x ? String(c.v(x) == null ? '' : c.v(x)) : (c.sel ? c.sel[0] : '');
+  if (!pode) return c.sel ? `<span class="cg-ctl-sn ${v === 'SIM' ? 'sim' : 'nao'}">${v}</span>` : (c.k === 'descricao' && !v && x.pdf && x.pdf.nm ? `<span class="cg-ctl-pdf">${esc(x.pdf.nm)}</span>` : esc(v));
+  const id = 'ctl-' + (x ? x.id : 'novo') + '-' + c.k;
+  const comum = `id="${esc(id)}" class="cg-ctl-cel${c.sel ? ' sel-' + (v === 'SIM' ? 'sim' : 'nao') : ''}" data-id="${x ? esc(x.id) : ''}" data-col="${c.k}" data-i="${i}" data-j="${j}"
+    aria-label="${esc(c.t + (x ? ' da carga ' + x.n : ' (linha nova)'))}" onkeydown="cgCtlTecla(event, this)" onpaste="cgCtlColar(event, this)"`;
+  if (c.sel) return `<select ${comum} onchange="cgCtlMudou(this)">${c.sel.map((o) => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+  const ph = x ? (c.k === 'descricao' && !v && x.pdf && x.pdf.nm ? x.pdf.nm : '') : (c.k === 'carga' ? 'nova carga' : '');
+  return `<input ${comum} value="${esc(v)}" data-antes="${esc(v)}"${c.lista ? ` list="${c.lista}"` : ''}${c.im ? ` inputmode="${c.im}"` : ''}${ph ? ` placeholder="${esc(ph)}"` : ''} autocomplete="off" onchange="cgCtlMudou(this)">`;
+}
+function cgControleHtml() {
+  const d = CG.dados, pode = d.podeEditar && !CG.hist, e = cgCtlEstado(), ls = cgCtlLinhasVisiveis(), total = cgLinhasControle().length;
+  const cab = CG_CTL.map((c) => { const o = e.ordem === c.k;
+    return `<th scope="col" style="min-width:${c.w}px" aria-sort="${o ? (e.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="cg-ctl-ord" onclick="cgCtlOrdenar(${jsArg(c.k)})" title="Ordenar por ${esc(c.t)}">${esc(c.t)}<span aria-hidden="true">${o ? (e.dir > 0 ? ' ▲' : ' ▼') : ''}</span></button></th>`; }).join('');
+  // a alca: arrastar a linha para uma doca da fila de cima (poe a carga no box)
+  const pega = (x) => pode ? `<td class="cg-ctl-pega">${x && x.etapa !== 'CARREGADA' ? `<span draggable="true" ondragstart="cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()" title="Arraste a carga ${esc(x.n)} para uma doca" aria-hidden="true">⠿</span>` : ''}</td>` : '';
+  const linha = (x, i) => `<tr data-id="${esc(x.id)}" class="${x.etapa === 'CARREGADA' ? 'carregada' : ''}">${pega(x)}${CG_CTL.map((c, j) => `<td>${cgCtlCelHtml(x, c, i, j, pode)}</td>`).join('')}</tr>`;
+  const nova = pode ? `<tr class="cg-ctl-nova" onfocusout="cgCtlSaiuDaNova(event)">${pega(null)}${CG_CTL.map((c, j) => `<td>${cgCtlCelHtml(null, c, ls.length, j, pode)}</td>`).join('')}</tr>` : '';
+  return `${pode ? `<section class="cg-cartao cg-sb cg-sb-mini-cartao" aria-label="Docas (solte a carga aqui)"><header class="cg-cartao-cab"><h3>Docas</h3><span class="cg-nota">Arraste a linha pela alça ⠿ até a doca para pôr a carga no box.</span></header>${cgFilaDocasHtml(true)}</section>` : ''}
+  <section class="cg-cartao cg-ctl-cartao">
+    <header class="cg-cartao-cab"><h3>Controle</h3><span class="cg-selo neutro">${ls.length}${ls.length !== total ? ' de ' + total : ''} ${ls.length === 1 ? 'linha' : 'linhas'}</span></header>
+    <div class="cg-ctl-barra">
+      <label class="cg-busca"><span class="sr">Filtrar o controle</span><input id="cg-ctl-busca" type="search" placeholder="Filtrar: carga, box, carro, motorista..." value="${esc(e.busca)}" oninput="cgCtlBuscar(this.value)" autocomplete="off"></label>
+      <label class="cg-ctl-check"><input type="checkbox" ${e.carregadas ? 'checked' : ''} onchange="cgCtlEstado().carregadas = this.checked; cgDesenhar()"> Mostrar as carregadas (24 h)</label>
+      ${pode ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgCtlColarJanela()">Colar linhas da planilha</button>' : ''}
+    </div>
+    <div class="cg-ctl-rolo" id="cg-ctl-rolo"><table class="cg-ctl" aria-label="Controle dos boxes">
+      <thead><tr>${pode ? '<th scope="col" class="cg-ctl-pega"><span class="sr">Arrastar</span></th>' : ''}${cab}</tr></thead><tbody>${ls.map(linha).join('')}${nova}</tbody></table></div>
+    ${pode ? cgCtlListasHtml() : ''}
+    <p class="cg-nota">${pode ? 'Clique numa célula e escreva; Tab ou Enter salva e passa adiante (Esc desfaz). Para várias linhas do Excel ou do Google Planilhas: copie e cole numa célula — a primeira coluna colada é a da célula; com a coluna CARGA, a carga que já está no pátio é atualizada e a nova entra. A última linha, em branco, cria uma carga.' : 'Somente leitura.'} CARREGADA? = SIM libera o box; a OBSERVAÇÃO vem da lista dos Cadastros.</p>
+  </section>`;
+}
+function cgRotuloMotorista(m) { return (m.codigo ? m.codigo + ' - ' : '') + m.nome + (m.placa ? ' (' + m.placa + ')' : ''); }
+function cgMotoristaDoCadastro(v) {
+  const q = cgNorm(v);
+  if (!q) return null;
+  return ((cgDadosVivos().cadastro || {}).motoristas || []).find((m) => cgNorm(cgRotuloMotorista(m)) === q || cgNorm(m.nome) === q || (m.codigo && cgNorm(m.codigo) === q)) || null;
+}
+function cgCtlListasHtml() {
+  const d = cgDadosVivos(), cad = d.cadastro || { motoristas: [], destinos: [], horarios: [] }, P = CG.dados.patio;
+  const cargas = (d.snapshot && d.snapshot.cargas) || [];
+  const destinos = [];
+  cad.destinos.forEach((x) => { if (destinos.indexOf(x.valor) === -1) destinos.push(x.valor); });
+  cargas.forEach((c) => { const n = String(c.nm || '').toUpperCase(); if (n && destinos.indexOf(n) === -1 && destinos.length < 500) destinos.push(n); });
+  return `<datalist id="cgl-cargas">${cargas.slice(0, 500).map((c) => `<option value="${esc(c.n)}">${esc(c.nm || '')}</option>`).join('')}</datalist>
+    <datalist id="cgl-motoristas">${cad.motoristas.map((m) => `<option value="${esc(cgRotuloMotorista(m))}"></option>`).join('')}</datalist>
+    <datalist id="cgl-destinos">${destinos.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+    <datalist id="cgl-situacoes">${((P && P.situacoes) || []).map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+    <datalist id="cgl-horarios">${cad.horarios.map((x) => `<option value="${esc(x.valor)}"></option>`).join('')}</datalist>`;
+}
+/* O motorista escolhido do cadastro: o texto completo, e a placa vai para o CARRO se ele estiver vazio. */
+function cgCtlCompletar(linha, x) {
+  if (linha.motorista == null) return linha;
+  const m = cgMotoristaDoCadastro(linha.motorista);
+  if (!m) return linha;
+  linha.motorista = cgRotuloMotorista(m);
+  if (m.placa && !(linha.veiculo || (x && x.veiculo))) linha.veiculo = m.placa;
+  return linha;
+}
+function cgCtlMudou(inp) {
+  const id = inp.getAttribute('data-id'), col = inp.getAttribute('data-col');
+  if (inp.tagName === 'SELECT') inp.className = inp.className.replace(/ sel-\w+/, '') + ' sel-' + (inp.value === 'SIM' ? 'sim' : 'nao');
+  if (!id) return;                                  // a linha nova grava ao sair dela (ou com Enter)
+  const x = cgLinhasControle().find((l) => l.id === id);
+  if (!x) return;
+  const v = inp.value.trim(), c = CG_CTL.find((k) => k.k === col);
+  if (String(c.v(x) == null ? '' : c.v(x)) === v) return;
+  const linha = cgCtlCompletar({ id: id, [col]: v }, x);
+  // depois que o foco ja foi para a proxima celula (Tab), para o redesenho nao atrapalhar
+  setTimeout(() => cgCtlSalvarLote([linha], () => {
+    if (c.campo) x[c.campo] = c.k === 'box' ? (Number(v) || 0) : (linha[col] || '');
+    if (linha.veiculo != null && col !== 'veiculo') x.veiculo = linha.veiculo;
+    if (col === 'carregada') x.etapa = v === 'SIM' ? 'CARREGADA' : (x.box ? 'BOX' : 'FILA');
+  }), 0);
+}
+function cgCtlNovaLinha() {
+  const linha = {};
+  CG_CTL.forEach((c) => { const i = el('ctl-novo-' + c.k); if (!i) return; const v = i.value.trim(); if (c.sel ? v === 'SIM' : v) linha[c.k] = v; });
+  return linha;
+}
+function cgCtlCriar() {
+  const linha = cgCtlNovaLinha();
+  if (!linha.carga) { if (Object.keys(linha).length) avisar('Escreva o número da CARGA na linha nova.', true); return; }
+  CG_CTL.forEach((c) => { const i = el('ctl-novo-' + c.k); if (i) i.value = c.sel ? c.sel[0] : ''; });
+  cgCtlSalvarLote([cgCtlCompletar(linha, null)]).then(() => { const i = el('ctl-novo-carga'); if (i) i.focus(); });
+}
+function cgCtlSaiuDaNova(ev) {
+  const tr = ev.currentTarget;
+  setTimeout(() => { if (tr.isConnected && !tr.contains(document.activeElement) && cgCtlNovaLinha().carga) cgCtlCriar(); }, 0);
+}
+function cgCtlTecla(ev, inp) {
+  if (ev.key === 'Escape') { if (inp.hasAttribute('data-antes')) inp.value = inp.getAttribute('data-antes'); inp.blur(); return; }
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  if (!inp.getAttribute('data-id')) { cgCtlCriar(); return; }
+  const i = Number(inp.getAttribute('data-i')) + (ev.shiftKey ? -1 : 1), j = inp.getAttribute('data-j');
+  const prox = document.querySelector('.cg-ctl-cel[data-i="' + i + '"][data-j="' + j + '"]');
+  if (prox) prox.focus(); else inp.blur();
+}
+/* Colar do Excel / Google Planilhas: linhas separadas por quebra, colunas por tabulacao. */
+function cgCtlTabela(t) {
+  return String(t || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n').map((l) => l.split('\t').map((c) => c.replace(/^"([\s\S]*)"$/, '$1').trim()));
+}
+const CG_CTL_NOMES = { CARGA: 'carga', COMPLEMENTO: 'complemento', PRIORIDADE: 'prioridade', BOX: 'box', CARRO: 'veiculo', VEICULO: 'veiculo', PLACA: 'veiculo', DESCRICAO: 'descricao',
+  DESTINO: 'descricao', MOTORISTA: 'motorista', CARREGADA: 'carregada', OBSERVACAO: 'situacao', SITUACAO: 'situacao', HORARIOCHEGADA: 'previsao', HORARIODECHEGADA: 'previsao', CHEGADA: 'previsao', PREVISAO: 'previsao' };
+function cgCtlInterpretar(texto, j0, i0) {
+  const tab = cgCtlTabela(texto).filter((l) => l.some(Boolean));
+  if (!tab.length) return [];
+  const cab = tab[0].map((c) => cgNorm(c).replace(/[^A-Z]/g, ''));
+  let cols, porPosicao = true;
+  if (cab.indexOf('CARGA') !== -1 && cab.filter((c) => CG_CTL_NOMES[c]).length >= 2) { cols = cab.map((c) => CG_CTL_NOMES[c] || ''); tab.shift(); porPosicao = false; }
+  else cols = tab[0].map((c, j) => (CG_CTL[(j0 || 0) + j] || {}).k || '');
+  const comCarga = cols.indexOf('carga') !== -1, vis = cgCtlLinhasVisiveis(), saida = [];
+  tab.forEach((l, r) => {
+    const o = {};
+    cols.forEach((k, j) => { if (k && l[j] != null && !(k === 'carregada' && !l[j])) o[k] = l[j]; });
+    if (!comCarga) {
+      const alvo = porPosicao && i0 != null ? vis[i0 + r] : null;
+      if (!alvo) return;
+      o.id = alvo.id;
+    } else if (!o.carga) return;
+    saida.push(cgCtlCompletar(o, o.id ? vis.find((x) => x.id === o.id) : null));
+  });
+  return saida;
+}
+function cgCtlColar(ev, inp) {
+  let t = '';
+  try { t = (ev.clipboardData || window.clipboardData).getData('text'); } catch (e) { t = ''; }
+  if (!t || (t.indexOf('\t') === -1 && !/\n\s*\S/.test(t.replace(/\r/g, '').replace(/\n+$/, '')))) return;   // um valor so: o colar normal
+  ev.preventDefault();
+  const i = inp.getAttribute('data-id') ? Number(inp.getAttribute('data-i')) : null;
+  const linhas = cgCtlInterpretar(t, Number(inp.getAttribute('data-j')), i);
+  if (!linhas.length) { avisar('Nada para colar aqui: sem a coluna CARGA, as linhas coladas vão para as linhas da grade a partir desta.', true); return; }
+  cgCtlSalvarLote(linhas);
+}
+function cgCtlColarJanela() {
+  abrirJanela('Colar linhas da planilha', `<div class="cg-envio"><p>Copie as linhas no Excel ou no Google Planilhas — com ou sem o cabeçalho <b>CARGA · COMPLEMENTO · PRIORIDADE · BOX · CARRO · DESCRIÇÃO · MOTORISTA · CARREGADA? · OBSERVAÇÃO · HORÁRIO CHEGADA</b> — e cole aqui. A carga que já está no pátio é atualizada; a nova entra. Até 300 linhas por vez.</p>
+    <label class="cg-rotulo" for="cg-ctl-colado">Linhas</label><textarea id="cg-ctl-colado" rows="8" placeholder="Cole aqui (Ctrl+V)"></textarea></div>`,
+    '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" onclick="cgCtlColarDaJanela()">Salvar as linhas</button>');
+  setTimeout(() => { const t = el('cg-ctl-colado'); if (t) t.focus(); }, 50);
+}
+function cgCtlColarDaJanela() {
+  const t = el('cg-ctl-colado') ? el('cg-ctl-colado').value : '';
+  const linhas = cgCtlInterpretar(t, 0, null);
+  if (!linhas.length) { avisar('Nada para salvar: cada linha precisa do número da CARGA.', true); return; }
+  fecharJanela();
+  cgCtlSalvarLote(linhas);
+}
+async function cgCtlSalvarLote(linhas, aplicar) {
+  const P = CG.dados.patio, antes = JSON.stringify(P);
+  const r = await cgAoVivo('carregamentoLoteCarga', { linhas: linhas }, aplicar || (() => {}), () => { CG.dados.patio = JSON.parse(antes); });
+  if (r && r.resultados) {
+    const err = r.resultados.filter((x) => !x.ok);
+    if (err.length) avisar(linhas.length === 1 ? 'Não salvou: ' + err[0].erro : err.length + ' de ' + linhas.length + ' linhas não salvaram — ' + err.slice(0, 3).map((x) => 'linha ' + x.linha + ': ' + x.erro).join(' · '), true);
+  }
+  return r;
+}
+
+/* ---------------- SITUACAO DOS BOXs: a fila de docas como na aba da planilha ---------------- */
+/*
+ * A copia fiel da aba "Situacao dos BOXs" da planilha do carregamento, que e a planta das docas do CD: a faixa com
+ * o caminhao da Bartofil e "BOX DE CARREGAMENTO FEIRA DE SANTANA" e UMA fila de docas, da esquerda para a direita na
+ * ordem do CD (26, 25 ... 1; parametro CARGA_BOXES_ORDEM). Cada doca, de cima para baixo: o patio (cinza) com o
+ * veiculo e a faixa do tipo nas cores da formatacao condicional da planilha (T... azul, LEVE azul-claro, 3/4 azul,
+ * F... petroleo, outro roxo), o NUMERO no amarelo, a SITUACAO (Livre verde / Ocupado vermelho, escrita em pe) e as
+ * cargas do box (numero curto, com a separacao e a conferencia do PDF). Toque na doca: o painel com as acoes;
+ * arraste uma carga (do patio, da grade Controle ou de outra doca) para a doca para por no box.
+ */
+function cgSbEstadoTexto(b) { return { LIVRE: 'Livre', OCUPADO: 'Ocupado', CARREGANDO: 'Carregando', RESERVADO: 'Reservado', BLOQUEADO: 'Bloqueado' }[b.estado] || b.estado; }
+/* O texto da faixa do veiculo, como eles escrevem na planilha (TRUCK, TOCO, 3/4, LEVE, VUC, CARRETA). */
+function cgSbVeicTexto(x) {
+  if (!x) return '';
+  const t = cgTipoVeiculoCli(x.tipo);
+  return t === 'MEDIO' ? '3/4' : (t === 'OUTRO' ? (x.veiculo && !/\d{3,}/.test(x.veiculo) ? x.veiculo.toUpperCase() : 'VEÍCULO') : t);
+}
+/* A cor da faixa pela formatacao condicional da planilha, na mesma ordem de prioridade. */
+function cgSbVeicCor(txt) {
+  const t = String(txt || '').trim().toUpperCase();
+  if (!t) return '';
+  if (t[0] === 'T') return 'v-t';
+  if (t === 'LEVE') return 'v-leve';
+  if (t.indexOf('3') !== -1) return 'v-3';
+  if (t[0] === 'F') return 'v-f';
+  return 'v-outro';
+}
+function cgSbCurto(n) { n = String(n || ''); return n.length > 3 ? n.slice(-3) : n; }
+const CG_SB_MAX_CARGAS = 7;
+function cgSbDocaHtml(b, compacto) {
+  const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
+  const x0 = b.itens.find((x) => x.noBox) || b.itens.find((x) => !x.virtual) || null;
+  const comVeic = x0 && (b.estado === 'OCUPADO' || b.estado === 'CARREGANDO');
+  const vt = cgSbVeicTexto(x0), est = b.estado.toLowerCase();
+  const al = (P.alertas || []).filter((a) => a.box === b.numero && a.tipo !== 'permanencia');
+  const grav = al.some((a) => a.grav === 'alerta') ? 'alerta' : (al.some((a) => a.grav === 'atencao') ? 'atencao' : 'info');
+  const rotulo = 'Box ' + b.numero + ': ' + cgSbEstadoTexto(b) + (b.loja ? ', ' + cgLojaRotulo(b) : '') + (x0 && x0.veiculo ? ', veículo ' + x0.veiculo : '') + (vt && x0 ? ' (' + vt + (comVeic ? '' : ', previsto') + ')' : '') +
+    (b.itens.length ? ', ' + b.itens.length + (b.itens.length === 1 ? ' carga' : ' cargas') + ': ' + b.itens.map((i) => i.n).join(', ') : '') + (al.length ? ', ' + al.length + (al.length === 1 ? ' aviso' : ' avisos') : '') + (b.obs ? ' (' + b.obs + ')' : '');
+  const solta = pode && b.estado !== 'BLOQUEADO' ? ` ondragover="cgSobreZona(event, 'carreg')" ondragleave="cgSaiuZona(event)" ondrop="cgSoltouCarreg(event, ${b.numero})"` : '';
+  const badge = al.length ? `<span class="cg-sb-aviso g-${grav}" title="${esc(al.map((a) => a.texto).join('\n'))}"><span aria-hidden="true">${CG_ICO_AL[grav]}</span>${al.length}</span>` : '';
+  const abre = `role="button" tabindex="0" onclick="cgPainelDoca(${b.numero})" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); cgPainelDoca(${b.numero}); }" aria-label="${esc(rotulo)}"`;
+  if (compacto) {
+    return `<div class="cg-sb-doca compacta est-${est}${b.loja ? ' loja' : ''}" role="listitem" data-box="${b.numero}"${solta}><div class="cg-sb-alvo" ${abre}>
+      <span class="cg-sb-num cg-num">${b.numero}</span><span class="cg-sb-st cg-sb-est-${est}">${esc(cgSbEstadoTexto(b))}</span>
+      <span class="cg-sb-qtd">${b.itens.length ? b.itens.length + (b.itens.length === 1 ? ' carga' : ' cargas') : '—'}</span>${badge}</div></div>`;
+  }
+  const cargas = b.itens.slice(0, CG_SB_MAX_CARGAS).map((x) => {
+    const p = x.pdf, sep = p && p.sep != null ? Math.max(0, Math.min(100, p.sep)) : null, conf = p && p.conf != null ? Math.max(0, Math.min(100, p.conf)) : null;
+    const tit = 'Carga ' + x.n + (x.loja ? ' · Loja ' + x.loja : '') + (p ? ' · separação ' + cgPctBaixo(p.sep) + ' · conferência ' + cgPctBaixo(p.conf) + (p.estado === 'pronta' ? ' · pronta' : '') : ' · fora do PDF') + (p && p.h ? ' · 24 h' : '');
+    const arrasta = pode && !x.virtual ? ` draggable="true" ondragstart="event.stopPropagation(); cgArrastar(event, 'carreg', ${jsArg(x.id)})" ondragend="cgSoltouFim()"` : '';
+    return `<span class="cg-sb-c${x.virtual ? ' loja' : ''}${p && p.h ? ' h24' : ''}${p && p.estado === 'pronta' ? ' pronta' : ''} et-${x.etapa.toLowerCase()}" data-n="${esc(x.n)}" title="${esc(tit)}"${arrasta}>
+      <b class="cg-num">${esc(cgSbCurto(x.n))}</b>${p ? `<span class="cg-sb-mini" aria-hidden="true"><i class="s" style="width:${sep == null ? 0 : sep.toFixed(0)}%"></i></span><span class="cg-sb-mini" aria-hidden="true"><i class="c" style="width:${conf == null ? 0 : conf.toFixed(0)}%"></i></span>` : ''}</span>`;
+  }).join('') + (b.itens.length > CG_SB_MAX_CARGAS ? `<span class="cg-sb-mais">+${b.itens.length - CG_SB_MAX_CARGAS}</span>` : '');
+  const reserva = b.loja ? `<span class="cg-sb-reserva"><b>Reservado</b> Loja ${esc(b.loja)}</span>` : '';
+  return `<div class="cg-sb-doca est-${est}${b.loja ? ' loja' : ''}${comVeic ? ' com-veic' : ''}" role="listitem" data-box="${b.numero}"${solta}><div class="cg-sb-alvo" ${abre}>
+    <div class="cg-sb-patio">${badge}
+      <div class="cg-sb-alto">${x0 ? `<span class="cg-sb-svg">${cgVeiculoSvg(x0.tipo, comVeic ? '' : 'fantasma')}</span>${x0.veiculo ? `<span class="cg-sb-placa cg-num">${esc(x0.veiculo)}</span>` : ''}` : (b.estado === 'BLOQUEADO' ? '<span class="cg-sb-bloq" aria-hidden="true">⛔</span>' : '')}</div>
+      <div class="cg-sb-faixa ${x0 ? cgSbVeicCor(vt) : ''}${x0 && !comVeic ? ' previsto' : ''}">${x0 ? `<span class="cg-sb-vert">${esc(vt)}</span>` : reserva}</div>
+    </div>
+    <div class="cg-sb-num cg-num">${b.numero}</div>
+    <div class="cg-sb-st cg-sb-est-${est}"><span class="cg-sb-vert">${esc(cgSbEstadoTexto(b))}</span>${x0 && b.loja ? reserva : ''}</div>
+    <div class="cg-sb-cargas">${cargas}</div>
+  </div></div>`;
+}
+function cgSbCabHtml() {
+  const filial = String(CG.dados.filial || 'Feira de Santana').replace(/^CD\s+/i, '').toUpperCase();
+  return `<div class="cg-sb-cab"><span class="cg-sb-logo" aria-hidden="true"><span class="cg-sb-logo-bau logo-completa"></span><svg class="cg-sb-logo-cab" viewBox="0 0 40 60"><path d="M0 14H21L39 33V50H0Z" fill="#1a1e82"/><path d="M5 19H19L30 31H5Z" fill="#fff"/><circle cx="24" cy="50" r="7" fill="#1a1e82" stroke="#fff" stroke-width="2.2"/></svg><svg class="cg-sb-logo-roda" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#1a1e82" stroke="#fff" stroke-width="2.4"/></svg></span>
+    <h3 class="cg-sb-titulo">BOX DE CARREGAMENTO ${esc(filial)}</h3></div>`;
+}
+function cgFilaDocasHtml(compacto) {
+  const lista = cgMapaNaOrdem();
+  return `<div class="cg-sb-rolo${compacto ? ' compacto' : ''}"><div class="cg-sb-fila" role="list" aria-label="Docas, da esquerda para a direita como no CD" style="--cg-sb-n:${lista.length}">${lista.map((b) => cgSbDocaHtml(b, compacto)).join('')}</div></div>`;
+}
+function cgMapaBoxesHtml() {
+  const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
+  return `<section class="cg-cartao cg-sb" aria-label="Situação dos BOXs">
+    <header class="cg-sb-topo">${cgSbCabHtml()}
+      <span class="cg-mapa-botoes"><span class="cg-selo neutro">${P.contagem.livres} livres · ${P.contagem.ocupados} com veículo${P.contagem.reservados ? ' · ' + P.contagem.reservados + ' reservados' : ''}</span>
+        ${pode ? `<button type="button" class="cg-btn cg-btn-primario" onclick="cgFormCarregamento('')">+ Registrar carga</button>` : ''}
+        <button type="button" class="cg-link" onclick="cgImprimirBoxes('mapa')">Imprimir o quadro</button></span></header>
+    ${cgFilaDocasHtml(false)}
+    <p class="cg-legenda-patio cg-sb-legenda"><span class="cg-sb-l lv">Livre</span><span class="cg-sb-l oc">Ocupado (veículo no box)</span><span class="cg-sb-l cr">Carregando</span><span class="cg-sb-l rs">Reservado (carga no box, veículo não chegou)</span><span class="cg-sb-l bl">Bloqueado</span>
+      <span class="cg-sb-l vt">Truck / Toco</span><span class="cg-sb-l v3">3/4</span><span class="cg-sb-l vl">Leve</span><span class="cg-sb-l vo">Outro</span>
+      <span class="cg-sb-dica">${pode ? 'Toque na doca para as ações; arraste uma carga para a doca.' : 'Toque na doca para ver as cargas.'}</span></p>
+  </section>
+  ${cgPatioAlertasHtml()}
+  ${cgPatioFilaHtml()}
+  ${cgPatioSemRegistroHtml()}`;
+}
+
+/* ---------------- CADASTROS DO PATIO ---------------- */
+function cgCadastrosHtml() {
+  const d = cgDadosVivos(), cad = d.cadastro || { motoristas: [], destinos: [], horarios: [] }, pode = CG.dados.podeEditar && !CG.hist, P = CG.dados.patio;
+  const del = (id, nome) => pode ? `<button type="button" class="cg-cad-x" onclick="cgCadastroOp({ op: 'excluir', id: ${jsArg(id)} })" aria-label="Excluir ${esc(nome)}" title="Excluir">✕</button>` : '';
+  const cartao = (titulo, n, form, itens, vazio) => `<section class="cg-cartao cg-cad"><header class="cg-cartao-cab"><h3>${titulo}</h3><span class="cg-selo neutro">${n}</span></header>
+    ${pode ? form : ''}<ul class="cg-cad-lista">${itens || `<li class="cg-vazio-txt">${vazio}</li>`}</ul></section>`;
+  return `<div class="cg-cad-grade">
+    ${cartao('Motoristas', cad.motoristas.length, `<form class="cg-cad-form" onsubmit="event.preventDefault(); cgCadastroSalvar('MOTORISTA')">
+        <input id="cgc-m-codigo" placeholder="Código" inputmode="numeric" maxlength="12" aria-label="Código do motorista">
+        <input id="cgc-m-nome" placeholder="Nome do motorista" maxlength="80" aria-label="Nome do motorista">
+        <input id="cgc-m-placa" placeholder="Placa" maxlength="10" aria-label="Placa">
+        <button class="cg-btn cg-btn-claro" type="submit">Adicionar</button></form>`,
+      cad.motoristas.map((m) => `<li><span><b>${esc(m.nome)}</b><small>${esc([m.codigo ? 'cód. ' + m.codigo : '', m.placa].filter(Boolean).join(' · ') || '—')}</small></span>${del(m.id, m.nome)}</li>`).join(''), 'Nenhum motorista. Na grade, o MOTORISTA completa com este cadastro e põe a placa no CARRO.')}
+    ${cartao('Destinos (DESCRIÇÃO)', cad.destinos.length, `<form class="cg-cad-form" onsubmit="event.preventDefault(); cgCadastroSalvar('DESTINO')">
+        <input id="cgc-destino" placeholder="FPI-D, rota..." maxlength="80" aria-label="Destino"><button class="cg-btn cg-btn-claro" type="submit">Adicionar</button></form>`,
+      cad.destinos.map((x) => `<li><span>${esc(x.valor)}</span>${del(x.id, x.valor)}</li>`).join(''), 'Nenhum destino.')}
+    ${cartao('Horários de chegada', cad.horarios.length, `<form class="cg-cad-form" onsubmit="event.preventDefault(); cgCadastroSalvar('HORARIO')">
+        <input id="cgc-horario" placeholder="05:30" inputmode="numeric" maxlength="5" aria-label="Horário de chegada"><button class="cg-btn cg-btn-claro" type="submit">Adicionar</button></form>`,
+      cad.horarios.map((x) => `<li><span class="cg-num">${esc(x.valor)}</span>${del(x.id, x.valor)}</li>`).join(''), 'Nenhum horário.')}
+    <section class="cg-cartao cg-cad"><header class="cg-cartao-cab"><h3>Observações (situação)</h3><span class="cg-selo neutro">${(P.situacoes || []).length}</span></header>
+      <ul class="cg-cad-sits">${(P.situacoes || []).map((s, i) => `<li class="cg-sit cat-${esc((P.situacoesCat || [])[i] || 'outra')}">${esc(s)}</li>`).join('')}</ul>
+      ${pode ? `<label class="cg-rotulo" for="cgc-obs">Uma por linha (a ordem é a da lista)</label><textarea id="cgc-obs" rows="6">${esc((P.situacoes || []).join('\n'))}</textarea>
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgSalvarObservacoes()">Salvar a lista</button>` : ''}</section>
+  </div>
+  ${pode ? '<p class="cg-nota">Para trazer o cadastro da planilha antiga (a aba Cadastro, junto com o Controle e a Situação dos BOXs): <button type="button" class="cg-link" onclick="cgImportarBoxes()">Importar da planilha antiga</button>. A planilha não é alterada.</p>' : ''}`;
+}
+function cgCadastroSalvar(tipo) {
+  const p = { op: 'salvar', tipo: tipo };
+  if (tipo === 'MOTORISTA') { p.codigo = val('cgc-m-codigo'); p.valor = val('cgc-m-nome'); p.placa = val('cgc-m-placa'); }
+  else p.valor = val(tipo === 'DESTINO' ? 'cgc-destino' : 'cgc-horario');
+  if (!p.valor) { avisar(tipo === 'MOTORISTA' ? 'Escreva o nome do motorista.' : (tipo === 'DESTINO' ? 'Escreva o destino.' : 'Escreva o horário, como 05:30.'), true); return; }
+  cgCadastroOp(p);
+}
+function cgCadastroOp(p) { return cgAoVivo('cadastroCarga', p, () => {}, () => {}); }
+function cgSalvarObservacoes() { const t = el('cgc-obs') ? el('cgc-obs').value : ''; cgCadastroOp({ op: 'situacoes', lista: t.split('\n') }); }
+
+/* ---------------- EXCEL, CSV E IMPRESSAO ---------------- */
+/* O quadro das docas para imprimir (A4 deitado): a mesma fila, com as cores da planilha, numa tabela. */
+const CG_QUADRO_CSS_IMPRESSAO = `.sbq { width: 100%; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; margin-top: 4px; }
+  .sbq td { border: 1px solid #000; padding: 0; text-align: center; vertical-align: middle; white-space: normal; background: #fff; }
+  .sbq tbody tr:nth-child(even) td { background: inherit; }
+  .sbq .pt td { background: #999 !important; height: 16mm; font-size: 7.5px; color: #111; border-color: #999 #FFCE00; }
+  .sbq .fx td { background: #999 !important; height: 26mm; border-color: #999 #FFCE00; }
+  .sbq .vt { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; font-size: 9px; letter-spacing: .02em; }
+  .sbq td.v-t { background: #1C4E9D !important; color: #fff; } .sbq td.v-leve { background: #9FC5E8 !important; color: #000; } .sbq td.v-3 { background: #377AEE !important; color: #fff; }
+  .sbq td.v-f { background: #0C343D !important; color: #fff; font-weight: 700; } .sbq td.v-outro { background: #351C75 !important; color: #fff; } .sbq td.previsto { opacity: .55; }
+  .sbq .nm td { background: #FFCE00 !important; border: 1.5px solid #071277; font: 800 17px Arial, sans-serif; color: #000; height: 11mm; }
+  .sbq .st td { height: 30mm; font-size: 11px; }
+  .sbq td.e-livre { background: #ACEBCD !important; color: #274E13; } .sbq td.e-ocupado, .sbq td.e-carregando { background: #EA9999 !important; color: #660000; }
+  .sbq td.e-reservado { background: #FFE599 !important; color: #5C4600; } .sbq td.e-bloqueado { background: #CCCCCC !important; color: #333; }
+  .sbq .cg td { background: #D9D9D9 !important; height: 24mm; vertical-align: top; font-size: 8.5px; line-height: 1.35; padding-top: 2px; color: #222; }
+  .sbq .cg td small { display: block; font-size: 6.5px; color: #444; }
+  .sbq .rs { display: block; font-size: 6.5px; font-weight: 700; }
+  .sbq-cab { display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; } .sbq-cab b { font: 800 20px Arial, sans-serif; color: #1A1F8C; letter-spacing: .01em; }
+  .sbq-leg { font-size: 8.5px; color: #4A4F6A; margin-top: 4px; }`;
+function cgQuadroImpressaoHtml() {
+  const lista = cgMapaNaOrdem();
+  const x0De = (b) => b.itens.find((x) => x.noBox) || b.itens.find((x) => !x.virtual) || null;
+  const filial = String(CG.dados.filial || 'Feira de Santana').replace(/^CD\s+/i, '').toUpperCase();
+  const linha = (cls, f) => `<tr class="${cls}">${lista.map(f).join('')}</tr>`;
+  return `<div class="sbq-cab"><b>BOX DE CARREGAMENTO ${esc(filial)}</b></div><table class="sbq"><tbody>
+    ${linha('pt', (b) => { const x = x0De(b); return `<td>${x && x.veiculo ? esc(x.veiculo) : ''}${b.loja && !x ? `<span class="rs">Reservado Loja ${esc(b.loja)}</span>` : ''}</td>`; })}
+    ${linha('fx', (b) => { const x = x0De(b), t = cgSbVeicTexto(x), com = x && (b.estado === 'OCUPADO' || b.estado === 'CARREGANDO');
+      return `<td class="${x ? cgSbVeicCor(t) + (com ? '' : ' previsto') : ''}">${x ? `<span class="vt">${esc(t)}</span>` : ''}</td>`; })}
+    ${linha('nm', (b) => `<td>${b.numero}</td>`)}
+    ${linha('st', (b) => `<td class="e-${b.estado.toLowerCase()}"><span class="vt">${esc(cgSbEstadoTexto(b))}</span></td>`)}
+    ${linha('cg', (b) => `<td>${b.itens.slice(0, 12).map((i) => `${esc(cgSbCurto(i.n))}${i.pdf ? `<small>${cgPctBaixo(i.pdf.sep)} / ${cgPctBaixo(i.pdf.conf)}</small>` : ''}`).join('<br>')}${b.itens.length > 12 ? '<br>+' + (b.itens.length - 12) : ''}</td>`)}
+  </tbody></table><p class="sbq-leg">Da esquerda para a direita como as docas do CD. Embaixo de cada carga: separação / conferência. Reservados: ${(CG.dados.patio.lojas || []).map((l) => 'box ' + l.box + ' = Loja ' + esc(l.nome)).join(' · ') || 'nenhum'}.</p>`;
+}
+
+function cgDataArquivo() { return cgIsoLocalAgora().slice(0, 10); }
+function cgValorExport(x, c) { const v = c.v(x); return c.k === 'descricao' && !v && x.pdf ? (x.pdf.nm || '') : (v == null ? '' : v); }
+function cgExportarControle(fmt) {
+  const ls = cgCtlLinhasVisiveis(), P = CG.dados.patio, cab = CG_CTL.map((c) => c.t);
+  const dados = ls.map((x) => CG_CTL.map((c) => cgValorExport(x, c)));
+  const nome = 'controle-boxes-' + cgDataArquivo();
+  if (typeof pnBaixarBlob !== 'function') { avisar('Exportar não está disponível nesta tela.', true); return; }
+  if (fmt === 'csv') {
+    const q = (v) => { const s = String(v == null ? '' : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    pnBaixarBlob(nome + '.csv', '﻿' + [cab].concat(dados).map((l) => l.map(q).join(';')).join('\r\n'), 'text/csv;charset=utf-8');
+    return;
+  }
+  const r = cgResumoControle(cgLinhasControle()), sub = (CG.dados.filial || '') + ' · ' + cgDataBr(cgIsoLocalAgora());
+  const TOM = { LIVRE: 'verde', RESERVADO: 'amarelo', OCUPADO: 'vermelho', CARREGANDO: 'laranja', BLOQUEADO: 'cinza' };
+  pnBaixarXlsx(nome + '.xlsx', [
+    { nome: 'Controle', linhas: [['Controle dos boxes'], [sub], [], cab].concat(dados.map((l) => l.map((v, j) => CG_CTL[j].k === 'carregada' ? { v: v, tom: v === 'SIM' ? 'verde' : 'cinza' } : (CG_CTL[j].k === 'box' && v !== '' ? Number(v) : v)))) },
+    { nome: 'Situação dos BOXs', linhas: [['Situação dos BOXs'], [sub], [], ['BOX', 'SITUAÇÃO', 'CARGAS', 'CARRO', 'TIPO', 'RESERVADO PARA', 'OBSERVAÇÃO']].concat(cgMapaNaOrdem().map((b) => {
+      const x0 = b.itens.find((x) => x.noBox) || b.itens.find((x) => !x.virtual) || null;
+      return [b.numero, { v: cgSbEstadoTexto(b), tom: TOM[b.estado] }, b.itens.map((i) => i.n).join(', '), b.itens.map((i) => i.veiculo).filter(Boolean).join(', '), x0 ? cgSbVeicTexto(x0) : '', b.loja ? 'Loja ' + b.loja : '', b.obs || ''];
+    })) },
+    { nome: 'Resumo', linhas: [['Resumo dos boxes'], [sub], [], ['INDICADOR', 'QUANTIDADE'], ['Total de caminhões', r.caminhoes], ['Caminhões carregados', r.carregados], ['Total de cargas', r.cargas],
+      ['Cargas carregadas', r.carregadas], ['Boxes livres', r.livres], ['Boxes ocupados', r.ocupados]].concat(Object.keys(r.porTipo).map((t) => ['Caminhões ' + CG_VEIC[t].nome, r.porTipo[t]])) }
+  ]);
+}
+function cgImprimirBoxes(so) {
+  if (typeof pnImprimirRelatorio !== 'function') { window.print(); return; }
+  const ls = cgCtlLinhasVisiveis(), P = CG.dados.patio, r = cgResumoControle(cgLinhasControle());
+  const sub = (CG.dados.filial || '') + ' · ' + cgDataBr(cgIsoLocalAgora());
+  const mapa = (so === 'mapa' ? '' : '<h2>Situação dos BOXs</h2>') + cgQuadroImpressaoHtml();
+  const resumo = `<h2>Resumo</h2><table class="resumo"><tbody>${[['Total de caminhões', r.caminhoes], ['Caminhões carregados', r.carregados], ['Total de cargas', r.cargas], ['Cargas carregadas', r.carregadas], ['Boxes livres', r.livres], ['Boxes ocupados', r.ocupados]]
+    .concat(Object.keys(r.porTipo).map((t) => ['Caminhões ' + CG_VEIC[t].nome, r.porTipo[t]])).map((l) => `<tr><td>${esc(l[0])}</td><td>${l[1]}</td></tr>`).join('')}</tbody></table>`;
+  const tabela = `<h2>Controle</h2><table class="ctl"><thead><tr>${CG_CTL.map((c) => `<th>${esc(c.t)}</th>`).join('')}</tr></thead><tbody>${ls.map((x) => `<tr>${CG_CTL.map((c) => { const v = cgValorExport(x, c);
+    return c.k === 'carregada' ? `<td><span class="tom ${v === 'SIM' ? 'verde' : 'cinza'}">${v}</span></td>` : `<td>${esc(v)}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
+  const css = CG_QUADRO_CSS_IMPRESSAO + `
+    table.ctl td, table.resumo td { text-align: left; white-space: normal; } table.resumo { width: auto; min-width: 260px; } table.resumo td:last-child { text-align: right; font-weight: 700; }`;
+  pnImprimirRelatorio(so === 'mapa' ? 'Situação dos BOXs' : 'Controle dos boxes', sub, so === 'mapa' ? mapa : resumo + mapa + tabela, css);
+}

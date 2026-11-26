@@ -1,0 +1,1168 @@
+/**
+ * IDENTIDADE — so reconhecer quem abriu.
+ *
+ * A PORTA E DO GOOGLE, NAO DO GSL.
+ *
+ * O GSL e implantado como "Executar como: eu" e "Quem pode acessar:
+ * Qualquer pessoa da Bartofil". Com isso o proprio Google Workspace faz
+ * o login: quem nao esta logado com uma conta @bartofil.com.br nem chega
+ * a ver a pagina. E a mesma implantacao do BI de funcoes, que funciona
+ * no servidor em nuvem.
+ *
+ * O que sobra para o GSL e uma pergunta so: QUEM e esta pessoa, para
+ * saber quais telas ela ve. A resposta vem de Session.getActiveUser(),
+ * que o Google preenche quando quem abre e do mesmo dominio do dono do
+ * script. O navegador nao manda e-mail, token nem senha — nao ha o que
+ * forjar e nao ha tela de entrada para travar.
+ *
+ * O que saiu (e por que):
+ *   - o botao "Entrar com Google" (OAuth) e o token de sessao: eram a
+ *     tela que ficava em loop no servidor em nuvem;
+ *   - a tela de pedido de acesso e a triagem: quem nao esta cadastrado
+ *     ve um aviso para falar com o administrador, e o administrador
+ *     cadastra em Pessoas e acessos.
+ */
+
+var _usuarioDaVez = null;
+const BUILD_AUTH = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
+
+/*
+ * 4.2 — QUEM ENTRA E O E-MAIL DIGITADO, NAO A CONTA DO NAVEGADOR.
+ *
+ * Nos computadores compartilhados do CD o navegador fica com a conta Google
+ * de quem usou antes (ou com varias contas guardadas, o que ainda derruba
+ * o google.script.run com HTTP 403). Por isso, a cada abertura, a pessoa
+ * digita o e-mail e o PIN dela; o servidor devolve um codigo de sessao que
+ * vive so enquanto a aba estiver aberta. A conta Google do navegador so
+ * precisa ser da Bartofil (a implantacao exige) — pode ser a conta geral
+ * do computador.
+ *
+ * Propriedade IDENTIDADE=GOOGLE volta ao modo antigo (conta do navegador);
+ * fica para os testes automaticos e para emergencia.
+ */
+var _tokenDaVez = '';
+var _porta = false;
+
+function modoGoogle_() { return String(prop('IDENTIDADE', '')).toUpperCase().trim() === 'GOOGLE'; }
+
+/* O e-mail de quem esta usando: o da sessao (modo padrao) ou o do Google. */
+function emailDoUsuario_() {
+  return modoGoogle_() ? emailDeQuemAbriu() : emailDaSessao_(_tokenDaVez);
+}
+
+function usuarioAtual() {
+  if (_usuarioDaVez) return _usuarioDaVez;
+  _usuarioDaVez = calcularUsuarioAtual();
+  return _usuarioDaVez;
+}
+
+/** Zera a memoria quando o proprio usuario muda (simulacao, novo perfil). */
+function esquecerUsuario() { _usuarioDaVez = null; }
+
+/* Erro com motivo que a tela sabe explicar. */
+function erroDeEntrada_(tipo, mensagem, email) {
+  const e = new Error(mensagem);
+  e.tipoEntrada = tipo;          // SEM_CONTA · SEM_CADASTRO · DESATIVADO · SEM_NIVEL
+  e.email = email || '';
+  return e;
+}
+
+function calcularUsuarioAtual() {
+  const email = emailDoUsuario_();
+
+  if (!email) {
+    if (!modoGoogle_()) {
+      // [SESSAO] e a marca que o navegador usa para voltar a tela de entrada.
+      throw erroDeEntrada_('SEM_SESSAO', '[SESSAO] Sua sessão terminou. Entre de novo com o seu e-mail e PIN.');
+    }
+    throw erroDeEntrada_('SEM_CONTA',
+      'O Google não informou qual conta abriu o sistema. Confira se você está com a conta ' +
+      '@bartofil.com.br aberta neste navegador e recarregue a página.');
+  }
+
+  const simulado = simulacaoAtiva(email);
+  if (simulado) return montarUsuario(simulado);
+
+  const registro = buscarAcesso(email);
+  const admin = String(prop('EMAIL_ADMIN', '')).toLowerCase().trim();
+
+  // O dono do sistema nunca fica trancado do lado de fora, mesmo se
+  // alguem apagar a linha dele em ACESSOS. "Dono" e o EMAIL_ADMIN da
+  // instalacao OU a conta que fez a implantacao (a que executa o script).
+  if (!registro && (email === admin || email === donoDoScript()) &&
+      (modoGoogle_() || emailDeQuemAbriu() === email)) {
+    return montarUsuario({ email: email, nome: nomeDaPessoa(email, ''), papel: 'Administrador do sistema',
+      perfil: 'ADMIN', turno: '', filiais: '*', situacao: 'ATIVO', cadastrado: true, verificado: true });
+  }
+
+  if (!registro) {
+    throw erroDeEntrada_('SEM_CADASTRO',
+      'Sua conta ainda não foi cadastrada no GSL. Peça ao administrador para liberar o seu acesso.', email);
+  }
+
+  const situacao = String(registro.SITUACAO || '').toUpperCase().trim();
+  const perfil = String(registro.PERFIL || '').toUpperCase().trim();
+
+  if (!marcado(registro.ATIVO) || situacao === 'RECUSADO' || situacao === 'INATIVO') {
+    throw erroDeEntrada_('DESATIVADO',
+      'Seu acesso ao GSL está desativado. Fale com o administrador.', email);
+  }
+  if (!perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO) {
+    throw erroDeEntrada_('SEM_NIVEL',
+      'Seu cadastro existe, mas ainda não tem nível de acesso definido. Fale com o administrador.', email);
+  }
+
+  return montarUsuario({
+    verificado: true,
+    id: registro.ID,
+    email: email,
+    nome: nomeDaPessoa(email, registro.NOME),
+    papel: String(registro.PAPEL || '').trim(),
+    perfil: perfil,
+    turno: String(registro.TURNO || '').toUpperCase().trim(),
+    filiais: String(registro.FILIAIS || '').trim(),
+    modulos: String(registro.MODULOS || '').trim(),
+    ajustes: String(registro.AJUSTES || '').trim(),
+    situacao: situacao || 'ATIVO',
+    cadastrado: true
+  });
+}
+
+/*
+ * Nome de quem esta usando. Sem nome no cadastro, o ultimo recurso e o
+ * comeco do e-mail arrumado (ponto e underline viram espaco, cada
+ * palavra com inicial maiuscula).
+ */
+function nomeDaPessoa(email, nomeAcesso) {
+  const direto = String(nomeAcesso || '').trim();
+  if (direto) return direto;
+  const raiz = String(email || '').split('@')[0].replace(/[._\-]+/g, ' ').replace(/\d+$/, '').trim();
+  if (!raiz) return 'Usuário';
+  return raiz.split(/\s+/).map(function (p) {
+    return p ? p.charAt(0).toUpperCase() + p.slice(1).toLowerCase() : '';
+  }).join(' ').trim();
+}
+
+/*
+ * O usuario com as permissoes de verdade: o nivel na matriz, o ajuste desta
+ * pessoa por menu por cima, e a trava do ADMIN (permissoesDaPessoa). O painel
+ * da filial entra na pergunta (nivelNaTela), porque depende da filial em uso.
+ */
+function montarUsuario(base) {
+  base.ajustesPorTela = lerAjustesPessoa(base.ajustes, base.modulos, base.perfil);
+  base.permissoes = permissoesDaPessoa(base.perfil, base.ajustesPorTela);
+  // Entra na chave do cache de tela e da bolinha: o que muda o que a pessoa ve ou pode.
+  base.chaveModulos = marcaDasPermissoes(base);
+  return base;
+}
+
+/*
+ * getActiveUser()    = a pessoa que esta com o navegador aberto.
+ * getEffectiveUser() = a conta que o script RODA (o dono da implantacao).
+ *
+ * So a primeira serve para dizer quem esta usando. A segunda seria o
+ * dono para todo mundo — e todo mundo entraria como administrador.
+ */
+function emailDeQuemAbriu() {
+  let email = '';
+  try { email = Session.getActiveUser().getEmail(); } catch (e) { email = ''; }
+  return String(email || '').toLowerCase().trim();
+}
+
+/* A conta que EXECUTA o script. Serve para instalacao e avisos de sistema. */
+function donoDoScript() {
+  let email = '';
+  try { email = Session.getEffectiveUser().getEmail(); } catch (e) { email = ''; }
+  return String(email || '').toLowerCase().trim();
+}
+
+/*
+ * DIAGNOSTICO — /exec?diagnostico=1
+ * Responde, de dentro da implantacao, se o Google esta informando quem abriu.
+ */
+function diagnosticoIdentidade() {
+  const ativo = emailDeQuemAbriu();
+  const dono = donoDoScript();
+  let cadastro = null;
+  try { cadastro = ativo ? buscarAcesso(ativo) : null; } catch (e) { cadastro = null; }
+
+  const r = {
+    usuarioAtivo: ativo || '(vazio)',
+    donoDoScript: dono || '(vazio)',
+    identidadeConfiavel: !!ativo,
+    cadastrado: !!cadastro,
+    perfil: cadastro ? String(cadastro.PERFIL || '') : '',
+    veredito: ''
+  };
+
+  if (!ativo) {
+    r.veredito = 'O Google NÃO informou quem abriu. Confira a implantação: "Executar como: eu" e ' +
+      '"Quem pode acessar: Qualquer pessoa da Bartofil". E confira se a pessoa está com a conta ' +
+      '@bartofil.com.br aberta no navegador.';
+  } else if (!cadastro) {
+    r.veredito = 'O Google informou a conta ' + ativo + ', mas ela não está cadastrada em Pessoas e acessos.';
+  } else {
+    r.veredito = 'Tudo certo: o Google informou a conta e ela está cadastrada com o nível ' + r.perfil + '.';
+  }
+
+  Logger.log(JSON.stringify(r, null, 2));
+  return r;
+}
+
+function buscarAcesso(email) {
+  const alvo = String(email || '').toLowerCase().trim();
+  const achados = cadastrosDeAcesso_().filter(function (a) { return a.EMAIL === alvo; });
+  return achados.length ? achados[0] : null;
+}
+
+/*
+ * As pessoas cadastradas SEM o resumo do PIN, da copia 'acessos' do cache —
+ * a mesma lista que decide quem entra. As telas que so precisam de nome,
+ * turno, perfil e filiais usam esta (10/10): antes cada uma relia a aba
+ * ACESSOS inteira da planilha.
+ */
+function cadastrosDeAcesso_() {
+  return comCache('acessos', function () {
+    return listar('ACESSOS').map(function (l) {
+      return {
+        ID: l.ID,
+        EMAIL: String(l.EMAIL || '').toLowerCase().trim(),
+        NOME: l.NOME, PAPEL: l.PAPEL, PERFIL: l.PERFIL, TURNO: l.TURNO,
+        ATIVO: l.ATIVO, SITUACAO: l.SITUACAO, FILIAIS: l.FILIAIS, MODULOS: l.MODULOS, AJUSTES: l.AJUSTES
+      };
+    });
+  });
+}
+
+/* A LISTA DE PESSOAS — alimenta a tela "Pessoas e acessos". */
+function listarPessoas() {
+  return listar('ACESSOS').map(function (l) {
+    const perfil = String(l.PERFIL || '').toUpperCase().trim();
+    let situacao = String(l.SITUACAO || '').toUpperCase().trim() ||
+                   (marcado(l.ATIVO) ? 'ATIVO' : 'INATIVO');
+    if (!marcado(l.ATIVO)) situacao = 'INATIVO';
+    return {
+      id: l.ID,
+      email: String(l.EMAIL || '').trim(),
+      nome: String(l.NOME || '').trim(),
+      papel: String(l.PAPEL || '').trim(),
+      perfil: perfil,
+      semNivel: !perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO,
+      turno: String(l.TURNO || '').toUpperCase().trim(),
+      filiais: String(l.FILIAIS || '').toUpperCase().trim(),
+      ajustes: lerAjustesPessoa(l.AJUSTES, l.MODULOS, perfil),
+      ativo: marcado(l.ATIVO),
+      situacao: situacao,
+      observacao: String(l.OBSERVACAO || ''),
+      temPin: !!String(l.PIN_HASH || '').trim(),
+      desde: l.CRIADO_EM
+    };
+  }).filter(function (a) { return a.email; })
+    .sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+}
+
+/* Nome antigo, mantido para nao quebrar chamada existente. */
+function listarAcessos() { return listarPessoas(); }
+
+/*
+ * O nivel ADMIN so e dado, tirado ou editado por outro ADMIN. Antes, quem
+ * tinha GERIR_ACESSOS (o gerente, por padrao) se promovia a ADMIN e ainda
+ * podia desativar o dono do sistema.
+ */
+function protegerAdmin_(usuario, perfilAlvo, perfilNovo) {
+  if (String(usuario.perfil || '').toUpperCase() === 'ADMIN') return;
+  if (String(perfilAlvo || '').toUpperCase().trim() === 'ADMIN' ||
+      String(perfilNovo || '').toUpperCase().trim() === 'ADMIN') {
+    throw new Error('Só um administrador pode dar, tirar ou editar o nível ADMIN.');
+  }
+}
+
+/*
+ * Pessoas e acessos e Filiais e paineis sao as telas que dao acesso: so um
+ * administrador as mexe no acesso de alguem (na matriz de um nivel ou no
+ * ajuste de uma pessoa). Sem isto, quem cuida das pessoas se dava Filiais e
+ * paineis (ou Ver e editar em Pessoas a outro nivel) e passava a mandar no
+ * que nao era dele. E regra de quem ESCREVE na matriz; o que estiver nela vale.
+ */
+const TELAS_SO_DO_ADMIN = ['acessos', 'filiais'];
+function protegerTelasDoAdmin_(usuario, telas) {
+  if (String(usuario.perfil || '').toUpperCase() === 'ADMIN') return;
+  if ([].concat(telas || []).some(function (t) { return TELAS_SO_DO_ADMIN.indexOf(t) !== -1; })) {
+    throw new Error('Só um administrador muda o acesso a Pessoas e acessos e a Filiais e painéis.');
+  }
+}
+
+/*
+ * O ajuste pedido pela tela: { tela: 'OCULTO'|'VER'|'EDITAR'|'PADRAO' }.
+ * Devolve o ajuste novo (so as telas com faixa) e as telas que mudaram.
+ */
+function ajustesDoPedido_(atuais, pedido) {
+  const novos = Object.assign({}, atuais || {});
+  const mudaram = [];
+  Object.keys(pedido || {}).forEach(function (id) {
+    if (!telaPorId_(id)) throw new Error('Menu desconhecido: ' + id + '.');
+    const bruto = String(pedido[id] || '').toUpperCase().trim();
+    const faixa = faixaDoTexto_(bruto);
+    if (!faixa && bruto !== 'PADRAO' && bruto !== '') throw new Error('Opção inválida para ' + telaPorId_(id).nome + '.');
+    const antes = novos[id] || '';
+    if (faixa) novos[id] = faixa; else delete novos[id];
+    if ((novos[id] || '') !== antes) mudaram.push(id);
+  });
+  return { ajustes: novos, mudaram: mudaram };
+}
+
+/* --- Administracao de pessoas, chamada pela tela --- */
+
+/*
+ * Cadastrar = liberar. Nao existe mais pedido nem fila: o administrador
+ * cadastra a pessoa, escolhe o nivel e as filiais, e ela ja entra.
+ * `ajustes` (opcional): o ajuste desta pessoa por menu, por cima do nivel.
+ */
+function acaoSalvarUsuario(usuario, params) {
+  const campos = {
+    // 25/11: igual a entrada — "joao.silva" (ou "joao.silva@") vira joao.silva@bartofil.com.br
+    EMAIL: completarEmail_(params.email),
+    NOME: String(params.nome || '').trim(),
+    PAPEL: String(params.papel || '').trim(),
+    PERFIL: String(params.perfil || '').toUpperCase().trim(),
+    TURNO: String(params.turno || '').toUpperCase().trim(),
+    FILIAIS: String(params.filiais || '').toUpperCase().replace(/\s+/g, ''),
+    ATIVO: params.ativo === false ? 'NAO' : 'SIM'
+  };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(campos.EMAIL)) throw new Error('Informe um e-mail válido.');
+  if (!campos.NOME) throw new Error('Informe o nome da pessoa — é ele que aparece no sistema.');
+  if (!campos.PERFIL || campos.PERFIL === PERFIL_PADRAO_NOVO_USUARIO) throw new Error('Escolha o nível de acesso.');
+  campos.SITUACAO = campos.ATIVO === 'SIM' ? 'ATIVO' : 'INATIVO';
+  campos.DECIDIDO_EM = agoraTexto();
+  campos.DECIDIDO_POR = usuario.email;
+
+  const alvo = params.id ? obter('ACESSOS', params.id) : null;
+  if (params.ajustes && typeof params.ajustes === 'object') {
+    const atuais = alvo ? lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL) : {};
+    const pedido = ajustesDoPedido_(atuais, params.ajustes);
+    protegerTelasDoAdmin_(usuario, pedido.mudaram);
+    campos.AJUSTES = textoDosAjustes(pedido.ajustes);
+  }
+
+  if (params.id) {
+    protegerAdmin_(usuario, alvo && alvo.PERFIL, campos.PERFIL);
+    const proprio = !!alvo && String(alvo.EMAIL || '').toLowerCase() === usuario.email;
+    if (proprio && campos.ATIVO === 'NAO') throw new Error('Você não pode desativar o próprio acesso.');
+    const r = atualizar('ACESSOS', params.id, campos, usuario.email);
+    limparCache('ACESSOS');
+    r.menuMudou = proprio;   // o proprio nivel, filiais ou ajustes: a resposta leva o menu novo (executarAcaoETela)
+    return r;
+  }
+
+  protegerAdmin_(usuario, '', campos.PERFIL);
+  const jaExiste = buscarAcesso(campos.EMAIL);
+  if (jaExiste) throw new Error('Esse e-mail já está cadastrado.');
+  if (!campos.AJUSTES) campos.AJUSTES = '{}';
+  const id = inserir('ACESSOS', campos, usuario.email);
+  limparCache('ACESSOS');
+  const resposta = { ok: true, id: id };
+  try { avisarAcessoLiberado({ nome: campos.NOME, email: campos.EMAIL, perfil: campos.PERFIL }); }
+  catch (e) { resposta.avisoEmail = 'Pessoa cadastrada, mas o e-mail de aviso não saiu: ' + (e.message || e); }
+  return resposta;
+}
+
+/*
+ * AJUSTE DESTA PESSOA num menu — o seletor da aba "Ajustes por pessoa".
+ * nivel: PADRAO (igual ao nivel) · OCULTO · VER · EDITAR
+ */
+function acaoDefinirAjustePessoa(usuario, params) {
+  const alvo = obter('ACESSOS', params.id);
+  if (!alvo) throw new Error('Pessoa não encontrada.');
+  protegerAdmin_(usuario, alvo.PERFIL, '');
+  const tela = String(params.tela || '');
+  if (!telaPorId_(tela)) throw new Error('Menu desconhecido: ' + tela + '.');
+  const pedido = {};
+  pedido[tela] = params.nivel;
+  const r = ajustesDoPedido_(lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL), pedido);
+  protegerTelasDoAdmin_(usuario, r.mudaram);
+  atualizar('ACESSOS', params.id, { AJUSTES: textoDosAjustes(r.ajustes) }, usuario.email);
+  limparCache('ACESSOS');
+  // O proprio acesso: a resposta leva o menu novo (executarAcaoETela) e o cartao some ou volta na hora.
+  return { ok: true, menuMudou: String(alvo.EMAIL || '').toLowerCase() === usuario.email };
+}
+
+/*
+ * COMPATIBILIDADE: a tela de antes (Modulos por pessoa) mudava um MODULO
+ * inteiro — PADRAO · NAO · VER · EDITAR. Vira o ajuste das telas daquele
+ * modulo (NAO = Oculto, VER = Ver, EDITAR = Ver e editar, PADRAO = igual ao nivel).
+ */
+function acaoDefinirModuloPessoa(usuario, params) {
+  const modulo = String(params.modulo || '');
+  const telas = TELAS.filter(function (t) { return t.modulo === modulo; });
+  if (!telas.length) throw new Error('Módulo desconhecido: ' + modulo + '.');
+  const modo = String(params.modo || '').toUpperCase().trim();
+  const faixa = { NAO: NIVEL_OCULTO, VER: NIVEL_VER, EDITAR: NIVEL_EDITAR, PADRAO: 'PADRAO', '': 'PADRAO' }[modo];
+  if (!faixa) throw new Error('Opção inválida.');
+  const alvo = obter('ACESSOS', params.id);
+  if (!alvo) throw new Error('Pessoa não encontrada.');
+  protegerAdmin_(usuario, alvo.PERFIL, '');
+  const pedido = {};
+  telas.forEach(function (t) { pedido[t.id] = faixa; });
+  const r = ajustesDoPedido_(lerAjustesPessoa(alvo.AJUSTES, alvo.MODULOS, alvo.PERFIL), pedido);
+  protegerTelasDoAdmin_(usuario, r.mudaram);
+  atualizar('ACESSOS', params.id, { AJUSTES: textoDosAjustes(r.ajustes) }, usuario.email);
+  limparCache('ACESSOS');
+  return { ok: true, menuMudou: String(alvo.EMAIL || '').toLowerCase() === usuario.email };
+}
+
+/** Liga/desliga o acesso sem apagar a pessoa. */
+function acaoAlternarAtivo(usuario, params) {
+  const alvo = obter('ACESSOS', params.id);
+  if (!alvo) throw new Error('Pessoa não encontrada.');
+  protegerAdmin_(usuario, alvo.PERFIL, '');
+  if (String(alvo.EMAIL || '').toLowerCase() === usuario.email) {
+    throw new Error('Você não pode desativar o próprio acesso.');
+  }
+  const ligar = !marcado(alvo.ATIVO);
+  atualizar('ACESSOS', params.id, {
+    ATIVO: ligar ? 'SIM' : 'NAO',
+    SITUACAO: ligar ? 'ATIVO' : 'INATIVO',
+    DECIDIDO_EM: agoraTexto(), DECIDIDO_POR: usuario.email
+  }, usuario.email);
+  limparCache('ACESSOS');
+  return { ok: true, ativo: ligar };
+}
+
+function acaoExcluirUsuario(usuario, params) {
+  if (String(params.email || '').toLowerCase() === usuario.email) {
+    throw new Error('Você não pode remover o próprio acesso.');
+  }
+  const alvo = obter('ACESSOS', params.id);
+  protegerAdmin_(usuario, alvo && alvo.PERFIL, '');
+  if (alvo && String(alvo.EMAIL || '').toLowerCase() === usuario.email) {
+    throw new Error('Você não pode remover o próprio acesso.');
+  }
+  const r = excluir('ACESSOS', params.id, usuario.email);
+  limparCache('ACESSOS');
+  return r;
+}
+
+/*
+ * UMA CELULA DA MATRIZ, pela tela "Niveis de acesso":
+ *   coluna TELA_<id> + valor OCULTO | VER | EDITAR, ou coluna ESCOPO + TODOS | TURNO | PROPRIAS.
+ * Vale na hora para quem ja esta dentro: o proximo pedido de cada pessoa ja
+ * le a matriz nova, e a resposta de quem mudou leva o menu novo (invalidarTudo).
+ */
+function acaoAlterarPermissao(usuario, params) {
+  const coluna = String(params.coluna || '').toUpperCase().trim();
+  const linha = obter('PERFIS', params.id);
+  if (!linha) throw new Error('Nível não encontrado.');
+  const perfil = String(linha.PERFIL || '').toUpperCase().trim();
+  if (String(usuario.perfil || '').toUpperCase() !== 'ADMIN' && perfil === 'ADMIN') {
+    throw new Error('Só um administrador mexe no nível ADMIN.');
+  }
+  const campos = {};
+  if (coluna === 'ESCOPO') {
+    const escopo = String(params.valor || '').toUpperCase().trim();
+    if (ESCOPOS.indexOf(escopo) === -1) throw new Error('Alcance inválido.');
+    campos.ESCOPO = escopo;
+  } else {
+    const tela = coluna.indexOf('TELA_') === 0 ? telaPorId_(coluna.substring(5).toLowerCase()) : null;
+    if (!tela) throw new Error('Coluna de permissão inválida.');
+    const faixa = faixaDoTexto_(params.valor);
+    if (!faixa) throw new Error('Escolha Oculto, Ver ou Ver e editar.');
+    if (perfil === 'ADMIN' && tela.id === TELA_TRAVADA_ADMIN && faixa !== NIVEL_EDITAR) throw new Error(MOTIVO_TRAVA_ADMIN);
+    protegerTelasDoAdmin_(usuario, [tela.id]);
+    campos[coluna] = faixa;
+    /*
+     * Linha ainda no modelo antigo (SIM/NAO): as outras telas vao gravadas
+     * ja convertidas junto — senao a conversao das outras celulas mudaria
+     * de base no meio do caminho.
+     */
+    if (linhaNoModeloAntigo_(linha)) {
+      const niveis = niveisDaLinha_(linha);
+      TELAS.forEach(function (t) { if (t.id !== tela.id) campos['TELA_' + t.id.toUpperCase()] = niveis[t.id]; });
+    }
+  }
+  const r = atualizar('PERFIS', params.id, campos, usuario.email);
+  r.invalidarTudo = true;
+  return r;
+}
+
+/* --- Ver o sistema como outro nivel (so o administrador) ---
+ * Guardado nas propriedades do SCRIPT com o e-mail na chave: com
+ * "Executar como: eu", as propriedades de usuario sao as do dono, iguais
+ * para todo mundo. */
+
+function chaveSimulacao_(email) { return 'SIMULACAO_' + String(email).toLowerCase(); }
+
+function simularPerfil(perfil, turno, ctx) {
+  contextoDaChamada_(ctx);
+  const email = emailDoUsuario_();
+  if (email !== String(prop('EMAIL_ADMIN', '')).toLowerCase()) {
+    throw new Error('Somente o administrador pode simular perfis.');
+  }
+  PropertiesService.getScriptProperties().setProperty(chaveSimulacao_(email), JSON.stringify({
+    perfil: String(perfil).toUpperCase().trim(),
+    turno: String(turno || '').toUpperCase().trim()
+  }));
+  esquecerProps();
+  esquecerUsuario();
+  return { ok: true };
+}
+
+function encerrarSimulacao(ctx) {
+  contextoDaChamada_(ctx);
+  const email = emailDoUsuario_();
+  PropertiesService.getScriptProperties().deleteProperty(chaveSimulacao_(email));
+  esquecerProps();
+  esquecerUsuario();
+  return { ok: true };
+}
+
+function simulacaoAtiva(email) {
+  if (email !== String(prop('EMAIL_ADMIN', '')).toLowerCase()) return null;
+  const bruto = prop(chaveSimulacao_(email), '');
+  if (!bruto) return null;
+  let s;
+  try { s = JSON.parse(bruto); } catch (e) { return null; }
+  return {
+    email: email, nome: 'Simulando ' + s.perfil + (s.turno ? ' / turno ' + s.turno : ''),
+    perfil: s.perfil, turno: s.turno, filiais: '*', cadastrado: true, simulado: true, verificado: true
+  };
+}
+
+
+/* ------------------------------------------------------------------ */
+/* ENTRADA POR E-MAIL E PIN (4.2)                                      */
+/* ------------------------------------------------------------------ */
+
+const SESSAO_SEGUNDOS = 6 * 3600;      // o CacheService guarda no maximo 6 h
+const SESSAO_RENOVAR_MS = 5 * 60 * 1000;
+// Uma hora sem usar o sistema e a sessao acaba (4.2.2): no computador
+// compartilhado, a aba esquecida aberta nao fica valida por 6 horas.
+const SESSAO_OCIOSA_MS = 60 * 60 * 1000;
+const PIN_TENTATIVAS = 5;
+const PIN_BLOQUEIO_SEG = 10 * 60;
+// 25/11: teto por dia. Com a versao da pasta compartilhada o /exec fica aberto a "Qualquer pessoa":
+// 5 erros a cada 10 min deixariam alguem varrer os PINs de 4 numeros em poucos dias. Com 20 por dia,
+// sao anos. O administrador destrava na hora (zerar o PIN); acertar o PIN tambem zera a conta.
+const PIN_ERROS_DIA = 20;
+const CODIGO_EMAIL_SEG = 15 * 60;      // codigo de primeiro acesso mandado por e-mail
+const CODIGO_ADMIN_SEG = 6 * 3600;     // codigo entregue pelo administrador (limite do cache)
+const CODIGO_REENVIO_MS = 60 * 1000;   // no maximo um e-mail de codigo por minuto
+const CODIGO_POR_JANELA = 3;           // e-mails de codigo por pessoa a cada 15 min
+const CODIGO_GLOBAL_HORA = 60;         // e-mails de codigo do sistema inteiro por hora
+const CODIGO_RESERVA_COTA = 50;        // cota diaria de e-mail que o codigo nunca consome
+
+/*
+ * Toda porta publica chama isto primeiro. `ctx` e { t: sessao, f: filial }
+ * (o navegador manda os dois); texto puro e a filial do modo antigo.
+ * Marca a execucao como "entrou pela porta" — ver exigirPorta_().
+ */
+function contextoDaChamada_(ctx) {
+  _porta = true;
+  if (ctx && typeof ctx === 'object') {
+    _tokenDaVez = String(ctx.t || '');
+    return String(ctx.f || '');
+  }
+  return String(ctx || '');
+}
+
+/*
+ * PORTA OBRIGATORIA.
+ *
+ * O Apps Script deixa o navegador chamar QUALQUER funcao global pelo
+ * google.script.run — nao so as portas. Sem esta trava, alguem com o
+ * console aberto chamava direto uma funcao interna (gravar pessoa, ler
+ * tabela, baixar arquivo) passando um "usuario" inventado. O acesso ao
+ * banco, ao Drive, ao e-mail, ao cache de telas e aos gatilhos passa por
+ * aqui: so anda se a execucao entrou por uma porta (que confere a sessao)
+ * ou se e o dono rodando pelo editor/gatilho.
+ */
+var _portaConferida = false;
+function exigirPorta_() {
+  if (_porta || _portaConferida) return;
+  const ativo = emailDeQuemAbriu();
+  // EMAIL_ADMIN lido direto: o prop() passa por aqui (seria recursao).
+  const admin = String(PropertiesService.getScriptProperties().getProperty('EMAIL_ADMIN') || '').toLowerCase().trim();
+  // Vazio so vale com a prova do gatilho (gatilhoDeVerdade_, no Codigo.gs): com a implantacao em
+  // "Qualquer pessoa" (versao local), quem chama pelo navegador sem conta Google tambem chega vazio.
+  const gatilho = !ativo && typeof _gatilhoConferido !== 'undefined' && _gatilhoConferido;
+  if (gatilho ||                                        // gatilho instalado neste projeto
+      (ativo && ativo === donoDoScript()) ||            // editor, pelo dono
+      (admin && ativo === admin)) {
+    _portaConferida = true;
+    return;
+  }
+  throw new Error('Acesso negado: use o sistema pela tela.');
+}
+
+/* Funcoes de editor (instalar, restaurar acesso...): so o dono. */
+function exigirDono_() {
+  const ativo = emailDeQuemAbriu();
+  const admin = String(prop('EMAIL_ADMIN', '')).toLowerCase().trim();
+  if (ativo && (ativo === donoDoScript() || ativo === admin)) return;
+  if (!ativo && !bancoInstalado()) return;              // primeira instalacao pelo editor
+  throw new Error('Somente o dono do sistema pode fazer isto.');
+}
+
+function segredoPin_() {
+  let s = prop('SEGREDO_PIN', '');
+  if (!s) {
+    s = Utilities.getUuid() + Utilities.getUuid();
+    PropertiesService.getScriptProperties().setProperty('SEGREDO_PIN', s);
+    esquecerProps();
+  }
+  return s;
+}
+
+/* So o resumo do PIN vai para a planilha — quem abre a planilha nao le o PIN. */
+function resumoPin_(email, pin) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+    segredoPin_() + '|' + String(email).toLowerCase() + '|' + String(pin), Utilities.Charset.UTF_8);
+  return bytes.map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
+}
+
+/*
+ * SESSAO DURAVEL (10/10). O CacheService e so o caminho rapido: o Google
+ * nao garante que um item fique ate o prazo, e o cache do script (no maximo
+ * 1.000 itens) e dividido com as telas, tabelas e bilhetes de todo mundo.
+ * Uma sessao despejada era a pessoa "saindo sozinha". A copia que vale
+ * fica nas propriedades de USUARIO do dono (com "Executar como: eu", uma
+ * loja so, separada das configuracoes que o prop() le a cada chamada). Na
+ * loja vai so o RESUMO do codigo: quem le as propriedades nao entra como
+ * ninguem.
+ *
+ *   cache 'sess_<codigo>'   -> { e, t (ultimo uso, de 5 em 5 min), c (criada), d (ultima escrita na loja) }
+ *   loja  'sessao_<resumo>' -> { e, c, u (ultimo uso, de 10 em 10 min) }
+ *
+ * As regras nao mudam: 1 h sem uso acaba a sessao (pela loja, no maximo
+ * 10 min mais cedo, nunca mais tarde) e "Sair" apaga as duas copias — e deixa
+ * no cache, por 6 h, a marca 'sessfim_<codigo>': um pedido que leu a sessao
+ * antes do Sair (e escreve depois) nao a traz de volta.
+ */
+const SESSAO_GRAVAR_USO_MS = 10 * 60 * 1000;   // no maximo uma escrita na loja a cada 10 min por sessao
+const SESSAO_PODA_MS = SESSAO_OCIOSA_MS + 15 * 60 * 1000;
+const PREFIXO_SESSAO_DURAVEL = 'sessao_';
+var _sessoesDaVez = {};                         // codigo -> e-mail ('' = nao existe), so nesta execucao
+
+function lojaDeSessoes_() { return PropertiesService.getUserProperties(); }
+
+function chaveSessaoDuravel_(token) {
+  const d = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'sessao|' + token, Utilities.Charset.UTF_8);
+  return PREFIXO_SESSAO_DURAVEL + Utilities.base64EncodeWebSafe(d).replace(/=+$/, '').slice(0, 32);
+}
+
+function criarSessao_(email) {
+  const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
+  const agora = Date.now();
+  // A loja e a copia que vale, mas nunca impede a entrada: loja cheia ou fora do ar = como antes (so o cache).
+  try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(token), JSON.stringify({ e: email, c: agora, u: agora })); } catch (e) {}
+  CacheService.getScriptCache().put('sess_' + token, JSON.stringify({ e: email, t: agora, c: agora, d: agora }), SESSAO_SEGUNDOS);
+  _sessoesDaVez[token] = String(email || '').toLowerCase().trim();
+  // A poda roda no aquecimento (gatilho de 15 min). Sem o gatilho, uma entrada a cada 2 h poda um pouco.
+  try { if (agora - Number(prop('PODA_SESSOES_EM', '0')) > PODA_NA_ENTRADA_MS) podarSessoes_(30); } catch (e) {}
+  return token;
+}
+
+/* E-mail dono da sessao, ou '' se ela nao existe/venceu. Renova o ultimo uso de tempos em tempos. */
+function emailDaSessao_(token) {
+  const t = String(token || '');
+  if (!/^[a-f0-9]{32,80}$/.test(t)) return '';
+  if (_sessoesDaVez[t] !== undefined) return _sessoesDaVez[t];
+  const cache = CacheService.getScriptCache();
+  // Uma chamada so ao cache para a sessao, a marca de "saiu", as pessoas, os perfis, as filiais e a
+  // geracao (preLerCache_). typeof: com o Banco.gs da entrega anterior (colado pela metade), le direto.
+  const lerDoCache = function (k) {
+    if (typeof preLerCache_ === 'function') { preLerCache_(t); return lerChaveCache_(cache, k); }
+    return cache.get(k);
+  };
+  let s = null, leuCache = false, fim = null;
+  try { s = JSON.parse(lerDoCache('sess_' + t) || 'null'); leuCache = true; } catch (e) { s = null; }
+  try { fim = lerDoCache('sessfim_' + t); } catch (e) { fim = null; }
+  if (fim) { _sessoesDaVez[t] = ''; return ''; }       // saiu (ou acabou por falta de uso)
+  const doCache = !!s;
+  if (!s) {
+    // O cache perdeu (despejo) ou a sessao nunca existiu: a loja decide. Mas so com o Codigo.gs
+    // desta entrega: o antigo encerra a sessao (Sair pela reserva) so no cache, e a loja traria
+    // de volta quem saiu.
+    if (typeof acaoPelaPagina_ !== 'function') { _sessoesDaVez[t] = ''; return ''; }
+    const reg = lerSessaoDaLoja_(t);
+    if (!reg || !reg.e) { _sessoesDaVez[t] = ''; return ''; }
+    s = { e: reg.e, t: Number(reg.u || 0), c: Number(reg.c || 0), d: Number(reg.u || 0) };
+  }
+  const agora = Date.now();
+  if (agora - Number(s.t || 0) > SESSAO_OCIOSA_MS) {
+    encerrarSessao_(t);
+    return '';
+  }
+  // Diagnostico: sessao viva que so a loja tinha = antes desta versao, uma "saida sozinha".
+  if (!doCache && leuCache) contarDiagnostico_('sessao_salva_pela_loja');
+  let mudou = !doCache;
+  if (agora - Number(s.t || 0) > SESSAO_RENOVAR_MS) { s.t = agora; mudou = true; }
+  const gravarNaLoja = agora - Number(s.d || 0) > SESSAO_GRAVAR_USO_MS;
+  if (mudou || gravarNaLoja) {
+    // Conferido de novo logo antes de escrever: o Sair pode ter passado depois da leitura.
+    let saiu = false;
+    try { saiu = !!cache.get('sessfim_' + t); } catch (e) {}
+    if (saiu) { _sessoesDaVez[t] = ''; return ''; }
+    if (gravarNaLoja) {
+      s.d = agora;
+      try { lojaDeSessoes_().setProperty(chaveSessaoDuravel_(t), JSON.stringify({ e: s.e, c: s.c || agora, u: agora })); } catch (e) {}
+    }
+    try { cache.put('sess_' + t, JSON.stringify(s), SESSAO_SEGUNDOS); } catch (e) {}
+  }
+  const email = String(s.e || '').toLowerCase().trim();
+  _sessoesDaVez[t] = email;
+  return email;
+}
+
+/*
+ * A copia da loja. A loja que nao respondeu (duas vezes) NAO quer dizer "sessao
+ * inexistente": e um erro passageiro, sem o [SESSAO] — a aba guarda o codigo e
+ * o proximo clique tenta de novo (antes, a pessoa voltava para o e-mail e o PIN).
+ */
+function lerSessaoDaLoja_(t) {
+  const k = chaveSessaoDuravel_(t);
+  let bruto = null, falhou = null;
+  for (let i = 0; i < 2; i++) {
+    try { bruto = lojaDeSessoes_().getProperty(k); falhou = null; break; }
+    catch (e) { falhou = e; if (i === 0) Utilities.sleep(200); }
+  }
+  if (falhou) throw new Error('Não consegui conferir a sua sessão agora (o Google demorou a responder). Tente de novo em instantes.');
+  try { return JSON.parse(bruto || 'null'); } catch (e) { return null; }
+}
+
+/* Fim da sessao (Sair, 1 h sem uso): a marca de "saiu" primeiro, depois as duas copias. */
+function encerrarSessao_(token) {
+  const t = String(token || '');
+  if (!/^[a-f0-9]{32,80}$/.test(t)) return;
+  const cache = CacheService.getScriptCache();
+  try { cache.put('sessfim_' + t, '1', SESSAO_SEGUNDOS); } catch (e) {}
+  try { lojaDeSessoes_().deleteProperty(chaveSessaoDuravel_(t)); } catch (e) {}
+  try { cache.remove('sess_' + t); } catch (e) {}
+  _sessoesDaVez[t] = '';
+}
+
+/*
+ * PODA: sessao parada ha mais de 1 h 15 min sai da loja. Roda no aquecimento
+ * (gatilho de 15 min, sem ninguem esperando). Sem o gatilho instalado, uma
+ * entrada a cada 2 h poda no maximo 30 — a entrada nunca paga a poda inteira.
+ * Nunca apaga sessao viva: quem esta em uso tem o ultimo uso gravado ha no
+ * maximo 10 min.
+ */
+const PODA_NA_ENTRADA_MS = 2 * 3600 * 1000;
+function podarSessoes_(limite) {
+  const maximo = Number(limite) > 1 ? Number(limite) : 30;
+  const loja = lojaDeSessoes_();
+  const todas = loja.getProperties();
+  const agora = Date.now();
+  let n = 0;
+  Object.keys(todas).some(function (k) {
+    if (k.indexOf(PREFIXO_SESSAO_DURAVEL) !== 0) return false;
+    let reg = null;
+    try { reg = JSON.parse(todas[k]); } catch (e) { reg = null; }
+    if (!reg || agora - Number(reg.u || 0) > SESSAO_PODA_MS) { try { loja.deleteProperty(k); n++; } catch (e) {} }
+    return n >= maximo;
+  });
+  try { PropertiesService.getScriptProperties().setProperty('PODA_SESSOES_EM', String(agora)); esquecerProps(); } catch (e) {}
+  return n;
+}
+
+/* Contadores de diagnostico (cache, 6 h): quantas sessoes a loja salvou (aparece no ?diagnostico=1). */
+function contarDiagnostico_(nome) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const k = 'diag_' + nome;
+    cache.put(k, String(Number(cache.get(k) || 0) + 1), 21600);
+  } catch (e) {}
+}
+
+/* Para o ?diagnostico=1: quantas sessoes a loja salvou (6 h) e quantas estao guardadas nela agora. */
+function resumoDasSessoes_() {
+  const r = { salvasPelaLoja: 0, naLoja: 0 };
+  try { r.salvasPelaLoja = Number(CacheService.getScriptCache().get('diag_sessao_salva_pela_loja') || 0); } catch (e) {}
+  try {
+    r.naLoja = Object.keys(lojaDeSessoes_().getProperties())
+      .filter(function (k) { return k.indexOf(PREFIXO_SESSAO_DURAVEL) === 0; }).length;
+  } catch (e) { r.naLoja = -1; }
+  return r;
+}
+
+/* A pessoa inteira (com o resumo do PIN), lida da tabela — nao do cache de acessos. */
+function registroDeAcesso_(email) {
+  const alvo = String(email || '').toLowerCase().trim();
+  return listar('ACESSOS').filter(function (l) {
+    return String(l.EMAIL || '').toLowerCase().trim() === alvo;
+  })[0] || null;
+}
+
+/* Chave por e-mail sem colisao: "ana.silva" e "ana_silva" nao dividem o contador. */
+function chavePinDe_(email) {
+  return String(email || '').replace(/[^a-z0-9]/g, function (c) { return '_' + c.charCodeAt(0).toString(16); });
+}
+function chaveErrosDia_(email) { return 'PIN_ERROS_DIA_' + chavePinDe_(email); }
+function hojePin_() { return Utilities.formatDate(new Date(), fuso(), 'yyyy-MM-dd'); }
+function errosPinHoje_(email) {
+  try {
+    const v = JSON.parse(PropertiesService.getScriptProperties().getProperty(chaveErrosDia_(email)) || '{}');
+    return v && v.d === hojePin_() ? Number(v.n || 0) : 0;
+  } catch (e) { return 0; }
+}
+/*
+ * Conta o erro sob a trava do script: varios pedidos errados ao mesmo tempo
+ * (ataque em paralelo) nao leem o mesmo numero e contam todos. Sem a trava
+ * em 3 s, conta assim mesmo (melhor contar do que travar a entrada).
+ */
+function contarErroPin_(email) {
+  const contar = function () {
+    const cache = CacheService.getScriptCache();
+    const k = 'pinerro_' + chavePinDe_(email);
+    const n = Number(cache.get(k) || 0) + 1;
+    cache.put(k, String(n), PIN_BLOQUEIO_SEG);
+    try {
+      const dia = errosPinHoje_(email) + 1;
+      PropertiesService.getScriptProperties().setProperty(chaveErrosDia_(email), JSON.stringify({ d: hojePin_(), n: dia }));
+      if (dia === PIN_ERROS_DIA) registrarLog('sistema', 'BLOQUEIO', 'PIN', email, PIN_ERROS_DIA + ' PINs errados hoje: entrada travada ate amanha (o administrador destrava zerando o PIN)');
+    } catch (e) {}
+    return n;
+  };
+  // comTrava (Banco.gs) e reentrante: se quem chamou ja esta na trava, conta ali mesmo.
+  try { return comTrava(contar, 3000); } catch (e) { return contar(); }
+}
+/* '' = livre; 'JANELA' = 5 erros nos ultimos 10 min; 'DIA' = o teto do dia. */
+function pinBloqueado_(email) {
+  if (errosPinHoje_(email) >= PIN_ERROS_DIA) return 'DIA';
+  return Number(CacheService.getScriptCache().get('pinerro_' + chavePinDe_(email)) || 0) >= PIN_TENTATIVAS ? 'JANELA' : '';
+}
+function avisoPinBloqueado_(motivo) {
+  return motivo === 'DIA'
+    ? 'PIN errado muitas vezes hoje. Por segurança, a entrada deste e-mail fica travada até amanhã — ou peça ao administrador para zerar o seu PIN.'
+    : 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.';
+}
+function zerarErrosPin_(email) {
+  try { CacheService.getScriptCache().remove('pinerro_' + chavePinDe_(email)); } catch (e) {}
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty(chaveErrosDia_(email))) props.deleteProperty(chaveErrosDia_(email));
+  } catch (e) {}
+}
+
+/*
+ * CODIGO DE PRIMEIRO ACESSO (4.2.2).
+ *
+ * Antes, quem ainda nao tinha PIN criava um so digitando o e-mail. Como o
+ * cadastro e feito pelo administrador e ninguem tem PIN no comeco, qualquer
+ * pessoa que soubesse o e-mail de um colega (ou de um administrador) criava
+ * o PIN dele, entrava como ele e ainda trancava o dono de verdade do lado de
+ * fora. Agora o primeiro PIN so nasce com uma prova de que a pessoa e dona
+ * do e-mail:
+ *   - o navegador esta na conta Google dela (o Google ja provou); ou
+ *   - um codigo de 6 numeros que o sistema manda para o e-mail dela; ou
+ *   - um codigo que o administrador gerou em Pessoas e acessos (para quem
+ *     nao consegue abrir o e-mail naquele momento).
+ * O cache guarda so o resumo do codigo, nunca o codigo.
+ */
+function chaveCodigo_(email, origem) { return 'pincod_' + origem + '_' + email.replace(/[^a-z0-9]/g, '_'); }
+
+function gerarCodigo_() {
+  const b = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid(), Utilities.Charset.UTF_8);
+  let n = 0;
+  for (let i = 0; i < 6; i++) n = (n * 256 + (b[i] & 255)) % 1000000;
+  return ('00000' + n).slice(-6);
+}
+
+/*
+ * Guarda o resumo do codigo. Para o e-mail, os 3 ultimos continuam valendo:
+ * um pedido novo (de outra pessoa, inclusive) nao invalida o codigo que ja
+ * esta na caixa de entrada de quem vai digitar.
+ */
+function guardarCodigo_(email, codigo, origem, segundos) {
+  const h = resumoPin_(email, 'codigo:' + codigo);
+  const antes = origem === 'email' ? lerCodigo_(email, origem) : null;
+  const hs = [h].concat(antes ? (antes.hs || [antes.h]).filter(Boolean) : []).slice(0, CODIGO_POR_JANELA);
+  CacheService.getScriptCache().put(chaveCodigo_(email, origem),
+    JSON.stringify({ h: h, hs: hs, em: Date.now(), n: antes ? Number(antes.n || 1) + 1 : 1,
+                     desde: antes ? Number(antes.desde || antes.em || Date.now()) : Date.now() }), segundos);
+}
+
+function lerCodigo_(email, origem) {
+  const bruto = CacheService.getScriptCache().get(chaveCodigo_(email, origem));
+  if (!bruto) return null;
+  try { return JSON.parse(bruto); } catch (e) { return null; }
+}
+
+function codigoConfere_(email, codigo) {
+  const c = String(codigo || '').replace(/\D/g, '');
+  if (!/^\d{6}$/.test(c)) return false;
+  const resumo = resumoPin_(email, 'codigo:' + c);
+  return ['email', 'admin'].some(function (o) {
+    const g = lerCodigo_(email, o);
+    return !!(g && (g.hs || [g.h]).indexOf(resumo) !== -1);
+  });
+}
+
+function apagarCodigos_(email) {
+  try { CacheService.getScriptCache().removeAll([chaveCodigo_(email, 'email'), chaveCodigo_(email, 'admin')]); } catch (e) {}
+}
+
+/*
+ * Manda o codigo para o e-mail da propria pessoa — direto pelo MailApp e SEM
+ * a copia (EMAIL_COPIA) que os avisos levam: o codigo e so dela.
+ */
+function mandarCodigoPorEmail_(email, nome) {
+  const atual = lerCodigo_(email, 'email');
+  if (atual && Date.now() - Number(atual.em || 0) < CODIGO_REENVIO_MS) return { jaEnviado: true };
+  /*
+   * LIMITES (4.2.2). O entrar() e publico: qualquer conta da empresa podia
+   * pedir codigo em nome de quem ainda nao tem PIN, sem fim — gastando a
+   * cota diaria de e-mail do dono (a mesma do digesto e dos avisos).
+   */
+  const pedeAdmin = 'Peça ao administrador um código de primeiro acesso (Pessoas e acessos).';
+  if (atual && Number(atual.n || 0) >= CODIGO_POR_JANELA) {
+    return { erro: 'Já mandamos ' + CODIGO_POR_JANELA + ' códigos para este e-mail. Use o mais recente, ' +
+      'espere 15 minutos ou ' + pedeAdmin.charAt(0).toLowerCase() + pedeAdmin.slice(1) };
+  }
+  const cache = CacheService.getScriptCache();
+  const kHora = 'pincod_hora_' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMddHH');
+  const naHora = Number(cache.get(kHora) || 0);
+  let cota = CODIGO_RESERVA_COTA + 1;
+  try { cota = MailApp.getRemainingDailyQuota(); } catch (e) { /* sem leitura da cota: segue */ }
+  if (naHora >= CODIGO_GLOBAL_HORA || cota <= CODIGO_RESERVA_COTA) {
+    return { erro: 'O envio de códigos está no limite agora. ' + pedeAdmin };
+  }
+  cache.put(kHora, String(naHora + 1), 3600);
+  const codigo = gerarCodigo_();
+  try {
+    MailApp.sendEmail({
+      to: email,
+      subject: 'GSL Bartofil — código de primeiro acesso: ' + codigo,
+      htmlBody: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#14152B;max-width:560px">' +
+        '<p>Olá' + (nome ? ', <b>' + htmlSeguro(nome) + '</b>' : '') + '.</p>' +
+        '<p>Alguém está criando o PIN do GSL para o e-mail <b>' + htmlSeguro(email) + '</b>. ' +
+        'Se foi você, digite este código na tela de entrada:</p>' +
+        '<p style="font-size:28px;font-weight:bold;letter-spacing:6px;color:#111785">' + codigo + '</p>' +
+        '<p style="color:#666;font-size:12px">O código vale 15 minutos. Se não foi você, ignore este e-mail — ' +
+        'sem o código ninguém cria o seu PIN.</p></div>'
+    });
+  } catch (e) {
+    return { erro: 'Não consegui mandar o código para o seu e-mail (' + (e.message || e) + '). ' +
+      'Peça ao administrador um código de primeiro acesso (Pessoas e acessos).' };
+  }
+  guardarCodigo_(email, codigo, 'email', CODIGO_EMAIL_SEG);
+  try {
+    registrarLog(emailDeQuemAbriu() || 'sistema', 'EMAIL', 'CODIGO_PIN', email,
+      'Código de primeiro acesso enviado (pedido pela conta ' + (emailDeQuemAbriu() || '—') + ')');
+  } catch (e) {}
+  return { enviado: true };
+}
+
+/*
+ * PORTA DE ENTRADA — e-mail + PIN.
+ *   PIN certo           -> sessao nova + tudo que a tela precisa (como no doGet)
+ *   primeiro acesso     -> { criarPin: true } ate a pessoa repetir o PIN
+ *   errado 5 vezes      -> 10 minutos de espera para aquele e-mail
+ */
+function entrar(email, pin, confirmacao, filial, codigo, tela, p) {
+  _porta = true;
+  try {
+    const r = entrar_(email, pin, confirmacao, filial, codigo);
+    // Veio de um link de e-mail (?tela=...): a tela ja vai junto com a entrada (uma ida so), com os filtros do link (p).
+    if (r && r.ok && r.entrada === 'APP' && tela && typeof embutirTela_ === 'function') embutirTela_(r, r.token, tela, p || '');
+    return JSON.stringify(r);
+  } catch (erro) {
+    return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
+  }
+}
+
+/*
+ * 25/11: no login a pessoa digita so o nome (joao.silva) — o dominio da
+ * Bartofil entra sozinho. Quem digita o e-mail inteiro (outro dominio,
+ * conta do administrador) continua entrando como antes.
+ */
+const DOMINIO_EMAIL_PADRAO = 'bartofil.com.br';
+function completarEmail_(bruto) {
+  let v = String(bruto || '').toLowerCase().replace(/\s+/g, '');
+  if (!v) return '';
+  if (v.indexOf('@') === -1) return v + '@' + DOMINIO_EMAIL_PADRAO;
+  if (v.charAt(v.length - 1) === '@') return v + DOMINIO_EMAIL_PADRAO;
+  return v;
+}
+
+function entrar_(emailBruto, pinBruto, confBruto, filial, codBruto) {
+  _porta = true;
+  if (!bancoInstalado()) return { ok: false, erro: 'O sistema ainda não foi instalado.' };
+  try { garantirEsquema(); } catch (erro) {
+    return { ok: false, erro: 'Não consegui atualizar o banco: ' + (erro.message || erro) };
+  }
+
+  const email = completarEmail_(emailBruto);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, erro: 'Digite o seu e-mail.' };
+  const travado = pinBloqueado_(email);
+  if (travado) return { ok: false, erro: avisoPinBloqueado_(travado) };
+
+  const pin = String(pinBruto || '').trim();
+  const registro = registroDeAcesso_(email);
+  const admin = String(prop('EMAIL_ADMIN', '')).toLowerCase().trim();
+  const ehDono = email === admin || email === donoDoScript();
+  const googleConfirma = emailDeQuemAbriu() === email;
+
+  if (!registro) {
+    // Dono sem linha em ACESSOS: so entra pela propria conta Google.
+    if (ehDono && googleConfirma) return abrirSessaoPara_(email, filial);
+    return { ok: false, erro: 'Este e-mail não está cadastrado no GSL. Peça ao administrador para liberar o seu acesso.' };
+  }
+
+  const situacao = String(registro.SITUACAO || '').toUpperCase().trim();
+  const perfil = String(registro.PERFIL || '').toUpperCase().trim();
+  if (!marcado(registro.ATIVO) || situacao === 'RECUSADO' || situacao === 'INATIVO') {
+    return { ok: false, erro: 'Seu acesso ao GSL está desativado. Fale com o administrador.' };
+  }
+  if (!perfil || perfil === PERFIL_PADRAO_NOVO_USUARIO) {
+    return { ok: false, erro: 'Seu cadastro existe, mas ainda não tem nível de acesso. Fale com o administrador.' };
+  }
+  if (!/^\d{4,6}$/.test(pin)) return { ok: false, erro: 'O PIN tem de 4 a 6 números.' };
+
+  const resumo = String(registro.PIN_HASH || '').trim();
+  if (!resumo) {
+    // PRIMEIRO ACESSO: a propria pessoa cria o PIN, digitando duas vezes —
+    // e prova que o e-mail e dela (ver CODIGO DE PRIMEIRO ACESSO).
+    const primeiroNome = String(registro.NOME || '').split(' ')[0];
+    const conf = String(confBruto || '').trim();
+    const codigo = String(codBruto || '').replace(/\D/g, '');
+    if (!googleConfirma) {
+      if (!codigo) {
+        const envio = mandarCodigoPorEmail_(email, primeiroNome);
+        if (envio.erro) return { ok: false, criarPin: true, pedirCodigo: true, erro: envio.erro };
+        return { ok: false, criarPin: true, pedirCodigo: true, nome: primeiroNome,
+                 recado: 'Primeiro acesso: mandamos um código de 6 números para ' + email +
+                         '. Digite o código e repita o PIN.' };
+      }
+      if (!codigoConfere_(email, codigo)) {
+        const n = contarErroPin_(email);
+        const restam = PIN_TENTATIVAS - n;
+        return { ok: false, criarPin: true, pedirCodigo: true, erro: restam > 0
+          ? 'Código incorreto ou vencido. Confira o e-mail mais recente do GSL. ' +
+            (restam === 1 ? 'Resta 1 tentativa.' : 'Restam ' + restam + ' tentativas.')
+          : 'Tentativas demais. Espere 10 minutos ou peça ao administrador um código de primeiro acesso.' };
+      }
+    }
+    if (!conf) {
+      return { ok: false, criarPin: true, pedirCodigo: !googleConfirma, nome: primeiroNome,
+               recado: 'Primeiro acesso: repita o PIN para confirmar. Guarde bem — é ele que você vai usar sempre.' };
+    }
+    if (conf !== pin) {
+      return { ok: false, criarPin: true, pedirCodigo: !googleConfirma, erro: 'Os dois PINs não são iguais. Digite de novo.' };
+    }
+    atualizar('ACESSOS', registro.ID, { PIN_HASH: resumoPin_(email, pin), PIN_EM: agoraTexto() }, email);
+    limparCache('ACESSOS');
+    apagarCodigos_(email);
+  } else if (resumoPin_(email, pin) !== resumo) {
+    const n = contarErroPin_(email);
+    const restam = PIN_TENTATIVAS - n;
+    return { ok: false, erro: restam > 0
+      ? 'PIN incorreto. ' + (restam === 1 ? 'Resta 1 tentativa.' : 'Restam ' + restam + ' tentativas.')
+      : 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.' };
+  }
+
+  zerarErrosPin_(email);
+  return abrirSessaoPara_(email, filial);
+}
+
+/*
+ * TROCAR O PROPRIO PIN (4.2.2). Pede o PIN atual (quem achou a sessao aberta
+ * num computador compartilhado nao troca o PIN de outra pessoa) e conta os
+ * erros junto com os da entrada: 5 erros bloqueiam por 10 minutos.
+ */
+function acaoTrocarMeuPin(usuario, params) {
+  const email = String(usuario.email || '').toLowerCase().trim();
+  const atual = String(params.atual || '').trim();
+  const novo = String(params.novo || '').trim();
+  const conf = String(params.confirmacao || '').trim();
+  const travado = pinBloqueado_(email);
+  if (travado) throw new Error(avisoPinBloqueado_(travado));
+  const registro = registroDeAcesso_(email);
+  if (!registro || !String(registro.PIN_HASH || '').trim()) {
+    throw new Error('Seu cadastro ainda não tem PIN. Saia e entre de novo para criar o seu.');
+  }
+  if (resumoPin_(email, atual) !== String(registro.PIN_HASH).trim()) {
+    const restam = PIN_TENTATIVAS - contarErroPin_(email);
+    throw new Error(restam > 0 ? 'O PIN atual está incorreto. ' + (restam === 1 ? 'Resta 1 tentativa.' : 'Restam ' + restam + ' tentativas.')
+      : 'PIN errado muitas vezes. Espere 10 minutos e tente de novo.');
+  }
+  if (!/^\d{4,6}$/.test(novo)) throw new Error('O PIN novo tem de 4 a 6 números.');
+  if (novo !== conf) throw new Error('Os dois campos do PIN novo não são iguais.');
+  if (novo === atual) throw new Error('O PIN novo é igual ao atual.');
+  zerarErrosPin_(email);
+  atualizar('ACESSOS', registro.ID, { PIN_HASH: resumoPin_(email, novo), PIN_EM: agoraTexto() }, email);
+  limparCache('ACESSOS');
+  return { ok: true, recado: 'PIN trocado. Use o novo na próxima entrada.' };
+}
+
+/* Cria a sessao e devolve a mesma carga que o doGet mandaria (APP ou ESCOLHER_FILIAL). */
+function abrirSessaoPara_(email, filial) {
+  const token = criarSessao_(email);
+  _tokenDaVez = token;
+  esquecerUsuario();
+  const carga = montarEntrada_(filial || '');
+  carga.token = token;
+  return carga;
+}
+
+/*
+ * A aba recarregou com a sessao guardada: devolve a entrada de novo, sem
+ * pedir o PIN. Com ctx.tela (a tela em que a aba estava), ela ja volta
+ * montada — o F5 cai na mesma tela numa ida so.
+ */
+function retomarSessao(ctx) {
+  const filial = contextoDaChamada_(ctx);
+  try {
+    if (!emailDaSessao_(_tokenDaVez)) return JSON.stringify({ ok: true, instalado: true, entrada: 'ENTRAR' });
+    const carga = montarEntrada_(filial);
+    carga.token = _tokenDaVez;
+    // typeof: Auth.gs novo com Codigo.gs antigo (colado pela metade) entra assim mesmo e a faixa de versao avisa
+    if (carga.ok && carga.entrada === 'APP' && ctx && ctx.tela && typeof embutirTela_ === 'function') embutirTela_(carga, _tokenDaVez, ctx.tela, ctx.p || '');
+    return JSON.stringify(carga);
+  } catch (erro) {
+    return JSON.stringify({ ok: false, erro: String(erro.message || erro) });
+  }
+}
+
+/* Sair: a sessao morre no servidor tambem (nao so no navegador). */
+function sairDoSistema(ctx) {
+  contextoDaChamada_(ctx);
+  if (_tokenDaVez) encerrarSessao_(_tokenDaVez);
+  return JSON.stringify({ ok: true });
+}
+
+/*
+ * MANTER A SESSAO: a tela chama enquanto a pessoa esta mexendo nela
+ * (digitando um relato longo, lendo uma tela grande) sem ir ao servidor,
+ * para a 1 h sem uso contar do ultimo movimento. Aba esquecida (ninguem
+ * mexendo) nao chama. Nao devolve dado nenhum.
+ */
+function manterSessao(ctx) {
+  contextoDaChamada_(ctx);
+  return JSON.stringify({ ok: !!emailDaSessao_(_tokenDaVez) });
+}
+
+/*
+ * Esqueceu o PIN (ou ainda nao criou): o administrador zera e recebe um
+ * CODIGO DE PRIMEIRO ACESSO para entregar a pessoa. Ela entra com o e-mail,
+ * um PIN novo e esse codigo — ou pede o codigo por e-mail na propria tela.
+ */
+function acaoZerarPin(usuario, params) {
+  const alvo = obter('ACESSOS', params.id);
+  if (!alvo) throw new Error('Pessoa não encontrada.');
+  const perfilAlvo = String(alvo.PERFIL || '').toUpperCase().trim();
+  if (perfilAlvo === 'ADMIN' && String(usuario.perfil).toUpperCase() !== 'ADMIN') {
+    throw new Error('Só um administrador zera o PIN de outro administrador.');
+  }
+  const email = String(alvo.EMAIL || '').toLowerCase().trim();
+  if (email === usuario.email) throw new Error('Para trocar o seu próprio PIN, peça a outro administrador.');
+  atualizar('ACESSOS', params.id, { PIN_HASH: '', PIN_EM: '' }, usuario.email);
+  limparCache('ACESSOS');
+  zerarErrosPin_(email);
+  const codigo = gerarCodigo_();
+  guardarCodigo_(email, codigo, 'admin', CODIGO_ADMIN_SEG);
+  registrarLog(usuario.email, 'CODIGO_PIN', 'ACESSOS', email, 'Código de primeiro acesso gerado pelo administrador');
+  const nome = String(alvo.NOME || '').split(' ')[0] || 'a pessoa';
+  return { ok: true, codigo: codigo, nome: nome, email: email,
+    recado: 'Código de primeiro acesso de ' + nome + ': ' + codigo + ' (vale 6 horas).' };
+}

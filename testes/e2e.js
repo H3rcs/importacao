@@ -5988,6 +5988,62 @@ async function rodar() {
     await aba.contexto.close(); await s.fechar();
   });
 
+  await cenario('entrar: falha passageira (HTTP 500) que chega com o clique vencido tenta de novo sozinha, com espera, e entra sem outro clique', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { atraso: 5600, falha: 'entrar:500:1' });
+    const f = await frame(aba);
+    await f.fill('#entrar-email', COORD);
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    await f.waitForFunction(() => /Tentando de novo/.test(document.getElementById('entrar-msg').textContent), null, { timeout: 12000 });
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou na segunda tentativa');
+    afirmar(s.registro.filter((r) => r.tipo === 'run' && r.fn === 'entrar').length === 2, 'duas chamadas de entrar');
+    afirmar(!s.registro.some((r) => r.tipo === 'doPost'), 'sem POST: o canal nao foi marcado por uma falha passageira');
+    const f2 = await frame(aba);
+    afirmar(await f2.evaluate(() => CANAL_BARRADO === false && DSP.fila.some((x) => x.k === 'entrada' && x.n === 'tentativa')), 'canal livre; o medidor anotou a nova tentativa');
+    afirmar(!aba.erros.filter((e) => !/HTTP 500/.test(e)).length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('entrar: falha passageira (HTTP 500) com o clique valendo vai pela pagina na hora e entra', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL, { falha: 'entrar:500' });
+    await entrar(aba, COORD, '1234');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou pela pagina');
+    afirmar(s.registro.filter((r) => r.tipo === 'doPost').length === 1, 'um POST so');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('F5 com o Google mudo: o logo nao gira para sempre — aos 20 s vem o "Continuar", que vai pela pagina e volta na tela, sem PIN', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, GERENTE, '5555');
+    const aba = await abrirAba(s, GERAL);
+    await entrar(aba, GERENTE, '5555');
+    await esperarTela(aba, ['aplicacao']);
+    let f = await frame(aba);
+    await f.evaluate(() => abrir('acoes'));
+    await f.waitForFunction(() => /Plano de A/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '40000', url: s.url }]);
+    const t0 = Date.now();
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    afirmar(await esperarTela(aba, ['entrar', 'aplicacao', 'falha'], 30000) === 'entrar', 'o Continuar apareceu');
+    const espera = Date.now() - t0;
+    afirmar(espera < 27000, 'em ate ~20 s: ' + espera + ' ms');
+    f = await frame(aba);
+    await f.waitForSelector('#entrar-continuar:not(.oculto) #entrar-continuar-botao:not([disabled])', { timeout: 5000 });
+    afirmar(/demorando/.test(await texto(aba, 'entrar-continuar-msg')), 'explica: ' + await texto(aba, 'entrar-continuar-msg'));
+    afirmar(/Continuar como/.test(await texto(aba, 'entrar-continuar-botao')), 'o botao nao ficou em Abrindo');
+    await f.click('#entrar-continuar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha', 'entrar'], 20000) === 'aplicacao', 'continuou pela pagina');
+    afirmar(s.registro.some((r) => r.tipo === 'doPost' && /(^|&)t=/.test(r.corpo)), 'foi pela pagina, com a sessao');
+    await aba.contexto.clearCookies({ name: 'gas_atraso' });
+    f = await frame(aba);
+    await f.waitForFunction(() => /Plano de A/.test(document.getElementById('titulo-pagina').textContent), null, { timeout: 15000 });
+    await aba.contexto.close(); await s.fechar();
+  });
+
   await cenario('leitor de PDF do projeto: sem a cdnjs, o pdf.js vem do servidor, le o PDF real e fica guardado no navegador (a segunda vez nem pergunta)', async () => {
     const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
     pelaPorta(s, DONO, DONO, '4321');
@@ -6036,7 +6092,8 @@ async function rodar() {
     const t = (await f.textContent('.cg-erro-leitor')).replace(/\s+/g, ' ');
     afirmar(/Ctrl\s*\+\s*A/.test(t) && /Ctrl\s*\+\s*C/.test(t) && /Ctrl\s*\+\s*V/.test(t) && /servidor do GSL/.test(t) && /cdnjs/.test(t), 'explicacao: ' + t);
     await f.click('.cg-erro-leitor .botao');
-    afirmar(await f.evaluate(() => document.activeElement && document.activeElement.id === 'cg-texto'), 'a caixa do texto abriu com o foco');
+    afirmar(await f.waitForFunction(() => document.activeElement && document.activeElement.id === 'cg-texto', null, { timeout: 3000 }).then(() => true, () => false),
+      'a caixa do texto abriu com o foco');
     await semRolagemLateral(f, 'erro do leitor no celular');
     await foto(aba, 'carga-celular-leitor-pdf-falhou');
     await contexto.close(); await s.fechar();

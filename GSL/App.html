@@ -899,13 +899,15 @@ async function retomarOuPedirEntrada(inicio) {
   const onde = telaDaAba();
   for (let tentativa = 0; tentativa < 2; tentativa++) {
     try {
-      const r = await chamarJSON('retomarSessao', { t: TOKEN, f: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' });
+      const r = await comPrazoDoEntrar(chamarJSON('retomarSessao', { t: TOKEN, f: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' }));
       // Erro do servidor (banco se atualizando, trava): a sessao continua; o clique tenta de novo.
       if (r && r.ok === false && !r.entrada) return mostrarContinuar({ erroEntrada: r.erro || 'O servidor não respondeu.' });
       if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
       return tratarEntrada(r);
     } catch (e) {
       if (canalBarradoDeVez(e) && URL_APP) { lembrarCanalBarrado(); return mostrarContinuar(); }
+      // 27/11: o Google mudo (20 s) nao ganha mais 20 s de logo girando: o "Continuar" ja vai pela pagina.
+      if (e && e.prazo && URL_APP) { ENTRAR_PELA_PAGINA = true; return mostrarContinuar({ erroEntrada: AVISO_GOOGLE_DEMORANDO }); }
       if (tentativa === 0 && falhaPassageira(e)) { await esperar(1500); continue; }
       return mostrarContinuar({ erroEntrada: explicarErro(e) });
     }
@@ -937,16 +939,31 @@ async function continuarSessao() {
   const campos = { t: TOKEN, filial: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' };
   if (b) { b.disabled = true; b.innerHTML = 'Abrindo…'; }
   DSP_ABERTURA.clique = performance.now();
-  // Canal barrado: ja vai por POST, dentro do clique.
-  if (CANAL_BARRADO && URL_APP) { navegarPelaPagina(campos); return; }
+  // Canal barrado (ou o Google mudo no clique anterior): ja vai por POST, dentro do clique.
+  if ((CANAL_BARRADO || ENTRAR_PELA_PAGINA) && URL_APP) { navegarPelaPagina(campos); return; }
   const clique = Date.now();
+  const vez = ++ENTRAR_TENTATIVAS;
+  const pedido = chamarJSON('retomarSessao', { t: TOKEN, f: campos.filial, tela: campos.tela, p: campos.p });
+  pedido.catch(() => {});
   try {
-    const r = await chamarJSON('retomarSessao', { t: TOKEN, f: campos.filial, tela: campos.tela, p: campos.p });
+    // 27/11: "Abrindo…" tem o mesmo prazo do Entrar (20 s); depois, o proximo clique vai pela pagina.
+    const r = await comPrazoDoEntrar(pedido);
     if (r && r.ok === false && !r.entrada) throw new Error(r.erro || 'O servidor não respondeu.');
     if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
     esconderContinuar();
     tratarEntrada(r);
   } catch (e) {
+    if (e && e.prazo && URL_APP) {
+      ENTRAR_PELA_PAGINA = true;
+      mostrarContinuar({ erroEntrada: AVISO_GOOGLE_DEMORANDO });
+      // A resposta atrasada ainda serve, se a pessoa nao clicou de novo nesse meio tempo.
+      pedido.then((tarde) => {
+        if (vez !== ENTRAR_TENTATIVAS || NAVEGACAO_PENDENTE || !tarde || !(tarde.entrada === 'APP' || tarde.entrada === 'ESCOLHER_FILIAL')) return;
+        const caixa = el('entrar-continuar'); if (!caixa || caixa.classList.contains('oculto')) return;
+        ENTRAR_PELA_PAGINA = false; esconderContinuar(); tratarEntrada(tarde);
+      }).catch(() => {});
+      return;
+    }
     if (canalBloqueado(e) && URL_APP) {
       if (canalBarradoDeVez(e)) lembrarCanalBarrado();
       if (Date.now() - clique < 4500) { navegarPelaPagina(campos); return; }
@@ -1068,16 +1085,44 @@ async function entrarNoSistema(ev) {
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
   const tentativa = ++ENTRAR_TENTATIVAS;
-  const pedido = chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || '',
-    paramsDoLinkJson(destinoDoLink()));
-  pedido.catch(() => {});            // a falha que chega depois de a corrida acabar nao vira erro solto
+  const pedir = () => {
+    const p = chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || '',
+      paramsDoLinkJson(destinoDoLink()));
+    p.catch(() => {});               // a falha que chega depois de a corrida acabar nao vira erro solto
+    return p;
+  };
+  let pedido = pedir();
+  // 27/11 — PRAZO: o Google que nao responde (partida a frio, rede presa) nao deixa o botao em
+  // "Entrando…" para sempre: aos ENTRAR_PRAZO_MS a tela explica e o proximo clique vai pela pagina.
+  // A resposta que chegar depois ainda vale (se ninguem clicou de novo). O prazo conta do clique.
+  const prazo = prazoDoEntrar(tentativa);
+  prazo.catch(() => {});
   try {
     // A sonda (disparada quando a pagina abriu) corre junto com o entrar: se ela acusar o canal
     // barrado enquanto o clique ainda vale, a entrada vai por POST na hora (catch abaixo).
-    // 27/11 — PRAZO: o Google que nao responde (partida a frio, rede presa) nao deixa o botao em
-    // "Entrando…" para sempre: aos ENTRAR_PRAZO_MS a tela explica e o proximo clique vai pela pagina.
-    // A resposta que chegar depois ainda vale (se ninguem clicou de novo).
-    const r = await Promise.race([pedido, canalBarradoPelaSonda(clique), prazoDoEntrar(tentativa)]);
+    let r;
+    for (let repeticao = 0; ; repeticao++) {
+      try { r = await Promise.race([pedido, canalBarradoPelaSonda(clique), prazo]); break; }
+      catch (e) {
+        /*
+         * 27/11 — NOVA TENTATIVA NO ENTRAR. Falha passageira (rede que piscou, HTTP 5xx do Google
+         * ocupado) que chega com o clique ainda valendo vai pela pagina (catch de fora). Chegou
+         * depois (o clique venceu): em vez de pedir outro clique, tenta de novo sozinha, com espera
+         * crescente (0,8 s e 2,5 s), dentro do mesmo prazo. Entrar nao grava nada que se repita
+         * (outra tentativa e so outra sessao); a recusa do Google (403, varias contas) nao repete.
+         */
+        if (repeticao < 2 && !e.entrarLento && falhaPassageira(e) && !cliqueAindaVale(clique) &&
+            tentativa === ENTRAR_TENTATIVAS && !ENTRADA_ENVIADA) {
+          falar('A conexão com o Google falhou. Tentando de novo…', 'ok');
+          medirEvento('entrada', 'tentativa', Date.now() - clique, false, e, { via: 'run', rt: repeticao + 1 });
+          await Promise.race([esperar(repeticao ? 2500 : 800), prazo]);
+          pedido = pedir();
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (/Tentando de novo/.test(msg.textContent)) falar('', '');
     if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
@@ -1134,6 +1179,15 @@ async function entrarNoSistema(ev) {
  */
 let ENTRAR_PRAZO_MS = 20000;      // let: o teste encurta
 let ENTRAR_PELA_PAGINA = false, ENTRAR_TENTATIVAS = 0;
+const AVISO_GOOGLE_DEMORANDO = 'O Google está demorando para responder (o servidor pode estar começando o dia). ' +
+  'Clique em Continuar de novo: desta vez vai pela página, sem esperar.';
+/* O mesmo prazo para o "Continuar como…" e a volta automatica do F5: o Google mudo vira erro com e.prazo. */
+function comPrazoDoEntrar(p) {
+  let t = 0;
+  const limite = new Promise((ok, erro) => { t = setTimeout(() => erro(Object.assign(
+    new Error('O Google não respondeu em ' + Math.round(ENTRAR_PRAZO_MS / 1000) + ' s (tempo esgotado).'), { prazo: true })), ENTRAR_PRAZO_MS); });
+  return Promise.race([p, limite]).finally(() => clearTimeout(t));
+}
 function prazoDoEntrar(tentativa) {
   return new Promise((ok, erro) => setTimeout(() => {
     if (tentativa === ENTRAR_TENTATIVAS && !ENTRADA_ENVIADA) erro(Object.assign(new Error('O Google não respondeu a tempo.'), { entrarLento: true }));
@@ -4658,6 +4712,7 @@ const NOMES_DSP = {
   'abertura:entrada': 'Abrir a página até a entrada aparecer', 'abertura:menu': 'Abrir com a sessão da aba (F5) até o menu',
   'abertura:html': 'Até a página começar a rodar', 'abertura:scripts': 'Ler e rodar a página (scripts e estilos)',
   'entrada:menu': 'Entrar: do clique em Entrar ao menu', 'entrada:prazo': 'Entrar sem resposta do Google em 20 s',
+  'entrada:tentativa': 'Entrar: a conexão falhou e tentou de novo sozinha',
   'run:entrar': 'Conferir e-mail e PIN (servidor)', 'run:retomarSessao': 'Voltar à sessão (F5)', 'run:sondarCanal': 'Teste da conversa com o Google',
   'run:carregarTela': 'Abrir uma tela', 'run:executarAcaoETela': 'Gravar e voltar a tela', 'run:executarAcao': 'Ações (leituras e gravações)',
   'run:carregarModulo': 'Buscar um módulo da página', 'run:abrirFilial': 'Entrar numa filial', 'run:manterSessao': 'Renovar a sessão',

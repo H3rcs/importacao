@@ -182,7 +182,7 @@ function envio(emitidoEm, cargas, extra) {
     cargas: Object.keys(cargas).map((nro) => {
       const d = {};
       DEPS.forEach((id) => { d[id] = (cargas[nro].d || cargas[nro])[id] || ['-', '-']; });
-      return { nro, nome: cargas[nro].nome || 'CARGA ' + nro, veiculo: 'MEDIO', box: '3', h24: !!cargas[nro].h24, d };
+      return { nro, nome: cargas[nro].nome || 'CARGA ' + nro, veiculo: 'MEDIO', box: cargas[nro].box || '3', h24: !!cargas[nro].h24, d };
     }) }, extra || {});
 }
 
@@ -280,16 +280,23 @@ async function rodar() {
   }
 
   console.log('\nServidor:');
-  await caso('instalação: tabelas, painel ligado, 12 paleteiras no pool do CD e 35 carrinhos na Miudeza, limites do equilíbrio', () => {
+  await caso('instalação: tabelas, painel ligado, 12 paleteiras e 12 check-outs no pool do CD e 35 carrinhos na Miudeza, limites do equilíbrio', () => {
     const m = mundo(); const s = entrar(m, DONO, '4321');
     const d = tela(m, s);
     const pal = d.equipamentos.filter((e) => e.tipo === 'PALETEIRA'), car = d.equipamentos.filter((e) => e.tipo === 'CARRINHO');
     afirmar(pal.length === 12 && pal.every((e) => e.estado === 'LIVRE' && e.dep === '' && e.id), 'paleteiras ' + JSON.stringify(pal.slice(0, 2)));
     afirmar(car.length === 35 && car.every((e) => e.estado === 'LIVRE' && e.dep === 'MIUDEZA' && e.id), 'carrinhos ' + car.length);
-    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 47, 'gravados na planilha');
+    const chk = d.equipamentos.filter((e) => e.tipo === 'CHECKOUT');
+    afirmar(chk.length === 12 && chk.every((e) => e.estado === 'LIVRE' && e.id), 'check-outs ' + chk.length);
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 59, 'gravados na planilha');
+    afirmar(d.turnos.map((t) => t.texto).join(' ') === '06:50–16:14 16:04–01:01 23:00–07:00' && d.turnoAgora.ativos.join() === 'B', 'turnos ' + JSON.stringify(d.turnoAgora));
+    afirmar(d.sequencia && !d.sequencia.usada && !d.sequencia.itens.length && d.patio && d.patio.n === 26 && d.patio.contagem.livres === 26, 'fase 2 vazia');
+    afirmar(d.flowrack.ruas.join() === '6,6,6,6,6' && Array.isArray(d.faltas) && Array.isArray(d.envios), 'flowrack/faltas');
+    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM'].forEach((t) => afirmar(Array.isArray(ctx(m).listar(t)), 'tabela ' + t));
     afirmar(d.podeEditar && !d.snapshot && d.depositos.length === 6 && d.andares.length === 5, 'tela vazia');
     const par = ctx(m).listar('PARAMETROS').map((p) => p.CHAVE);
-    afirmar(['CARGA_EQUILIBRIO_PP', 'CARGA_ATENCAO_PP', 'CARGA_PESO_24H'].every((k) => par.indexOf(k) !== -1), 'parametros');
+    afirmar(['CARGA_EQUILIBRIO_PP', 'CARGA_ATENCAO_PP', 'CARGA_PESO_24H', 'CARGA_TURNO_A', 'CARGA_TURNO_B', 'CARGA_TURNO_C', 'CARGA_BOX_PERMANENCIA_MIN', 'CARGA_SITUACOES_BOX',
+      'CARGA_BOXES', 'CARGA_FLOWRACK_RUAS', 'CARGA_SEQ_EM_CURSO'].every((k) => par.indexOf(k) !== -1), 'parametros');
     const ger = entrar(m, GERENTE, '5555');
     afirmar(tela(m, ger).podeEditar, 'gerente edita');
     const con = entrar(m, CONSULTA, '7777');
@@ -310,7 +317,45 @@ async function rodar() {
     const d = tela(m, s);
     afirmar(d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.id).length === 12 && d.equipamentos.filter((e) => e.tipo === 'CARRINHO' && e.id).length === 35, 'semeados');
     afirmar(JSON.parse(ctx(m).listar('FILIAIS').find((x) => x.PRINCIPAL === 'SIM').PAINEIS).carga === 'ATIVO', 'painel ligado');
-    afirmar(m.props.script.VERSAO_ESQUEMA === '8.14', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+    afirmar(m.props.script.VERSAO_ESQUEMA === '8.15', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+  });
+
+  await caso('migração 8.14 → 8.15: tabelas novas e a coluna RUA, paleteira "em uso" volta para o pool (a manutenção fica), check-outs semeados, parâmetros novos', () => {
+    const m = mundo();
+    const c = ctx(m);
+    const banco = m.planilhas.get(c.prop('ID_BANCO', ''));
+    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM', 'CARGA_BOXES', 'CARGA_CARREGAMENTO'].forEach((t) => { banco.abas = banco.abas.filter((a) => a.nome !== t); });
+    // banco da 8.14: sem a coluna RUA, sem check-outs, paleteiras marcadas em uso a mao
+    const eq = banco.abas.find((a) => a.nome === 'CARGA_EQUIPE');
+    const iRua = eq.dados[0].indexOf('RUA');
+    eq.dados.forEach((l) => { if (l) l.splice(iRua, 1); });
+    const abaEq = banco.abas.find((a) => a.nome === 'CARGA_EQUIPAMENTOS');
+    const cab = abaEq.dados[0];
+    abaEq.dados = abaEq.dados.filter((l, i) => !i || (l && l[cab.indexOf('TIPO')] !== 'CHECKOUT'));
+    m.cache.clear();
+    const linhas = ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'PALETEIRA');
+    ctx(m).atualizar('CARGA_EQUIPAMENTOS', linhas[0].ID, { ESTADO: 'USO', DEPOSITO: 'GRANDEZA' }, 'teste');
+    ctx(m).atualizar('CARGA_EQUIPAMENTOS', linhas[1].ID, { ESTADO: 'USO', DEPOSITO: 'BLOCADO' }, 'teste');
+    ctx(m).atualizar('CARGA_EQUIPAMENTOS', linhas[2].ID, { ESTADO: 'MANUTENCAO', DEPOSITO: '', OBSERVACAO: 'roda' }, 'teste');
+    const par = banco.abas.find((a) => a.nome === 'PARAMETROS');
+    const iChave = par.dados[0].indexOf('CHAVE');
+    par.dados = par.dados.filter((l, i) => !i || !(l && /^CARGA_(TURNO|BOX|SITUACOES|FLOWRACK|SEQ)/.test(String(l[iChave]))));
+    m.props.script.VERSAO_ESQUEMA = '8.14';
+    m.cache.clear();
+    const s = entrar(m, DONO, '4321');
+    const d = tela(m, s);
+    afirmar(m.props.script.VERSAO_ESQUEMA === '8.15', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+    const pal = ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'PALETEIRA');
+    afirmar(!pal.some((r) => r.ESTADO === 'USO') && pal.filter((r) => r.ESTADO === 'MANUTENCAO').length === 1 && pal.find((r) => r.ESTADO === 'MANUTENCAO').OBSERVACAO === 'roda', 'paleteiras ' + JSON.stringify(pal.map((r) => r.ESTADO)));
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT').length === 12, 'check-outs semeados');
+    afirmar(banco.abas.find((a) => a.nome === 'CARGA_EQUIPE').dados[0].indexOf('RUA') !== -1, 'coluna RUA');
+    ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM', 'CARGA_BOXES', 'CARGA_CARREGAMENTO'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
+    afirmar(ctx(m).parametro('CARGA_TURNO_B', '') === '16:04-01:01' && ctx(m).parametro('CARGA_BOXES', '') === '26', 'parametros');
+    afirmar(d.equipamentos.filter((e) => e.tipo === 'CHECKOUT').length === 12 && d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.estado === 'MANUTENCAO').length === 1, 'tela');
+    // abrir de novo nao migra outra vez (nada duplica)
+    m.cache.clear();
+    tela(m, entrar(m, DONO, '4321'));
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 59, 'nada duplicou: ' + ctx(m).listar('CARGA_EQUIPAMENTOS').length);
   });
 
   await caso('envio do PDF real: 47 cargas, resumo por depósito igual à conta direta das células, 24 h pendente e o "-" fora das contas', () => {
@@ -443,41 +488,57 @@ async function rodar() {
     afirmar(!r.equipe.length, 'limpar tudo');
   });
 
-  await caso('paleteiras (pool do CD): pegar a livre de número mais baixo, em uso num dos quatro, manutenção, devolver; quantidade 14 → 10', () => {
+  await caso('paleteiras e check-outs acompanham as pessoas: cada separador (G·NG·P·B) usa uma paleteira, cada conferente um check-out; manutenção à mão; "faltam N"', () => {
     const m = mundo(); const s = entrar(m, GERENTE, '5555');
-    let r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', estado: 'USO', dep: 'PESAVEIS' });
-    afirmar(/Paleteira 1: em uso em Pesáveis/.test(r.recado), r.recado);
-    r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 5, estado: 'USO', dep: 'NOBRE_GRANDEZA' });
-    r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', estado: 'USO', dep: 'GRANDEZA' });
-    afirmar(r.equipamentos.find((e) => e.tipo === 'PALETEIRA' && e.numero === 2).dep === 'GRANDEZA', 'pegou a 2');
-    afirmar(/Grandeza, Nobre Grandeza, Pesáveis ou Blocado/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 3, estado: 'USO', dep: 'MIUDEZA' }))), 'miudeza nao usa paleteira');
-    r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 5, estado: 'MANUTENCAO', dep: 'NOBRE_GRANDEZA', obs: 'roda' });
-    const p5 = r.equipamentos.find((e) => e.tipo === 'PALETEIRA' && e.numero === 5);
-    afirmar(p5.estado === 'MANUTENCAO' && p5.dep === '' && p5.obs === 'roda', 'manutencao ' + JSON.stringify(p5));
-    r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 1, estado: 'LIVRE' });
-    afirmar(/livre no pool/.test(r.recado), r.recado);
-    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 14 });
-    afirmar(r.equipamentos.filter((e) => e.tipo === 'PALETEIRA').length === 14 && /14 paleteiras no CD/.test(r.recado), 'quantidade 14');
-    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 10 });
-    afirmar(r.equipamentos.filter((e) => e.tipo === 'PALETEIRA').length === 10 && r.equipamentos.filter((e) => e.tipo === 'CARRINHO').length === 35, 'quantidade 10');
-    for (let i = 0; i < 8; i++) acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', estado: 'USO', dep: 'BLOCADO' });
-    afirmar(/Nenhuma paleteira livre/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', estado: 'USO', dep: 'BLOCADO' }))), 'pool vazio');
+    ligarQuadro(m, s);
+    const p = tela(m, s).pessoas;
+    const mover = (x, dep, papel, andar) => acao(m, s, 'moverPessoaCarga', { pessoa: x, destino: { dep, papel, andar } });
+    const consumo = () => { const c = ctx(m); return c.cgConsumoEquip_(c.cgEquipe_(), c.cgEquipamentos_()); };
+    // o "em uso" a mao nao existe mais
+    afirmar(/entra em uso sozinha/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 1, estado: 'USO', dep: 'GRANDEZA' }))), 'paleteira USO recusado');
+    afirmar(/entra em uso sozinho/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', numero: 1, estado: 'USO' }))), 'checkout USO recusado');
+    [0, 1, 2].forEach((i) => { mover(p[i], 'GRANDEZA', 'SEPARADOR'); m.desvioRelogio += 1000; });
+    mover(p[3], 'MIUDEZA', 'SEPARADOR'); mover(p[4], 'NOBRE', 'SEPARADOR', 2);       // Miudeza e Nobre nao usam paleteira
+    mover(p[5], 'NOBRE', 'CONFERENTE'); mover(p[6], 'GRANDEZA', 'CONFERENTE');
+    let c = consumo();
+    afirmar(c.PALETEIRA.pessoas === 3 && c.PALETEIRA.emUso === 3 && c.PALETEIRA.livres === 9 && !c.PALETEIRA.falta && c.PALETEIRA.porDep.GRANDEZA.com === 3, 'paleteiras ' + JSON.stringify(c.PALETEIRA));
+    afirmar(c.CHECKOUT.pessoas === 2 && c.CHECKOUT.livres === 10 && c.CHECKOUT.porDep.NOBRE.com === 1, 'check-outs ' + JSON.stringify(c.CHECKOUT));
+    // pool menor e uma em manutencao: os dois separadores que chegaram por ultimo (Blocado) ficam sem
+    acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 4 });
+    let r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 2, estado: 'MANUTENCAO', obs: 'roda solta' });
+    afirmar(/Paleteira 2: em manutenção/.test(r.recado), r.recado);
+    m.desvioRelogio += 1000; mover(p[7], 'BLOCADO', 'SEPARADOR'); m.desvioRelogio += 1000; mover(p[8], 'BLOCADO', 'SEPARADOR');
+    c = consumo();
+    afirmar(c.PALETEIRA.total === 4 && c.PALETEIRA.manutencao === 1 && c.PALETEIRA.disponiveis === 3 && c.PALETEIRA.falta === 2 && c.PALETEIRA.livres === 0, 'falta ' + JSON.stringify(c.PALETEIRA));
+    afirmar(c.PALETEIRA.porDep.BLOCADO.sem === 2 && c.PALETEIRA.porDep.GRANDEZA.sem === 0 && c.PALETEIRA.sem.join() === [p[7].k, p[8].k].join(), 'quem ficou sem ' + JSON.stringify(c.PALETEIRA.porDep));
+    // mover de novo para o mesmo deposito e papel nao muda o "desde" (a paleteira continua com a pessoa)
+    const desde = ctx(m).cgEquipe_().find((x) => x.k === p[4].k).desde;
+    m.desvioRelogio += 60000; mover(p[4], 'NOBRE', 'SEPARADOR', 3);
+    afirmar(ctx(m).cgEquipe_().find((x) => x.k === p[4].k).desde === desde, 'desde mantido');
+    // a manutencao volta: funcionando
+    r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 2, estado: 'LIVRE' });
+    afirmar(/funcionando/.test(r.recado) && consumo().PALETEIRA.falta === 1, 'voltou: ' + r.recado);
+    // check-outs: quantidade e manutencao
+    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'CHECKOUT', quantidade: 1 });
+    afirmar(/1 check-out no CD/.test(r.recado), r.recado);
+    c = consumo();
+    afirmar(c.CHECKOUT.falta === 1 && c.CHECKOUT.sem.length === 1, 'check-out falta ' + JSON.stringify(c.CHECKOUT));
     afirmar(/de 0 a 60/.test(erroDe(() => acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 61 }))), 'limite 60');
-    // carrinhos: ciclo e quantidade
+    afirmar(/não existe/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 9, estado: 'MANUTENCAO' }))), 'numero fora');
+    // carrinhos: continuam a mao (ciclo e quantidade)
     r = acao(m, s, 'equipamentoCarga', { tipo: 'CARRINHO', numero: 35, estado: 'USO' });
     afirmar(r.equipamentos.find((e) => e.tipo === 'CARRINHO' && e.numero === 35).estado === 'USO', 'carrinho em uso');
-    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'CARRINHO', quantidade: 30 });
-    afirmar(r.equipamentos.filter((e) => e.tipo === 'CARRINHO').length === 30, 'carrinhos 30');
     r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'CARRINHO', quantidade: 0 });
-    afirmar(!r.equipamentos.some((e) => e.tipo === 'CARRINHO'), 'carrinhos 0 ' + r.equipamentos.filter((e) => e.tipo === 'CARRINHO').length);
-    afirmar(!tela(m, s).equipamentos.some((e) => e.tipo === 'CARRINHO'), 'zero continua zero (nao volta para o padrao)');
+    afirmar(!r.equipamentos.some((e) => e.tipo === 'CARRINHO') && !tela(m, s).equipamentos.some((e) => e.tipo === 'CARRINHO'), 'carrinhos 0 (nao volta para o padrao)');
   });
 
   await caso('permissões: consulta vê e pergunta a geração, mas não grava; "Ver" na matriz tira a gravação do gerente', () => {
     const m = mundo();
     const con = entrar(m, CONSULTA, '7777');
     afirmar(acao(m, con, 'geracaoCarga', {}).g, 'geracao para quem ve');
-    ['enviarSituacaoCarga', 'moverPessoaCarga', 'equipamentoCarga', 'quantidadeEquipamentoCarga', 'limparAlocacaoCarga', 'excluirSituacaoCarga'].forEach((n) => {
+    afirmar(tela(m, con).patio.mapa.length === 26 && /não existe mais/.test(erroDe(() => acao(m, con, 'snapshotCarga', { id: 'x' }))), 'leituras para quem ve');
+    ['enviarSituacaoCarga', 'moverPessoaCarga', 'equipamentoCarga', 'quantidadeEquipamentoCarga', 'limparAlocacaoCarga', 'excluirSituacaoCarga',
+      'sequenciaCarga', 'presencaCarga', 'passagemCarga', 'carregamentoCarga', 'boxCarga', 'importarBoxesCarga', 'parametrosCarga'].forEach((n) => {
       afirmar(/só para ver/.test(erroDe(() => acao(m, con, n, {}))), n + ' recusado');
     });
     const adm = entrar(m, DONO, '4321');
@@ -540,6 +601,382 @@ async function rodar() {
     const c = ctx(m);
     afirmar(c.cgCargasDe_(noDrive[0])[0].n === '900001', 'le do Drive');
     afirmar(tela(m, s).historico.length === 8, 'historico inteiro');
+  });
+
+  console.log('\nFase 2 (8.15):');
+
+  await caso('turnos pelo horário: A, B e C (B e C passam da meia-noite), sobreposição = passagem, o dia do turno e o turno do Quadro (1° = A, ADM, 4° fora)', () => {
+    const m = mundo(); const c = ctx(m);
+    const t = c.cgTurnos_();
+    const h = (hh, mm) => c.cgTurnosNoHorario_(t, hh * 60 + mm);
+    const casos = [[10, 0, 'A', null], [16, 10, 'A,B', 'A>B'], [16, 14, 'B', null], [20, 0, 'B', null], [23, 30, 'B,C', 'B>C'], [0, 30, 'B,C', 'B>C'],
+      [1, 1, 'C', null], [3, 0, 'C', null], [6, 55, 'A,C', 'C>A'], [7, 0, 'A', null], [6, 49, 'C', null]];
+    casos.forEach(([hh, mm, ativos, pass]) => {
+      const r = h(hh, mm);
+      afirmar(r.ativos.slice().sort().join() === ativos && (r.passagem ? r.passagem.sai + '>' + r.passagem.entra : null) === pass, hh + ':' + mm + ' ' + JSON.stringify(r));
+    });
+    afirmar(c.cgDiaDoTurno_('C', '2026-11-26T02:00:00', t) === '2026-11-25' && c.cgDiaDoTurno_('C', '2026-11-26T15:00:00', t) === '2026-11-26', 'dia do C');
+    afirmar(c.cgDiaDoTurno_('B', '2026-11-26T00:30:00', t) === '2026-11-25' && c.cgDiaDoTurno_('A', '2026-11-26T00:30:00', t) === '2026-11-26' && c.cgDiaDoTurno_('', '2026-12-01T00:30:00', t) === '2026-12-01', 'dia do B/A');
+    afirmar(c.cgDiaDoTurno_('C', '2026-12-01T03:00:00', t) === '2026-11-30' && c.cgDiaDoTurno_('C', '2027-01-01T03:00:00', t) === '2026-12-31', 'virada de mes e ano');
+    const eq = { '1° TURNO': 'A', '1º TURNO': 'A', '2° TURNO': 'B', 'TURNO 3': 'C', '3': 'C', 'TB': 'B', 'ADM': 'ADM', 'ADMINISTRATIVO': 'ADM', '4° TURNO': '', '': '' };
+    Object.keys(eq).forEach((k) => afirmar(c.cgTurnoDaEquipe_(k) === eq[k], k + ' -> ' + c.cgTurnoDaEquipe_(k)));
+    afirmar(JSON.stringify(c.cgHorarioTurno_('6h50 às 16h14')) === JSON.stringify({ ini: 410, fim: 974 }) && !c.cgHorarioTurno_('25:00-01:00') && !c.cgHorarioTurno_('08:00-08:00'), 'leitura do horario');
+    // editar na tela (quem edita): o horario novo vale
+    const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'parametrosCarga', { turnos: { A: '07:00 - 15:20', B: '15:10-23:40', C: '23:30-07:10' } });
+    const d = tela(m, s);
+    afirmar(d.turnos.map((x) => x.texto).join(' ') === '07:00–15:20 15:10–23:40 23:30–07:10' && d.turnos[1].cruza === false && d.turnos[2].cruza === true, 'editado ' + JSON.stringify(d.turnos));
+    afirmar(/Turno B: escreva o horário/.test(erroDe(() => acao(m, s, 'parametrosCarga', { turnos: { B: 'de tarde' } }))), 'horario invalido');
+    afirmar(/Nada para salvar/.test(erroDe(() => acao(m, s, 'parametrosCarga', {}))), 'vazio');
+  });
+
+  await caso('faltou: chip vermelho (sai da alocação, não pode ser alocado), vale até o fim do turno da pessoa (o C passa da meia-noite), desfazer, ao vivo e no LOG', () => {
+    const m = mundo(); let s = entrar(m, COORD, '1234');
+    ligarQuadro(m, entrar(m, DONO, '4321'));
+    const p = tela(m, s).pessoas;
+    const a = p.find((x) => x.equipe === '1° TURNO'), cT = p.find((x) => x.equipe === '3° TURNO');
+    acao(m, s, 'moverPessoaCarga', { pessoa: a, destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } });
+    const g0 = acao(m, s, 'geracaoCarga', {}).g;
+    let r = acao(m, s, 'presencaCarga', { pessoa: a, falta: true });
+    afirmar(/marcado como falta e tirado da alocação/.test(r.recado) && !r.equipe.some((x) => x.k === a.k) && r.faltas.length === 1 && r.faltas[0].k === a.k, 'marcou ' + r.recado);
+    afirmar(r.g !== g0 && acao(m, s, 'geracaoCarga', {}).g === r.g, 'geracao mudou');
+    afirmar(r.faltas[0].porNome === 'Maria Souza' && r.faltas[0].data === '2026-11-25' && r.faltas[0].turno === 'A', 'quem e quando ' + JSON.stringify(r.faltas[0]));
+    afirmar(/marcado como falta neste turno \(por Maria Souza\)/.test(erroDe(() => acao(m, s, 'moverPessoaCarga', { pessoa: a, destino: { dep: 'MIUDEZA', papel: 'SEPARADOR' } }))), 'nao aloca');
+    r = acao(m, s, 'presencaCarga', { pessoa: a, falta: true });
+    afirmar(ctx(m).listar('CARGA_PRESENCA').length === 1, 'marcar de novo nao duplica');
+    ctx(m).descarregarLog();
+    afirmar(ctx(m).listar('LOG').some((l) => l.TABELA === 'CARGA_PRESENCA' && l.QUEM === COORD), 'no LOG');
+    afirmar(tela(m, s).faltas.length === 1 && tela(m, s).faltas[0].ativa, 'na tela');
+    // desfazer
+    r = acao(m, s, 'presencaCarga', { pessoa: a, falta: false });
+    afirmar(/Falta de .* desfeita/.test(r.recado) && !r.faltas.length, 'desfez');
+    acao(m, s, 'moverPessoaCarga', { pessoa: a, destino: { dep: 'MIUDEZA', papel: 'SEPARADOR' } });
+    // o turno C: marcada as 23:30 de 25/11 continua as 02:00 de 26/11 e some no C seguinte (23:30 de 26/11)
+    m.desvioRelogio = Date.parse('2026-11-25T23:30:00-03:00') - Date.now(); s = entrar(m, COORD, '1234');
+    acao(m, s, 'presencaCarga', { pessoa: cT, falta: true });
+    acao(m, s, 'presencaCarga', { pessoa: a, falta: true });
+    const valendo = () => { const c = ctx(m); return c.cgFaltas_(c.cgTurnos_(), c.cgAgoraIso_()); };
+    m.desvioRelogio = Date.parse('2026-11-26T02:00:00-03:00') - Date.now(); s = entrar(m, COORD, '1234');
+    afirmar(tela(m, s).faltas.filter((x) => x.ativa).length === 1, 'a tela leva as de ontem e hoje, com "ativa"');
+    let f = valendo().map((x) => x.k);
+    afirmar(f.indexOf(cT.k) !== -1 && f.indexOf(a.k) === -1, 'as 02:00 do dia seguinte: o C continua, o A (do dia 25) ja nao ' + JSON.stringify(f));
+    m.desvioRelogio = Date.parse('2026-11-26T23:30:00-03:00') - Date.now(); s = entrar(m, COORD, '1234');
+    f = valendo();
+    afirmar(!f.length, 'no turno seguinte zerou ' + JSON.stringify(f));
+    acao(m, s, 'moverPessoaCarga', { pessoa: cT, destino: { dep: 'BLOCADO', papel: 'CONFERENTE' } });
+    afirmar(/Pessoa inválida/.test(erroDe(() => acao(m, s, 'presencaCarga', { pessoa: { k: '<x>', nome: 'x' }, falta: true }))), 'chave');
+  });
+
+  await caso('sequência: segue o relatório até alguém mexer; mover persiste para todos; confere pela situação (fora de sequência, deveria ter começado); PDF novo entra no fim; 24 h para o topo; limpar', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    const ger2 = entrar(m, DONO, '4321');
+    acao(m, s, 'parametrosCarga', { emCurso: 2 });
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T08:00:00', {
+      '900001': { GRANDEZA: ['0/10', '0/10'] }, '900002': { GRANDEZA: ['0/10', '0/10'] }, '900003': { GRANDEZA: ['0/10', '0/10'] },
+      '900004': { MIUDEZA: ['2/10', '0/10'] }, '900005': { GRANDEZA: ['X', 'X'] }, '900006': { NOBRE: ['0/5', '0/5'] } }));
+    let q = tela(m, s).sequencia;
+    afirmar(!q.usada && q.itens.map((x) => x.n).join() === '900001,900002,900003,900004,900005,900006' && q.itens.every((x) => x.virtual), 'virtual na ordem do relatorio');
+    const flags = (seq) => seq.itens.map((x) => x.n.slice(-1) + ':' + x.flags.join('+')).join(' ');
+    afirmar(flags(q) === '1:emCurso+deveria+pulada 2:emCurso+deveria 3: 4:fora 5: 6:', 'conferencia ' + flags(q));
+    afirmar(q.alertas.fora === 1 && q.alertas.deveria === 2 && q.prontas === 1 && q.ativas === 5, 'alertas ' + JSON.stringify(q.alertas));
+    afirmar(!ctx(m).listar('CARGA_SEQUENCIA').length, 'nada gravado ainda');
+    // mover a 900004 para a primeira posicao: grava a fila inteira; o outro ve
+    const g0 = acao(m, s, 'geracaoCarga', {}).g;
+    let r = acao(m, s, 'sequenciaCarga', { op: 'mover', carga: '900004', para: 1 });
+    afirmar(r.recado === 'Carga 900004 na posição 1.' && r.g !== g0, r.recado);
+    afirmar(ctx(m).listar('CARGA_SEQUENCIA').length === 6 && r.sequencia.usada && !r.sequencia.itens.some((x) => x.virtual), 'gravou 6 linhas');
+    q = tela(m, ger2).sequencia;
+    afirmar(q.itens.map((x) => x.n).join() === '900004,900001,900002,900003,900005,900006' && q.mexida && q.mexida.por === GERENTE, 'o outro ve ' + q.itens.map((x) => x.n));
+    afirmar(flags(q) === '4:emCurso 1:emCurso+deveria 2: 3: 5: 6:', 'conferida de novo ' + flags(q));
+    r = acao(m, ger2, 'sequenciaCarga', { op: 'mover', carga: '900006', para: 99 });
+    afirmar(r.sequencia.itens[5].n === '900006' && /posição 6/.test(r.recado), 'para alem do fim = ultima');
+    r = acao(m, ger2, 'sequenciaCarga', { op: 'mover', carga: '900003', para: 2 });
+    afirmar(r.sequencia.itens.map((x) => x.n).join() === '900004,900003,900001,900002,900005,900006', 'mover para o meio ' + r.sequencia.itens.map((x) => x.n));
+    afirmar(/não está na sequência/.test(erroDe(() => acao(m, s, 'sequenciaCarga', { op: 'mover', carga: '123456', para: 1 }))), 'carga desconhecida');
+    afirmar(/qual posição/.test(erroDe(() => acao(m, s, 'sequenciaCarga', { op: 'mover', carga: '900001', para: 0 }))), 'posicao 0');
+    afirmar(/desconhecida/.test(erroDe(() => acao(m, s, 'sequenciaCarga', { op: 'apagar' }))), 'op');
+    // PDF novo: a 900002 saiu do relatorio; a 900007 (24 h) entra no fim com a sugestao de subir
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T09:00:00', {
+      '900001': { GRANDEZA: ['3/10', '0/10'] }, '900003': { GRANDEZA: ['0/10', '0/10'] }, '900004': { MIUDEZA: ['6/10', '2/10'] },
+      '900005': { GRANDEZA: ['X', 'X'] }, '900006': { NOBRE: ['0/5', '0/5'] }, '900007': { h24: true, d: { BLOCADO: ['0/4', '0/4'] } } }));
+    q = tela(m, s).sequencia;
+    afirmar(q.itens.map((x) => x.n).join() === '900004,900003,900001,900002,900005,900006,900007', 'nova no fim ' + q.itens.map((x) => x.n));
+    const it = (n) => q.itens.find((x) => x.n === n);
+    afirmar(it('900002').saiu && it('900002').estado === 'saiu' && it('900007').flags.indexOf('prioridade') !== -1 && it('900007').h === 1, 'saiu e prioridade ' + JSON.stringify([it('900002'), it('900007')]));
+    afirmar(ctx(m).listar('CARGA_SEQUENCIA').find((x) => x.CARGA === '900002').SAIU_EM === '2026-11-25T09:00:00', 'SAIU_EM');
+    r = acao(m, s, 'sequenciaCarga', { op: 'topo24' });
+    afirmar(r.sequencia.itens[0].n === '900007' && /1 carga de 24 horas subiu/.test(r.recado) && !r.sequencia.itens[0].flags.includes('prioridade'), 'topo ' + r.recado);
+    // limpar: sai a pronta (900005) e a que saiu do relatorio (900002); a pronta nao volta como virtual
+    r = acao(m, s, 'sequenciaCarga', { op: 'limpar' });
+    afirmar(/2 cargas saíram da fila/.test(r.recado) && r.sequencia.itens.map((x) => x.n).join() === '900007,900004,900003,900001,900006', 'limpar ' + r.sequencia.itens.map((x) => x.n));
+    afirmar(/Nenhuma carga pronta/.test(erroDe(() => acao(m, s, 'sequenciaCarga', { op: 'limpar' }))), 'nada para limpar');
+    // a carga que volta ao relatorio volta para a fila no lugar dela
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T10:00:00', { '900001': { GRANDEZA: ['4/10', '0/10'] }, '900008': { GRANDEZA: ['0/3', '0/3'] } }));
+    q = tela(m, s).sequencia;
+    afirmar(q.itens.map((x) => x.n + (x.saiu ? '-' : '')).join() === '900007-,900004-,900003-,900001,900006-,900008', 'depois do 3o PDF ' + q.itens.map((x) => x.n + (x.saiu ? '-' : '')));
+    // mais de 24 h fora do relatorio: some da fila no PDF seguinte
+    m.desvioRelogio = Date.parse('2026-11-26T12:00:00-03:00') - Date.now();
+    const s2 = entrar(m, GERENTE, '5555');
+    acao(m, s2, 'enviarSituacaoCarga', envio('2026-11-26T11:00:00', { '900001': { GRANDEZA: ['9/10', '0/10'] }, '900008': { GRANDEZA: ['0/3', '0/3'] } }));
+    q = tela(m, s2).sequencia;
+    afirmar(q.itens.map((x) => x.n).join() === '900001,900008', '24 h depois ' + q.itens.map((x) => x.n));
+  });
+
+  await caso('histórico: abrir um envio antigo (só leitura, com os indicadores daquela hora), comparar com agora e entre dois; o envio do Drive carrega sob demanda', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T08:00:00', { '900001': { GRANDEZA: ['0/10', '0/10'] }, '900002': { GRANDEZA: ['5/10', '0/10'], NOBRE: ['0/4', '0/4'] }, '900003': { MIUDEZA: ['1/2', '0/2'] } }));
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T09:00:00', { '900001': { GRANDEZA: ['4/10', '0/10'] }, '900002': { GRANDEZA: ['X', 'X'], NOBRE: ['X', 'X'] }, '900004': { GRANDEZA: ['0/6', '0/6'] } }));
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T10:00:00', { '900001': { GRANDEZA: ['10/10', '2/10'] }, '900004': { GRANDEZA: ['0/6', '0/6'] } }));
+    const d = tela(m, s);
+    afirmar(d.envios.length === 3 && d.envios[2].emitido === '2026-11-25T08:00:00' && d.envios[0].total === 2 && !d.envios[0].drive, 'lista ' + JSON.stringify(d.envios[2]));
+    const id1 = d.envios[2].id, id2 = d.envios[1].id;
+    let r = acao(m, s, 'snapshotCarga', { id: id1, com: 'atual' });
+    afirmar(r.snapshot.emitido === '2026-11-25T08:00:00' && r.snapshot.cargas.length === 3 && r.snapshot.resumo.dep.GRANDEZA.restSep === 15, 'snapshot ' + JSON.stringify(r.snapshot.resumo.dep.GRANDEZA));
+    afirmar(r.indicadores.porDep.GRANDEZA && r.indicadores.equilibrio && r.indicadores.envios === 1, 'indicadores daquela hora ' + r.indicadores.envios);
+    const cp = r.comparacao;
+    afirmar(cp.de === '2026-11-25T08:00:00' && cp.para === '2026-11-25T10:00:00' && cp.horas === 2, 'janela ' + JSON.stringify([cp.de, cp.para, cp.horas]));
+    afirmar(cp.porDep.GRANDEZA.sep === 10 && cp.porDep.GRANDEZA.conf === 2 && cp.porDep.GRANDEZA.concluidas === 0, 'grandeza ' + JSON.stringify(cp.porDep.GRANDEZA));
+    const tipo = (n) => (cp.cargas.find((x) => x.n === n) || {}).tipo;
+    afirmar(tipo('900001') === 'avancou' && tipo('900002') === 'saiu' && tipo('900003') === 'saiu' && tipo('900004') === 'nova' && cp.totais.novas === 1 && cp.totais.sairam === 2, 'tipos ' + JSON.stringify(cp.cargas));
+    // entre os dois primeiros (a ordem dos dois nao importa)
+    r = acao(m, s, 'snapshotCarga', { id: id2, com: id1 });
+    afirmar(r.comparacao.de === '2026-11-25T08:00:00' && r.comparacao.para === '2026-11-25T09:00:00', 'ordem ' + JSON.stringify([r.comparacao.de, r.comparacao.para]));
+    const t2 = (n) => (r.comparacao.cargas.find((x) => x.n === n) || {}).tipo;
+    afirmar(t2('900002') === 'concluiu' && r.comparacao.porDep.NOBRE.concluidas === 1 && r.comparacao.porDep.NOBRE.sep === 4 && r.comparacao.porDep.NOBRE.conf === 4, 'concluiu ' + JSON.stringify(r.comparacao.porDep.NOBRE));
+    afirmar(r.comparacao.porDep.NOBRE.pctAntes === 0 && r.comparacao.porDep.NOBRE.pctDepois === 100, 'pct nobre');
+    afirmar(!acao(m, s, 'snapshotCarga', { id: id1, com: id1 }).comparacao, 'consigo mesmo: sem comparacao');
+    afirmar(/não existe mais/.test(erroDe(() => acao(m, s, 'snapshotCarga', { id: 'nada' }))), 'id invalido');
+    // envios antigos no Drive: abrem do mesmo jeito; arquivo sumido = mensagem clara
+    for (let h = 11; h < 18; h++) acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T' + h + ':00:00', { '900001': { GRANDEZA: ['10/10', (h - 9) + '/10'] } }));
+    const env = tela(m, s).envios;
+    const doDrive = env.filter((x) => x.drive);
+    afirmar(doDrive.length >= 3 && doDrive.some((x) => x.id === id1), 'no drive: ' + doDrive.length);
+    r = acao(m, s, 'snapshotCarga', { id: id1, com: 'atual' });
+    afirmar(r.snapshot.drive && r.snapshot.cargas.length === 3 && r.comparacao.totais.sairam === 2, 'do Drive ' + r.snapshot.cargas.length);
+    const linha = ctx(m).listar('CARGA_SNAPSHOTS').find((x) => x.ID === id1);
+    m.arquivos.get(String(linha.CARGAS).slice(6)).lixo = true;
+    m.arquivos.delete(String(linha.CARGAS).slice(6));
+    afirmar(/no Drive/.test(erroDe(() => acao(m, s, 'snapshotCarga', { id: id1 }))), 'arquivo apagado');
+  });
+
+  await caso('pátio e boxes (nativo): registrar (número curto, tipo do veículo pelo relatório), box, chegou, carregando, carregada libera o box, reabrir, excluir; histórico; ao vivo', () => {
+    const m = mundo(); const s = entrar(m, COORD, '1234');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { h24: true, d: { GRANDEZA: ['0/10', '0/10'] } }, '900002': { GRANDEZA: ['X', 'X'] },
+      '900003': { box: '12', d: { GRANDEZA: ['3/10', '0/10'] } } }));
+    let d = tela(m, s);
+    afirmar(d.patio.n === 26 && d.patio.mapa.length === 26 && d.patio.mapa.every((b) => b.estado === 'LIVRE') && d.patio.semRegistro.length === 3 && d.patio.semRegistro[0].n === '900001',
+      'patio vazio ' + JSON.stringify(d.patio.contagem));
+    afirmar(d.patio.situacoes.length === 25 && d.patio.situacoes.indexOf('MARCOU E NAO VEIO') !== -1 && d.patio.tipos.join() === 'LEVE,VUC,MEDIO,TOCO,TRUCK,CARRETA,OUTRO', 'listas');
+    const g0 = acao(m, s, 'geracaoCarga', {}).g;
+    // numero curto (como no quadro antigo): 002 = 900002; tipo pelo veiculo do relatorio (MEDIO)
+    let r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '002', box: 7, veiculo: 'abc1d23', motorista: 'Motorista Teste B', previsao: '16:30' });
+    afirmar(/Carga 900002 no box 7 \(002 = 900002\)/.test(r.recado) && r.g !== g0, r.recado);
+    const id2 = r.id;
+    let b7 = r.patio.mapa[6];
+    afirmar(b7.estado === 'RESERVADO' && b7.itens[0].n === '900002' && b7.itens[0].tipo === 'MEDIO' && b7.itens[0].veiculo === 'ABC1D23' && b7.itens[0].pdf.estado === 'pronta', 'box 7 reservado ' + JSON.stringify(b7.itens[0]).slice(0, 200));
+    afirmar(/já está no box 7/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900002' }))), 'duplicada');
+    afirmar(/Box de 1 a 26/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', box: 27 }))), 'box 27');
+    afirmar(/Situação "TANTO FAZ" não está na lista/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', situacao: 'tanto faz' }))), 'situacao fora da lista');
+    afirmar(/Previsão: escreva/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', previsao: 'logo' }))), 'previsao');
+    afirmar(/Informe o número/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '' }))), 'sem numero');
+    // o carro chegou: o box fica ocupado com o veiculo encostado
+    m.desvioRelogio += 60000;
+    r = acao(m, s, 'carregamentoCarga', { op: 'chegou', id: id2 });
+    b7 = r.patio.mapa[6];
+    afirmar(/chegou ao box 7 às \d\d:\d\d/.test(r.recado) && b7.estado === 'OCUPADO' && b7.itens[0].situacao === 'JÁ NO BOX' && b7.noBox && b7.noBox === b7.itens[0].chegada, r.recado + ' ' + JSON.stringify(b7).slice(0, 200));
+    // a 900001 (24 h) entra no patio com "marcou e nao veio": alerta de prioridade
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', tipo: 'TRUCK', situacao: 'marcou e não veio', prioridade: '1' });
+    const id1 = r.id;
+    afirmar(r.patio.fila.length === 1 && r.patio.fila[0].n === '900001' && r.patio.fila[0].situacao === 'MARCOU E NAO VEIO' && r.patio.fila[0].etapa === 'FILA', 'fila ' + JSON.stringify(r.patio.fila[0]).slice(0, 200));
+    afirmar(r.patio.alertas.some((a) => a.tipo === 'prioridadeRisco' && a.carga === '900001' && a.grav === 'alerta'), 'prioridade com risco');
+    // arrastar para o box 3; depois de volta ao patio
+    r = acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
+    afirmar(r.patio.mapa[2].estado === 'RESERVADO' && !r.patio.fila.length, 'no box 3');
+    afirmar(/Ponha a carga/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 0 }) && acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 }))), 'carregando sem box');
+    acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
+    r = acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 });
+    afirmar(r.patio.mapa[2].estado === 'CARREGANDO' && r.patio.mapa[2].itens[0].chegada && r.patio.mapa[2].itens[0].situacao === 'CARREGANDO', 'carregando');
+    // carregada: libera o box, fica nas carregadas de hoje; reabrir volta ao box
+    r = acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 });
+    afirmar(/box 7 liberado/.test(r.recado) && r.patio.mapa[6].estado === 'LIVRE' && r.patio.carregadas[0].n === '900002' && r.patio.carregadas[0].carregadaPor === COORD, r.recado);
+    afirmar(/já está carregada/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 }))), 'carregada duas vezes');
+    r = acao(m, s, 'carregamentoCarga', { op: 'reabrir', id: id2 });
+    afirmar(r.patio.mapa[6].estado === 'OCUPADO' && !r.patio.carregadas.length, 'reaberta no box 7');
+    acao(m, s, 'carregamentoCarga', { op: 'carregada', id: id2 });
+    const hist = ctx(m).cgCarregamentos_().find((x) => x.id === id2).hist.map((h) => h[2]);
+    afirmar(hist.join(' | ') === 'registrou no box 7 | chegou (box 7) | carregada (box 7 liberado) | reabriu | carregada (box 7 liberado)' && ctx(m).cgCarregamentos_()[0].hist[0][1] === 'Maria Souza', 'historico ' + hist.join(' | '));
+    // situacao e excluir
+    r = acao(m, s, 'carregamentoCarga', { op: 'situacao', id: id1, situacao: 'Carro com defeito' });
+    afirmar(r.patio.mapa[2].itens[0].situacao === 'CARRO COM DEFEITO' && r.patio.mapa[2].itens[0].situacaoCat === 'risco', 'situacao');
+    r = acao(m, s, 'carregamentoCarga', { op: 'excluir', id: id1 });
+    afirmar(r.patio.mapa[2].estado === 'LIVRE' && /tirada do pátio/.test(r.recado), 'excluida');
+    afirmar(/não existe mais/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'chegou', id: id1 }))), 'id excluido');
+    // a carga que nao esta no relatorio entra (com aviso), e o numero curto que nao casa e recusado
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '765432', veiculo: 'VUC 2700' });
+    afirmar(/não está na situação de carga/.test(r.recado) && r.patio.fila.find((x) => x.n === '765432').tipo === 'VUC', 'fora do pdf ' + r.recado);
+    afirmar(/Nenhuma carga da situação de carga termina em 777/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '777' }))), 'curto sem par');
+    ctx(m).descarregarLog();
+    afirmar(ctx(m).listar('LOG').some((l) => l.TABELA === 'CARGA_CARREGAMENTO'), 'no LOG');
+  });
+
+  await caso('pátio: cruzamento com o PDF (pronta sem veículo no box, veículo encostado com a carga longe, box diferente, permanência acima do limite, carga que saiu do relatório) e box bloqueado', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { h24: true, d: { GRANDEZA: ['X', 'X'] } }, '900002': { box: '5', d: { GRANDEZA: ['1/10', '0/10'] } },
+      '900003': { box: '4', d: { GRANDEZA: ['X', 'X'] } }, '900004': { box: '6', d: { GRANDEZA: ['X', 'X'] } } }));
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900002', box: 9, chegada: '17:00' });
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900003', box: 4 });
+    const id4 = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900004', box: 6, chegada: '17:30' }).id;
+    acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id4 });
+    const p = tela(m, s).patio;
+    const tipos = p.alertas.map((a) => a.tipo + ':' + a.carga).sort().join(' ');
+    afirmar(tipos === 'boxDiferente:900002 boxLonge:900002 prontaSemBox:900001 prontaSemBox:900003', 'alertas ' + tipos);
+    afirmar(p.alertas[0].tipo === 'prontaSemBox' && p.alertas[0].carga === '900001' && p.alertas[0].grav === 'alerta' && /nem registro no pátio/.test(p.alertas[0].texto), 'a de 24 h primeiro ' + p.alertas[0].texto);
+    afirmar(p.mapa[8].estado === 'OCUPADO' && p.mapa[8].noBoxMin >= 60 && p.mapa[8].noBoxMin <= 61 && p.mapa[5].estado === 'CARREGANDO', 'chegada pela hora: ' + p.mapa[8].noBoxMin);
+    // a permanencia (limite 120 min): 2 h depois
+    m.desvioRelogio += 90 * 60000;
+    const s2 = entrar(m, GERENTE, '5555');
+    const p2 = ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_());
+    const perm = p2.alertas.filter((a) => a.tipo === 'permanencia');
+    afirmar(perm.length === 1 && perm[0].carga === '900002' && perm[0].min >= 150 && perm[0].min <= 152 && /encostado há 2 h 3\d \(limite 2 h\)/.test(perm[0].texto), 'permanencia ' + JSON.stringify(perm));
+    acao(m, s2, 'parametrosCarga', { permanencia: 200 });
+    afirmar(!ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_()).alertas.some((a) => a.tipo === 'permanencia'), 'limite editado');
+    // a carga sai do relatorio sem estar carregada
+    acao(m, s2, 'enviarSituacaoCarga', envio('2026-11-25T16:00:00', { '900001': { GRANDEZA: ['X', 'X'] } }));
+    const p3 = tela(m, s2).patio;
+    afirmar(p3.alertas.filter((a) => a.tipo === 'foraDoPdf').map((a) => a.carga).sort().join() === '900002,900003,900004', 'fora do pdf');
+    // bloquear: box com carga nao bloqueia; vazio bloqueia e nao recebe carga
+    afirmar(/tem carga/.test(erroDe(() => acao(m, s2, 'boxCarga', { numero: 9, estado: 'BLOQUEADO' }))), 'box com carga');
+    let r = acao(m, s2, 'boxCarga', { numero: 2, estado: 'BLOQUEADO', obs: 'porta quebrada' });
+    afirmar(r.patio.mapa[1].estado === 'BLOQUEADO' && r.patio.mapa[1].obs === 'porta quebrada' && /Box 2 bloqueado/.test(r.recado), 'bloqueado');
+    afirmar(/box 2 está bloqueado \(porta quebrada\)/.test(erroDe(() => acao(m, s2, 'carregamentoCarga', { op: 'salvar', carga: '900001', box: 2 }))), 'nao recebe');
+    r = acao(m, s2, 'boxCarga', { numero: 2, estado: 'LIVRE' });
+    afirmar(r.patio.mapa[1].estado === 'LIVRE' && !r.patio.mapa[1].obs, 'liberado');
+    // quantidade de boxes
+    acao(m, s2, 'parametrosCarga', { boxes: 30 });
+    afirmar(tela(m, s2).patio.mapa.length === 30, '30 boxes');
+    afirmar(/de 1 a 99/.test(erroDe(() => acao(m, s2, 'parametrosCarga', { boxes: 0 }))), 'boxes 0');
+    // tipos de veiculo pelo texto do relatorio
+    const t = (x) => ctx(m).cgTipoDoVeiculo_(x);
+    afirmar(t('VUC 2700') === 'VUC' && t('MEDIO - DEP') === 'MEDIO' && t('3/4') === 'MEDIO' && t('TOCO - DEP') === 'TOCO' && t('BI-TRUCK') === 'TRUCK' && t('CARRETA LS') === 'CARRETA' &&
+      t('LEVE') === 'LEVE' && t('FIORINO') === 'LEVE' && t('XYZ') === 'OUTRO' && t('') === '', 'tipos');
+  });
+
+  /* A planilha antiga dos boxes: Controle + Situacao dos BOXs, com o que a de verdade tem (linhas vazias, coluna sem nome). */
+  function planilhaBoxes(m) {
+    const controle = [
+      ['CARGA', 'COMPLEMENTO', 'PRIORIDADE', 'BOX', 'CARRO', 'DESCRIÇÃO', 'MOTORISTA', 'CARREGADA?', 'OBSERVAÇÃO', '', 'HORÁRIO CHEGADA'],
+      ['900001', '', '1', '5', 'TRUCK', 'ROTA TESTE NORTE', 'MOTORISTA TESTE A', 'NÃO', 'MARCOU E NAO VEIO', '', ''],
+      ['002', '', '', '3', 'VUC', 'ROTA TESTE SUL', 'MOTORISTA TESTE B', '', 'MOTORISTA A CAMINHO', '', ''],
+      ['', '', '', '', '', '', '', '', '', '', ''],
+      ['900004', 'COMPL', '', '7', 'TRUCK', 'ROTA TESTE LESTE', 'MOTORISTA TESTE C', '', 'JÁ NO BOX', '', '06:10'],
+      ['900005', '', 'ALTA', '3', 'TOCO', 'ROTA TESTE OESTE', 'MOTORISTA TESTE D', 'SIM', 'Carro com defeito', '', '']
+    ];
+    const boxes = [26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+    const sit = [['SITUAÇÃO DOS BOXS'], [], [],
+      [''].concat(boxes.map((b) => b === 7 ? 'TRUCK' : (b === 12 ? 'BI-TRUCK' : ''))),
+      ['BOX'].concat(boxes.map(String)),
+      [''].concat(boxes.map((b) => [7, 12, 20].indexOf(b) !== -1 ? 'Ocupado' : 'Livre')),
+      [''].concat(boxes.map((b) => b === 7 ? '004' : (b === 12 ? '003  010' : (b === 20 ? '999' : ''))))];
+    // a Situacao vai da coluna B ate a AA (27 colunas): a aba de teste tem 40
+    const p = m.novaPlanilha('Controle de Boxes (teste)');
+    const Aba = Object.getPrototypeOf(p.abas[0]).constructor;
+    p.abas[0].nome = 'Controle';
+    controle.forEach((l, i) => { p.abas[0].dados[i] = l.slice(); });
+    const aba = new Aba(p, 'Situação dos BOXs', 1000, 40);
+    p.abas.push(aba);
+    sit.forEach((l, i) => { aba.dados[i] = l.slice(); });
+    return 'https://docs.google.com/spreadsheets/d/' + p.id + '/edit';
+  }
+
+  await caso('importar da planilha antiga (uma vez): Controle e quadro dos boxes viram o pátio, a carregada não entra, o que já está no GSL fica; a planilha não é tocada', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T08:00:00', {
+      '900001': { h24: true, d: { GRANDEZA: ['0/10', '0/10'] } }, '900002': { GRANDEZA: ['X', 'X'] }, '900003': { box: '12', d: { GRANDEZA: ['3/10', '0/10'] } },
+      '900004': { box: '7', d: { GRANDEZA: ['X', 'X'] } }, '900005': { GRANDEZA: ['1/10', '0/10'] }, '900010': { box: '12', d: { GRANDEZA: ['9/10', '9/10'] } } }));
+    acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900003', box: 1 });       // ja esta no GSL: fica como esta
+    const link = planilhaBoxes(m);
+    const id = link.split('/')[5];
+    const antes = JSON.stringify(m.planilhas.get(id).abas.map((a) => a.dados));
+    afirmar(/Cole o link/.test(erroDe(() => acao(m, s, 'importarBoxesCarga', { link: 'http://exemplo.com' }))), 'link ruim');
+    let r = acao(m, s, 'importarBoxesCarga', { link });
+    afirmar(/4 cargas importadas da planilha "Controle de Boxes \(teste\)" \(2 já estavam no GSL ou sem número\)\. A planilha não foi alterada\./.test(r.recado), r.recado);
+    const por = {};
+    ctx(m).cgCarregamentos_().forEach((x) => { por[x.n] = x; });
+    afirmar(!por['900005'] && por['900003'].box === 1, 'carregada nao entra; a do GSL fica');
+    afirmar(por['900001'].box === 5 && por['900001'].situacao === 'MARCOU E NAO VEIO' && por['900001'].tipo === 'TRUCK' && por['900001'].motorista === 'MOTORISTA TESTE A' && por['900001'].etapa === 'BOX' && !por['900001'].noBox, '900001 ' + JSON.stringify(por['900001']).slice(0, 200));
+    afirmar(por['900002'].box === 3 && por['900002'].tipo === 'VUC' && por['900002'].situacao === 'MOTORISTA A CAMINHO', '002 = 900002');
+    afirmar(por['900004'].box === 7 && por['900004'].noBox === '2026-11-25T06:10:00' && por['900004'].chegada === '2026-11-25T06:10:00' && por['900004'].situacao === 'JÁ NO BOX', '900004 no box desde 06:10');
+    afirmar(por['900010'].box === 12 && por['900010'].noBox && por['900010'].tipo === 'TRUCK', '900010 do quadro (BI-TRUCK, ocupado)');
+    afirmar(JSON.stringify(m.planilhas.get(id).abas.map((a) => a.dados)) === antes, 'a planilha deles nao foi tocada');
+    r = acao(m, s, 'importarBoxesCarga', { link });
+    afirmar(/^0 cargas importadas/.test(r.recado), 'de novo nao duplica: ' + r.recado);
+  });
+
+  await caso('planilha antiga, leitura tolerante: cabeçalho fora da 1ª linha, colunas em outra ordem, nomes sem acento ou minúsculos, abas com outro nome; faltando aba, o aviso', () => {
+    const m = mundo(); const c = ctx(m);
+    const r = c.cgInterpretarBoxes_([
+      { nome: 'Resumo', valores: [['qualquer coisa'], ['1', '2']] },
+      { nome: ' controle ', valores: [['PLANILHA DE DOCAS'], [], ['Observacao', 'Nº Carga', 'Box', 'motorista', 'Horario de chegada', 'carro', 'Carregada'],
+        ['sem previsão', '763154', '14', 'X', '07:15', 'TRUCK', 'sim'], ['', '', '', '', '', '', ''], ['Já no box', '155/156', '15', 'Y', '', 'VUC', '']] },
+      { nome: 'situacao dos boxs', valores: [[], ['', 'CARRETA', ''], ['', '3', '2', '1'], ['', 'ocupado', 'LIVRE', 'Ocupado'], ['', '154 155', '', '']] }
+    ]);
+    afirmar(r.abas.controle === ' controle ' && r.abas.situacao === 'situacao dos boxs' && !r.avisos.length, 'abas ' + JSON.stringify(r));
+    afirmar(r.controle.length === 3 && r.controle[0].carga === '763154' && r.controle[0].box === '14' && r.controle[0].obsCat === 'risco' && r.controle[0].carregadaSim && r.controle[0].chegada === '07:15', 'controle ' + JSON.stringify(r.controle[0]));
+    afirmar(r.controle[1].carga === '155' && r.controle[2].carga === '156' && r.controle[1].obsCat === 'ok', 'duas cargas numa celula');
+    afirmar(r.boxes.length === 3 && r.boxes[0].numero === 3 && r.boxes[0].estado === 'OCUPADO' && r.boxes[0].veiculo === 'CARRETA' && r.boxes[0].cargas.join() === '154,155' && r.boxes[1].estado === 'LIVRE', 'boxes ' + JSON.stringify(r.boxes));
+    const sem = c.cgInterpretarBoxes_([{ nome: 'Plan1', valores: [['nada aqui']] }]);
+    afirmar(sem.avisos.length === 2 && /Controle/.test(sem.avisos[0]) && /Situação dos BOXs/.test(sem.avisos[1]), 'avisos ' + JSON.stringify(sem.avisos));
+    // numero curto que casa com duas cargas: nao chuta
+    const amb = c.cgResolverCarga_('154', [{ n: '763154' }, { n: '764154' }]);
+    afirmar(!amb.n && amb.ambigua.join() === '763154,764154' && /pode ser 763154 ou 764154/.test(amb.erro), 'ambigua ' + JSON.stringify(amb));
+    afirmar(['MARCOU E NAO VEIO', 'Marcou e não veio', 'CARRO NA OFICINA', 'SEM PREVISÃO'].every((o) => c.cgCategoriaObs_(o) === 'risco') &&
+      c.cgCategoriaObs_('CARREGAR SÓ À NOITE') === 'espera' && c.cgCategoriaObs_('JÁ NO BOX') === 'ok' && c.cgCategoriaObs_('outra coisa') === 'outra' && c.cgCategoriaObs_('') === '', 'categorias');
+  });
+
+  await caso('passagem de turno: quem sai confirma o retrato (24 h primeiro, gargalo, alocação, manutenção, faltas); quem entra marca ciente; confirmar de novo pede ciente de novo', () => {
+    const m = mundo(); const s = entrar(m, COORD, '1234');
+    ligarQuadro(m, entrar(m, DONO, '4321'));
+    const p = tela(m, s).pessoas;
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { GRANDEZA: ['8/10', '0/10'] }, '900002': { h24: true, d: { NOBRE: ['1/10', '0/10'] } }, '900003': { GRANDEZA: ['X', 'X'] } }));
+    acao(m, s, 'moverPessoaCarga', { pessoa: p[0], destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } });
+    acao(m, s, 'presencaCarga', { pessoa: p[1], falta: true });
+    acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', numero: 3, estado: 'MANUTENCAO', obs: 'leitor' });
+    afirmar(/ainda não confirmou/.test(erroDe(() => acao(m, s, 'passagemCarga', { op: 'ciente', sai: 'A', entra: 'B' }))), 'ciente sem confirmar');
+    afirmar(/Diga o turno/.test(erroDe(() => acao(m, s, 'passagemCarga', { op: 'confirmar', sai: 'A', entra: 'A' }))), 'turnos iguais');
+    let r = acao(m, s, 'passagemCarga', { op: 'confirmar', sai: 'A', entra: 'B', obs: 'Box 7 com defeito na porta' });
+    afirmar(/confirmada/.test(r.recado) && r.passagens.length === 1, r.recado);
+    const ps = r.passagens[0];
+    afirmar(ps.data === '2026-11-25' && ps.confirmadoNome === 'Maria Souza' && !ps.cienteEm && ps.obs === 'Box 7 com defeito na porta', 'linha ' + JSON.stringify(ps).slice(0, 200));
+    const re = ps.resumo;
+    afirmar(re.abertas === 2 && re.cargas[0].n === '900002' && re.cargas[0].gargalo === 'NOBRE' && re.h24 === 1 && re.emitido === '2026-11-25T15:00:00', 'cargas ' + JSON.stringify(re.cargas));
+    afirmar(re.alocacao.GRANDEZA.sep === 1 && re.pessoas === 1 && re.faltas.length === 1 && re.manutencao.length === 1 && re.manutencao[0].tipo === 'CHECKOUT' && re.manutencao[0].obs === 'leitor', 'resto ' + JSON.stringify(re));
+    const ger = entrar(m, GERENTE, '5555');
+    r = acao(m, ger, 'passagemCarga', { op: 'ciente', sai: 'A', entra: 'B' });
+    afirmar(r.passagens[0].cienteNome === 'João Lima' && r.passagens[0].cienteEm, 'ciente ' + JSON.stringify(r.passagens[0]).slice(0, 200));
+    afirmar(/Já está ciente: João Lima/.test(erroDe(() => acao(m, ger, 'passagemCarga', { op: 'ciente', sai: 'A', entra: 'B' }))), 'ciente duas vezes');
+    r = acao(m, s, 'passagemCarga', { op: 'confirmar', sai: 'A', entra: 'B' });
+    afirmar(r.passagens.length === 1 && !r.passagens[0].cienteEm, 'confirmar de novo pede ciente de novo');
+    afirmar(tela(m, s).passagens.length === 1, 'na tela');
+  });
+
+  await caso('flowrack: ruas por andar (parâmetro), pessoa na rua do andar, rua fora do andar recusada, trocar de rua não muda o "desde"', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    ligarQuadro(m, s);
+    const p = tela(m, s).pessoas;
+    let r = acao(m, s, 'moverPessoaCarga', { pessoa: p[0], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2, rua: 3 } });
+    afirmar(r.equipe[0].andar === 2 && r.equipe[0].rua === 3, 'rua 3 ' + JSON.stringify(r.equipe[0]));
+    afirmar(/tem 6 ruas/.test(erroDe(() => acao(m, s, 'moverPessoaCarga', { pessoa: p[1], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2, rua: 7 } }))), 'rua 7');
+    acao(m, s, 'parametrosCarga', { ruas: '6,6,8,8,4' });
+    afirmar(tela(m, s).flowrack.ruas.join() === '6,6,8,8,4', 'parametro');
+    const desde = r.equipe[0].desde;
+    m.desvioRelogio += 60000;
+    r = acao(m, s, 'moverPessoaCarga', { pessoa: p[0], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2, rua: 8 } });
+    afirmar(r.equipe[0].rua === 8 && r.equipe[0].desde === desde, 'rua 8 ' + JSON.stringify(r.equipe[0]));
+    r = acao(m, s, 'moverPessoaCarga', { pessoa: p[0], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 4 } });
+    afirmar(r.equipe[0].rua === 0 && r.equipe[0].andar === 4, 'sem rua = o andar todo');
+    afirmar(/Ruas do flowrack/.test(erroDe(() => acao(m, s, 'parametrosCarga', { ruas: '6,6' }))) && /Ruas do flowrack/.test(erroDe(() => acao(m, s, 'parametrosCarga', { ruas: '30' }))), 'ruas invalidas');
+    acao(m, s, 'parametrosCarga', { ruas: '7,7,7,7,7' });
+    afirmar(ctx(m).parametro('CARGA_FLOWRACK_RUAS', '') === '7', 'iguais viram um numero so');
   });
 
   const falhas = resultados.filter((x) => !x).length;

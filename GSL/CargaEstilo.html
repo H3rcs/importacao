@@ -9,7 +9,7 @@
    tela aberta o fundo animado do GSL some (html.cg-ativo).
    Chrome 109: sem color-mix, sem :has, sem aninhamento.
    ===================================================================== */
-:root { --gsl-carga-estilo: '2026.11.26'; }
+:root { --gsl-carga-estilo: '2026.11.27'; }
 .cg {
   --cg-navy: #111785; --cg-navy-2: #1e27a8; --cg-azul: #3949d6; --cg-azul-claro: #6573f0;
   --cg-ceu: #4fb6e8; --cg-amarelo: #fbb917; --cg-amarelo-tenue: #fff4d6; --cg-verde: #1e9e57; --cg-verde-tenue: #e3f5ea;
@@ -485,6 +485,15 @@ html.cg-arrastando-paleteira .cg-pal-zona { border-color: var(--cg-azul-claro); 
 .cg-previa input[type="datetime-local"], .cg-previa textarea { width: 100%; }
 .cg-erro { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(214, 69, 69, .1); color: #b83232; font-size: 13px; font-weight: 500; }
 [data-tema="escuro"] .cg-erro { color: #ffb0b0; }
+/* 27/11: a edicao da alocacao (arrastar varias pessoas e salvar de uma vez) */
+.cg-edicao { position: sticky; top: 0; z-index: 30; margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: #fff8d6; border: 2px solid var(--cg-amarelo, #fbb917); color: #3b2f00; }
+[data-tema="escuro"] .cg-edicao { background: #3a3000; color: #fff4c2; }
+.cg-edicao-linha { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cg-edicao-txt small { opacity: .8; }
+.cg-edicao-botoes { display: flex; gap: 8px; }
+.cg-edicao-aviso { margin: 8px 0 0; font-size: 13px; font-weight: 600; }
+.cg-edicao-falhas { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+@media (max-width: 600px) { .cg-edicao-botoes { width: 100%; } .cg-edicao-botoes .cg-btn { flex: 1; } }
 /* 27/11: o leitor de PDF nao abriu — o caminho do texto colado explicado ali mesmo */
 .cg-erro-leitor { display: grid; gap: 8px; line-height: 1.55; }
 .cg-erro-leitor p, .cg-erro-leitor ol { margin: 0; }

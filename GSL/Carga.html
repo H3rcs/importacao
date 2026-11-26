@@ -630,8 +630,10 @@ function cgIndDep(id) {
 
 /* ---------------- PINTAR ---------------- */
 function pintarCarga(r) {
-  CG.vivo = r.dados || {};
+  // 27/11: copia rasa — o que a edicao troca (equipe, faltas) nao mexe na resposta guardada (CACHE_TELAS)
+  CG.vivo = Object.assign({}, r.dados || {});
   CG.dados = CG.vivo;
+  if (cgEditando()) cgReaplicarEdicao({ equipe: CG.vivo.equipe || [], faltas: CG.vivo.faltas || [] });
   CG.g = CG.dados.g || '';
   if (CG.hist) cgAplicarHistorico();
   const abas = cgAbas().map((a) => a[0]);
@@ -660,6 +662,7 @@ function cgDesenhar() {
   const t0 = performance.now();
   const html = `<div class="cg${CG.tv ? ' cg-modo-tv' : ''}${CG.hist ? ' cg-em-historico' : ''}" id="cg">
     ${cgHeroHtml()}
+    ${CG.hist ? '' : cgBarraEdicaoHtml()}
     ${CG.hist ? cgFaixaHistoricoHtml() : cgFaixaIdadeHtml() + cgFaixasDoTurnoHtml()}
     <nav class="cg-abas" role="tablist" aria-label="Situação de carga">
       ${abas.map(([id, nome]) => {
@@ -1291,6 +1294,8 @@ function cgMover(k, destino) {
   if (destino && cgFaltou(k)) { avisar(cgNomeCurto(p.nome) + ' está marcado como falta neste turno. Desfaça a falta para alocar.', true); return; }
   const params = { pessoa: { k: k, nome: p.nome, funcao: p.funcao || '', equipe: p.equipe || '' },
     destino: destino ? { dep: destino.dep, papel: destino.papel, andar: destino.andar >= 0 ? destino.andar : '', rua: rua || '' } : null };
+  // 27/11: EDICAO — o arrasto (e o menu da pessoa) so muda a tela; o Salvar manda tudo de uma vez.
+  if (cgEdicaoLigada()) { cgAnotar({ tipo: 'mover', pessoa: params.pessoa, destino: params.destino }); return; }
   cgAoVivo('moverPessoaCarga', params, () => {
     const lista = (CG.dados.equipe || []).filter((x) => x.k !== k);
     const mesmo = atual && destino && atual.dep === destino.dep && atual.papel === destino.papel;
@@ -1342,6 +1347,159 @@ function cgQuantidade(idPool, delta) {
 }
 
 /*
+ * EDICAO DA ALOCACAO (27/11, pedido do gerente: "cada vez que arrasto uma pessoa a tela recarrega").
+ * Quem tem Ver e editar arrasta quantas pessoas quiser (entre depositos, papeis, andares e ruas, na Equipe,
+ * na Supervisao, em Todos os depositos e em cada deposito) e marca/desfaz faltas: a tela muda na hora, sem
+ * ir ao servidor. A barra "N alteracoes pendentes — Salvar / Descartar" aparece no alto. Salvar manda tudo
+ * de uma vez (acao edicaoEquipeCarga, uma trava so no servidor): as outras telas abertas atualizam pelo ao
+ * vivo. Paleteiras e check-outs que faltam sao recontados na tela a cada arrasto (cgConsumo).
+ *   - CG.edicao = { ops: [...], base: { equipe, faltas } (o que o servidor disse por ultimo), avisos: [], falhas: [] }
+ *   - cada op leva `de` (onde a pessoa estava na base): se alguem a mudou nesse meio tempo, o servidor nao faz
+ *     aquela e avisa;
+ *   - chegou mudanca de outra pessoa enquanto edita: a base nova entra e as alteracoes daqui sao reaplicadas
+ *     por cima (cgReaplicarEdicao), com o aviso de quem foi mexido dos dois lados;
+ *   - sair da tela (ou da pagina) com alteracoes pendentes pergunta antes.
+ */
+const cgCopia = (x) => JSON.parse(JSON.stringify(x == null ? null : x));
+function cgEdicaoLigada() { return !!(CG.dados && CG.dados.podeEditar && !CG.hist); }
+function cgEditando() { return !!(CG.edicao && CG.edicao.ops.length); }
+function cgPodeSair() {
+  if (!cgEditando()) return true;
+  const n = CG.edicao.ops.length;
+  if (window.confirm('A alocação da Situação de Carga tem ' + n + (n === 1 ? ' alteração que não foi salva' : ' alterações que não foram salvas') + '. Sair sem salvar?')) {
+    CG.edicao = null; return true;
+  }
+  return false;
+}
+window.addEventListener('beforeunload', function (ev) {
+  if (!cgEditando() || paginaAtual !== 'carga') return;
+  ev.preventDefault(); ev.returnValue = '';
+  return '';
+});
+function cgLugarNaBase(k) {
+  const x = ((CG.edicao && CG.edicao.base.equipe) || []).find((p) => p.k === k);
+  return x ? { dep: x.dep, papel: x.papel, andar: x.andar >= 0 ? x.andar : -1, rua: x.rua || 0 } : null;
+}
+function cgFaltaNaBase(k) {
+  return ((CG.edicao && CG.edicao.base.faltas) || []).some((f) => f.k === k && f.data === cgDiaDoTurnoCli(f.turno));
+}
+const cgMesmoLugarCli = (a, b) => (!a || !b) ? (!a && !b)
+  : a.dep === b.dep && a.papel === b.papel && Number(a.andar >= 0 ? a.andar : -1) === Number(b.andar >= 0 ? b.andar : -1) && Number(a.rua || 0) === Number(b.rua || 0);
+function cgDestinoDaOp(op) {
+  return op.destino ? { dep: op.destino.dep, papel: op.destino.papel, andar: op.destino.andar === '' ? -1 : Number(op.destino.andar), rua: Number(op.destino.rua || 0) } : null;
+}
+/* Aplica uma alteracao na tela (CG.dados). Devolve o motivo quando nao da (a pessoa esta com falta). */
+function cgAplicarOp(op) {
+  const k = op.pessoa.k;
+  if (op.tipo === 'mover') {
+    const dest = cgDestinoDaOp(op), atual = cgLugarDe(k);
+    if (dest && cgFaltou(k)) return 'está marcado como falta';
+    const lista = (CG.dados.equipe || []).filter((x) => x.k !== k);
+    if (dest) lista.push({ k: k, nome: op.pessoa.nome, funcao: op.pessoa.funcao || '', equipe: op.pessoa.equipe || '', dep: dest.dep, papel: dest.papel,
+      andar: dest.andar, rua: dest.rua, desde: atual && atual.dep === dest.dep && atual.papel === dest.papel ? atual.desde : '' });
+    CG.dados.equipe = lista;
+    return '';
+  }
+  if (op.falta) {
+    if (!cgFaltou(k)) CG.dados.faltas = (CG.dados.faltas || []).concat([{ k: k, nome: op.pessoa.nome, equipe: op.pessoa.equipe || '', turno: cgTurnoDaEquipeCli(op.pessoa.equipe),
+      data: cgDiaDoTurnoCli(cgTurnoDaEquipeCli(op.pessoa.equipe)), porNome: (CG.dados.voce || {}).nome || '', pendente: true }]);
+    CG.dados.equipe = (CG.dados.equipe || []).filter((x) => x.k !== k);
+  } else CG.dados.faltas = (CG.dados.faltas || []).filter((f) => !(f.k === k && f.data === cgDiaDoTurnoCli(f.turno)));
+  return '';
+}
+/* Uma alteracao nova: a de antes da mesma pessoa (e do mesmo tipo) sai; a que volta ao que o servidor tem some. A tela e refeita: base + alteracoes. */
+function cgAnotar(op) {
+  if (!CG.edicao) CG.edicao = { ops: [], base: { equipe: cgCopia(CG.dados.equipe || []), faltas: cgCopia(CG.dados.faltas || []) }, avisos: [], falhas: [] };
+  const E = CG.edicao, k = op.pessoa.k;
+  if (op.tipo === 'mover' && cgDestinoDaOp(op) && cgFaltou(k)) { avisar(cgNomeCurto(op.pessoa.nome) + ' está marcado como falta neste turno. Desfaça a falta para alocar.', true); return; }
+  E.ops = E.ops.filter((o) => !(o.pessoa.k === k && (o.tipo === op.tipo || (op.tipo === 'falta' && op.falta))));
+  if (op.tipo === 'mover') op.de = cgLugarNaBase(k); else op.de = cgFaltaNaBase(k);
+  const igualABase = op.tipo === 'mover' ? cgMesmoLugarCli(cgDestinoDaOp(op), op.de) && !E.ops.some((o) => o.pessoa.k === k) : op.de === !!op.falta;
+  if (!igualABase) E.ops.push(op);
+  cgRefazerDaBase();
+  E.falhas = [];
+  cgDesenhar();
+}
+function cgRefazerDaBase() {
+  const E = CG.edicao;
+  CG.dados.equipe = cgCopia(E.base.equipe || []); CG.dados.faltas = cgCopia(E.base.faltas || []);
+  E.ops.forEach((op) => cgAplicarOp(op));
+}
+/* A base mudou (o ao vivo trouxe a mudanca de outra pessoa, ou outra gravacao voltou): reaplica as alteracoes daqui por cima. */
+function cgReaplicarEdicao(novaBase) {
+  const E = CG.edicao;
+  if (!E) return;
+  const antes = E.base;
+  const mexidas = [];
+  E.base = { equipe: cgCopia(novaBase.equipe || []), faltas: cgCopia(novaBase.faltas || []) };
+  CG.dados.equipe = cgCopia(novaBase.equipe || []); CG.dados.faltas = cgCopia(novaBase.faltas || []);
+  const tirar = [];
+  E.ops.forEach((op) => {
+    const k = op.pessoa.k;
+    const lugarAntes = (antes.equipe || []).find((p) => p.k === k), lugarAgora = cgLugarNaBase(k);
+    const faltaAntes = (antes.faltas || []).some((f) => f.k === k && f.data === cgDiaDoTurnoCli(f.turno));
+    const mudou = op.tipo === 'mover' ? !cgMesmoLugarCli(lugarAntes ? { dep: lugarAntes.dep, papel: lugarAntes.papel, andar: lugarAntes.andar, rua: lugarAntes.rua } : null, lugarAgora)
+      : faltaAntes !== cgFaltaNaBase(k);
+    if (mudou && mexidas.indexOf(op.pessoa.nome) === -1) mexidas.push(op.pessoa.nome);
+    op.de = op.tipo === 'mover' ? lugarAgora : cgFaltaNaBase(k);          // a pessoa ja foi avisada: o Salvar compara com a base nova
+    const motivo = cgAplicarOp(op);
+    if (motivo) { tirar.push(op); E.avisos.push(cgNomeCurto(op.pessoa.nome) + ' ' + motivo + ' (outra pessoa marcou): a sua alteração saiu.'); }
+  });
+  E.ops = E.ops.filter((o) => tirar.indexOf(o) === -1);
+  if (mexidas.length) E.avisos.push('Alguém alterou a alocação enquanto você editava: ' + mexidas.map(cgNomeCurto).join(', ') +
+    (mexidas.length === 1 ? ' foi mudado' : ' foram mudados') + ' por outra pessoa. As suas alterações continuam por cima — confira e salve (ou descarte).');
+  E.avisos = E.avisos.slice(-4);
+}
+function cgBarraEdicaoHtml() {
+  const E = CG.edicao;
+  if (!E || (!E.ops.length && !(E.falhas || []).length)) return '';
+  const n = E.ops.length;
+  const falhas = (E.falhas || []).length ? `<ul class="cg-edicao-falhas">${E.falhas.map((f) => `<li><b>${esc(cgNomeCurto(f.nome))}</b>: ${esc(f.motivo)}</li>`).join('')}</ul>` : '';
+  return `<div class="cg-edicao${n ? '' : ' so-falhas'}" role="region" aria-label="Alterações da alocação">
+    <div class="cg-edicao-linha">
+      ${n ? `<span class="cg-edicao-txt"><b class="cg-num">${n}</b> ${n === 1 ? 'alteração pendente' : 'alterações pendentes'} na alocação <small>(só nesta tela até salvar)</small></span>
+      <span class="cg-edicao-botoes"><button type="button" class="cg-btn cg-btn-claro" onclick="cgDescartarEdicao()">Descartar</button>
+        <button type="button" class="cg-btn cg-btn-primario" id="cg-salvar-edicao" onclick="cgSalvarEdicao()">Salvar</button></span>`
+      : `<span class="cg-edicao-txt">Algumas alterações não foram feitas:</span><span class="cg-edicao-botoes"><button type="button" class="cg-btn cg-btn-claro" onclick="CG.edicao = null; cgDesenhar()">Fechar</button></span>`}
+    </div>
+    ${(E.avisos || []).length ? `<p class="cg-edicao-aviso" role="alert">${E.avisos.map(esc).join('<br>')}</p>` : ''}
+    ${falhas}
+  </div>`;
+}
+function cgDescartarEdicao() {
+  const E = CG.edicao;
+  if (!E) return;
+  CG.dados.equipe = cgCopia(E.base.equipe); CG.dados.faltas = cgCopia(E.base.faltas);
+  CG.edicao = null;
+  cgDesenhar();
+  avisar('Alterações descartadas.');
+}
+let CG_SALVANDO = false;
+async function cgSalvarEdicao() {
+  const E = CG.edicao;
+  if (!cgEditando() || CG_SALVANDO) return;
+  const ops = E.ops.map((o) => ({ tipo: o.tipo, pessoa: o.pessoa, destino: o.destino || null, falta: o.falta, de: o.de === undefined ? null : o.de }));
+  // Canal barrado: o Salvar vai pela pagina (POST), como qualquer gravacao; a pagina volta com a tela atualizada.
+  if (CANAL_BARRADO) { CG.edicao = null; try { await agir('edicaoEquipeCarga', { ops: ops }); } catch (e) { CG.edicao = E; cgDesenhar(); } return; }
+  CG_SALVANDO = true; CG.pendentes++;
+  const b = el('cg-salvar-edicao'); if (b) { b.disabled = true; b.textContent = 'Salvando…'; }
+  try {
+    const r = await executarAcaoSrv('edicaoEquipeCarga', { ops: ops });
+    if (r && r.ok === false) throw new Error(r.erro || 'Não foi possível salvar.');
+    CG.edicao = (r.falhas || []).length ? { ops: [], base: { equipe: r.equipe || [], faltas: r.faltas || [] }, avisos: [], falhas: r.falhas } : null;
+    if (r.equipe) CG.dados.equipe = r.equipe;
+    if (r.faltas) CG.dados.faltas = r.faltas;
+    if (r.g) { CG.g = r.g; CG.dados.g = r.g; CG_VIVO.conhecer(r.g); }
+    esquecerTela('carga');
+    if (paginaAtual === 'carga') cgDesenhar();
+    avisar(r.recado || 'Alocação salva.', !!(r.falhas || []).length);
+  } catch (e) {
+    if (paginaAtual === 'carga') cgDesenhar();
+    if (!(await painelSaiu(e, 'carga'))) avisar('A alocação não foi salva: ' + explicarErro(e) + ' As alterações continuam na tela; tente Salvar de novo.', true);
+  } finally { CG_SALVANDO = false; CG.pendentes--; }
+}
+
+/*
  * GRAVACAO AO VIVO: a tela muda na hora (aplicar), o servidor confere e devolve o estado verdadeiro
  * (equipe ou equipamentos, e a geracao nova). Recusou: volta como estava (desfazer).
  * Canal barrado (HTTP 403): vai pelo agir, que grava pela pagina.
@@ -1356,6 +1514,7 @@ async function cgAoVivo(acao, params, aplicar, desfazer, recado) {
     if (r && r.equipe) CG.dados.equipe = r.equipe;
     if (r && r.equipamentos) CG.dados.equipamentos = r.equipamentos;
     ['sequencia', 'patio', 'faltas', 'passagens', 'subturnos', 'cadastro', 'automaticas'].forEach((k) => { if (r && r[k]) CG.dados[k] = r[k]; });
+    if (cgEditando() && r && (r.equipe || r.faltas)) cgReaplicarEdicao({ equipe: CG.dados.equipe || [], faltas: CG.dados.faltas || [] });
     if (r && r.g) { CG.g = r.g; CG.dados.g = r.g; CG_VIVO.conhecer(r.g); }
     esquecerTela('carga');
     if (paginaAtual === 'carga') cgDesenhar();
@@ -1760,6 +1919,7 @@ function cgFaltasAtivas() { return ((CG.vivo || CG.dados || {}).faltas || []).fi
 function cgFaltou(k) { return cgFaltasAtivas().some((f) => f.k === k) ? 1 : 0; }
 function cgMarcarFalta(k, marcar) {
   const p = cgPessoa(k);
+  if (cgEdicaoLigada()) { cgAnotar({ tipo: 'falta', pessoa: { k: k, nome: p.nome, equipe: p.equipe || '' }, falta: !!marcar }); return; }
   const antes = { faltas: (CG.dados.faltas || []).slice(), equipe: (CG.dados.equipe || []).slice() };
   cgAoVivo('presencaCarga', { pessoa: { k: k, nome: p.nome, equipe: p.equipe || '' }, falta: !!marcar }, () => {
     if (marcar) {

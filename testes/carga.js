@@ -458,6 +458,47 @@ async function rodar() {
     afirmar(Math.abs(e.porDep.GRANDEZA.pct - 33.3) < 0.01, 'peso 24 h: ' + e.porDep.GRANDEZA.pct);
   });
 
+  await caso('edição em lote (27/11): várias pessoas e uma falta num Salvar só — uma geração, a mudada por outra pessoa no meio volta como falha, o resto é feito', () => {
+    const m = mundo(); const s = entrar(m, COORD, '1234'); const g = entrar(m, GERENTE, '5555');
+    ligarQuadro(m, entrar(m, DONO, '4321'));
+    const t0 = tela(m, s), p = t0.pessoas;
+    // o gerente ja tinha posto p[3] na Miudeza; a coordenadora abriu a tela antes (de: disponivel)
+    acao(m, g, 'moverPessoaCarga', { pessoa: p[3], destino: { dep: 'MIUDEZA', papel: 'CONFERENTE' } });
+    const g0 = tela(m, s).g;
+    const ops = [
+      { tipo: 'mover', pessoa: p[0], destino: { dep: 'GRANDEZA', papel: 'SEPARADOR', andar: '', rua: '' }, de: null },
+      { tipo: 'mover', pessoa: p[1], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2, rua: 3 }, de: null },
+      { tipo: 'mover', pessoa: p[2], destino: { dep: 'PESAVEIS', papel: 'CONFERENTE', andar: '', rua: '' }, de: null },
+      { tipo: 'mover', pessoa: p[3], destino: { dep: 'BLOCADO', papel: 'SEPARADOR', andar: '', rua: '' }, de: null },     // mudada por outro
+      { tipo: 'falta', pessoa: p[4], falta: true, de: false },
+      { tipo: 'mover', pessoa: p[5], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 9, rua: '' }, de: null }       // andar que nao existe
+    ];
+    const r = acao(m, s, 'edicaoEquipeCarga', { ops });
+    afirmar(r.feitas === 4 && r.falhas.length === 2, 'feitas/falhas: ' + JSON.stringify([r.feitas, r.falhas]));
+    afirmar(/outra pessoa mudou .* enquanto você editava \(agora em Miudeza · conferente\)/.test(r.falhas[0].motivo) && r.falhas[0].k === p[3].k, 'conflito: ' + r.falhas[0].motivo);
+    afirmar(/andar do flowrack/.test(r.falhas[1].motivo), 'andar: ' + r.falhas[1].motivo);
+    const lugar = (k) => r.equipe.find((x) => x.k === k);
+    afirmar(lugar(p[0].k).dep === 'GRANDEZA' && lugar(p[1].k).andar === 2 && lugar(p[1].k).rua === 3 && lugar(p[2].k).papel === 'CONFERENTE' &&
+      lugar(p[3].k).dep === 'MIUDEZA' && !lugar(p[4].k), 'equipe: ' + JSON.stringify(r.equipe.map((x) => [x.nome, x.dep, x.papel, x.andar])));
+    afirmar(r.faltas.some((f) => f.k === p[4].k) && r.g && r.g !== g0, 'falta gravada e a geracao subiu');
+    // as outras telas veem na proxima pergunta (a geracao mudou uma vez so)
+    const vista = tela(m, g);
+    afirmar(vista.g === r.g && vista.equipe.length === 4, 'a outra tela: ' + vista.equipe.length);
+    // de volta: tirar dois e desfazer a falta, conferindo o lugar de agora
+    const r2 = acao(m, s, 'edicaoEquipeCarga', { ops: [
+      { tipo: 'mover', pessoa: p[0], destino: null, de: { dep: 'GRANDEZA', papel: 'SEPARADOR', andar: -1, rua: 0 } },
+      { tipo: 'mover', pessoa: p[1], destino: null, de: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2, rua: 3 } },
+      { tipo: 'falta', pessoa: p[4], falta: false, de: true }] });
+    afirmar(r2.feitas === 3 && !r2.falhas.length && r2.equipe.length === 2 && !r2.faltas.some((f) => f.k === p[4].k && f.ativa), 'volta: ' + JSON.stringify(r2.falhas));
+    // falta marcada por outra pessoa no meio: mover quem faltou nao passa
+    acao(m, g, 'presencaCarga', { pessoa: p[6], falta: true });
+    const r3 = acao(m, s, 'edicaoEquipeCarga', { ops: [{ tipo: 'mover', pessoa: p[6], destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' }, de: null }] });
+    afirmar(r3.feitas === 0 && /falta/.test(r3.falhas[0].motivo), 'falta no meio: ' + JSON.stringify(r3.falhas));
+    // recusas
+    afirmar(/Nenhuma alteração/.test(erroDe(() => acao(m, s, 'edicaoEquipeCarga', { ops: [] }))), 'vazio');
+    afirmar(/só para ver/.test(erroDe(() => acao(m, entrar(m, CONSULTA, '7777'), 'edicaoEquipeCarga', { ops }))), 'quem so ve nao salva');
+  });
+
   await caso('equipe: uma pessoa num lugar só; andares do Nobre; volta para disponíveis; recusas; limpar alocação do turno', () => {
     const m = mundo(); const s = entrar(m, COORD, '1234');
     ligarQuadro(m, entrar(m, DONO, '4321'));

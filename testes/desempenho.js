@@ -525,6 +525,174 @@ caso('colagem pela metade (19/10): um .gs da entrega anterior por vez — a faix
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* 27/11: MEDIDOR, PAGINA EM PARTES, LEITOR DE PDF, AQUECIMENTO         */
+/* ------------------------------------------------------------------ */
+
+const cargaDaPagina = (saida) => JSON.parse(/CARGA_INICIAL\s*=\s*(\{.*?\});/s.exec(saida.getContent())[1].replace(/\\u002f/g, '/').replace(/\\u003c/g, '<'));
+
+caso('pagina em partes: o GET sai sem Paineis, Aprendiz e Carga (a tela busca com carregarModulo); o POST da reserva sai inteiro', () => {
+  const m = mundo();
+  const get = ctx(m, '').doGet({ parameter: {} });
+  const html = get.getContent();
+  const c = cargaDaPagina(get);
+  afirmar(JSON.stringify(c.modulosAParte) === '["paineis","aprendiz","carga"]', 'modulos a parte: ' + JSON.stringify(c.modulosAParte));
+  afirmar(!/const BUILD_PAINEIS = /.test(html) && !/const BUILD_CARGA_TELA = /.test(html) && !/BUILD_APRENDIZ_TELA = /.test(html) && !/--gsl-carga-estilo: '/.test(html),
+    'o GET nao leva os modulos');
+  afirmar(/const BUILD_APP = /.test(html) && /--gsl-paineis-estilo/.test(html) && /--gsl-plano-estilo/.test(html), 'o GET leva o App e os estilos do nucleo');
+  afirmar(typeof c.srvMs === 'number', 'o tempo do servidor vai na pagina (srvMs)');
+  // a reserva (POST): pagina inteira, sem modulosAParte
+  entrar(m, DONO, '4321');                                         // o PIN do dono criado
+  const pg = ctx(m, '').doGet({ parameter: {} });
+  const bilhete = cargaDaPagina(pg).bilhete;
+  const post = novaExecucao(m, PASTA, { contaGoogle: 'computador.cd@bartofil.com.br' }, OP).doPost({ parameter: { bilhete, email: DONO, pin: '4321' } });
+  const cp = cargaDaPagina(post);
+  afirmar(cp.entrada === 'APP' && !cp.modulosAParte && /const BUILD_PAINEIS = /.test(post.getContent()) && /const BUILD_CARGA_TELA = /.test(post.getContent()), 'o POST leva tudo');
+  afirmar(html.length < post.getContent().length * 0.65, 'o GET tem bem menos HTML: ' + html.length + ' x ' + post.getContent().length);
+  // os modulos: o mesmo HTML do include, sem dado; nome estranho e recusado
+  const mod = JSON.parse(chamar(m, 'estagiario@bartofil.com.br', 'carregarModulo', 'carga').valor);
+  afirmar(mod.nome === 'carga' && /const BUILD_CARGA_TELA = /.test(mod.html) && /--gsl-carga-estilo: '/.test(mod.html) && mod.build, 'modulo carga');
+  afirmar(/const BUILD_PAINEIS = /.test(JSON.parse(chamar(m, 'x@bartofil.com.br', 'carregarModulo', 'paineis').valor).html), 'modulo paineis');
+  const ruim = chamar(m, 'x@bartofil.com.br', 'carregarModulo', '../Codigo');
+  afirmar(!ruim.ok && /Módulo desconhecido/.test(ruim.erro.message), 'nome estranho recusado: ' + JSON.stringify(ruim));
+});
+
+caso('pagina em partes so com o App.html desta versao: App.html antigo (sem garantirModulos) recebe a pagina inteira', () => {
+  const fs = require('fs'), os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-partes-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.writeFileSync(path.join(tmp, 'App.html'), fs.readFileSync(path.join(PASTA, 'App.html'), 'utf8').replace('function garantirModulos(', 'function garantirModulosVelho('));
+    const m = new Mundo({ dono: DONO });
+    novaExecucao(m, tmp, { contaGoogle: DONO }, OP).instalar(DONO);
+    const get = novaExecucao(m, tmp, { contaGoogle: '' }, OP).doGet({ parameter: {} });
+    afirmar(!cargaDaPagina(get).modulosAParte && /const BUILD_PAINEIS = /.test(get.getContent()), 'App antigo: pagina inteira');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+caso('medidor: carregarTela e executarAcaoETela trazem o tempo do servidor e as abas lidas (_srv); da copia, c:1', () => {
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  tirarDoCache(m, /^(t|tb)\|/);
+  const a = chamar(m, GERENTE, 'carregarTela', { t: s.t, f: s.f }, 'acoes', {}).valor;
+  const x = JSON.parse(a);
+  afirmar(x._srv && typeof x._srv.ms === 'number' && x._srv.lp >= 1 && !x._srv.c && x.tela === 'acoes', 'primeira: ' + JSON.stringify(x._srv));
+  const b = JSON.parse(chamar(m, GERENTE, 'carregarTela', { t: s.t, f: s.f }, 'acoes', {}).valor);
+  afirmar(b._srv.c === 1 && b._srv.lp === 0, 'da copia: ' + JSON.stringify(b._srv));
+  const g = JSON.parse(chamar(m, GERENTE, 'executarAcaoETela', { t: s.t, f: s.f }, 'salvarAcao',
+    { acao: 'Medir o tempo', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] }, 'acoes', {}).valor);
+  afirmar(g._srv && typeof g._srv.ms === 'number' && g.r && g.r.ok !== false && g.tela && !g.tela._srv, 'gravar e devolver a tela: ' + JSON.stringify(g._srv));
+});
+
+caso('medidor: cada pessoa manda as proprias medicoes; so o administrador ve o painel (por marco, tela, computador, erros) e exporta', () => {
+  const m = mundo(); const dono = entrar(m, DONO, '4321'); const ger = entrar(m, GERENTE, '5555');
+  const maq = { id: 'abc123', r: 'Cloud expedição', d: 'Windows 10/11 · Chrome 109 · 2 núcleos · vídeo: Microsoft Basic Render Driver', l: 1 };
+  const amostras = [
+    { k: 'abertura', n: 'entrada', ms: 4200, ok: 1, i: 1000, srv: 300 },
+    { k: 'run', n: 'carregarTela', x: 'acoes', ms: 1800, ok: 1, srv: 400, lp: 3, kb: 40, i: 500 },
+    { k: 'run', n: 'carregarTela', x: 'acoes', ms: 2200, ok: 1, srv: 50, lp: 0, kb: 40, i: 400, rt: 1 },
+    { k: 'run', n: 'entrar', ms: 9000, ok: 0, e: 'NetworkError: Connection failure due to HTTP 403', i: 300 },
+    { k: 'tela', n: 'desenho', x: 'carga.equipe', ms: 320, ok: 1, i: 200 },
+    { k: 'inventado', n: 'x', ms: 1 },                                         // tipo desconhecido: fora
+    { k: 'run', n: '<script>', x: 'a"b', ms: -5, ok: 1 }                        // nome sujo: limpo
+  ];
+  afirmar(acao(m, ger, 'registrarDesempenho', { m: maq, a: amostras }).n === 6, 'gravou 6 (o tipo inventado fica de fora)');
+  // o gerente (Configuracao: Ver e editar) nao e administrador: o painel volta vazio; ajustar e recusado
+  afirmar(acao(m, ger, 'painelDesempenho', {}).semAcesso === true, 'gerente: sem o painel');
+  afirmar(/Só o administrador/.test(erroDe(() => acao(m, ger, 'ajustarDesempenho', { aquecer: false }))), 'gerente nao ajusta');
+  const p = acao(m, dono, 'painelDesempenho', {});
+  afirmar(p.total === 6 && !p.bruto, 'total: ' + p.total);
+  const tela = p.marcos.find((l) => l.chave === 'run:carregarTela');
+  afirmar(tela && tela.n === 2 && tela.p50 === 1800 && tela.p90 === 2200 && tela.srv50 === 50 && tela.tentativas === 1 && tela.lp === 1.5, 'marco das telas: ' + JSON.stringify(tela));
+  afirmar(p.porAcao.some((l) => l.chave === 'run:carregarTela:acoes' && l.n === 2) && p.porAcao.some((l) => l.chave === 'tela:desenho:carga.equipe'), 'por tela/acao');
+  const pc = p.porMaquina.find((l) => l.chave === 'abc123');
+  afirmar(pc && pc.rotulo === 'Cloud expedição' && /Basic Render/.test(pc.dica) && pc.leve && pc.pessoas === 1 && pc.abertura50 === 4200 && pc.falhas === 1, 'por computador: ' + JSON.stringify(pc));
+  afirmar(p.erros.length === 1 && /HTTP 403/.test(p.erros[0].erro) && p.erros[0].quem === 'joao.lima' && p.erros[0].maquina === 'Cloud expedição', 'ultimos erros: ' + JSON.stringify(p.erros));
+  afirmar(!JSON.stringify(p).includes('<script>'), 'nada de HTML nas medicoes');
+  const b = acao(m, dono, 'painelDesempenho', { bruto: true });
+  afirmar(b.bruto.length === 6 && b.bruto[0].length === 15, 'exportar: ' + JSON.stringify(b.bruto[0]));
+  // pelo console, sem a porta: nada
+  const direto = chamar(m, 'estagiario@bartofil.com.br', 'acaoPainelDesempenho', { email: 'x', perfil: 'ADMIN', permissoes: {} }, {});
+  afirmar(!direto.ok, 'painel pelo console recusado');
+  // apagar
+  acao(m, dono, 'ajustarDesempenho', { apagar: true });
+  afirmar(acao(m, dono, 'painelDesempenho', {}).total === 0, 'apagou');
+});
+
+caso('medidor: a pagina da reserva (POST) traz as medicoes da aba (campo dsp) e o servidor guarda com a sessao', () => {
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  const dsp = JSON.stringify({ m: { id: 'cd01', r: '', d: 'Windows', l: 0 }, a: [{ k: 'post', n: 'tela', x: 'acoes', ms: 3100, ok: 1, i: 50, via: 'post' }] });
+  const nav = post(m, { t: s.t, filial: s.f, tela: 'acoes', dsp });
+  afirmar(nav.entrada === 'APP', 'a pagina abriu');
+  const dono = entrar(m, DONO, '4321');
+  const p = acao(m, dono, 'painelDesempenho', {});
+  afirmar(p.total === 1 && p.marcos[0].chave === 'post:tela' && p.marcos[0].pagina === 1, 'medicao da reserva: ' + JSON.stringify(p.marcos));
+  // sem sessao valida: nada e guardado
+  post(m, { t: 'f'.repeat(64), filial: s.f, tela: 'acoes', dsp });
+  afirmar(acao(m, dono, 'painelDesempenho', {}).total === 1, 'sem sessao nao guarda');
+});
+
+caso('medidor: o resumo de cada dia (aquecimento) junta as fatias que fecharam, em faixas, sem contar duas vezes', () => {
+  const m = mundo(); const ger = entrar(m, GERENTE, '5555'); const dono = entrar(m, DONO, '4321');
+  const a = [];
+  for (let i = 0; i < 10; i++) a.push({ k: 'run', n: 'carregarTela', x: 'acoes', ms: 400 + i * 100, ok: 1, i: 40 * 60000 });
+  a.push({ k: 'abertura', n: 'entrada', ms: 2500, ok: 1, i: 40 * 60000 });
+  a.push({ k: 'run', n: 'executarAcao', x: 'salvarAcao', ms: 700, ok: 0, e: 'PERMISSION_DENIED', i: 40 * 60000 });
+  acao(m, ger, 'registrarDesempenho', { m: { id: 'x1' }, a });
+  // 40 min depois: a fatia em que elas foram guardadas ja fechou (a chave passa para tres fatias atras)
+  for (const k of [...m.cache.keys()]) {
+    const x = /^dsp\|(\d+)\|(\d)$/.exec(k);
+    if (x) { m.cache.set('dsp|' + (Number(x[1]) - 3) + '|' + x[2], m.cache.get(k)); m.cache.delete(k); }
+  }
+  const c = ctx(m, '');
+  const n1 = c.dspResumirDias_();
+  const n2 = c.dspResumirDias_();
+  afirmar(n1 === 12 && n2 === 0, 'juntou uma vez: ' + n1 + ', ' + n2);
+  const dias = acao(m, dono, 'painelDesempenho', {}).dias;
+  afirmar(dias.length === 1 && dias[0].tela.n === 10 && dias[0].tela.p50 === 1000 && dias[0].tela.p90 === 1500 && dias[0].abertura.p50 === 3000 &&
+    dias[0].acao.falhas === 1 && dias[0].canal === 1, 'dia: ' + JSON.stringify(dias[0]));
+  afirmar(String(m.props.script.DSP_DIAS || '').length < 9000, 'cabe na propriedade');
+});
+
+caso('aquecimento: de 5 em 5 min (leve) e o completo de 15 em 15; MANTER_AQUECIDO = NAO volta aos 15; o gatilho segue a escolha', () => {
+  const m = mundo(); const dono = entrar(m, DONO, '4321');
+  const c = ctx(m, '');
+  const formatar = c.Utilities.formatDate;
+  c.Utilities.formatDate = function (d, fuso, formato) { return formato === 'H' ? '10' : formatar.apply(this, arguments); };
+  try {
+    const x1 = c.aquecerCache(), x2 = c.aquecerCache();
+    afirmar(x1.ok && x1.tabelas > 5 && x2.ok && x2.leve === true, 'primeiro completo, o seguinte leve: ' + JSON.stringify([x1, x2]));
+    afirmar(Number(m.cache.get('aquecido_em').v) > 0, 'marca do ultimo aquecimento');
+  } finally { c.Utilities.formatDate = formatar; }
+  afirmar(c.minutosDoAquecimento_() === 5, 'padrao: 5 min');
+  acao(m, dono, 'ajustarDesempenho', { aquecer: false });
+  afirmar(ctx(m).minutosDoAquecimento_() === 15 && acao(m, dono, 'painelDesempenho', {}).aquecimento.ligado === false, 'desligado: 15 min');
+  acao(m, dono, 'ajustarDesempenho', { aquecer: true });
+  chamar(m, DONO, 'executarAcao', { t: dono.t, f: dono.f }, 'ligarGatilhos', {});
+  const g = m.gatilhos.find((x) => x.fn === 'aquecerCache');
+  afirmar(g && g.desc.indexOf('everyMinutes(5)') !== -1, 'gatilho de 5 em 5: ' + JSON.stringify(g && g.desc));
+});
+
+caso('leitor de PDF dentro do projeto: a acao leitorPdf entrega o pdf.js (o mesmo da pasta vendor) e a faixa confere os dois arquivos', () => {
+  const zlib = require('zlib'), fs = require('fs'), os = require('os');
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  const VENDOR = path.join(__dirname, '..', 'ferramentas', 'vendor', 'pdfjs-3.11.174');
+  [['leitor', 'pdf.min.js'], ['trabalhador', 'pdf.worker.min.js']].forEach(([qual, arquivo]) => {
+    const r = acao(m, s, 'leitorPdf', { qual });
+    const bytes = zlib.gunzipSync(Buffer.from(r.b64.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
+    afirmar(r.arquivo === arquivo && r.versao === '3.11.174' && r.carimbo === '2026.11.27' && bytes.equals(fs.readFileSync(path.join(VENDOR, arquivo))), qual + ': o mesmo arquivo');
+  });
+  afirmar(/Pedido inválido/.test(erroDe(() => acao(m, s, 'leitorPdf', { qual: 'Codigo' }))), 'so os dois arquivos');
+  // a faixa: arquivo esquecido no projeto
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-pdf-'));
+  try {
+    fs.readdirSync(PASTA).forEach((n) => fs.copyFileSync(path.join(PASTA, n), path.join(tmp, n)));
+    fs.unlinkSync(path.join(tmp, 'LeitorPdfTrabalhador.html'));
+    const c2 = novaExecucao(new Mundo({ dono: DONO }), tmp, { contaGoogle: DONO }, OP);
+    afirmar(c2.arquivosForaDaVersao_(true).join() === 'LeitorPdfTrabalhador.html' && !c2.arquivosForaDaVersao_().length, 'faixa: ' + c2.arquivosForaDaVersao_(true).join());
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  afirmar(!ctx(m).arquivosForaDaVersao_(true).length, 'todos na versao');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

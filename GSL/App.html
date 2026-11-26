@@ -1180,6 +1180,7 @@ function apagarTelaDaPessoa() {
   FOTO_CACHE.clear();
   if (typeof apzZerar === 'function') apzZerar();
   if (typeof qdZerar === 'function') qdZerar();       // o Quadro do CD de quem saiu (QD_MEMO guarda a GERAL inteira)
+  if (typeof CG !== 'undefined' && CG) CG.edicao = null;   // a alocacao que quem saiu nao salvou nao fica para o proximo
 }
 
 /* Sessao vencida no meio do uso. */
@@ -1917,6 +1918,7 @@ function abrirModulos() {
   if (!SESSAO || !SESSAO.usuario) {
     return mostrarFalha('Tentei abrir o menu sem uma sessão carregada. Recarregue a página.');
   }
+  if (paginaAtual === 'carga' && typeof cgPodeSair === 'function' && !cgPodeSair()) return;
   moduloAtual = null;
   paginaAtual = 'modulos'; paramsAtual = {};
   lembrarTelaDaAba('', {});
@@ -2213,6 +2215,8 @@ async function abrir(idTela, params) {
    * caia num erro com a lateral vazia e sem botao de voltar.
    */
   if (!SESSAO) return;
+  // 27/11: a Situacao de Carga com alteracoes da alocacao ainda nao salvas pergunta antes de sair dela.
+  if (paginaAtual === 'carga' && idTela !== 'carga' && typeof cgPodeSair === 'function' && !cgPodeSair()) return;
   if (idTela === 'modulos') return abrirModulos();
   if (!(SESSAO.telas || []).some((t) => t.id === idTela)) {
     abrirModulos();

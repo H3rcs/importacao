@@ -917,6 +917,12 @@ function acaoExcluirSituacaoCarga(usuario, params) {
  * Sem destino = de volta aos disponiveis. Uma linha viva por pessoa: mover troca o lugar dela.
  */
 function acaoMoverPessoaCarga(usuario, params) {
+  cgMoverPessoa_(usuario, params);
+  esquecerLeituras();
+  return { ok: true, equipe: cgEquipe_(), g: cgGeracao_() };
+}
+/* O miolo do mover (tambem usado pela edicao em lote, dentro da mesma trava). */
+function cgMoverPessoa_(usuario, params) {
   const p = params || {};
   const pessoa = p.pessoa || {};
   const k = String(pessoa.k || '');
@@ -965,8 +971,6 @@ function acaoMoverPessoaCarga(usuario, params) {
       inserir('CARGA_EQUIPE', campos, quem);
     }
   });
-  esquecerLeituras();
-  return { ok: true, equipe: cgEquipe_(), g: cgGeracao_() };
 }
 
 /*
@@ -1175,6 +1179,14 @@ function cgFaltaDe_(k, turnos, agora) { return cgFaltas_(turnos, agora).filter(f
  * desfaz. No dia seguinte (o proximo turno da pessoa) a falta deixa de valer sozinha.
  */
 function acaoPresencaCarga(usuario, params) {
+  const x = cgPresenca_(usuario, params);
+  esquecerLeituras();
+  const nomeCurto = cgTitulo_(x.nome);
+  return { ok: true, faltas: cgFaltas_(cgTurnos_(), cgAgoraIso_(), true), equipe: cgEquipe_(), g: cgGeracao_(),
+    recado: x.marcar ? nomeCurto + ' marcado como falta' + (x.tirou ? ' e tirado da alocação' : '') + '.' : 'Falta de ' + nomeCurto + ' desfeita.' };
+}
+/* O miolo da falta (tambem usado pela edicao em lote). Devolve { nome, marcar, tirou }. */
+function cgPresenca_(usuario, params) {
   const p = params || {};
   const pessoa = p.pessoa || {};
   const k = String(pessoa.k || '');
@@ -1198,10 +1210,72 @@ function acaoPresencaCarga(usuario, params) {
       ativas.forEach(function (f) { excluir('CARGA_PRESENCA', f.id, quem); });
     }
   });
+  return { nome: nome, marcar: marcar, tirou: tirou };
+}
+
+/*
+ * EDICAO DA ALOCACAO EM LOTE (27/11). O gerente arrasta varias pessoas (entre depositos, papeis, andares e
+ * ruas) e marca faltas NA TELA, sem ir ao servidor a cada arrasto; o "Salvar" manda tudo aqui, de uma vez.
+ * params: { ops: [ { tipo: 'mover', pessoa, destino, de } | { tipo: 'falta', pessoa, falta, de } ] }
+ *   de: onde a pessoa estava (mover: { dep, papel, andar, rua } ou null) — ou se tinha falta (falta: true/false) —
+ *       quando a edicao comecou. Se alguem mudou a pessoa nesse meio tempo, aquela alteracao NAO e feita e volta
+ *       na lista de falhas (com onde ela esta agora); as outras sao feitas.
+ * Tudo numa trava so: a geracao sobe uma vez e as outras telas abertas atualizam (o ao vivo).
+ */
+const CG_EDICAO_MAX = 300;
+function cgLugarAtual_(k) {
+  const r = listar('CARGA_EQUIPE').filter(function (x) { return String(x.PESSOA) === k; })[0];
+  if (!r) return null;
+  const andar = String(r.ANDAR) === '' ? -1 : Number(r.ANDAR), rua = Number(r.RUA || 0) || 0;
+  return { dep: String(r.DEPOSITO || ''), papel: String(r.PAPEL || ''), andar: isFinite(andar) ? andar : -1, rua: rua };
+}
+function cgMesmoLugar_(a, b) {
+  if (!a || !b) return !a && !b;
+  const n = function (v, padrao) { return v === '' || v == null || !isFinite(Number(v)) ? padrao : Number(v); };
+  return String(a.dep) === String(b.dep) && String(a.papel) === String(b.papel) && n(a.andar, -1) === n(b.andar, -1) && n(a.rua, 0) === n(b.rua, 0);
+}
+function cgDescreverLugar_(l) {
+  if (!l) return 'disponíveis';
+  const d = CG_DEPOSITOS.filter(function (x) { return x.id === l.dep; })[0];
+  return (d ? d.nome : l.dep) + (l.andar >= 0 ? ' (' + (CG_ANDARES[l.andar] || 'andar ' + l.andar) + ')' : '') + ' · ' + (l.papel === 'CONFERENTE' ? 'conferente' : 'separador');
+}
+function acaoEdicaoEquipeCarga(usuario, params) {
+  const ops = Array.isArray(params && params.ops) ? params.ops : [];
+  if (!ops.length) throw new Error('Nenhuma alteração para salvar.');
+  if (ops.length > CG_EDICAO_MAX) throw new Error('Alterações demais de uma vez (' + ops.length + '): salve em partes de até ' + CG_EDICAO_MAX + '.');
+  const feitas = [], falhas = [];
+  comTrava(function () {
+    const turnos = cgTurnos_(), agora = cgAgoraIso_();
+    ops.forEach(function (op) {
+      op = op && typeof op === 'object' ? op : {};
+      const k = String((op.pessoa && op.pessoa.k) || '');
+      const nome = cgTitulo_(cgTexto_(op.pessoa && op.pessoa.nome, 80) || 'Pessoa');
+      try {
+        if (op.tipo === 'mover') {
+          if (Object.prototype.hasOwnProperty.call(op, 'de')) {
+            const agoraEm = cgLugarAtual_(k);
+            if (!cgMesmoLugar_(agoraEm, op.de || null)) throw new Error('outra pessoa mudou ' + nome + ' enquanto você editava (agora em ' + cgDescreverLugar_(agoraEm) + ')');
+          }
+          cgMoverPessoa_(usuario, { pessoa: op.pessoa, destino: op.destino || null });
+        } else if (op.tipo === 'falta') {
+          if (Object.prototype.hasOwnProperty.call(op, 'de')) {
+            const tinha = !!cgFaltaDe_(k, turnos, agora);
+            if (tinha !== !!op.de && tinha !== (op.falta !== false && op.falta !== 'false')) throw new Error('outra pessoa mudou a falta de ' + nome + ' enquanto você editava');
+          }
+          cgPresenca_(usuario, { pessoa: op.pessoa, falta: op.falta });
+        } else throw new Error('alteração desconhecida');
+        feitas.push(k);
+      } catch (e) {
+        falhas.push({ k: k, nome: nome, motivo: String((e && e.message) || e).replace(/\.$/, '') });
+      }
+      esquecerLeituras();             // a proxima conferencia le a planilha como ficou
+    });
+  });
   esquecerLeituras();
-  const nomeCurto = cgTitulo_(nome);
-  return { ok: true, faltas: cgFaltas_(cgTurnos_(), cgAgoraIso_(), true), equipe: cgEquipe_(), g: cgGeracao_(),
-    recado: marcar ? nomeCurto + ' marcado como falta' + (tirou ? ' e tirado da alocação' : '') + '.' : 'Falta de ' + nomeCurto + ' desfeita.' };
+  const n = feitas.length;
+  return { ok: true, feitas: n, falhas: falhas, equipe: cgEquipe_(), faltas: cgFaltas_(cgTurnos_(), cgAgoraIso_(), true), g: cgGeracao_(),
+    recado: (n ? n + (n === 1 ? ' alteração salva' : ' alterações salvas') : 'Nenhuma alteração salva') +
+      (falhas.length ? '; ' + falhas.length + (falhas.length === 1 ? ' não foi feita' : ' não foram feitas') + ' (veja na tela).' : '.') };
 }
 
 /* ------------------------------------------------------------------ */

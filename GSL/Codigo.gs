@@ -910,6 +910,8 @@ const ACOES = {
   enviarSituacaoCarga: { tela: 'carga', funcao: 'acaoEnviarSituacaoCarga' },
   excluirSituacaoCarga:{ tela: 'carga', funcao: 'acaoExcluirSituacaoCarga' },
   moverPessoaCarga:    { tela: 'carga', funcao: 'acaoMoverPessoaCarga' },
+  // 27/11: a edicao da alocacao em lote (arrastar varias pessoas e marcar faltas na tela; um Salvar so).
+  edicaoEquipeCarga:   { tela: 'carga', funcao: 'acaoEdicaoEquipeCarga' },
   limparAlocacaoCarga: { tela: 'carga', funcao: 'acaoLimparAlocacaoCarga' },
   equipamentoCarga:    { tela: 'carga', funcao: 'acaoEquipamentoCarga' },
   quantidadeEquipamentoCarga: { tela: 'carga', funcao: 'acaoQuantidadeEquipamentoCarga' },

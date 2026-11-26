@@ -657,7 +657,8 @@ function cgDesenhar() {
   const rolagem = window.scrollY;
   const d = CG.dados;
   const abas = cgAbas();
-  pagina.innerHTML = `<div class="cg${CG.tv ? ' cg-modo-tv' : ''}${CG.hist ? ' cg-em-historico' : ''}" id="cg">
+  const t0 = performance.now();
+  const html = `<div class="cg${CG.tv ? ' cg-modo-tv' : ''}${CG.hist ? ' cg-em-historico' : ''}" id="cg">
     ${cgHeroHtml()}
     ${CG.hist ? cgFaixaHistoricoHtml() : cgFaixaIdadeHtml() + cgFaixasDoTurnoHtml()}
     <nav class="cg-abas" role="tablist" aria-label="Situação de carga">
@@ -670,6 +671,14 @@ function cgDesenhar() {
     </nav>
     <div class="cg-corpo" id="cg-corpo">${cgCorpoHtml()}</div>
   </div>`;
+  /*
+   * 27/11: a tela ja desenhada so troca o que mudou (remendar, no App.html): a mudanca ao vivo, o arrasto
+   * e a gravacao nao redesenham as ~150 pessoas da Equipe, as docas e as cargas que ficaram iguais.
+   */
+  const remendo = !!(CG.desenhadoEm && el('cg') && pagina.children.length === 1 && typeof remendar === 'function');
+  if (remendo) remendar(pagina, html, 9); else pagina.innerHTML = html;
+  const ms = performance.now() - t0;
+  if (typeof medirEvento === 'function' && ms > 30) medirEvento('tela', 'desenho', ms, true, '', { x: 'carga.' + CG.aba + (remendo ? '.remendo' : '') });
   if (roloXY && el('cg-ctl-rolo')) { el('cg-ctl-rolo').scrollLeft = roloXY[0]; el('cg-ctl-rolo').scrollTop = roloXY[1]; }
   if (foco) { const f = el(foco.id); if (f) { if (digitando != null) f.value = digitando; f.focus(); if (sel) { try { f.setSelectionRange(sel[0], sel[1]); } catch (e) {} } } }
   if (CG.desenhadoEm) window.scrollTo(0, rolagem);

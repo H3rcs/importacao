@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <script>var GSL_T0 = Date.now();</script>
+  <script>var GSL_T0 = Date.now(); var GSL_INDEX = '2026.11.27';
+    /* 27/11: o modo leve (computador sem placa de video, area de trabalho remota) vale ja na primeira pintura. */
+    try { if (localStorage.getItem('gsl_modo_leve') === '1') document.documentElement.className += ' modo-leve'; } catch (e) {}</script>
   <base target="_top">
   <meta charset="utf-8">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23111785%22/%3E%3Crect%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%2301973A%22/%3E%3Crect%20x%3D%2232%22%20y%3D%2250%22%20width%3D%2232%22%20height%3D%227%22%20fill%3D%22%23FFEE03%22/%3E%3Ctext%20x%3D%2232%22%20y%3D%2242%22%20font-family%3D%22Archivo%2CArial%2Csans-serif%22%20font-size%3D%2240%22%20font-weight%3D%22800%22%20fill%3D%22%23fff%22%20text-anchor%3D%22middle%22%3EB%3C/text%3E%3C/svg%3E">
@@ -16,7 +18,8 @@
   <?!= include('PaineisEstilo'); ?>
   <?!= include('PlanoEstilo'); ?>
   <?!= include('Marca'); ?>
-  <?!= include('CargaEstilo'); ?>
+  <!-- 27/11: os modulos pesados (modulo) ficam de fora da pagina do GET: a tela busca depois (Desempenho.gs). -->
+  <?!= typeof modulo === 'function' ? modulo('CargaEstilo') : include('CargaEstilo'); ?>
 </head>
 <body>
 
@@ -275,8 +278,8 @@
     var CARGA_INICIAL = <?!= inicial ?>;
   </script>
   <?!= include('App'); ?>
-  <?!= include('Paineis'); ?>
-  <?!= include('Aprendiz'); ?>
-  <?!= include('Carga'); ?>
+  <?!= typeof modulo === 'function' ? modulo('Paineis') : include('Paineis'); ?>
+  <?!= typeof modulo === 'function' ? modulo('Aprendiz') : include('Aprendiz'); ?>
+  <?!= typeof modulo === 'function' ? modulo('Carga') : include('Carga'); ?>
 </body>
 </html>

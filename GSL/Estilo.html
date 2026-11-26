@@ -26,7 +26,7 @@
 /* As fontes (Poppins, Inter e Archivo) sao carregadas no Index.html, sem bloquear a pagina. */
 
 :root {
-  --gsl-estilo: '2026.11.26';   /* carimbo da entrega (conferirVersao no App.html) */
+  --gsl-estilo: '2026.11.27';   /* carimbo da entrega (conferirVersao no App.html) */
   /* Marca — iguais nos dois temas. */
   --azul: #111785;
   --azul-escuro: #0d126b;
@@ -194,6 +194,27 @@ a { color: var(--azul-vivo); }
 .modo-leve .kpi:hover,
 .modo-leve .holocard:hover { transform: none; }
 .modo-leve *, .modo-leve *::before, .modo-leve *::after { transition-duration: 0s !important; }
+/*
+ * 27/11 — MODO LEVE DE VERDADE. O computador sem placa de video (servidor em nuvem, area de trabalho
+ * remota, "Microsoft Basic Render Driver", SwiftShader) desenha tudo no processador: desfoque, degrade
+ * grande, sombra larga e animacao custam cada quadro. Ligado sozinho quando o app percebe (medirFluidez,
+ * no App.html) ou pelo botao do raio. Cores, desenho e textos ficam iguais; o foco do teclado vira contorno.
+ */
+html.modo-leve { --sombra: none; --sombra-alta: none; --degrade: #111785; --degrade-topo: #111785; --lateral: #0d126b; --pa-degrade: #111785; }
+html.modo-leve[data-tema="escuro"] { --degrade: #0d126b; --degrade-topo: #0d126b; --lateral: #070b33; --pa-degrade: #0d126b; }
+.modo-leve *:not(.cg-gira), .modo-leve *::before, .modo-leve *::after { animation: none !important; transition: none !important; }
+.modo-leve * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; text-shadow: none !important; }
+.modo-leve .tela-espera, html.modo-leve[data-tema="escuro"] .tela-espera { background: #0d126b; }
+.modo-leve .cartao, .modo-leve .holocard, .modo-leve .janela, .modo-leve .kpi, .modo-leve .lateral, .modo-leve .topo,
+.modo-leve .recado, .modo-leve .espera-cartao, .modo-leve .botao, .modo-leve .cg-cartao, .modo-leve .cg-aba.ativa { box-shadow: none !important; }
+.modo-leve :focus-visible { outline: 2px solid var(--foco, #3f63e0) !important; outline-offset: 2px; }
+.modo-leve .cg-hero, html.modo-leve[data-tema="escuro"] .cg-hero { background: #111785; }
+.modo-leve .cg-hero::before { background: none !important; }
+/* as listas longas (cargas, a Equipe): o que esta fora da tela nem e desenhado ate a pessoa rolar ate la */
+@media screen {
+  .modo-leve .cg-tr { content-visibility: auto; contain-intrinsic-height: auto 52px; }
+  .modo-leve .cg-quadro-dep { content-visibility: auto; contain-intrinsic-height: auto 320px; }
+}
 
 /* =========================================================
    PAINEL DE DADOS — rampas, medidores e selos de situação
@@ -2158,6 +2179,20 @@ input.travado {
 
 /* Tabela chave-valor (Estado do sistema). */
 .tabela-chave { max-width: 640px; }
+/* 27/11: o painel de desempenho (Configuracao > Sistema, so o administrador) */
+.dsp-rolo { overflow-x: auto; margin-bottom: 14px; }
+.dsp-tabela th, .dsp-tabela td { white-space: nowrap; padding: 6px 8px; font-size: 12.5px; vertical-align: top; text-align: left; }
+.dsp-tabela td small { color: var(--tinta-media); white-space: normal; }
+.dsp-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.dsp-ruim { color: var(--alerta-forte, #b83232); font-weight: 600; }
+.dsp-erro { white-space: normal !important; min-width: 220px; max-width: 420px; color: var(--tinta-media); }
+.dsp-este td { background: var(--verde-tenue); }
+.dsp-sub { margin: 16px 0 6px; font-size: 14px; }
+.dsp-maquina { display: grid; gap: 4px; max-width: 520px; margin: 6px 0 10px; }
+.dsp-maquina input { max-width: 320px; }
+.dsp-rotulo { font-size: 12.5px; font-weight: 600; }
+.dsp-ajuda { margin: 6px 0 4px; font-size: 13px; line-height: 1.6; }
+.dsp-ajuda ul { margin: 6px 0; padding-left: 18px; }
 .tabela-chave td { padding: 10px 12px; }
 .tabela-chave td:first-child { width: 220px; color: var(--tinta-media); font-weight: 500; background: var(--superficie-2); border-right: 1px solid var(--linha); }
 .tabela-chave tr:last-child td { border-bottom: 0; }

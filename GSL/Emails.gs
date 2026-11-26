@@ -15,7 +15,7 @@
  * todo e-mail que o sistema manda. Agora e o amarelo da marca escurecido
  * ate ter contraste com texto branco.
  */
-const BUILD_EMAILS = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_EMAILS = '2026.11.27';   // carimbo da entrega — ver APP.build no Codigo.gs
 const COR_AZUL = '#111785', COR_VERDE = '#01973A', COR_AMAR = '#FFEE03';
 const COR_ALERTA = '#8A6A00';        /* ambar escuro — sinal, nunca vermelho */
 const COR_ALERTA_FUNDO = '#FFF3CC';  /* fundo claro da caixa de motivo */
@@ -38,7 +38,10 @@ function instalarGatilhos() {
   // Continua instalada porque o selo de rotinas conta com ela.
   ScriptApp.newTrigger('gerarMesSeNecessario').timeBased().atHour(5).everyDays(1).create();
   // Aquecimento: mantem as telas montadas no cache para quem chegar.
-  ScriptApp.newTrigger('aquecerCache').timeBased().everyMinutes(15).create();
+  // 27/11: de 5 em 5 min (o servidor roda um pouco a cada vez: menos partidas a frio para quem chega;
+  // o aquecimento completo continua de 15 em 15). MANTER_AQUECIDO = NAO (painel Desempenho) volta aos 15.
+  ScriptApp.newTrigger('aquecerCache').timeBased()
+    .everyMinutes(typeof minutosDoAquecimento_ === 'function' ? minutosDoAquecimento_() : 15).create();
   /*
    * A planilha da competencia aberta e atualizada pelo RH uma vez por
    * dia. Este gatilho reimporta so ela, de manha, para o painel ja

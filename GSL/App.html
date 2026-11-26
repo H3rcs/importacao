@@ -243,19 +243,171 @@ function canalBarradoLembrado() {
 let ULTIMO_CONTATO = Date.now();     // ultima ida ao servidor que conferiu a sessao (ver vigiarSessao)
 const NAO_CONFERE_SESSAO = { renovarBilhete: true, sondarCanal: true, instalar: true };
 
+/*
+ * MEDIDOR DE DESEMPENHO (27/11). Cada pagina mede o que a pessoa sente: a abertura (ate a entrada ou
+ * o menu aparecer), a entrada (o clique em Entrar ate o menu), cada chamada ao Google (nome, tempo,
+ * tamanho da resposta, o tempo do proprio servidor e as abas lidas da planilha, falha, nova tentativa)
+ * e o tempo de desenhar as telas. As medicoes vao em lote para o servidor (registrarDesempenho), no
+ * maximo de 30 em 30 s, e o administrador ve em Configuracao > Sistema > Desempenho. Nada de dado de
+ * tela: so nomes de tela/acao, tempos e a descricao do computador (sistema, navegador, nucleos, placa de video).
+ */
+const DSP = { fila: [], ultimoEnvio: 0, indo: false, maq: null, gpu: '' };
+const CHAVE_DSP_FILA = 'gsl_dsp_fila', CHAVE_MAQ_ID = 'gsl_maquina_id', CHAVE_MAQ_NOME = 'gsl_maquina_nome';
+function dspMaquina() {
+  if (DSP.maq) { DSP.maq.l = document.documentElement.classList.contains('modo-leve') ? 1 : 0; return DSP.maq; }
+  let id = lerLocal(CHAVE_MAQ_ID);
+  if (!id || !/^[\w-]{4,16}$/.test(id)) { id = Math.random().toString(36).slice(2, 12); gravarLocal(CHAVE_MAQ_ID, id); }
+  const ua = navigator.userAgent || '';
+  const so = /Windows NT 10/.test(ua) ? 'Windows 10/11' : /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad/.test(ua) ? 'iOS' : /CrOS/.test(ua) ? 'ChromeOS' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'outro';
+  const nav = ((ua.match(/(Edg|OPR|Firefox|Chrome)\/(\d+)/) || []).slice(1, 3).join(' ') || 'navegador').replace('Edg', 'Edge');
+  let tela = '';
+  try { tela = screen.width + 'x' + screen.height; } catch (e) {}
+  DSP.maq = { id: id, r: lerLocal(CHAVE_MAQ_NOME) || '',
+    d: [so, nav, (navigator.hardwareConcurrency || '?') + ' núcleos', navigator.deviceMemory ? navigator.deviceMemory + ' GB' : '',
+      tela ? 'tela ' + tela : '', DSP.gpu ? 'vídeo: ' + DSP.gpu : ''].filter(Boolean).join(' · '),
+    l: document.documentElement.classList.contains('modo-leve') ? 1 : 0 };
+  return DSP.maq;
+}
+/* Uma medicao. k: abertura | entrada | run | tela | pdf | post | modulo | leve; n: o nome; x: o detalhe (tela, acao). */
+function medirEvento(k, n, ms, ok, e, extra) {
+  try {
+    const a = Object.assign({ k: k, n: String(n || ''), ms: Math.max(0, Math.round(ms || 0)), ok: ok === false ? 0 : 1, t: Date.now() }, extra || {});
+    if (a.ok === 0 && e) a.e = String((e && e.message) || e).slice(0, 160);
+    DSP.fila.push(a);
+    if (DSP.fila.length > 200) DSP.fila.splice(0, DSP.fila.length - 200);
+  } catch (x) { /* medir nunca atrapalha */ }
+}
+/* Monta o lote para mandar (idade em vez da hora: o relogio do computador pode estar errado). */
+function loteDeMedicoes(max) {
+  const agora = Date.now();
+  const lote = DSP.fila.splice(0, max || 60).map((a) => {
+    const o = Object.assign({}, a, { i: Math.max(0, agora - a.t) }); delete o.t; return o;
+  });
+  return { m: dspMaquina(), a: lote };
+}
+/* Manda as medicoes juntadas (com a sessao viva e o canal livre). */
+function enviarMedicoes(forcar) {
+  if (DSP.indo || !DSP.fila.length || !TOKEN || !SESSAO || CANAL_BARRADO) return;
+  if (!forcar && DSP.fila.length < 30 && Date.now() - DSP.ultimoEnvio < 30000) return;
+  if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+  const lote = loteDeMedicoes(60);
+  DSP.indo = true; DSP.ultimoEnvio = Date.now();
+  const devolver = () => { DSP.indo = false; DSP.fila = lote.a.map((a) => Object.assign({}, a, { t: Date.now() - a.i })).concat(DSP.fila).slice(-200); };
+  try {
+    google.script.run.withSuccessHandler(() => { DSP.indo = false; })
+      .withFailureHandler(devolver).executarAcao(ctx(), 'registrarDesempenho', lote);
+  } catch (e) { devolver(); }
+}
+setInterval(() => enviarMedicoes(false), 30000);
+/* A fila sobrevive ao F5 e a pagina da reserva (POST): fica na aba ate ser mandada. */
+window.addEventListener('pagehide', function () {
+  try { if (DSP.fila.length) sessionStorage.setItem(CHAVE_DSP_FILA, JSON.stringify(DSP.fila.slice(-120))); } catch (e) {}
+});
+(function () {
+  try {
+    const x = JSON.parse(sessionStorage.getItem(CHAVE_DSP_FILA) || '[]');
+    sessionStorage.removeItem(CHAVE_DSP_FILA);
+    if (Array.isArray(x)) DSP.fila = x.filter((a) => a && a.k && Date.now() - a.t < 6 * 3600 * 1000).concat(DSP.fila);
+  } catch (e) {}
+})();
+
+/*
+ * AS FASES DA ABERTURA. abertura:html = a pagina (o nosso HTML) comecou a rodar; abertura:scripts = o
+ * HTML inteiro lido e os scripts rodados; abertura:entrada (ou abertura:menu, com a sessao da aba) = a
+ * primeira tela pintada. entrada:menu = do clique em Entrar ao menu na tela. post:<tipo> = a pagina da
+ * reserva (do envio do formulario a pagina nova). Tudo contado do comeco da moldura (performance).
+ */
+const DSP_ABERTURA = { pintada: false, clique: 0 };
+const CHAVE_DSP_NAV = 'gsl_dsp_nav';
+function aberturaMs() { return performance.now(); }
+function depoisDaPintura(fn) {
+  try { requestAnimationFrame(() => setTimeout(fn, 0)); } catch (e) { setTimeout(fn, 0); }
+}
+function marcarAberturaPintada(qual) {
+  if (DSP_ABERTURA.pintada) return;
+  DSP_ABERTURA.pintada = true;
+  depoisDaPintura(() => {
+    const c = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) || {};
+    medirEvento('abertura', qual, aberturaMs(), true, '', { x: c.viaPost ? 'post' : (MODO_LOCAL ? 'local' : 'get'),
+      srv: typeof c.srvMs === 'number' ? c.srvMs : undefined, via: c.viaPost ? 'post' : (MODO_LOCAL ? 'local' : 'run') });
+  });
+}
+/* O menu (ou a tela) apareceu: fecha a medida do clique em Entrar, ou a da abertura com a sessao da aba. */
+function marcarEntradaPintada() {
+  const clique = DSP_ABERTURA.clique;
+  DSP_ABERTURA.clique = 0;
+  if (clique) depoisDaPintura(() => medirEvento('entrada', 'menu', performance.now() - clique, true, '', { via: 'run' }));
+  else marcarAberturaPintada('menu');
+}
+
+/*
+ * A CONVERSA COM O GOOGLE (27/11):
+ *   - NOVA TENTATIVA: as leituras (abrir tela, sonda, F5, modulos, filial) que falham por rede ou
+ *     servidor ocupado (HTTP 0/5xx, NetworkError) tentam de novo sozinhas, com espera crescente
+ *     (0,7 s e 2,5 s). Gravacao NUNCA repete sozinha: o pedido pode ter chegado.
+ *   - PRAZO: abrir tela, F5, filial e modulo tem prazo; o Google que nao responde vira um erro
+ *     ("tempo esgotado") e a tela nao fica parada em "Carregando…" para sempre.
+ *   - MEDIDA: cada chamada vira uma medicao (ver MEDIDOR).
+ */
+// (retomarSessao e inicio ja tem a propria segunda tentativa, com o "Continuar" depois dela.)
+const RETENTAVEIS = { carregarTela: 1, manterSessao: 1, carregarModulo: 1, abrirFilial: 1, renovarBilhete: 1 };
+const PRAZO_MS = { carregarTela: 45000, carregarModulo: 60000, retomarSessao: 30000, abrirFilial: 30000, inicio: 30000 };
+function detalheDaChamada(f, a) {
+  if (f === 'carregarTela' || /^executarAcao/.test(f)) return String(a[1] || '');
+  if (f === 'carregarModulo') return String(a[0] || '');
+  return '';
+}
+function medirChamada(f, a, t0, ok, v, tentativas, erro) {
+  const extra = { x: detalheDaChamada(f, a), rt: tentativas, via: MODO_LOCAL ? 'local' : 'run' };
+  if (ok && typeof v === 'string') {
+    extra.kb = Math.round(v.length / 1024);
+    const m = /^\{"_srv":\{"ms":(\d+)(?:,"lp":(\d+))?/.exec(v.slice(0, 60));
+    if (m) { extra.srv = Number(m[1]); extra.lp = Number(m[2] || 0); }
+  }
+  medirEvento('run', f, performance.now() - t0, ok, erro, extra);
+}
 const chamar = (f, ...a) => new Promise((ok, erro) => {
   const tk = TOKEN;                  // a sessao de quando o pedido saiu
-  google.script.run.withSuccessHandler((v) => {
-    if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado();   // passou: nao e mais barrado
-    if (TOKEN && TOKEN === tk && !NAO_CONFERE_SESSAO[f]) ULTIMO_CONTATO = Date.now();
-    ok(v);
-  }).withFailureHandler((e) => {
-    // Sessao vencida (sem uso) ou apagada: volta para a entrada — so se a resposta e da sessao
-    // de agora (a de quem saiu, chegando atrasada, derrubava quem entrou depois).
-    if (/\[SESSAO\]/.test(String((e && e.message) || e || '')) && tk && tk === TOKEN) sessaoTerminou();
-    if (canalBarradoDeVez(e)) lembrarCanalBarrado();
-    erro(e);
-  })[f](...a);
+  const t0 = performance.now();
+  let tentativa = 0, acabou = false, prazo = 0;
+  const fim = () => { acabou = true; clearTimeout(prazo); };
+  if (PRAZO_MS[f]) {
+    prazo = setTimeout(() => {
+      if (acabou) return;
+      fim();
+      const e = new Error('O Google não respondeu em ' + Math.round(PRAZO_MS[f] / 1000) + ' s (tempo esgotado).');
+      e.prazo = true;
+      medirChamada(f, a, t0, false, null, tentativa, e);
+      erro(e);
+    }, PRAZO_MS[f]);
+  }
+  const ir = () => {
+    google.script.run.withSuccessHandler((v) => {
+      if (acabou) return;              // a resposta que chegou depois do prazo: a tela ja seguiu
+      fim();
+      if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado();   // passou: nao e mais barrado
+      if (TOKEN && TOKEN === tk && !NAO_CONFERE_SESSAO[f]) ULTIMO_CONTATO = Date.now();
+      medirChamada(f, a, t0, true, v, tentativa);
+      ok(v);
+    }).withFailureHandler((e) => {
+      if (acabou) return;
+      // Rede que caiu um instante, servidor ocupado: a leitura tenta de novo (a sessao ainda e a mesma).
+      if (RETENTAVEIS[f] && tentativa < 2 && falhaPassageira(e) && tk === TOKEN) {
+        tentativa++;
+        setTimeout(ir, tentativa === 1 ? 700 : 2500);
+        return;
+      }
+      fim();
+      // Sessao vencida (sem uso) ou apagada: volta para a entrada — so se a resposta e da sessao
+      // de agora (a de quem saiu, chegando atrasada, derrubava quem entrou depois).
+      if (/\[SESSAO\]/.test(String((e && e.message) || e || '')) && tk && tk === TOKEN) sessaoTerminou();
+      if (canalBarradoDeVez(e)) lembrarCanalBarrado();
+      medirChamada(f, a, t0, false, null, tentativa, e);
+      erro(e);
+    })[f](...a);
+  };
+  ir();
 });
 
 /*
@@ -276,11 +428,18 @@ function sondarCanal() {
     const fim = (passou) => { clearTimeout(prazo); if (SONDA_INDO === esta) SONDA_INDO = null; ok(passou); };
     prazo = setTimeout(() => { if (SONDA === 'indo') SONDA = 'erro'; fim(false); }, 10000);
     try {
+      const t0 = performance.now();
       google.script.run
-        .withSuccessHandler(function () { SONDA = 'ok'; if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado(); fim(true); })
+        .withSuccessHandler(function () {
+          SONDA = 'ok'; if (CANAL_BARRADO || lerLocal(CHAVE_CANAL)) esquecerCanalBarrado();
+          medirEvento('run', 'sondarCanal', performance.now() - t0, true, '', { via: 'run' });
+          fim(true);
+          setTimeout(prebuscarModulos, 0);       // 27/11: o canal passa — os modulos vem enquanto a pessoa digita
+        })
         .withFailureHandler(function (e) {
           SONDA = canalBarradoDeVez(e) ? 'barrado' : 'erro';
           if (SONDA === 'barrado') { lembrarCanalBarrado(); SONDA_BARROU_EM = Date.now(); }
+          medirEvento('run', 'sondarCanal', performance.now() - t0, false, e, { via: 'run' });
           fim(false);
         })
         .sondarCanal();
@@ -322,8 +481,94 @@ const chamarJSON = async (f, ...a) => {
   }
   if (geracao !== GERACAO_SESSAO) return new Promise(() => {});
   if (!bruto) throw new Error('O servidor não respondeu. Recarregue a página.');
-  return typeof bruto === 'string' ? JSON.parse(bruto) : bruto;
+  const r = typeof bruto === 'string' ? JSON.parse(bruto) : bruto;
+  if (r && typeof r === 'object' && r._srv) delete r._srv;      // o tempo do servidor ja foi para o medidor
+  return r;
 };
+
+/*
+ * MODULOS A PARTE (27/11). A pagina do /exec (GET) chega sem os modulos pesados — Paineis (Filiais,
+ * Nobreaks, Limpeza, Quadro do CD, Estoque), Jovem Aprendiz e Situacao de Carga, uns 700 KB: a entrada
+ * aparece com menos da metade do HTML. Enquanto a pessoa digita o e-mail e o PIN (a sonda ja disse que o
+ * canal passa), a tela busca os modulos por tras (carregarModulo) e os poe na pagina. A tela que precisa
+ * de um modulo espera por ele (garantirModulos); se a conversa falhar, ela abre pela pagina (a da reserva
+ * vem inteira). A pagina da reserva (POST) e a GSL-Local ja vem com tudo.
+ */
+const MODULOS_PRONTO = {
+  paineis: () => typeof BUILD_PAINEIS === 'string',
+  aprendiz: () => typeof BUILD_APRENDIZ_TELA === 'string',
+  carga: () => typeof BUILD_CARGA_TELA === 'string'
+};
+const ORDEM_MODULOS = ['paineis', 'aprendiz', 'carga'];          // a Carga usa funcoes do Paineis
+const TELA_MODULOS = { filiais: ['paineis'], nobreaks: ['paineis'], limpeza: ['paineis'], quadro: ['paineis'], estoque: ['paineis'],
+  acoes: ['paineis'], aprendiz: ['aprendiz'], carga: ['paineis', 'carga'] };
+const MODULOS_VIERAM = {};          // nome -> true (veio, mesmo vazio: modulo opcional fora do projeto)
+const MODULOS_INDO = {};            // nome -> promessa
+function modulosDaPagina() {
+  const c = (typeof CARGA_INICIAL !== 'undefined' && CARGA_INICIAL) || {};
+  return !MODO_LOCAL && Array.isArray(c.modulosAParte) ? c.modulosAParte : [];
+}
+function moduloPresente(nome) {
+  if (MODULOS_VIERAM[nome]) return true;
+  if (modulosDaPagina().indexOf(nome) === -1) return true;        // a pagina ja veio com ele (ou nao e em partes)
+  return !!(MODULOS_PRONTO[nome] && MODULOS_PRONTO[nome]());
+}
+const modulosFaltando = (lista) => (lista || ORDEM_MODULOS).filter((n) => !moduloPresente(n));
+/* Poe o HTML de um modulo na pagina: cada <style> no fim do head, cada <script> roda como os da propria pagina. */
+function injetarModulo(nome, html) {
+  const molde = document.createElement('template');
+  molde.innerHTML = html || '';
+  Array.from(molde.content.childNodes).forEach((no) => {
+    const tag = (no.nodeName || '').toLowerCase();
+    if (tag === 'style') {
+      const st = document.createElement('style');
+      st.setAttribute('data-modulo', nome);
+      st.textContent = no.textContent;
+      document.head.appendChild(st);
+    } else if (tag === 'script') {
+      const sc = document.createElement('script');
+      sc.setAttribute('data-modulo', nome);
+      sc.textContent = no.textContent;
+      document.body.appendChild(sc);
+    }
+  });
+}
+function buscarModulo(nome) {
+  if (moduloPresente(nome)) return Promise.resolve(true);
+  if (MODULOS_INDO[nome]) return MODULOS_INDO[nome];
+  const t0 = performance.now();
+  MODULOS_INDO[nome] = chamarJSON('carregarModulo', nome).then((r) => {
+    if (moduloPresente(nome)) return true;           // chegou por outro caminho enquanto vinha
+    const t1 = performance.now();
+    injetarModulo(nome, (r && r.html) || '');
+    MODULOS_VIERAM[nome] = true;
+    medirEvento('modulo', nome, performance.now() - t0, true, '', { x: 'instalar', srv: Math.round(performance.now() - t1) });
+    return true;
+  }).finally(() => { delete MODULOS_INDO[nome]; });
+  return MODULOS_INDO[nome];
+}
+/* Os modulos que faltam (na ordem). Depois de todos, a faixa de versao confere os carimbos deles. */
+async function garantirModulos(lista) {
+  const faltam = modulosFaltando(lista ? ORDEM_MODULOS.filter((n) => lista.indexOf(n) !== -1) : ORDEM_MODULOS);
+  for (const n of faltam) await buscarModulo(n);
+  if (faltam.length && SESSAO && !modulosFaltando().length) conferirVersao(SESSAO);
+  return true;
+}
+/* Por tras, sem pressa: so com o canal livre e sem pedido da pessoa em voo. */
+let PREBUSCA_MODULOS = false;
+async function prebuscarModulos() {
+  if (PREBUSCA_MODULOS || !modulosFaltando().length || CANAL_BARRADO) return;
+  PREBUSCA_MODULOS = true;
+  try {
+    for (const n of ORDEM_MODULOS) {
+      if (CANAL_BARRADO || SAINDO_DA_PAGINA) return;
+      if (moduloPresente(n)) continue;
+      await filaLivre(20);
+      try { await buscarModulo(n); } catch (e) { return; }      // falhou: a tela que precisar tenta de novo
+    }
+    if (SESSAO) conferirVersao(SESSAO);
+  } finally { PREBUSCA_MODULOS = false; }
+}
 
 const carregarTelaSrv = (id, params) => {
   const filial = FILIAL;
@@ -373,20 +618,60 @@ const marcado = (id) => (el(id) ? el(id).checked : false);
 const CHAVE_LEVE = 'gsl_modo_leve';
 
 function lerModoLeve() { return lerLocal(CHAVE_LEVE); }
-function aplicarModoLeve(ligado) {
+/*
+ * 27/11 — QUEM DECIDIU. O modo leve que a PESSOA escolheu (o botao do raio) vale para sempre neste
+ * navegador. O que o app decidiu sozinho e refeito: a deteccao nova (sem placa de video) vale tambem para
+ * os computadores em que a versao anterior tinha decidido "desligado".
+ */
+const CHAVE_LEVE_QUEM = 'gsl_modo_leve_quem', CHAVE_VIDEO = 'gsl_placa_video';
+let MOTIVO_LEVE = '';
+function aplicarModoLeve(ligado, quem, motivo) {
   document.documentElement.classList.toggle('modo-leve', !!ligado);
+  if (motivo !== undefined) MOTIVO_LEVE = motivo || '';
   const b = el('modo-leve-alternar');
   if (b) b.title = ligado
-    ? 'Modo leve LIGADO — animações desligadas. Clique para voltar as animações.'
-    : 'Modo leve desligado. Clique para desligar as animações e ganhar fluidez.';
+    ? 'Modo leve LIGADO' + (MOTIVO_LEVE ? ' (' + MOTIVO_LEVE + ')' : '') + ' — sem animações, sombras e degradês. Clique para voltar ao visual completo.'
+    : 'Modo leve desligado. Clique para desligar animações, sombras e degradês e ganhar fluidez.';
   gravarLocal(CHAVE_LEVE, ligado ? '1' : '0');
+  if (quem) gravarLocal(CHAVE_LEVE_QUEM, quem);
+  if (DSP.maq) DSP.maq.l = ligado ? 1 : 0;
 }
 function alternarModoLeve() {
   const agora = !document.documentElement.classList.contains('modo-leve');
-  aplicarModoLeve(agora);
-  avisar(agora ? 'Modo leve ligado — animacoes desligadas.'
-               : 'Modo leve desligado — animacoes de volta.');
+  aplicarModoLeve(agora, 'pessoa', agora ? 'escolhido neste computador' : '');
+  avisar(agora ? 'Modo leve ligado neste computador — sem animações, sombras e degradês.'
+               : 'Modo leve desligado neste computador — visual completo de volta.');
   if (paginaAtual === 'config') abrir('config', paramsAtual);
+}
+
+/*
+ * A PLACA DE VIDEO (27/11). Sem placa de video (ou com ela bloqueada) o Chrome desenha no processador:
+ * o WebGL responde com SwiftShader, llvmpipe, "Microsoft Basic Render Driver" (area de trabalho remota),
+ * ou nem abre — e o failIfMajorPerformanceCaveat recusa o contexto. Medido uma vez por semana (abrir um
+ * contexto WebGL custa), guardado neste navegador.
+ */
+const RE_SEM_VIDEO = /SwiftShader|llvmpipe|softpipe|Software|Basic Render|Remote Display|RDP|VMware SVGA|VirtualBox|Mesa Off|Parallels|Hyper-V|Citrix/i;
+function placaDeVideo() {
+  try {
+    const guardado = JSON.parse(lerLocal(CHAVE_VIDEO) || 'null');
+    if (guardado && Date.now() - guardado.t < 7 * 86400000) return guardado;
+  } catch (e) {}
+  let r = { nome: '', semVideo: false, t: Date.now() };
+  try {
+    const c = document.createElement('canvas');
+    const opcoes = { failIfMajorPerformanceCaveat: true };
+    let gl = c.getContext('webgl', opcoes) || c.getContext('experimental-webgl', opcoes), recusou = false;
+    if (!gl) { recusou = true; gl = c.getContext('webgl') || c.getContext('experimental-webgl'); }
+    if (!gl) r = { nome: 'sem WebGL', semVideo: true, t: Date.now() };
+    else {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const nome = String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || '');
+      r = { nome: nome.replace(/^ANGLE \(/, '').replace(/\)$/, '').replace(/\s+/g, ' ').slice(0, 70), semVideo: recusou || RE_SEM_VIDEO.test(nome), t: Date.now() };
+      try { const perder = gl.getExtension('WEBGL_lose_context'); if (perder) perder.loseContext(); } catch (e) {}
+    }
+  } catch (e) { r = { nome: 'WebGL falhou', semVideo: true, t: Date.now() }; }
+  gravarLocal(CHAVE_VIDEO, JSON.stringify(r));
+  return r;
 }
 
 /*
@@ -418,27 +703,43 @@ aplicarLateral(lerLocal(CHAVE_LATERAL) === '1');
 
 function medirFluidez() {
   const salvo = lerModoLeve();
-  if (salvo !== null) { aplicarModoLeve(salvo === '1'); return; }
+  // A escolha da pessoa vale (o botao do raio). Navegador de teste automatizado (webdriver) nao decide sozinho.
+  if (salvo !== null && (lerLocal(CHAVE_LEVE_QUEM) === 'pessoa' || navigator.webdriver)) {
+    aplicarModoLeve(salvo === '1', '', salvo === '1' ? 'escolhido neste computador' : '');
+    return;
+  }
+  if (navigator.webdriver) return;
+  const decidir = (ligado, motivo) => {
+    aplicarModoLeve(ligado, 'auto', motivo);
+    medirEvento('leve', ligado ? 'ligado' : 'normal', 0, true, '', { x: String(motivo || '').replace(/[^\w.:-]+/g, '-').slice(0, 40) });
+  };
   try {
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return aplicarModoLeve(true);
-    }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return decidir(true, 'movimento reduzido no Windows');
     const nucleos = navigator.hardwareConcurrency || 8;
     const memoria = navigator.deviceMemory || 8;
-    if (nucleos <= 2 || memoria <= 2) return aplicarModoLeve(true);
+    if (nucleos <= 2 || memoria <= 2) return decidir(true, nucleos <= 2 ? nucleos + ' núcleos' : memoria + ' GB de memória');
   } catch (e) { /* navegador sem essas informacoes: mede na marra */ }
 
+  // Depois da primeira pintura (a entrada nao espera): a placa de video e, se ela parecer boa, os quadros.
   setTimeout(function () {
-    let quadros = 0;
-    const inicio = performance.now();
+    const video = placaDeVideo();
+    DSP.gpu = video.nome || '';
+    if (DSP.maq) DSP.maq = null;                 // a descricao do computador passa a ter a placa
+    if (video.semVideo) return decidir(true, 'sem placa de vídeo: ' + (video.nome || 'WebGL'));
+    let quadros = 0, lentos = 0, antes = performance.now();
+    const inicio = antes;
     const contar = function () {
+      const agora = performance.now();
       quadros++;
-      const decorrido = performance.now() - inicio;
+      if (agora - antes > 50) lentos++;          // um quadro de mais de 50 ms
+      antes = agora;
+      const decorrido = agora - inicio;
       if (decorrido < 1000) return requestAnimationFrame(contar);
-      aplicarModoLeve(quadros / (decorrido / 1000) < 45);
+      const qps = quadros / (decorrido / 1000);
+      decidir(qps < 45 || lentos >= 4, (qps < 45 || lentos >= 4) ? Math.round(qps) + ' quadros por segundo' : '');
     };
     requestAnimationFrame(contar);
-  }, 400);
+  }, 600);
 }
 
 /* Aba em segundo plano: congela o ceu. */
@@ -483,6 +784,18 @@ else setTimeout(iniciar, 0);
  */
 async function iniciar() {
   try {
+    try {
+      const inicioHtml = typeof GSL_T0 === 'number' ? Math.max(0, GSL_T0 - performance.timeOrigin) : 0;
+      if (inicioHtml) medirEvento('abertura', 'html', inicioHtml, true);
+      medirEvento('abertura', 'scripts', Math.max(0, performance.now() - inicioHtml), true);
+      // A pagina que veio da reserva: do envio do formulario (na pagina anterior) ate esta comecar a rodar.
+      const nav = JSON.parse(lerSs(CHAVE_DSP_NAV) || 'null');
+      gravarSs(CHAVE_DSP_NAV, '');
+      if (nav && nav.t && typeof GSL_T0 === 'number' && GSL_T0 - nav.t < 120000) {
+        medirEvento('post', nav.tipo || 'pagina', GSL_T0 - nav.t, true, '', { via: 'post', x: nav.x || '' });
+        if (nav.tipo === 'entrar') DSP_ABERTURA.clique = performance.now() - (Date.now() - nav.t);
+      }
+    } catch (e) { /* medir nunca atrapalha */ }
     aplicarTema(lerLocal(CHAVE_TEMA) || 'claro');
     medirFluidez();
     vigiarVisibilidade();
@@ -508,9 +821,13 @@ async function iniciar() {
         if (inicio.filial && inicio.filial.codigo) em.filial = inicio.filial.codigo;
         google.script.history.replace(null, em, '');
       } catch (e) {}
-      sondarDeVezEmQuando();
+      // 27/11: pagina que veio pela reserva SEM o canal marcado como barrado (o Google demorou, a rede
+      // piscou): a sonda confere logo — passando, os cliques seguintes voltam ao caminho rapido.
+      if (!canalBarradoLembrado()) setTimeout(sondarCanal, 1500);
+      else sondarDeVezEmQuando();
     } else if (inicio.entrada === 'ENTRAR' && !lerSs(CHAVE_SESSAO)) {
-      sondarCanal();          // enquanto a pessoa digita e-mail e PIN, descobre se o canal passa
+      // enquanto a pessoa digita e-mail e PIN, descobre se o canal passa (falha passageira: confere de novo)
+      sondarCanal().then((passou) => { if (!passou && SONDA === 'erro') setTimeout(sondarCanal, 2500); });
     }
     if (!inicio.ok) return mostrarFalha(inicio.erro);
 
@@ -619,6 +936,7 @@ async function continuarSessao() {
   const onde = telaDaAba();
   const campos = { t: TOKEN, filial: onde.f || lerLocal(CHAVE_FILIAL) || '', tela: onde.tela || '', p: onde.p || '' };
   if (b) { b.disabled = true; b.innerHTML = 'Abrindo…'; }
+  DSP_ABERTURA.clique = performance.now();
   // Canal barrado: ja vai por POST, dentro do clique.
   if (CANAL_BARRADO && URL_APP) { navegarPelaPagina(campos); return; }
   const clique = Date.now();
@@ -643,6 +961,7 @@ function mostrarEntrada(info) {
   info = info || {};
   esconderContinuar();
   soMostrar('entrar');
+  marcarAberturaPintada('entrada');
   const form = el('form-entrar');
   if (form && URL_APP) form.action = URL_APP;
   el('entrar-bilhete').value = bilheteDaPagina();
@@ -670,6 +989,7 @@ function enviarFormEntrada() {
   ENTRADA_ENVIADA = true;
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…';
+  gravarSs(CHAVE_DSP_NAV, JSON.stringify({ t: Date.now(), tipo: 'entrar' }));
   el('form-entrar').submit();
   // Navegacao barrada (clique vencido): libera o botao para o proximo clique.
   setTimeout(() => {
@@ -740,19 +1060,24 @@ async function entrarNoSistema(ev) {
   if (el('entrar-tela')) el('entrar-tela').value = (destinoDoLink() || {}).tela || '';
   if (el('entrar-p')) el('entrar-p').value = paramsDoLinkJson(destinoDoLink());
   el('entrar-bilhete').value = bilheteDaPagina();
-  // Canal ja sabidamente barrado: vai por POST ja, dentro do clique.
-  if (CANAL_BARRADO && URL_APP) { enviarFormEntrada(); return false; }
+  // Canal ja sabidamente barrado: vai por POST ja, dentro do clique. 27/11: tambem quando o clique
+  // anterior esperou demais pelo Google (ENTRAR_PELA_PAGINA) — a pagina mostra o progresso do navegador.
+  if ((CANAL_BARRADO || ENTRAR_PELA_PAGINA) && URL_APP) { enviarFormEntrada(); return false; }
   const clique = Date.now();
+  DSP_ABERTURA.clique = performance.now();
   const b = el('entrar-botao');
   b.disabled = true; b.textContent = 'Entrando…'; falar('', '');
+  const tentativa = ++ENTRAR_TENTATIVAS;
+  const pedido = chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || '',
+    paramsDoLinkJson(destinoDoLink()));
+  pedido.catch(() => {});            // a falha que chega depois de a corrida acabar nao vira erro solto
   try {
     // A sonda (disparada quando a pagina abriu) corre junto com o entrar: se ela acusar o canal
     // barrado enquanto o clique ainda vale, a entrada vai por POST na hora (catch abaixo).
-    const r = await Promise.race([
-      chamarJSON('entrar', email, pin, conf, (destinoDoLink() || {}).filial || '', codigo, (destinoDoLink() || {}).tela || '',
-        paramsDoLinkJson(destinoDoLink())),
-      canalBarradoPelaSonda(clique)
-    ]);
+    // 27/11 — PRAZO: o Google que nao responde (partida a frio, rede presa) nao deixa o botao em
+    // "Entrando…" para sempre: aos ENTRAR_PRAZO_MS a tela explica e o proximo clique vai pela pagina.
+    // A resposta que chegar depois ainda vale (se ninguem clicou de novo).
+    const r = await Promise.race([pedido, canalBarradoPelaSonda(clique), prazoDoEntrar(tentativa)]);
     if (r && r.telaEmbutida) { const d = destinoDoLink(); if (d && d.tela === r.telaEmbutida.id) esquecerDestinoDoLink(true); }
     if (r && r.criarPin) {
       el('entrar-confirma').classList.remove('oculto');
@@ -777,10 +1102,24 @@ async function entrarNoSistema(ev) {
      * onde a chamada nao passa. Mas a janela de cima so navega ate ~5 s
      * depois do clique: se a falha demorou mais, o proximo clique envia.
      */
+    if (e && e.entrarLento) {
+      medirEvento('entrada', 'prazo', Date.now() - clique, false, 'o Google não respondeu em ' + Math.round(ENTRAR_PRAZO_MS / 1000) + ' s', { via: 'run' });
+      if (URL_APP) {
+        ENTRAR_PELA_PAGINA = true;
+        falar('O Google está demorando para responder (o servidor pode estar começando o dia). Clique em Entrar de novo: ' +
+          'desta vez a entrada vai pela página, sem esperar.', 'ok');
+      } else falar('O servidor está demorando para responder. Confira a internet e clique em Entrar de novo.');
+      // A resposta atrasada ainda serve, se a pessoa nao clicou de novo nesse meio tempo.
+      pedido.then((tarde) => {
+        if (tentativa !== ENTRAR_TENTATIVAS || ENTRADA_ENVIADA || !tarde || !el('form-entrar') || el('entrar').classList.contains('oculto')) return;
+        if (tarde.entrada === 'APP' || tarde.entrada === 'ESCOLHER_FILIAL') { ENTRAR_PELA_PAGINA = false; falar('', ''); tratarEntrada(tarde); }
+      }).catch(() => {});
+      return false;
+    }
     if (URL_APP) {
       if (canalBarradoDeVez(e)) lembrarCanalBarrado(); else CANAL_BARRADO = true;
       if (cliqueAindaVale(clique)) { enviarFormEntrada(); return false; }
-      falar('A conexão com o Google falhou. Clique em Entrar de novo para continuar.', 'ok');
+      falar('A conexão com o Google falhou. Clique em Entrar de novo: a entrada vai pela página.', 'ok');
       return false;
     }
     falar(explicarErro(e));
@@ -788,6 +1127,17 @@ async function entrarNoSistema(ev) {
     if (!ENTRADA_ENVIADA) { b.disabled = false; b.textContent = 'Entrar'; }
   }
   return false;
+}
+/*
+ * PRAZO DO ENTRAR (27/11). 20 s sem resposta do Google: a tela para de esperar (o botao volta), explica
+ * e o proximo clique vai pela pagina (POST no /exec), que nao depende do google.script.run.
+ */
+const ENTRAR_PRAZO_MS = 20000;
+let ENTRAR_PELA_PAGINA = false, ENTRAR_TENTATIVAS = 0;
+function prazoDoEntrar(tentativa) {
+  return new Promise((ok, erro) => setTimeout(() => {
+    if (tentativa === ENTRAR_TENTATIVAS && !ENTRADA_ENVIADA) erro(Object.assign(new Error('O Google não respondeu a tempo.'), { entrarLento: true }));
+  }, ENTRAR_PRAZO_MS));
 }
 
 /* Rejeita (como erro de canal) se a sonda acusar o canal barrado enquanto o clique vale. */
@@ -1117,6 +1467,11 @@ function montarSessao(r) {
   const av = el('aviso-simulacao'); if (av) av.classList.toggle('oculto', !r.simulacao);
   conferirVersao(r);
   soMostrar('aplicacao');
+  marcarEntradaPintada();
+  if (r.telaEmbutida && r.telaEmbutida.resposta) delete r.telaEmbutida.resposta._srv;
+  // 27/11: os modulos que a pagina ainda nao tem vem por tras (a primeira tela e o menu, que nao precisa deles).
+  setTimeout(prebuscarModulos, 0);
+  setTimeout(() => enviarMedicoes(true), 3000);
   // A pagina veio de uma gravacao pela reserva: o recado (ou o erro) aparece aqui. Sem o resultado
   // (Codigo.gs antigo, resposta perdida), a pessoa precisa saber que nao houve confirmacao.
   if (r.resultadoAcao) setTimeout(() => mostrarResultadoAcao(r.resultadoAcao), 0);
@@ -1160,7 +1515,7 @@ function pintarCaixaFilial() {
  * parte dos arquivos no Apps Script e parte nao — e ai aparecem erros como
  * "Ação desconhecida". A faixa diz QUAIS arquivos faltam.
  */
-const BUILD_APP = '2026.11.26';
+const BUILD_APP = '2026.11.27';
 function mostrarResultadoAcao(x) {
   if (!x) return;
   if (x.ok === false) {
@@ -1188,15 +1543,18 @@ function conferirVersao(r) {
   const pastaVelha = MODO_LOCAL && app.build !== BUILD_APP;
   if (app.build !== BUILD_APP && !pastaVelha) faltam.unshift('Codigo.gs (ou App.html)');
   // Cada tela com o carimbo da entrega em que mudou por ultimo (como em arquivosForaDaVersao_, no Codigo.gs).
-  if (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.11.26') faltam.push('Paineis.html');
+  // 27/11: os modulos que a pagina busca depois (pagina em partes) so sao conferidos quando chegam (garantirModulos confere de novo).
+  const veio = (n) => !modulosFaltando([n]).length;
+  if (veio('paineis') && (typeof BUILD_PAINEIS === 'undefined' || BUILD_PAINEIS !== '2026.11.26')) faltam.push('Paineis.html');
   if (carimboCss('--gsl-paineis-estilo') !== '2026.11.26') faltam.push('PaineisEstilo.html');
-  if (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.11.26') faltam.push('Aprendiz.html (e a linha dele no Index.html)');
-  if (typeof GSL_T0 === 'undefined' || !el('entrar-continuar') || !el('lateral-alternar') || !el('entrar-p')) faltam.push('Index.html');
-  if (carimboDoEstilo() !== '2026.11.26') faltam.push('Estilo.html');
+  if (veio('aprendiz') && (typeof BUILD_APRENDIZ_TELA === 'undefined' || BUILD_APRENDIZ_TELA !== '2026.11.26')) faltam.push('Aprendiz.html (e a linha dele no Index.html)');
+  if (typeof GSL_T0 === 'undefined' || typeof GSL_INDEX === 'undefined' || GSL_INDEX !== '2026.11.27' ||
+      !el('entrar-continuar') || !el('lateral-alternar') || !el('entrar-p')) faltam.push('Index.html');
+  if (carimboDoEstilo() !== '2026.11.27') faltam.push('Estilo.html');
   if (carimboCss('--gsl-plano-estilo') !== '2026.11.26') faltam.push('PlanoEstilo.html (e a linha dele no Index.html)');
   // Situacao de Carga: include opcional — so confere quando a tela esta na pagina.
-  if (typeof BUILD_CARGA_TELA !== 'undefined' && BUILD_CARGA_TELA !== '2026.11.26') faltam.push('Carga.html');
-  if (typeof BUILD_CARGA_TELA !== 'undefined' && carimboCss('--gsl-carga-estilo') !== '2026.11.26') faltam.push('CargaEstilo.html');
+  if (typeof BUILD_CARGA_TELA !== 'undefined' && BUILD_CARGA_TELA !== '2026.11.27') faltam.push('Carga.html');
+  if (typeof BUILD_CARGA_TELA !== 'undefined' && carimboCss('--gsl-carga-estilo') !== '2026.11.27') faltam.push('CargaEstilo.html');
   let faixa = el('aviso-versao');
   if (!faltam.length && !pastaVelha) { if (faixa) faixa.remove(); return; }
   if (!faixa) {
@@ -1360,6 +1718,15 @@ function navegarPelaPagina(campos) {
     i.type = 'hidden'; i.name = k; i.value = String(campos[k]);
     f.appendChild(i);
   });
+  // 27/11: as medicoes desta aba vao junto (o computador que barra o Google nao tem outro caminho) e a pagina nova mede a volta.
+  try {
+    if (campos.t && !campos.sair && DSP.fila.length) {
+      const lote = JSON.stringify(loteDeMedicoes(60));
+      if (lote.length < 18000) { const i = document.createElement('input'); i.type = 'hidden'; i.name = 'dsp'; i.value = lote; f.appendChild(i); }
+    }
+    gravarSs(CHAVE_DSP_NAV, JSON.stringify({ t: Date.now(), tipo: campos.sair ? 'sair' : (campos.acao ? 'gravar' : (campos.tela ? 'tela' : 'filial')),
+      x: String(campos.acao || campos.tela || '').slice(0, 40) }));
+  } catch (e) {}
   document.body.appendChild(f);
   if (campos.acao) { GRAVANDO_PELA_PAGINA = Date.now(); gravarSs(CHAVE_ACAO, String(Date.now())); }
   f.submit();
@@ -1868,6 +2235,25 @@ async function abrir(idTela, params) {
   el('subtitulo-pagina').textContent = '';
   el('acoes-topo').innerHTML = '';
 
+  /*
+   * 27/11: a tela mora num modulo que a pagina ainda nao tem (pagina em partes): espera por ele. Canal
+   * barrado (ou a conversa falhou): abre pela pagina, que vem inteira.
+   */
+  if (modulosFaltando(TELA_MODULOS[idTela]).length) {
+    const pedido = chaveTela(idTela, paramsAtual);
+    if (CANAL_BARRADO && abrirPorNavegacao(idTela, paramsAtual)) return;
+    el('pagina').innerHTML = '<div class="vazio">Carregando…</div>';
+    try { await garantirModulos(TELA_MODULOS[idTela]); }
+    catch (e) {
+      if (chaveTela(paginaAtual, paramsAtual) !== pedido) return;
+      if (canalBloqueado(e) && abrirPorNavegacao(idTela, paramsAtual)) return;
+      el('pagina').innerHTML = `<div class="erro-caixa">Não consegui carregar esta tela. ${esc(explicarErro(e))}
+        <div style="margin-top:12px"><button class="botao secundario" onclick="abrir(paginaAtual, paramsAtual)">Tentar de novo</button></div></div>`;
+      return;
+    }
+    if (chaveTela(paginaAtual, paramsAtual) !== pedido) return;      // a pessoa foi para outra tela enquanto o modulo vinha
+  }
+
   const chave = chaveTela(idTela, paramsAtual);
   const guardado = CACHE_TELAS[chave];
 
@@ -1975,6 +2361,40 @@ function mesmaResposta(a, b) {
   return semHora(a) === semHora(b);
 }
 
+/*
+ * REMENDAR (27/11). Troca na tela so o que mudou: compara o HTML novo com o que ja esta desenhado, no por
+ * no (ate `fundo` niveis). O que e igual fica como esta — sem recalcular estilo, layout e pintura, o que
+ * pesa no computador sem placa de video (a Equipe da Situacao de Carga tem ~150 pessoas e redesenha a
+ * cada mudanca ao vivo). Campo de formulario que mudou e trocado inteiro; o que nao mudou guarda o foco e
+ * o que estava digitado.
+ */
+const REMENDO_INTEIRO = { INPUT: 1, TEXTAREA: 1, SELECT: 1, OPTION: 1, SVG: 1, svg: 1, CANVAS: 1 };
+function remendar(alvo, html, fundo) {
+  if (!alvo) return;
+  const molde = document.createElement('template');
+  molde.innerHTML = html;
+  remendarFilhos(alvo, molde.content, fundo == null ? 6 : fundo);
+}
+function remendarFilhos(alvo, novo, fundo) {
+  const velhos = alvo.childNodes, novos = Array.from(novo.childNodes);
+  if (velhos.length !== novos.length) {
+    while (alvo.firstChild) alvo.removeChild(alvo.firstChild);
+    novos.forEach((n) => alvo.appendChild(n));
+    return;
+  }
+  for (let i = 0; i < novos.length; i++) {
+    const v = velhos[i], n = novos[i];
+    if (v.nodeType !== n.nodeType || v.nodeName !== n.nodeName) { alvo.replaceChild(n, v); continue; }
+    if (n.nodeType !== 1) { if (v.nodeValue !== n.nodeValue) v.nodeValue = n.nodeValue; continue; }
+    if (v.outerHTML === n.outerHTML) continue;
+    if (fundo <= 0 || REMENDO_INTEIRO[n.nodeName]) { alvo.replaceChild(n, v); continue; }
+    // mesmos filhos? acerta os atributos e desce
+    Array.from(v.attributes).forEach((a) => { if (!n.hasAttribute(a.name)) v.removeAttribute(a.name); });
+    Array.from(n.attributes).forEach((a) => { if (v.getAttribute(a.name) !== a.value) v.setAttribute(a.name, a.value); });
+    remendarFilhos(v, n, fundo - 1);
+  }
+}
+
 /* Resolvido na hora do uso, nao na leitura do arquivo. Uma tela sem pintor
    vira uma mensagem na tela — nao a pagina inteira em branco. */
 const TELAS_PINTA = {
@@ -2049,7 +2469,11 @@ function pintar(idTela, r, silencioso) {
    * lateral e o resto do sistema continuam de pe.
    */
   try {
+    const t0 = performance.now();
     pintor(r);
+    // 27/11: o tempo de desenhar (as telas pesadas no computador sem placa de video). A repintura de fundo so quando pesa.
+    const ms = performance.now() - t0;
+    if (!silencioso || ms > 40) medirEvento('tela', 'desenho', ms, true, '', { x: idTela });
   } catch (e) {
     pagina.innerHTML = `<div class="erro-caixa">
       <strong>Não consegui montar a tela "${esc(r.titulo || idTela)}".</strong>
@@ -3705,6 +4129,8 @@ function corCategoria(cat) {
  * ausencia, com filtro de periodo. Os graficos sairam.
  */
 let FICHA = { matricula: '', de: '', ate: '' };
+/* A data por extenso mora no Paineis (modulo que a pagina busca depois): sem ele, a data como veio. */
+const dataLongaSegura = (d) => (typeof pnDataLonga === 'function' ? pnDataLonga(d) : String(d || ''));
 async function fichaColaborador(matricula, de, ate) {
   FICHA = { matricula: matricula, de: de || '', ate: ate || '' };
   if (CANAL_BARRADO && URL_APP) return fichaPelaPagina();   // ainda dentro do clique
@@ -3746,8 +4172,8 @@ function montarFicha(f) {
   const corTipo = { 'Falta injustificada': 'var(--alerta)', 'Falta justificada': '#D97706', 'Falta disciplinar': '#7C3AED',
     'Atestado': '#2563EB', 'Licença legal': '#0891B2', 'Outras ausências': 'var(--tinta-media)' };
   const rotuloPeriodo = (p.de || p.ate)
-    ? (p.de ? pnDataLonga(p.de) : 'o início') + ' a ' + (p.ate ? pnDataLonga(p.ate) : 'hoje')
-    : 'todo o histórico' + (p.primeiroDia ? ' (' + pnDataLonga(p.primeiroDia) + ' a ' + pnDataLonga(p.ultimoDia) + ')' : '');
+    ? (p.de ? dataLongaSegura(p.de) : 'o início') + ' a ' + (p.ate ? dataLongaSegura(p.ate) : 'hoje')
+    : 'todo o histórico' + (p.primeiroDia ? ' (' + dataLongaSegura(p.primeiroDia) + ' a ' + dataLongaSegura(p.ultimoDia) + ')' : '');
   const pctAus = p.diasLancados ? Math.round(p.ausencias / p.diasLancados * 1000) / 10 : 0;
   return `
     <div class="ficha-topo">
@@ -4149,7 +4575,14 @@ function salvarApresentacaoSeMudou(turno, id, original) {
 function cfgSistema(d) {
   const pSis = (d.parametros || []).filter((p) => p.grupo === 'sistema');
   const ed = podeEditar('config');
+  // 27/11: o medidor de desempenho (so o administrador: o servidor diz em pode.desempenho e confere de novo)
+  const dsp = !!(ACESSO_DA_TELA.config && ACESSO_DA_TELA.config.desempenho);
+  if (dsp) setTimeout(() => carregarDesempenho(false), 0);
   return `${ed ? '' : avisoSoVer('Configuração')}
+    ${dsp ? `<div class="cartao dsp-cartao" style="margin-bottom:14px">
+      <div class="cartao-titulo">Desempenho <span class="dica" style="font-weight:400">— o que cada computador sente ao usar o GSL (últimas 6 horas e 14 dias)</span></div>
+      <div id="dsp-painel"><div class="vazio">Carregando as medições…</div></div>
+    </div>` : ''}
     <div class="cartao" style="margin-bottom:14px">
       <div class="cartao-titulo">Estado do sistema</div>
       <table class="tabela-chave"><tbody>
@@ -4173,15 +4606,134 @@ function cfgSistema(d) {
         <button class="botao secundario" onclick="alternarModoLeve()">${document.documentElement.classList.contains('modo-leve') ? '⚡ Modo leve: LIGADO' : '⚡ Modo leve: desligado'}</button>
         ${d.pastaAnexos ? `<button class="botao secundario" onclick="window.open(${jsArg(d.pastaAnexos)},'_blank')">📁 Abrir pasta das entregas</button>` : ''}
       </div>
-      <p class="dica"><b>Modo leve</b>: desliga as animações de entrada e as transições, mantendo cores e
-      layout. O app liga sozinho quando percebe que a maquina nao está dando conta dos quadros;
-      este botão serve para forçar ou desfazer, e vale so neste computador.</p>
+      <p class="dica"><b>Modo leve</b>: tira animações, transições, sombras, desfoques e os degradês grandes, mantendo cores e
+      layout. O app liga sozinho quando percebe um computador sem placa de vídeo (servidor em nuvem, área de trabalho remota)
+      ou que não está dando conta dos quadros${MOTIVO_LEVE ? ' — aqui: ' + esc(MOTIVO_LEVE) : ''}; este botão força ou desfaz, e vale só neste computador.</p>
     </div>
 
     ${pSis.length ? `<div class="cartao">
       <div class="cartao-titulo">Outros parâmetros</div>
       <div class="grade grade-dupla">${pSis.map(campoParam).join('')}</div>
     </div>` : ''}`;
+}
+
+/*
+ * PAINEL DE DESEMPENHO (27/11, so o administrador). As medicoes que as paginas mandam (ver MEDIDOR):
+ * marcos (abrir, entrar, telas, gravacoes), por tela/acao, por computador, os ultimos erros e o resumo
+ * de cada dia. p50 = metade das vezes foi mais rapido que isto; p90 = 9 de cada 10 vezes.
+ */
+let DSP_PAINEL = null;
+const fmtMs = (ms) => (ms == null || ms < 0 ? '—' : ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(ms < 10000 ? 1 : 0).replace('.', ',') + ' s');
+const fmtQuando = (t) => { if (!t) return '—'; const d = new Date(t); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+const NOMES_DSP = {
+  'abertura:entrada': 'Abrir a página até a entrada aparecer', 'abertura:menu': 'Abrir com a sessão da aba (F5) até o menu',
+  'abertura:html': 'Até a página começar a rodar', 'abertura:scripts': 'Ler e rodar a página (scripts e estilos)',
+  'entrada:menu': 'Entrar: do clique em Entrar ao menu', 'entrada:prazo': 'Entrar sem resposta do Google em 20 s',
+  'run:entrar': 'Conferir e-mail e PIN (servidor)', 'run:retomarSessao': 'Voltar à sessão (F5)', 'run:sondarCanal': 'Teste da conversa com o Google',
+  'run:carregarTela': 'Abrir uma tela', 'run:executarAcaoETela': 'Gravar e voltar a tela', 'run:executarAcao': 'Ações (leituras e gravações)',
+  'run:carregarModulo': 'Buscar um módulo da página', 'run:abrirFilial': 'Entrar numa filial', 'run:manterSessao': 'Renovar a sessão',
+  'tela:desenho': 'Desenhar a tela no computador', 'post:entrar': 'Pela página (reserva): entrar', 'post:tela': 'Pela página (reserva): abrir tela',
+  'post:gravar': 'Pela página (reserva): gravar', 'post:filial': 'Pela página (reserva): filial', 'post:sair': 'Pela página (reserva): sair',
+  'modulo:paineis': 'Módulo Painéis (instalar)', 'modulo:carga': 'Módulo Situação de Carga (instalar)', 'modulo:aprendiz': 'Módulo Jovem Aprendiz (instalar)'
+};
+const nomeDsp = (k) => NOMES_DSP[k] || (/^pdf:leitor:/.test(k) ? 'Leitor de PDF: ' + k.split(':')[2] : k);
+async function carregarDesempenho(bruto) {
+  const alvo = el('dsp-painel');
+  try {
+    const r = await executarAcaoSrv('painelDesempenho', bruto ? { bruto: true } : {});
+    if (!r || r.semAcesso) { const c = document.querySelector('.dsp-cartao'); if (c) c.remove(); return null; }
+    if (bruto) return r;
+    DSP_PAINEL = r;
+    if (el('dsp-painel')) el('dsp-painel').innerHTML = painelDesempenhoHtml(r);
+    return r;
+  } catch (e) {
+    if (alvo && !bruto) alvo.innerHTML = `<div class="erro-caixa">${esc(explicarErro(e))}</div>`;
+    else avisar(explicarErro(e), true);
+    return null;
+  }
+}
+function linhaDsp(l, nome) {
+  const ruim = (ms) => (ms >= 5000 ? ' class="dsp-num dsp-ruim"' : ' class="dsp-num"');
+  return `<tr><td>${esc(nome)}</td><td class="dsp-num">${l.n}</td><td${ruim(l.p50)}>${fmtMs(l.p50)}</td><td${ruim(l.p90)}>${fmtMs(l.p90)}</td>
+    <td class="dsp-num">${fmtMs(l.max)}</td><td class="dsp-num">${l.srv50 >= 0 ? fmtMs(l.srv50) + ' / ' + fmtMs(l.srv90) : '—'}</td>
+    <td class="dsp-num">${l.lp || '—'}</td><td class="dsp-num">${l.kb ? l.kb + ' KB' : '—'}</td>
+    <td class="dsp-num${l.falhas ? ' dsp-ruim' : ''}">${l.falhas || '—'}</td><td class="dsp-num">${l.tentativas || '—'}</td><td class="dsp-num">${l.pagina || '—'}</td></tr>`;
+}
+const CAB_DSP = '<tr><th>O quê</th><th>Vezes</th><th>p50</th><th>p90</th><th>Pior</th><th>Servidor p50 / p90</th><th>Abas lidas</th><th>Tamanho</th><th>Falhas</th><th>Tentou de novo</th><th>Pela página</th></tr>';
+function painelDesempenhoHtml(r) {
+  const maq = dspMaquina();
+  const leve = document.documentElement.classList.contains('modo-leve');
+  const aq = r.aquecimento || {};
+  const tabela = (linhas, nome) => linhas.length
+    ? `<div class="dsp-rolo"><table class="dsp-tabela"><thead>${CAB_DSP}</thead><tbody>${linhas.map((l) => linhaDsp(l, nome(l))).join('')}</tbody></table></div>`
+    : '<p class="dica">Ainda sem medições.</p>';
+  const dias = (r.dias || []).map((d) => {
+    const c = (x) => (x ? `${fmtMs(x.p50)} / ${fmtMs(x.p90)} <small>(${x.n}${x.falhas ? ', ' + x.falhas + ' falhas' : ''})</small>` : '—');
+    return `<tr><td>${esc(d.dia.split('-').reverse().join('/'))}</td><td>${c(d.abertura)}</td><td>${c(d.entrada)}</td><td>${c(d.tela)}</td><td>${c(d.acao)}</td><td>${c(d.desenho)}</td>
+      <td class="dsp-num${d.canal ? ' dsp-ruim' : ''}">${d.canal || '—'}</td><td class="dsp-num">${d.pagina || '—'}</td></tr>`;
+  }).join('');
+  return `
+    <div class="cfg-botoes" style="margin-bottom:10px">
+      <button class="botao secundario" onclick="carregarDesempenho(false)">Atualizar</button>
+      <button class="botao secundario" onclick="exportarDesempenho()">Exportar (planilha CSV)</button>
+      ${podeEditar('config') ? `<button class="botao secundario" onclick="agir('ajustarDesempenho',{aquecer:${aq.ligado ? 'false' : 'true'}})">${aq.ligado ? 'Desligar' : 'Ligar'} o aquecimento de 5 em 5 min</button>
+      <button class="botao secundario" onclick="if (window.confirm('Apagar todas as medições de desempenho guardadas?')) agir('ajustarDesempenho',{apagar:true})">Apagar medições</button>` : ''}
+    </div>
+    <p class="dica">${r.total} medições nas últimas ${r.janelaHoras} h. Aquecimento ${aq.ligado ? '<b>ligado</b> (o servidor roda de 5 em 5 min, das 5h às 21h)' : '<b>desligado</b> (de 15 em 15 min)'}
+      · último: ${aq.ultimo ? fmtQuando(aq.ultimo) : 'ainda não rodou — clique em Ligar rotinas automáticas (Manutenção)'}.</p>
+    <div class="dsp-maquina">
+      <label class="dsp-rotulo" for="dsp-nome-maquina">Nome deste computador (aparece em "Por computador")</label>
+      <input id="dsp-nome-maquina" maxlength="40" placeholder="ex.: Cloud expedição 2" value="${esc(maq.r)}" onchange="nomearComputador(this.value)">
+      <p class="dica">${esc(maq.d)} · modo leve ${leve ? 'ligado' + (MOTIVO_LEVE ? ' (' + esc(MOTIVO_LEVE) + ')' : '') : 'desligado'}</p>
+    </div>
+    <details class="dsp-ajuda"><summary>Como ler estes números</summary>
+      <ul>
+        <li><b>p50</b>: metade das vezes foi mais rápido que isto (o "normal"). <b>p90</b>: 9 de cada 10 vezes (o "dia ruim"). <b>Pior</b>: a vez mais lenta.</li>
+        <li><b>Servidor</b>: quanto do tempo foi o Apps Script trabalhando. O resto (p50 menos servidor) é o caminho: internet, Google e o computador.</li>
+        <li><b>Abrir a página</b> alto só em alguns computadores = o computador (ou a rede dele); alto em todos = o Google (partida a frio: veja se o aquecimento está ligado).</li>
+        <li><b>Desenhar a tela</b> alto = computador sem placa de vídeo (o modo leve ajuda). <b>Falhas</b> e <b>Pela página</b> altos = o Google recusando a conversa (várias contas no navegador): use um perfil do Chrome só com a conta @bartofil.com.br.</li>
+        <li>Telas "pela página" e entradas "pela página" são as do caminho de reserva: mais lentas, mas funcionam onde o Google barra.</li>
+      </ul>
+    </details>
+    <h4 class="dsp-sub">Marcos (todos os computadores)</h4>
+    ${tabela(r.marcos || [], (l) => nomeDsp(l.chave))}
+    <h4 class="dsp-sub">Por computador</h4>
+    ${(r.porMaquina || []).length ? `<div class="dsp-rolo"><table class="dsp-tabela"><thead><tr><th>Computador</th><th>Pessoas</th><th>Chamadas</th><th>p50</th><th>p90</th><th>Abrir a página (p50)</th><th>Falhas</th><th>Pela página</th><th>Modo leve</th><th>Último uso</th></tr></thead><tbody>
+      ${(r.porMaquina || []).map((m) => `<tr${m.chave === maq.id ? ' class="dsp-este"' : ''}><td><b>${esc(m.rotulo || 'sem nome')}</b>${m.chave === maq.id ? ' <small>(este)</small>' : ''}<br><small>${esc(m.dica)}</small></td>
+        <td class="dsp-num">${m.pessoas}</td><td class="dsp-num">${m.n}</td><td class="dsp-num">${fmtMs(m.p50)}</td><td class="dsp-num">${fmtMs(m.p90)}</td><td class="dsp-num">${fmtMs(m.abertura50)}</td>
+        <td class="dsp-num${m.falhas ? ' dsp-ruim' : ''}">${m.falhas || '—'}</td><td class="dsp-num">${m.pagina || '—'}</td><td>${m.leve ? 'sim' : 'não'}</td><td>${fmtQuando(m.ultimo)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="dica">Ainda sem medições.</p>'}
+    <h4 class="dsp-sub">Por tela e ação</h4>
+    ${tabela(r.porAcao || [], (l) => l.chave.replace(/^run:/, '').replace(/^tela:desenho:/, 'desenho: '))}
+    <h4 class="dsp-sub">Últimos erros</h4>
+    ${(r.erros || []).length ? `<div class="dsp-rolo"><table class="dsp-tabela"><thead><tr><th>Quando</th><th>Quem</th><th>Computador</th><th>O quê</th><th>Tempo</th><th>Caminho</th><th>Erro</th></tr></thead><tbody>
+      ${r.erros.map((x) => `<tr><td>${fmtQuando(x.quando)}</td><td>${esc(x.quem)}</td><td>${esc(x.maquina)}</td><td>${esc(nomeDsp(x.nome.split(':').slice(0, 2).join(':')))} <small>${esc(x.nome.split(':').slice(2).join(':'))}</small></td>
+        <td class="dsp-num">${fmtMs(x.ms)}</td><td>${esc(x.via)}${x.tentativas ? ' · tentou ' + (x.tentativas + 1) + 'x' : ''}</td><td class="dsp-erro">${esc(x.erro)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="dica">Nenhum erro nas últimas 6 horas.</p>'}
+    <h4 class="dsp-sub">Por dia (p50 / p90)</h4>
+    ${dias ? `<div class="dsp-rolo"><table class="dsp-tabela"><thead><tr><th>Dia</th><th>Abrir a página</th><th>Entrar</th><th>Abrir tela</th><th>Gravar</th><th>Desenhar</th><th>Conversa recusada</th><th>Pela página</th></tr></thead><tbody>${dias}</tbody></table></div>`
+      : '<p class="dica">O resumo do dia é feito pelo aquecimento (rotinas automáticas ligadas), a cada 15 minutos.</p>'}`;
+}
+function nomearComputador(v) {
+  gravarLocal(CHAVE_MAQ_NOME, String(v || '').trim().slice(0, 40));
+  DSP.maq = null;
+  avisar('Nome deste computador guardado. As próximas medições vão com ele.');
+  medirEvento('leve', document.documentElement.classList.contains('modo-leve') ? 'ligado' : 'normal', 0, true, '', { x: 'nome' });
+  enviarMedicoes(true);
+}
+async function exportarDesempenho() {
+  const r = await carregarDesempenho(true);
+  if (!r || !r.bruto) return;
+  const cab = ['quando', 'quem', 'computador', 'descricao', 'tipo', 'nome', 'detalhe', 'ms', 'ok', 'servidor_ms', 'abas_lidas', 'kb', 'tentativas', 'caminho', 'erro'];
+  const campo = (v) => { const t = String(v == null ? '' : v); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const linhas = r.bruto.map((x) => { const y = x.slice(); y[0] = new Date(x[0]).toLocaleString('pt-BR'); return y.map(campo).join(';'); });
+  const texto = '\ufeff' + cab.join(';') + '\n' + linhas.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([texto], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'gsl-desempenho-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  avisar(r.bruto.length + ' medições exportadas.');
 }
 
 const valorPar = (d, chave) =>

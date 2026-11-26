@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.11.26'
+  build: '2026.11.27'
 };
 
 /*
@@ -43,26 +43,38 @@ const APP = {
  *   2026.10.20  = fotos e gravacoes pela pagina quando o Google barra a conversa; excluir item do estoque de verdade
  *   2026.10.21  = ferias com programacao, acoes so para os citados, relatorios nas cores da Bartofil, planilha do aprendiz
  */
-function arquivosForaDaVersao_() {
-  // Entrega de 26/11: todos os .gs com carimbo mudaram nesta entrega.
-  const ENTREGA = APP.build;
+function arquivosForaDaVersao_(comHtml) {
+  // Cada .gs com o carimbo da entrega em que mudou por ultimo (27/11: desempenho; os outros sao de 26/11).
+  const ANTES = '2026.11.26', ENTREGA = APP.build;
   const carimbos = {
-    'Acoes.gs':     [ENTREGA, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
-    'Estoque.gs':   [ENTREGA, typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
-    'Limpeza.gs':   [ENTREGA, typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
+    'Acoes.gs':     [ANTES, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Estoque.gs':   [ANTES, typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
+    'Limpeza.gs':   [ANTES, typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
     'Emails.gs':    [ENTREGA, typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
-    'Instalacao.gs':[ENTREGA, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
-    'Filiais.gs':   [ENTREGA, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
-    'Aprendiz.gs':  [ENTREGA, typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
-    'Permissoes.gs':[ENTREGA, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
-    'Auth.gs':      [ENTREGA, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
+    'Instalacao.gs':[ANTES, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
+    'Filiais.gs':   [ANTES, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
+    'Aprendiz.gs':  [ANTES, typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
+    'Permissoes.gs':[ANTES, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
+    'Auth.gs':      [ANTES, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
     'Banco.gs':     [ENTREGA, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO],
-    'Quadro.gs':    [ENTREGA, typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
-    'Calendario.gs':[ENTREGA, typeof BUILD_CALENDARIO === 'undefined' ? '' : BUILD_CALENDARIO],
-    'Config.gs':    [ENTREGA, typeof BUILD_CONFIG === 'undefined' ? '' : BUILD_CONFIG],
-    'Carga.gs':     [ENTREGA, typeof BUILD_CARGA === 'undefined' ? '' : BUILD_CARGA]
+    'Quadro.gs':    [ANTES, typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
+    'Calendario.gs':[ANTES, typeof BUILD_CALENDARIO === 'undefined' ? '' : BUILD_CALENDARIO],
+    'Config.gs':    [ANTES, typeof BUILD_CONFIG === 'undefined' ? '' : BUILD_CONFIG],
+    'Carga.gs':     [ENTREGA, typeof BUILD_CARGA === 'undefined' ? '' : BUILD_CARGA],
+    'Desempenho.gs':[ENTREGA, typeof BUILD_DESEMPENHO === 'undefined' ? '' : BUILD_DESEMPENHO]
   };
-  return Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
+  const fora = Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
+  // Na entrada (comHtml): os arquivos HTML que a pagina nao confere sozinha — os leitores de PDF da
+  // Situacao de Carga (so dados, sem codigo: o carimbo esta na linha GSL-PDFJS).
+  if (comHtml) {
+    ['LeitorPdf', 'LeitorPdfTrabalhador'].forEach(function (nome) {
+      let carimbo = '';
+      try { carimbo = (/GSL-PDFJS \S+ \S+ (\S+)/.exec(HtmlService.createHtmlOutputFromFile(nome).getContent().slice(0, 300)) || [])[1] || ''; }
+      catch (e) { carimbo = ''; }
+      if (carimbo !== '2026.11.27') fora.push(nome + '.html');
+    });
+  }
+  return fora;
 }
 
 /*
@@ -91,7 +103,13 @@ function doGet(e) {
    * entrava como a pessoa anterior, sem digitar PIN. A reserva agora e
    * um POST (ver doPost), que nao deixa o codigo em lugar nenhum.
    */
-  return paginaComCarga_(cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p, aba: pedido.aba, acao: pedido.acao }));
+  const t0 = Date.now();
+  const carga = cargaDaPagina_({ filial: pedido.filial, tela: pedido.tela, p: pedido.p, aba: pedido.aba, acao: pedido.acao });
+  // 27/11: a pagina do GET sai SEM os modulos pesados (ver ABERTURA EM PARTES, no Desempenho.gs):
+  // a entrada aparece antes, e a tela busca os modulos por tras. A da reserva (POST) continua inteira.
+  carga.emPartes = true;
+  carga.srvMs = Date.now() - t0;
+  return paginaComCarga_(carga);
 }
 
 /*
@@ -110,6 +128,10 @@ function doPost(e) {
   const p = (e && e.parameter) || {};
   const pagina = doPost_(p);
   terminarBilhete_(p.bilhete);          // a folga de reenvio conta a partir daqui
+  // 27/11: as medicoes que a aba juntou vem no formulario (o computador que barra o Google nao tem outro caminho).
+  if (p.dsp && p.t && typeof dspDoFormulario_ === 'function') {
+    try { dspDoFormulario_(emailDaSessao_(String(p.t)), p.dsp); } catch (x) {}
+  }
   return pagina;
 }
 
@@ -472,7 +494,19 @@ function gatilhoDeVerdade_(e) {
 function paginaComCarga_(carga) {
   carga.urlApp = urlDoApp_();
   carga.bilhete = novoBilhete_();
+  /*
+   * EM PARTES (27/11): so quando o Index.html e o App.html desta versao estao no projeto (o App sabe
+   * buscar os modulos: garantirModulos). Colado pela metade, a pagina sai inteira, como antes.
+   */
   const t = HtmlService.createTemplateFromFile('Index');
+  _paginaEmPartes = false;
+  if (carga.emPartes) {
+    try { _paginaEmPartes = typeof carregarModulo === 'function' && include('App').indexOf('function garantirModulos(') !== -1 &&
+      t.getRawContent().indexOf("modulo('Carga')") !== -1; }
+    catch (e) { _paginaEmPartes = false; }
+  }
+  delete carga.emPartes;
+  if (_paginaEmPartes) carga.modulosAParte = Object.keys(MODULOS_A_PARTE);
   t.app = APP;
   // "<" escapado: um texto com </script> dentro de um nome nao pode
   // fechar a tag do script que carrega os dados.
@@ -579,7 +613,7 @@ function montarSessaoNaFilial_(usuario, codigo) {
     entrada: 'APP',
     // gravarPelaPagina: este Codigo.gs grava pela reserva (acaoPelaPagina_). App.html novo com o Codigo.gs
     // antigo nao manda a gravacao por POST — o doPost_ antigo trataria como navegacao e nada seria gravado.
-    app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_(), gravarPelaPagina: true }),
+    app: Object.assign({}, APP, { foraDaVersao: arquivosForaDaVersao_(true), gravarPelaPagina: true }),
     usuario: {
       nome: usuario.nome, email: usuario.email, papel: usuario.papel || '', perfil: usuario.perfil,
       turno: usuario.turno, escopo: descreverEscopo(usuario)
@@ -667,9 +701,22 @@ function acaoDiagnosticoIdentidade(usuario) {
   return diagnosticoIdentidade();
 }
 
+/*
+ * Modulo pesado na pagina (27/11): na pagina EM PARTES (GET) fica de fora — a tela busca depois
+ * (carregarModulo, no Desempenho.gs). Na pagina inteira (POST da reserva), entra como o include.
+ */
+var _paginaEmPartes = false;
+function modulo(nome) {
+  if (_paginaEmPartes && typeof MODULOS_A_PARTE !== 'undefined' &&
+      Object.keys(MODULOS_A_PARTE).some(function (k) { return MODULOS_A_PARTE[k].indexOf(nome) !== -1; })) return '';
+  return include(nome);
+}
+
+var _includes = {};     // o mesmo arquivo lido duas vezes na mesma execucao (o App, na pagina em partes)
 function include(nome) {
+  if (Object.prototype.hasOwnProperty.call(_includes, nome)) return _includes[nome];
   try {
-    return HtmlService.createHtmlOutputFromFile(nome).getContent();
+    return (_includes[nome] = HtmlService.createHtmlOutputFromFile(nome).getContent());
   } catch (e) {
     // Tela de modulo esquecida (ou com outro nome) ao colar a entrega: o resto do GSL abre e a
     // faixa "Atualização incompleta" diz qual arquivo falta. As telas do nucleo continuam obrigatorias.
@@ -886,6 +933,11 @@ const ACOES = {
   // gerais, da propria pessoa
   // Bolinha do menu (acoes em aberto por modulo): so leitura; so conta o que a pessoa ve (nivelNaTela).
   pendencias:          { livre: true, funcao: 'acaoPendencias' },
+  // 27/11: o medidor de desempenho. Cada pessoa manda as proprias medicoes (livre); o painel e os
+  // ajustes (aquecimento, apagar) sao da Configuracao e, por dentro, so do administrador (Desempenho.gs).
+  registrarDesempenho: { livre: true, funcao: 'acaoRegistrarDesempenho' },
+  painelDesempenho:    { tela: 'config', leitura: true, funcao: 'acaoPainelDesempenho' },
+  ajustarDesempenho:   { tela: 'config', funcao: 'acaoAjustarDesempenho' },
   // "Atualizar dados" (barra lateral): joga fora as copias e rele a planilha; nao muda dado de ninguem.
   atualizarDados:      { livre: true, funcao: 'acaoAtualizarDados' }
 };
@@ -941,6 +993,8 @@ function chaveDeTela(idTela, usuario, params) {
  * cadastro dela antes de qualquer leitura.
  */
 function carregarTela(ctx, idTela, params) {
+  const t0 = Date.now();
+  const marca = function (texto, doCache) { return typeof dspMarca_ === 'function' ? dspMarca_(texto, t0, doCache) : texto; };
   const codigoFilial = contextoDaChamada_(ctx);
   const usuario = usuarioAtual();
   entrarNaFilial(usuario, codigoFilial);
@@ -961,7 +1015,7 @@ function carregarTela(ctx, idTela, params) {
   const semCopia = !!TELAS_SEM_COPIA[idTela];
   const chave = chaveDeTela(idTela, usuario, params);
   const guardado = semCopia ? null : lerTextoCache(chave);
-  if (guardado) return guardado;
+  if (guardado) return marca(guardado, true);
 
   const executor = globalThis[tela.funcao];
   if (typeof executor !== 'function') {
@@ -983,14 +1037,17 @@ function carregarTela(ctx, idTela, params) {
      * e campo de gravar com pode.editar (Ver e editar). Com Ver, ela abre so
      * para leitura — e o servidor recusa qualquer gravacao do mesmo jeito.
      */
-    pode: { nivel: nivelNaTela(usuario, idTela), ver: true, editar: podeEditar(usuario, idTela) },
+    // 27/11: desempenho — a Configuracao mostra o painel do medidor so ao administrador (o servidor confere de novo).
+    pode: Object.assign({ nivel: nivelNaTela(usuario, idTela), ver: true, editar: podeEditar(usuario, idTela) },
+      idTela === 'config' ? { desempenho: ehAdministrador(usuario) } : {}),
     // O retrato do menu (cada tela e a faixa dela): a tela confere com o menu que tem e, se mudou, rele o menu.
     menu: marcaDoMenu(usuario),
     dados: executor(usuario, params || {})
   });
 
   if (!semCopia) gravarTextoCache(chave, texto, VALIDADE_TELA);
-  return texto;
+  // 27/11: o tempo do servidor e as abas lidas da planilha vao junto (_srv) para o medidor da tela.
+  return marca(texto, false);
 }
 
 /*
@@ -1011,6 +1068,18 @@ function aquecerCache(e) {
   const hora = Number(Utilities.formatDate(new Date(), fuso(), 'H'));
   if (hora < 5 || hora > 21) return { ok: true, pulou: 'fora de horario' };
   if (!bancoInstalado()) return { ok: true, pulou: 'sem banco' };
+  /*
+   * 27/11 — MANTER AQUECIDO. O gatilho roda de 5 em 5 min: cada vez o Apps Script carrega o projeto
+   * e monta a pagina de entrada (menos partida a frio para quem chega). O aquecimento completo (as
+   * tabelas de cada filial no cache, o resumo do medidor) so a cada ~15 min.
+   */
+  const cacheAq = CacheService.getScriptCache();
+  try { cacheAq.put('aquecido_em', String(Date.now()), 21600); } catch (x) {}
+  try { HtmlService.createTemplateFromFile('Index'); include('App'); } catch (x) { /* so aquece */ }
+  const completo = Number(cacheAq.get('aquecido_completo_em') || 0);
+  if (completo && Date.now() - completo < 14 * 60 * 1000) return { ok: true, leve: true };
+  try { cacheAq.put('aquecido_completo_em', String(Date.now()), 21600); } catch (x) {}
+  try { if (typeof dspResumirDias_ === 'function') dspResumirDias_(); } catch (x) { /* o medidor nunca derruba o aquecimento */ }
 
   /*
    * 10/10 — O AQUECIMENTO QUE SERVE A TODOS. Antes ele montava as telas na
@@ -1045,6 +1114,7 @@ const TABELAS_AQUECIDAS = ['ATIVIDADES', 'SETORES', 'ROTINAS', 'PARAMETROS', 'CO
  * o cartao some ou volta na hora, sem F5.
  */
 function executarAcaoETela(ctx, nomeAcao, params, idTela, paramsTela) {
+  const t0 = Date.now();
   const r = JSON.parse(executarAcao(ctx, nomeAcao, params)) || {};
   let tela = null, menu = null;
   if (!r.invalidarTudo && idTela && idTela !== 'modulos') {
@@ -1053,7 +1123,9 @@ function executarAcaoETela(ctx, nomeAcao, params, idTela, paramsTela) {
   if (r.invalidarTudo || r.menuMudou) {
     try { menu = menuDaSessao_(ctx); } catch (e) { menu = null; }   // sem menu, a tela fica como esta (F5 corrige)
   }
-  return JSON.stringify({ r: r, tela: tela, menu: menu });
+  if (tela) delete tela._srv;
+  const texto = JSON.stringify({ r: r, tela: tela, menu: menu });
+  return typeof dspMarca_ === 'function' ? dspMarca_(texto, t0, false) : texto;
 }
 
 /*

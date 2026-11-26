@@ -18,7 +18,7 @@
  * Uma leitura so por execucao, guardada aqui.
  */
 var _props = null;
-const BUILD_BANCO = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_BANCO = '2026.11.27';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 function prop(chave, padrao) {
   // 4.2.2: as propriedades guardam o SEGREDO_PIN e os IDs do banco. Sem esta
@@ -185,6 +185,7 @@ function chaveGeracaoTabela(tabela) {
  * risco de servir dado velho entre requisicoes.
  */
 let _bancos = {};      // id da planilha -> Spreadsheet (so nesta execucao)
+var _dspLeituras = 0;  // 27/11: abas lidas da planilha nesta execucao (o medidor de desempenho, Desempenho.gs)
 let _tabelas = {};
 
 /*
@@ -304,6 +305,7 @@ function listar(tabela, incluirExcluidos) {
    * vazias que so ficaram formatadas. Pedindo o retangulo exato, a
    * leitura encolhe junto com os dados de verdade.
    */
+  _dspLeituras++;
   const aba = abaDe(tabela);
   const ultimaLinha = aba.getLastRow();
   const ultimaColuna = aba.getLastColumn();

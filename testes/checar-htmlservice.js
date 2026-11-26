@@ -42,6 +42,8 @@ const carga = { ok: true, entrada: 'ENTRAR', urlApp: 'https://script.google.com/
 const inicial = new Function('carga', 'return ' + expr)(carga);
 let pagina = ler('Index.html')
   .replace(/<\?!= include\('(\w+)'\); \?>/g, (m, nome) => ler(nome + '.html'))
+  // 27/11: os modulos que a pagina do GET busca depois (carregarModulo) sao o mesmo HTML: conferidos do mesmo jeito.
+  .replace(/<\?!= typeof modulo === 'function' \? modulo\('(\w+)'\) : include\('\1'\); \?>/g, (m, nome) => ler(nome + '.html'))
   .replace('<?!= inicial ?>', () => inicial);
 
 const sobra = pagina.match(/<\?[\s\S]*?\?>/);

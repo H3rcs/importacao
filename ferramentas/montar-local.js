@@ -103,7 +103,9 @@ function montar(opcoes) {
   let linkCss = false;
 
   index = index.replace(/<\?([\s\S]*?)\?>/g, (tudo, corpo) => {
-    const inc = /^!=\s*include\('(\w+)'\);?\s*$/.exec(corpo.trim());
+    // 27/11: modulo('X') (os modulos que a pagina online busca depois) entra inteiro aqui, como o include.
+    const inc = /^!=\s*include\('(\w+)'\);?\s*$/.exec(corpo.trim()) ||
+      /^!=\s*typeof modulo === 'function' \? modulo\('(\w+)'\) : include\('\1'\);?\s*$/.exec(corpo.trim());
     if (inc) {
       const nome = inc[1];
       if (!existe(nome + '.html')) {
@@ -139,7 +141,7 @@ function montar(opcoes) {
   const local = { build: c.buildApp, versao: c.versao, montadoEm: new Date().toISOString() };
   const cabeca = '\n  <script src="gsl-config.js"></script>\n' +
     '  <script>var GSL_LOCAL = ' + JSON.stringify(local) + ';</script>';
-  const marcaT0 = /<script>\s*var GSL_T0 = Date\.now\(\);\s*<\/script>/;
+  const marcaT0 = /<script>\s*var GSL_T0 = Date\.now\(\);[\s\S]*?<\/script>/;
   if (!marcaT0.test(index)) throw new Error('Index.html sem o GSL_T0 no alto do <head>.');
   index = index.replace(marcaT0, (m) => m + cabeca);
   index = index.replace(/<meta charset="utf-8">/i, (m) => m +

@@ -30,7 +30,8 @@ const CARLA = 'carla.dias@bartofil.com.br';        // nivel CONSULTA: e nela que
 const ATACANTE = 'estagiario@bartofil.com.br';
 const FAIXAS = ['OCULTO', 'VER', 'EDITAR'];
 /* As acoes da propria pessoa, fora de qualquer menu. Acao nova "livre" tem de entrar aqui de proposito. */
-const LIVRES = ['enviarFeedback', 'trocarMeuPin', 'pendencias', 'atualizarDados'];
+// 27/11: registrarDesempenho — cada pessoa manda as proprias medicoes de tempo (nada de dado de ninguem).
+const LIVRES = ['enviarFeedback', 'trocarMeuPin', 'pendencias', 'atualizarDados', 'registrarDesempenho'];
 /* Recusa da porta (a matriz), nao do negocio. */
 const RECUSA = /só para ver|não inclui a tela|não está ligado na filial|não diz de qual tela/;
 

@@ -182,7 +182,7 @@ function envio(emitidoEm, cargas, extra) {
     cargas: Object.keys(cargas).map((nro) => {
       const d = {};
       DEPS.forEach((id) => { d[id] = (cargas[nro].d || cargas[nro])[id] || ['-', '-']; });
-      return { nro, nome: cargas[nro].nome || 'CARGA ' + nro, veiculo: 'MEDIO', box: cargas[nro].box || '3', h24: !!cargas[nro].h24, d };
+      return { nro, nome: cargas[nro].nome || 'CARGA ' + nro, veiculo: cargas[nro].veiculo != null ? cargas[nro].veiculo : 'MEDIO', box: cargas[nro].box || '9', h24: !!cargas[nro].h24, d };
     }) }, extra || {});
 }
 
@@ -796,9 +796,10 @@ async function rodar() {
     const id1 = r.id;
     afirmar(r.patio.fila.length === 1 && r.patio.fila[0].n === '900001' && r.patio.fila[0].situacao === 'MARCOU E NAO VEIO' && r.patio.fila[0].etapa === 'FILA', 'fila ' + JSON.stringify(r.patio.fila[0]).slice(0, 200));
     afirmar(r.patio.alertas.some((a) => a.tipo === 'prioridadeRisco' && a.carga === '900001' && a.grav === 'alerta'), 'prioridade com risco');
-    // arrastar para o box 3; depois de volta ao patio
+    // arrastar para o box 3 (reservado para a loja de Vitoria da Conquista: aviso); depois de volta ao patio
     r = acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
     afirmar(r.patio.mapa[2].estado === 'RESERVADO' && !r.patio.fila.length, 'no box 3');
+    afirmar(r.patio.alertas.some((a) => a.tipo === 'boxDaLoja' && a.carga === '900001' && /Box 3 é reservado para a Loja Vitória da Conquista: a carga 900001 não é da loja/.test(a.texto)), 'aviso do box da loja');
     afirmar(/Ponha a carga/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 0 }) && acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 }))), 'carregando sem box');
     acao(m, s, 'carregamentoCarga', { op: 'box', id: id1, box: 3 });
     r = acao(m, s, 'carregamentoCarga', { op: 'carregando', id: id1 });
@@ -826,7 +827,7 @@ async function rodar() {
     afirmar(ctx(m).listar('LOG').some((l) => l.TABELA === 'CARGA_CARREGAMENTO'), 'no LOG');
   });
 
-  await caso('pátio: cruzamento com o PDF (pronta sem veículo no box, veículo encostado com a carga longe, box diferente, permanência acima do limite, carga que saiu do relatório) e box bloqueado', () => {
+  await caso('pátio: cruzamento com o PDF (pronta sem veículo no box, veículo encostado com a carga longe, box diferente, carga que saiu do relatório; o tempo encostado não avisa mais) e box bloqueado', () => {
     const m = mundo(); const s = entrar(m, GERENTE, '5555');
     acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { h24: true, d: { GRANDEZA: ['X', 'X'] } }, '900002': { box: '5', d: { GRANDEZA: ['1/10', '0/10'] } },
       '900003': { box: '4', d: { GRANDEZA: ['X', 'X'] } }, '900004': { box: '6', d: { GRANDEZA: ['X', 'X'] } } }));
@@ -838,15 +839,13 @@ async function rodar() {
     const tipos = p.alertas.map((a) => a.tipo + ':' + a.carga).sort().join(' ');
     afirmar(tipos === 'boxDiferente:900002 boxLonge:900002 prontaSemBox:900001 prontaSemBox:900003', 'alertas ' + tipos);
     afirmar(p.alertas[0].tipo === 'prontaSemBox' && p.alertas[0].carga === '900001' && p.alertas[0].grav === 'alerta' && /nem registro no pátio/.test(p.alertas[0].texto), 'a de 24 h primeiro ' + p.alertas[0].texto);
-    afirmar(p.mapa[8].estado === 'OCUPADO' && p.mapa[8].noBoxMin >= 60 && p.mapa[8].noBoxMin <= 61 && p.mapa[5].estado === 'CARREGANDO', 'chegada pela hora: ' + p.mapa[8].noBoxMin);
-    // a permanencia (limite 120 min): 2 h depois
+    afirmar(p.mapa[8].estado === 'OCUPADO' && /T17:00:00$/.test(p.mapa[8].noBox) && p.mapa[8].itens[0].chegada === p.mapa[8].noBox && p.mapa[5].estado === 'CARREGANDO', 'chegada pela hora: ' + p.mapa[8].noBox);
+    afirmar(!('noBoxMin' in p.mapa[8]) && !('noBoxMin' in p.mapa[8].itens[0]) && !('permanenciaMin' in p), 'sem o tempo encostado');
+    // 3 h depois: o veiculo continua encostado, sem aviso de tempo (pedido de 26/11); a chegada continua gravada
     m.desvioRelogio += 90 * 60000;
     const s2 = entrar(m, GERENTE, '5555');
     const p2 = ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_());
-    const perm = p2.alertas.filter((a) => a.tipo === 'permanencia');
-    afirmar(perm.length === 1 && perm[0].carga === '900002' && perm[0].min >= 150 && perm[0].min <= 152 && /encostado há 2 h 3\d \(limite 2 h\)/.test(perm[0].texto), 'permanencia ' + JSON.stringify(perm));
-    acao(m, s2, 'parametrosCarga', { permanencia: 200 });
-    afirmar(!ctx(m).cgPatioDaTela_(ctx(m).cgCargasDoUltimo_()).alertas.some((a) => a.tipo === 'permanencia'), 'limite editado');
+    afirmar(!p2.alertas.some((a) => a.tipo === 'permanencia' || /encostado há/.test(a.texto)) && /T17:00:00$/.test(p2.mapa[8].noBox), 'sem aviso de permanencia ' + JSON.stringify(p2.alertas.map((a) => a.tipo)));
     // a carga sai do relatorio sem estar carregada
     acao(m, s2, 'enviarSituacaoCarga', envio('2026-11-25T16:00:00', { '900001': { GRANDEZA: ['X', 'X'] } }));
     const p3 = tela(m, s2).patio;
@@ -1232,11 +1231,63 @@ async function rodar() {
     afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT' && !r.DEPOSITO).length === 0, 'o do CD inteiro saiu');
     ['CARGA_PESSOAS', 'CARGA_ALOCACOES', 'CARGA_CADASTRO'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
     afirmar(banco.abas.find((a) => a.nome === 'CARGA_CARREGAMENTO').dados[0].indexOf('DESCRICAO') !== -1, 'coluna DESCRICAO');
+    const prm = {};
+    ctx(m).listar('PARAMETROS').forEach((r) => { prm[r.CHAVE] = (prm[r.CHAVE] || 0) + 1; });
+    afirmar(prm.CARGA_BOXES_ORDEM === 1 && prm.CARGA_BOXES_LOJA === 1, 'parametros novos uma vez: ' + prm.CARGA_BOXES_ORDEM + ' ' + prm.CARGA_BOXES_LOJA);
+    afirmar(ctx(m).parametro('CARGA_BOXES_ORDEM', '') === '26-1' && ctx(m).parametro('CARGA_BOXES_LOJA', '') === '1-2 = Feira de Santana; 3 = Vitória da Conquista', 'valores padrao');
     const f = ctx(m).listar('FILIAIS').find((x) => x.PRINCIPAL === 'SIM');
     afirmar(JSON.parse(f.PAINEIS).carga === 'DESATIVADO', 'o painel desligado ficou desligado: ' + f.PAINEIS);
     // de novo: nada muda
     m.cache.clear(); m.props.script.VERSAO_ESQUEMA = '8.15'; entrar(m, DONO, '4321');
     afirmar(ctx(m).cgEquipamentos_().filter((e) => e.tipo === 'CHECKOUT').length === 18, 'idempotente');
+  });
+
+  await caso('quadro das docas e lojas: ordem 26→1, boxes 1-2 da loja de Feira e 3 da de Vitória da Conquista, a carga da loja entra sozinha no box dela, sem os avisos do pátio, e continua na sequência', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', {
+      '762882': { box: '1', veiculo: '', nome: '762787/762788/762789/762790', d: { NOBRE: ['X', 'X'] } },
+      '762883': { box: '1', veiculo: '', nome: '762791/762792', d: { MIUDEZA: ['1/2', '0/2'] } },
+      '763384': { box: '3', veiculo: '', nome: 'C87-W-XX-VDC/RETIRA-OO-OOO-PRI', d: { MIUDEZA: ['0/1', '0/1'] } },
+      '900011': { box: '12', d: { GRANDEZA: ['X', 'X'] } },
+      '900012': { box: '14', d: { GRANDEZA: ['2/10', '0/10'] } } }));
+    let p = tela(m, s).patio;
+    // a ordem das docas como no CD: 26 ... 1
+    afirmar(p.ordem.length === 26 && p.ordem[0] === 26 && p.ordem[25] === 1 && p.ordemTexto === '26-1', 'ordem ' + p.ordem.join());
+    afirmar(JSON.stringify(p.lojas) === JSON.stringify([{ box: 1, nome: 'Feira de Santana' }, { box: 2, nome: 'Feira de Santana' }, { box: 3, nome: 'Vitória da Conquista' }]) &&
+      p.lojasTexto === '1-2 = Feira de Santana; 3 = Vitória da Conquista', 'lojas ' + JSON.stringify(p.lojas));
+    // a carga da loja entra sozinha no box dela, sem registro e sem veiculo
+    afirmar(p.mapa[0].loja === 'Feira de Santana' && p.mapa[1].loja === 'Feira de Santana' && p.mapa[2].loja === 'Vitória da Conquista' && !p.mapa[3].loja, 'loja do box');
+    afirmar(p.mapa[0].itens.map((x) => x.n).join() === '762882,762883' && p.mapa[0].itens.every((x) => x.virtual && !x.id && x.loja === 'Feira de Santana' && !x.veiculo && x.pdf) &&
+      p.mapa[0].estado === 'RESERVADO' && p.mapa[2].itens[0].n === '763384' && p.mapa[2].itens[0].loja === 'Vitória da Conquista' && p.mapa[1].estado === 'LIVRE', 'cargas da loja no box ' + JSON.stringify(p.mapa[0]).slice(0, 300));
+    afirmar(p.lojaPorCarga['762882'] === 'Feira de Santana' && p.lojaPorCarga['763384'] === 'Vitória da Conquista' && !p.lojaPorCarga['900011'] && p.porCarga['762882'].loja === 'Feira de Santana' && p.porCarga['762882'].box === 1, 'loja por carga');
+    // sem "pronta sem veiculo", "sem registro no patio" nem "box diferente" para as da loja
+    afirmar(p.semRegistro.map((x) => x.n).sort().join() === '900011,900012', 'sem registro so as de fora ' + p.semRegistro.map((x) => x.n));
+    afirmar(p.alertas.map((a) => a.tipo + ':' + a.carga).join() === 'prontaSemBox:900011', 'alertas ' + p.alertas.map((a) => a.tipo + ':' + a.carga));
+    // continuam nos indicadores e na sequencia
+    const d = tela(m, s);
+    afirmar(d.sequencia.itens.some((x) => x.n === '762882') && d.sequencia.itens.some((x) => x.n === '763384') && d.snapshot.cargas.length === 5, 'na sequencia e no relatorio');
+    // a carga de fora no box de uma loja: aviso; a da loja registrada em outro box: vale o registro, sem "box diferente"
+    let r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900012', box: 2, veiculo: 'TESTE12', tipo: 'TRUCK' });
+    afirmar(r.patio.alertas.some((a) => a.tipo === 'boxDaLoja' && a.box === 2 && a.carga === '900012' && /Loja Feira de Santana/.test(a.texto)), 'aviso de carga de fora no box da loja');
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '762883', box: 5 });
+    afirmar(r.patio.mapa[4].itens[0].n === '762883' && r.patio.mapa[4].itens[0].loja === 'Feira de Santana' && !r.patio.mapa[4].itens[0].virtual &&
+      r.patio.mapa[0].itens.map((x) => x.n).join() === '762882' && !r.patio.alertas.some((a) => a.carga === '762883'), 'registro vale ' + JSON.stringify(r.patio.alertas));
+    // "Carregada" na carga da loja: cria o registro ja carregado e o box fica livre
+    r = acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '763384', box: 3, carregada: 'SIM' });
+    afirmar(r.patio.mapa[2].estado === 'LIVRE' && !r.patio.mapa[2].itens.length && r.patio.carregadas.some((x) => x.n === '763384' && x.loja === 'Vitória da Conquista'), 'loja carregada');
+    // os ajustes: ordem e lojas (com validacao); "nenhum" desliga
+    afirmar(/Ordem dos boxes/.test(erroDe(() => acao(m, s, 'parametrosCarga', { ordemBoxes: '1-30' }))) && /Boxes das lojas/.test(erroDe(() => acao(m, s, 'parametrosCarga', { lojas: 'box um' }))) &&
+      /Boxes das lojas/.test(erroDe(() => acao(m, s, 'parametrosCarga', { lojas: '1 = A; 1 = B' }))), 'validacao');
+    acao(m, s, 'parametrosCarga', { ordemBoxes: '1-10, 12', lojas: '4 = Loja da Matriz; 6-7 = Loja de Alagoinhas' });
+    p = tela(m, s).patio;
+    afirmar(p.ordem.join() === '1,2,3,4,5,6,7,8,9,10,12' && p.lojasTexto === '4 = Matriz; 6-7 = Alagoinhas' && p.mapa[0].itens.length === 0 && p.semRegistro.some((x) => x.n === '762882'), 'ajustes ' + p.lojasTexto + ' ' + p.ordem);
+    acao(m, s, 'parametrosCarga', { lojas: 'nenhum' });
+    p = tela(m, s).patio;
+    afirmar(!p.lojas.length && p.lojasTexto === 'nenhum' && !Object.keys(p.lojaPorCarga).length && p.alertas.some((a) => a.tipo === 'prontaSemBox' && a.carga === '762882'), 'sem lojas');
+    // pura: a funcao do texto
+    const c = ctx(m);
+    afirmar(JSON.stringify(c.cgLerBoxesLoja_('1-2 = Feira de Santana; 3 = Vitória da Conquista', 26)) === JSON.stringify({ 1: 'Feira de Santana', 2: 'Feira de Santana', 3: 'Vitória da Conquista' }) &&
+      c.cgLerBoxesLoja_('30 = X', 26) === null && c.cgTextoBoxesLoja_({ 1: 'A', 2: 'A', 5: 'A', 3: 'B' }) === '1-2, 5 = A; 3 = B', 'texto das lojas');
   });
 
   const falhas = resultados.filter((x) => !x).length;

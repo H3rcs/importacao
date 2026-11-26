@@ -245,6 +245,7 @@ function acaoAjustarDesempenho(usuario, params) {
   if (params.aquecer === true || params.aquecer === false) {
     PropertiesService.getScriptProperties().setProperty('MANTER_AQUECIDO', params.aquecer ? 'SIM' : 'NAO');
     registrarLog(usuario.email, 'DESEMPENHO', 'SISTEMA', '', 'Aquecimento de 5 em 5 min ' + (params.aquecer ? 'ligado' : 'desligado'));
+    try { ajustarGatilhoDoAquecimento_(); } catch (e) { /* sem permissao de gatilho: vale no proximo "Ligar rotinas automaticas" */ }
   }
   if (params.apagar === true) {
     const f = dspFatia_(Date.now()), chaves = [];
@@ -346,3 +347,22 @@ function manterAquecido_() {
 }
 /* De quantos em quantos minutos o gatilho aquecerCache roda (instalarGatilhos). */
 function minutosDoAquecimento_() { return manterAquecido_() ? 5 : 15; }
+/*
+ * O gatilho no intervalo escolhido, sem o administrador precisar clicar em "Ligar rotinas automaticas"
+ * de novo: depois de publicar esta versao (o gatilho antigo e de 15 em 15) e ao ligar/desligar o
+ * aquecimento no painel. So troca o gatilho que ja existe — rotinas desligadas continuam desligadas.
+ */
+function ajustarGatilhoDoAquecimento_() {
+  const props = PropertiesService.getScriptProperties();
+  const quer = String(minutosDoAquecimento_());
+  if (props.getProperty('AQUECIMENTO_MIN') === quer) return false;
+  let tinha = false;
+  ScriptApp.getProjectTriggers().forEach(function (g) {
+    if (g.getHandlerFunction() === 'aquecerCache') { ScriptApp.deleteTrigger(g); tinha = true; }
+  });
+  if (!tinha) return false;
+  ScriptApp.newTrigger('aquecerCache').timeBased().everyMinutes(Number(quer)).create();
+  props.setProperty('AQUECIMENTO_MIN', quer);
+  try { if (typeof esquecerEstadoGatilhos === 'function') esquecerEstadoGatilhos(); } catch (e) {}
+  return true;
+}

@@ -1080,6 +1080,8 @@ function aquecerCache(e) {
   exigirPorta_();
   // As sessoes paradas saem da loja aqui (a qualquer hora), e nao na entrada de alguem.
   try { if (typeof podarSessoes_ === 'function') podarSessoes_(500); } catch (e) {}
+  // 27/11: o gatilho de antes (15 em 15) passa sozinho para o intervalo do aquecimento (5 em 5).
+  try { if (typeof ajustarGatilhoDoAquecimento_ === 'function') ajustarGatilhoDoAquecimento_(); } catch (e) {}
   const hora = Number(Utilities.formatDate(new Date(), fuso(), 'H'));
   if (hora < 5 || hora > 21) return { ok: true, pulou: 'fora de horario' };
   if (!bancoInstalado()) return { ok: true, pulou: 'sem banco' };

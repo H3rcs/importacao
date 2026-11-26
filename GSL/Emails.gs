@@ -42,6 +42,7 @@ function instalarGatilhos() {
   // o aquecimento completo continua de 15 em 15). MANTER_AQUECIDO = NAO (painel Desempenho) volta aos 15.
   ScriptApp.newTrigger('aquecerCache').timeBased()
     .everyMinutes(typeof minutosDoAquecimento_ === 'function' ? minutosDoAquecimento_() : 15).create();
+  if (typeof minutosDoAquecimento_ === 'function') PropertiesService.getScriptProperties().setProperty('AQUECIMENTO_MIN', String(minutosDoAquecimento_()));
   /*
    * A planilha da competencia aberta e atualizada pelo RH uma vez por
    * dia. Este gatilho reimporta so ela, de manha, para o painel ja

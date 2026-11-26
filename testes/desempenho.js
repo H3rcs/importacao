@@ -670,6 +670,25 @@ caso('aquecimento: de 5 em 5 min (leve) e o completo de 15 em 15; MANTER_AQUECID
   chamar(m, DONO, 'executarAcao', { t: dono.t, f: dono.f }, 'ligarGatilhos', {});
   const g = m.gatilhos.find((x) => x.fn === 'aquecerCache');
   afirmar(g && g.desc.indexOf('everyMinutes(5)') !== -1, 'gatilho de 5 em 5: ' + JSON.stringify(g && g.desc));
+  // desligar no painel troca o gatilho na hora (sem clicar em Ligar rotinas automaticas)
+  acao(m, dono, 'ajustarDesempenho', { aquecer: false });
+  const aq = () => m.gatilhos.filter((x) => x.fn === 'aquecerCache');
+  afirmar(aq().length === 1 && aq()[0].desc.indexOf('everyMinutes(15)') !== -1, 'desligado: gatilho de 15 em 15: ' + JSON.stringify(aq().map((x) => x.desc)));
+  acao(m, dono, 'ajustarDesempenho', { aquecer: true });
+  afirmar(aq().length === 1 && aq()[0].desc.indexOf('everyMinutes(5)') !== -1, 'ligado: 5 em 5 de novo');
+  // a versao publicada por cima do gatilho antigo (15 em 15, sem a marca): o proprio gatilho passa para 5 em 5
+  const c2 = ctx(m, '');
+  c2.PropertiesService.getScriptProperties().deleteProperty('AQUECIMENTO_MIN');
+  m.gatilhos.splice(m.gatilhos.indexOf(aq()[0]), 1);
+  c2.ScriptApp.newTrigger('aquecerCache').timeBased().everyMinutes(15).create();
+  c2.aquecerCache();
+  afirmar(aq().length === 1 && aq()[0].desc.indexOf('everyMinutes(5)') !== -1, 'o gatilho antigo virou 5 em 5: ' + JSON.stringify(aq().map((x) => x.desc)));
+  const antes = aq()[0].id; ctx(m, '').aquecerCache();
+  afirmar(aq()[0].id === antes, 'e nao troca de novo a cada vez');
+  // rotinas desligadas (sem o gatilho): nada e ligado sozinho
+  m.gatilhos.splice(m.gatilhos.indexOf(aq()[0]), 1);
+  acao(m, dono, 'ajustarDesempenho', { aquecer: false });
+  afirmar(!aq().length, 'sem gatilho, continua sem');
 });
 
 caso('leitor de PDF dentro do projeto: a acao leitorPdf entrega o pdf.js (o mesmo da pasta vendor) e a faixa confere os dois arquivos', () => {

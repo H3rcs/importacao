@@ -980,7 +980,7 @@ function acaoEquipamentoCarga(usuario, params) {
   }
   const dep = pool.dep;
   const obs = estado === 'MANUTENCAO' ? cgTexto_(p.obs, 120) : '';
-  const nome = CG_EQUIP_NOME[tipo][0] + (tipo === 'CHECKOUT' ? ' da ' + cgNomeDep_(dep) : '');
+  const nome = CG_EQUIP_NOME[tipo][0] + (tipo === 'CHECKOUT' ? (dep === 'NOBRE' ? ' do ' : ' da ') + cgNomeDep_(dep) : '');
   let numero = p.numero === '' || p.numero == null ? 0 : Number(p.numero);
   comTrava(function () {
     cgMaterializar_(pool, usuario.email);
@@ -992,7 +992,7 @@ function acaoEquipamentoCarga(usuario, params) {
   });
   esquecerLeituras();
   const onde = estado === 'USO' ? 'em uso' : (estado === 'LIVRE' ? (CG_EQUIP_CONSUMO[tipo] ? 'funcionando (no pool' + (tipo === 'CHECKOUT' ? ')' : ' do CD)') : 'livre') : 'em manutenção');
-  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: CG_EQUIP_NOME[tipo][0] + ' ' + numero + (tipo === 'CHECKOUT' ? ' da ' + cgNomeDep_(dep) : '') + ': ' + onde + '.' };
+  return { ok: true, equipamentos: cgEquipamentos_(), g: cgGeracao_(), recado: CG_EQUIP_NOME[tipo][0] + ' ' + numero + (tipo === 'CHECKOUT' ? (dep === 'NOBRE' ? ' do ' : ' da ') + cgNomeDep_(dep) : '') + ': ' + onde + '.' };
 }
 function cgNomeDep_(id) { const d = CG_DEPOSITOS.filter(function (x) { return x.id === id; })[0]; return d ? d.nome : id; }
 

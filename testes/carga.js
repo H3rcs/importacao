@@ -280,15 +280,15 @@ async function rodar() {
   }
 
   console.log('\nServidor:');
-  await caso('instalação: tabelas, painel ligado, 12 paleteiras e 12 check-outs no pool do CD e 35 carrinhos na Miudeza, limites do equilíbrio', () => {
+  await caso('instalação: tabelas, painel ligado, 12 paleteiras no pool do CD, 35 carrinhos e 8 check-outs na Miudeza, 10 check-outs no Nobre, limites do equilíbrio', () => {
     const m = mundo(); const s = entrar(m, DONO, '4321');
     const d = tela(m, s);
     const pal = d.equipamentos.filter((e) => e.tipo === 'PALETEIRA'), car = d.equipamentos.filter((e) => e.tipo === 'CARRINHO');
     afirmar(pal.length === 12 && pal.every((e) => e.estado === 'LIVRE' && e.dep === '' && e.id), 'paleteiras ' + JSON.stringify(pal.slice(0, 2)));
     afirmar(car.length === 35 && car.every((e) => e.estado === 'LIVRE' && e.dep === 'MIUDEZA' && e.id), 'carrinhos ' + car.length);
     const chk = d.equipamentos.filter((e) => e.tipo === 'CHECKOUT');
-    afirmar(chk.length === 12 && chk.every((e) => e.estado === 'LIVRE' && e.id), 'check-outs ' + chk.length);
-    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 59, 'gravados na planilha');
+    afirmar(chk.length === 18 && chk.every((e) => e.estado === 'LIVRE' && e.id) && chk.filter((e) => e.dep === 'MIUDEZA').length === 8 && chk.filter((e) => e.dep === 'NOBRE').length === 10, 'check-outs ' + chk.length);
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 65, 'gravados na planilha');
     afirmar(d.turnos.map((t) => t.texto).join(' ') === '06:50–16:14 16:04–01:01 23:00–07:00' && d.turnoAgora.ativos.join() === 'B', 'turnos ' + JSON.stringify(d.turnoAgora));
     afirmar(d.sequencia && !d.sequencia.usada && !d.sequencia.itens.length && d.patio && d.patio.n === 26 && d.patio.contagem.livres === 26, 'fase 2 vazia');
     afirmar(d.flowrack.ruas.join() === '6,6,6,6,6' && Array.isArray(d.faltas) && Array.isArray(d.envios), 'flowrack/faltas');
@@ -317,7 +317,7 @@ async function rodar() {
     const d = tela(m, s);
     afirmar(d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.id).length === 12 && d.equipamentos.filter((e) => e.tipo === 'CARRINHO' && e.id).length === 35, 'semeados');
     afirmar(JSON.parse(ctx(m).listar('FILIAIS').find((x) => x.PRINCIPAL === 'SIM').PAINEIS).carga === 'ATIVO', 'painel ligado');
-    afirmar(m.props.script.VERSAO_ESQUEMA === '8.15', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+    afirmar(m.props.script.VERSAO_ESQUEMA === '8.16', 'versao ' + m.props.script.VERSAO_ESQUEMA);
   });
 
   await caso('migração 8.14 → 8.15: tabelas novas e a coluna RUA, paleteira "em uso" volta para o pool (a manutenção fica), check-outs semeados, parâmetros novos', () => {
@@ -344,18 +344,18 @@ async function rodar() {
     m.cache.clear();
     const s = entrar(m, DONO, '4321');
     const d = tela(m, s);
-    afirmar(m.props.script.VERSAO_ESQUEMA === '8.15', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+    afirmar(m.props.script.VERSAO_ESQUEMA === '8.16', 'versao ' + m.props.script.VERSAO_ESQUEMA);
     const pal = ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'PALETEIRA');
     afirmar(!pal.some((r) => r.ESTADO === 'USO') && pal.filter((r) => r.ESTADO === 'MANUTENCAO').length === 1 && pal.find((r) => r.ESTADO === 'MANUTENCAO').OBSERVACAO === 'roda', 'paleteiras ' + JSON.stringify(pal.map((r) => r.ESTADO)));
-    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT').length === 12, 'check-outs semeados');
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT').length === 18, 'check-outs semeados');
     afirmar(banco.abas.find((a) => a.nome === 'CARGA_EQUIPE').dados[0].indexOf('RUA') !== -1, 'coluna RUA');
     ['CARGA_SEQUENCIA', 'CARGA_PRESENCA', 'CARGA_PASSAGEM', 'CARGA_BOXES', 'CARGA_CARREGAMENTO'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
     afirmar(ctx(m).parametro('CARGA_TURNO_B', '') === '16:04-01:01' && ctx(m).parametro('CARGA_BOXES', '') === '26', 'parametros');
-    afirmar(d.equipamentos.filter((e) => e.tipo === 'CHECKOUT').length === 12 && d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.estado === 'MANUTENCAO').length === 1, 'tela');
+    afirmar(d.equipamentos.filter((e) => e.tipo === 'CHECKOUT').length === 18 && d.equipamentos.filter((e) => e.tipo === 'PALETEIRA' && e.estado === 'MANUTENCAO').length === 1, 'tela');
     // abrir de novo nao migra outra vez (nada duplica)
     m.cache.clear();
     tela(m, entrar(m, DONO, '4321'));
-    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 59, 'nada duplicou: ' + ctx(m).listar('CARGA_EQUIPAMENTOS').length);
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').length === 65, 'nada duplicou: ' + ctx(m).listar('CARGA_EQUIPAMENTOS').length);
   });
 
   await caso('envio do PDF real: 47 cargas, resumo por depósito igual à conta direta das células, 24 h pendente e o "-" fora das contas', () => {
@@ -488,7 +488,7 @@ async function rodar() {
     afirmar(!r.equipe.length, 'limpar tudo');
   });
 
-  await caso('paleteiras e check-outs acompanham as pessoas: cada separador (G·NG·P·B) usa uma paleteira, cada conferente um check-out; manutenção à mão; "faltam N"', () => {
+  await caso('paleteiras e check-outs acompanham as pessoas: cada separador (G·NG·P·B) usa uma paleteira, cada conferente da Miudeza ou do Nobre um check-out do depósito; manutenção à mão; "faltam N"', () => {
     const m = mundo(); const s = entrar(m, GERENTE, '5555');
     ligarQuadro(m, s);
     const p = tela(m, s).pessoas;
@@ -496,13 +496,15 @@ async function rodar() {
     const consumo = () => { const c = ctx(m); return c.cgConsumoEquip_(c.cgEquipe_(), c.cgEquipamentos_()); };
     // o "em uso" a mao nao existe mais
     afirmar(/entra em uso sozinha/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 1, estado: 'USO', dep: 'GRANDEZA' }))), 'paleteira USO recusado');
-    afirmar(/entra em uso sozinho/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', numero: 1, estado: 'USO' }))), 'checkout USO recusado');
+    afirmar(/entra em uso sozinho/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', dep: 'NOBRE', numero: 1, estado: 'USO' }))), 'checkout USO recusado');
+    afirmar(/só na Miudeza ou no Nobre/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', dep: 'GRANDEZA', numero: 1, estado: 'MANUTENCAO' }))), 'checkout so na Miudeza e no Nobre');
     [0, 1, 2].forEach((i) => { mover(p[i], 'GRANDEZA', 'SEPARADOR'); m.desvioRelogio += 1000; });
     mover(p[3], 'MIUDEZA', 'SEPARADOR'); mover(p[4], 'NOBRE', 'SEPARADOR', 2);       // Miudeza e Nobre nao usam paleteira
     mover(p[5], 'NOBRE', 'CONFERENTE'); mover(p[6], 'GRANDEZA', 'CONFERENTE');
     let c = consumo();
     afirmar(c.PALETEIRA.pessoas === 3 && c.PALETEIRA.emUso === 3 && c.PALETEIRA.livres === 9 && !c.PALETEIRA.falta && c.PALETEIRA.porDep.GRANDEZA.com === 3, 'paleteiras ' + JSON.stringify(c.PALETEIRA));
-    afirmar(c.CHECKOUT.pessoas === 2 && c.CHECKOUT.livres === 10 && c.CHECKOUT.porDep.NOBRE.com === 1, 'check-outs ' + JSON.stringify(c.CHECKOUT));
+    afirmar(c.CHECKOUT_NOBRE.pessoas === 1 && c.CHECKOUT_NOBRE.livres === 9 && c.CHECKOUT_NOBRE.porDep.NOBRE.com === 1 && c.CHECKOUT_MIUDEZA.pessoas === 0 && c.CHECKOUT_MIUDEZA.livres === 8,
+      'check-outs (o conferente da Grandeza nao usa) ' + JSON.stringify([c.CHECKOUT_NOBRE, c.CHECKOUT_MIUDEZA]));
     // pool menor e uma em manutencao: os dois separadores que chegaram por ultimo (Blocado) ficam sem
     acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 4 });
     let r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 2, estado: 'MANUTENCAO', obs: 'roda solta' });
@@ -519,10 +521,15 @@ async function rodar() {
     r = acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 2, estado: 'LIVRE' });
     afirmar(/funcionando/.test(r.recado) && consumo().PALETEIRA.falta === 1, 'voltou: ' + r.recado);
     // check-outs: quantidade e manutencao
-    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'CHECKOUT', quantidade: 1 });
-    afirmar(/1 check-out no CD/.test(r.recado), r.recado);
+    mover(p[9], 'MIUDEZA', 'CONFERENTE'); m.desvioRelogio += 1000; mover(p[10], 'MIUDEZA', 'CONFERENTE');
+    r = acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'CHECKOUT', dep: 'MIUDEZA', quantidade: 1 });
+    afirmar(/1 check-out na Miudeza/.test(r.recado), r.recado);
+    r = acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', dep: 'NOBRE', numero: 10, estado: 'MANUTENCAO', obs: 'leitor' });
+    afirmar(/Check-out 10 do Nobre: em manutenção/.test(r.recado), r.recado);
     c = consumo();
-    afirmar(c.CHECKOUT.falta === 1 && c.CHECKOUT.sem.length === 1, 'check-out falta ' + JSON.stringify(c.CHECKOUT));
+    afirmar(c.CHECKOUT_MIUDEZA.falta === 1 && c.CHECKOUT_MIUDEZA.sem.join() === p[10].k && c.CHECKOUT_NOBRE.falta === 0 && c.CHECKOUT_NOBRE.manutencao === 1 && c.CHECKOUT_NOBRE.total === 10,
+      'check-out falta ' + JSON.stringify([c.CHECKOUT_MIUDEZA, c.CHECKOUT_NOBRE]));
+    afirmar(r.equipamentos.filter((e) => e.tipo === 'CHECKOUT' && e.dep === 'MIUDEZA').length === 1 && r.equipamentos.filter((e) => e.tipo === 'CHECKOUT' && e.dep === 'NOBRE').length === 10, 'quantidades por deposito');
     afirmar(/de 0 a 60/.test(erroDe(() => acao(m, s, 'quantidadeEquipamentoCarga', { tipo: 'PALETEIRA', quantidade: 61 }))), 'limite 60');
     afirmar(/não existe/.test(erroDe(() => acao(m, s, 'equipamentoCarga', { tipo: 'PALETEIRA', numero: 9, estado: 'MANUTENCAO' }))), 'numero fora');
     // carrinhos: continuam a mao (ciclo e quantidade)
@@ -776,8 +783,8 @@ async function rodar() {
     afirmar(b7.estado === 'RESERVADO' && b7.itens[0].n === '900002' && b7.itens[0].tipo === 'MEDIO' && b7.itens[0].veiculo === 'ABC1D23' && b7.itens[0].pdf.estado === 'pronta', 'box 7 reservado ' + JSON.stringify(b7.itens[0]).slice(0, 200));
     afirmar(/já está no box 7/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900002' }))), 'duplicada');
     afirmar(/Box de 1 a 26/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', box: 27 }))), 'box 27');
-    afirmar(/Situação "TANTO FAZ" não está na lista/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', situacao: 'tanto faz' }))), 'situacao fora da lista');
-    afirmar(/Previsão: escreva/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', previsao: 'logo' }))), 'previsao');
+    afirmar(/Observação "TANTO FAZ" não está na lista/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', situacao: 'tanto faz' }))), 'situacao fora da lista');
+    afirmar(/Horário de chegada: escreva/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '900001', previsao: 'logo' }))), 'previsao');
     afirmar(/Informe o número/.test(erroDe(() => acao(m, s, 'carregamentoCarga', { op: 'salvar', carga: '' }))), 'sem numero');
     // o carro chegou: o box fica ocupado com o veiculo encostado
     m.desvioRelogio += 60000;
@@ -940,7 +947,7 @@ async function rodar() {
     acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { GRANDEZA: ['8/10', '0/10'] }, '900002': { h24: true, d: { NOBRE: ['1/10', '0/10'] } }, '900003': { GRANDEZA: ['X', 'X'] } }));
     acao(m, s, 'moverPessoaCarga', { pessoa: p[0], destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } });
     acao(m, s, 'presencaCarga', { pessoa: p[1], falta: true });
-    acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', numero: 3, estado: 'MANUTENCAO', obs: 'leitor' });
+    acao(m, s, 'equipamentoCarga', { tipo: 'CHECKOUT', dep: 'NOBRE', numero: 3, estado: 'MANUTENCAO', obs: 'leitor' });
     afirmar(/ainda não confirmou/.test(erroDe(() => acao(m, s, 'passagemCarga', { op: 'ciente', sai: 'A', entra: 'B' }))), 'ciente sem confirmar');
     afirmar(/Diga o turno/.test(erroDe(() => acao(m, s, 'passagemCarga', { op: 'confirmar', sai: 'A', entra: 'A' }))), 'turnos iguais');
     let r = acao(m, s, 'passagemCarga', { op: 'confirmar', sai: 'A', entra: 'B', obs: 'Box 7 com defeito na porta' });

@@ -218,6 +218,36 @@ async function rodar() {
     a.forEach((l, i) => afirmar(l === b[i], 'linha ' + (i + 1) + ': texto ' + l + ' / pdf ' + b[i]));
   });
 
+  await caso('texto colado de outros visores (27/11): um pedaço por linha (visor do Chrome), tabulação, cabeçalho repetido — as mesmas 47 cargas; o que não dá, diz por quê', async () => {
+    const cp = require('child_process');
+    let padrao = '', layout = '', cru = '';
+    try {
+      padrao = cp.execSync('pdftotext "' + REAL + '" -', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      layout = cp.execSync('pdftotext -layout "' + REAL + '" -', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      cru = cp.execSync('pdftotext -raw "' + REAL + '" -', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    } catch (e) { console.log('        (sem o pdftotext nesta maquina)'); return; }
+    const b = real.cargas.map((c) => linhaDe(c, real.depositos));
+    const abas = layout.split('\n').map((l) => l.trim().replace(/ {2,}/g, '\t')).join('\n');
+    const nbsp = layout.replace(/ /g, '\u00a0');
+    const repetido = layout + '\n' + layout;                          // colou duas vezes / cabecalho repetido
+    [['um pedaço por linha', padrao], ['tabulação', abas], ['espaço que não quebra', nbsp], ['repetido', repetido]].forEach(([nome, texto]) => {
+      const t = L.cgLerTexto(texto);
+      const a = t.cargas.map((c) => linhaDe(c, t.depositos));
+      afirmar(t.emitidoEm === '2026-11-25T08:48:58' && a.length === 47 && !t.problemas.length, nome + ': ' + a.length + ' ' + JSON.stringify(t.problemas.slice(0, 2)));
+      a.forEach((l, i) => afirmar(l === b[i], nome + ', linha ' + (i + 1) + ': ' + l + ' / pdf ' + b[i]));
+    });
+    // a ordem crua do PDF (pdftotext -raw): as cargas vem todas; o "*" vem longe da carga e se perde (a previa mostra 0 de 24 h)
+    const r = L.cgLerTexto(cru);
+    afirmar(r.cargas.length === 47 && !r.problemas.length, 'cru: ' + r.cargas.length + ' ' + JSON.stringify(r.problemas.slice(0, 2)));
+    // pedacos que nao dao: o motivo aparece
+    const cortado = L.cgLerTexto('SITUAÇÃO 25/11/2026 08:48:58\n762610 ARA-B-XX-DELMIRO MEDIO - DEP 18 X X X X\n763304 * BAX VUC 2700 10 X X X 4/5 X X - - X X X X');
+    afirmar(cortado.cargas.length === 1 && cortado.cargas[0].nro === '763304' && cortado.cargas[0].h24 && cortado.problemas.length === 1 &&
+      cortado.problemas[0].nro === '762610' && /12 células/.test(cortado.problemas[0].motivo), 'cortado: ' + JSON.stringify(cortado.problemas));
+    afirmar(/não tem números de carga/.test(L.cgLerTexto('qualquer coisa').avisos.join()) && /vazia/.test(L.cgLerTexto('  ').avisos.join()) &&
+      /nenhum com as 12 células/.test(L.cgLerTexto('762610 ARA X X').avisos.join()), 'avisos de nada lido');
+    afirmar(/data e a hora de emissão/.test(L.cgLerTexto('762610 A MEDIO 1 X X X X X X X X X X X X').avisos.join()), 'sem a emissao: avisa');
+  });
+
   await caso('células: X, -, a/b com espaços; o resto (texto, a > b, b = 0) fica sem leitura', async () => {
     const c = L.cgCelulaTexto;
     afirmar(c('X') === 'X' && c('x') === 'X' && c('-') === '-' && c('–') === '-' && c('4 / 9') === '4/9' && c('42/45') === '42/45', 'validas');

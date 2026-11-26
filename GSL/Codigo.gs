@@ -334,6 +334,19 @@ function acaoPelaPagina_(p) {
   let resultado = null;
   if (idem) {
     try { const ja = cache.get(idem); if (ja) resultado = JSON.parse(ja); } catch (x) {}
+    /*
+     * 27/11 — O MESMO CLIQUE ENQUANTO O PRIMEIRO GRAVA (o "Continuar" com o Google demorando, ou F5): antes a pagina
+     * voltava na hora com "A gravacao ainda esta sendo feita" e a tela montada ANTES de a gravacao terminar — para a
+     * pessoa, "nao aconteceu nada". Agora espera o primeiro terminar (ate 25 s) e monta a tela depois dele.
+     */
+    for (let i = 0; resultado && resultado.pendente && i < 25; i++) {
+      Utilities.sleep(1000);
+      try { const ja = cache.get(idem); resultado = ja ? JSON.parse(ja) : resultado; } catch (x) {}
+    }
+    if (resultado && !resultado.pendente) {
+      // a tela abaixo tem de ver o que o primeiro gravou: nada memorizado desta execucao vale
+      try { _geracao = null; _geracaoTb = {}; esquecerLeituras(); esquecerProps(); } catch (x) {}
+    }
   }
   if (!resultado) {
     if (idem) {
@@ -344,10 +357,10 @@ function acaoPelaPagina_(p) {
     try { params = JSON.parse(String(p.ap || '{}')) || {}; } catch (x) { params = {}; }
     try {
       const r = JSON.parse(executarAcao({ t: p.t, f: p.filial }, String(p.acao), params)) || {};
-      resultado = { ok: r.ok !== false, erro: r.ok === false ? String(r.erro || '') : '',
+      resultado = { acao: String(p.acao || '').slice(0, 40), ok: r.ok !== false, erro: r.ok === false ? String(r.erro || '') : '',
         recado: String(r.recado || ''), avisoEmail: String(r.avisoEmail || ''), aviso: String(r.aviso || '') };
     } catch (erro) {
-      resultado = { ok: false, erro: String(erro.message || erro) };
+      resultado = { acao: String(p.acao || '').slice(0, 40), ok: false, erro: String(erro.message || erro) };
     }
     if (idem) { try { cache.put(idem, JSON.stringify(resultado), 600); } catch (x) {} }
   }

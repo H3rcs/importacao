@@ -1519,8 +1519,18 @@ function pintarCaixaFilial() {
 const BUILD_APP = '2026.11.27';
 function mostrarResultadoAcao(x) {
   if (!x) return;
+  // 27/11: a gravacao ainda rodava quando esta pagina foi montada (o servidor esperou 25 s): a tela pode estar sem ela.
+  if (x.pendente) {
+    avisar('A gravação ainda estava sendo feita quando esta página foi montada. Clique em "Atualizar dados" (barra lateral) em alguns segundos para ver o resultado.', true);
+    return;
+  }
   if (x.ok === false) {
     const msg = String(x.erro || 'Não consegui gravar.');
+    // 27/11: o envio da Situacao de Carga recusado (pela pagina) nao pode passar despercebido num aviso que some.
+    if (x.acao === 'enviarSituacaoCarga') {
+      return abrirJanela('A situação de carga NÃO foi salva', `<p style="margin-top:0;line-height:1.7">${esc(avisoDaRecusa(msg))}</p>
+        <p class="dica">Confira o relatório e envie de novo (Enviar situação).</p>`, '<button class="botao" onclick="fecharJanela()">Entendi</button>');
+    }
     if (/MailApp|send_mail|autoriz/i.test(msg)) return janelaAutorizarEmail(msg);
     return avisar(avisoDaRecusa(msg), true);
   }
@@ -1731,14 +1741,29 @@ function navegarPelaPagina(campos) {
   document.body.appendChild(f);
   if (campos.acao) { GRAVANDO_PELA_PAGINA = Date.now(); gravarSs(CHAVE_ACAO, String(Date.now())); }
   f.submit();
-  // Ainda aqui depois de 4 s: o navegador barrou a navegacao (o clique ja
-  // tinha "vencido"). Um botao da ao navegador o clique que ele exige.
+  /*
+   * Ainda aqui depois de 6 s: o navegador barrou a navegacao (o clique ja tinha "vencido") — um botao da ao
+   * navegador o clique que ele exige. 27/11: SO onde o navegador nao diz se o clique valia. No Chrome (que diz,
+   * navigator.userActivation), o envio saiu com o clique valendo: estar aqui depois de 6 s e o GOOGLE DEMORANDO
+   * (gravacao grande, partida a frio). O "Continuar" de antes reenviava o mesmo POST no meio da gravacao: a
+   * pagina nova chegava com "A gravacao ainda esta sendo feita" e a tela de antes ("nao aconteceu nada").
+   * Agora a tela so avisa que esta esperando o Google.
+   */
   setTimeout(() => {
-    // Navegacao em andamento (servidor lento) nao e bloqueio: nada a fazer.
     if (NAVEGACAO_PENDENTE !== campos || SAINDO_DA_PAGINA) return;
+    if (ua) { avisarEsperaDaPagina(campos); return; }
     pedirCliqueParaNavegar();
   }, 6000);
   return true;
+}
+function avisarEsperaDaPagina(campos) {
+  avisar(campos.acao ? 'Gravando… o Google está demorando para responder. Não feche nem recarregue: a página volta sozinha com a tela atualizada.'
+    : 'Abrindo… o Google está demorando para responder. A página volta sozinha.');
+  setTimeout(() => {
+    if (NAVEGACAO_PENDENTE !== campos || SAINDO_DA_PAGINA) return;
+    // 40 s e nada: ai sim, o clique (a navegacao pode ter sido barrada sem aviso).
+    pedirCliqueParaNavegar();
+  }, 34000);
 }
 /* O clique que o navegador exige: na janela e, se ela for fechada, tambem na pagina. */
 function pedirCliqueParaNavegar() {

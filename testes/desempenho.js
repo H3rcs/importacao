@@ -693,6 +693,26 @@ caso('leitor de PDF dentro do projeto: a acao leitorPdf entrega o pdf.js (o mesm
   afirmar(!ctx(m).arquivosForaDaVersao_(true).length, 'todos na versao');
 });
 
+caso('reserva (27/11): o mesmo clique reenviado enquanto o primeiro grava espera ele terminar e a pagina ja vem com a gravacao', () => {
+  const m = mundo(); const s = entrar(m, GERENTE, '5555');
+  const idem = '11111111-2222-4333-8444-555555555555';
+  m.cache.set('feito_' + idem, { v: JSON.stringify({ ok: true, pendente: true, recado: 'A gravação ainda está sendo feita.' }), expira: Date.now() + 60000 });
+  const bilhete = cargaDaPagina(ctx(m, '').doGet({ parameter: {} })).bilhete;
+  const c = novaExecucao(m, PASTA, { contaGoogle: 'computador.cd@bartofil.com.br' }, OP);
+  let dormiu = 0;
+  c.Utilities.sleep = () => {
+    if (++dormiu !== 3) return;
+    // o primeiro POST (outra execucao) termina agora: gravou e deixou o resultado
+    acao(m, s, 'salvarAcao', { acao: 'Gravada pelo primeiro clique', prazo: '2026-12-01', turno: 'A', responsaveisEmails: [GERENTE] });
+    m.cache.set('feito_' + idem, { v: JSON.stringify({ ok: true, recado: 'Ação criada.' }), expira: Date.now() + 60000 });
+  };
+  const saida = c.doPost({ parameter: { bilhete, t: s.t, filial: s.f, acao: 'salvarAcao', ap: '{}', idem, tela: 'acoes' } });
+  const carga = cargaDaPagina(saida);
+  afirmar(dormiu === 3 && carga.resultadoAcao && carga.resultadoAcao.recado === 'Ação criada.' && !carga.resultadoAcao.pendente, 'esperou: ' + JSON.stringify([dormiu, carga.resultadoAcao]));
+  afirmar(JSON.stringify(carga.telaEmbutida.resposta.dados).indexOf('Gravada pelo primeiro clique') !== -1, 'a tela ja tem a gravacao do primeiro clique');
+  afirmar(ctx(m).listar('ACOES').filter((a) => /Gravada pelo primeiro/.test(a.ACAO)).length === 1, 'gravou uma vez so');
+});
+
 const falhas = resultados.filter((x) => !x).length;
 console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
 process.exit(falhas ? 1 : 0);

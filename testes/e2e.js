@@ -423,6 +423,16 @@ function desdeMarca(aba) {
  */
 const PDF_REAL = path.join(__dirname, 'fixtures', 'situacao-carga-real.pdf');
 const VENDOR_PDFJS = path.join(__dirname, '..', 'ferramentas', 'vendor', 'pdfjs-3.11.174');
+/*
+ * 27/11: o texto do PDF como a pessoa cola (Ctrl+A, Ctrl+C no PDF aberto). 'layout' = pdftotext -layout (as
+ * colunas na mesma linha); 'padrao' = pdftotext sem -layout (um pedaco por linha, como o visor de PDF do Chrome
+ * costuma copiar); 'abas' = as celulas separadas por tabulacao.
+ */
+function textoColado(modo) {
+  const cp = require('child_process');
+  const bruto = cp.execSync('pdftotext ' + (modo === 'layout' || modo === 'abas' ? '-layout ' : '') + '"' + PDF_REAL + '" -').toString();
+  return modo === 'abas' ? bruto.split('\n').map((l) => l.trim().replace(/ {2,}/g, '\t')).join('\n') : bruto;
+}
 async function cdnjsLocal(contexto) {
   await contexto.route(/^https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/pdf\.js\/3\.11\.174\/(pdf(\.worker)?\.min\.js)$/, (rota) => {
     const nome = /(pdf(\.worker)?\.min\.js)$/.exec(rota.request().url())[1];
@@ -5770,6 +5780,93 @@ async function rodar() {
     afirmar(!abaC.erros.length, 'erros (consulta): ' + abaC.erros.join(' | '));
     await ctxC.close(); await s.fechar();
   });
+
+  /*
+   * 27/11 — "ENVIEI A SITUACAO E NAO ACONTECEU NADA". O envio pelo texto colado (o leitor de PDF falhou no
+   * computador do gerente), com o canal normal e com o Google barrando a conversa (HTTP 403: a gravacao vai
+   * pela pagina, POST). Em cada caso a tela tem de mostrar as 47 cargas novas — ou dizer por que nao.
+   */
+  for (const modo of ['normal', '403', '403-lento']) {
+    await cenario('situacao de carga pelo texto colado (' + modo + '): cola, le as 47 cargas, salva e a tela mostra a situacao nova', async () => {
+      const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+      pelaPorta(s, DONO, DONO, '4321');
+      const contexto = await navegador.newContext({ viewport: { width: 1280, height: 900 } });
+      await contexto.clock.install({ time: new Date('2026-11-25T18:00:00-03:00') });
+      await contexto.route(/cdnjs\.cloudflare\.com/, (rota) => rota.abort());
+      const barrado = modo !== 'normal';
+      const aba = await abrirAba(s, DONO, { contexto, bloqueio403: barrado });
+      await entrar(aba, DONO, '4321');
+      afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'entrou');
+      let f = await frame(aba);
+      await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+      if (barrado) { await aba.page.waitForTimeout(500); await esperarTela(aba, ['aplicacao'], 20000); f = await frame(aba); }
+      await esperarCarga(f);
+      afirmar(/Nenhuma situação de carga enviada ainda/.test(await f.textContent('.cg-hero')), 'comeca vazia');
+      // outro navegador com a mesma tela aberta (a TV do CD): tem de ver a situacao nova pelo ao vivo
+      let outra = null;
+      if (modo === 'normal') {
+        const ctxB = await navegador.newContext({ viewport: { width: 1280, height: 900 } });
+        await ctxB.clock.install({ time: new Date('2026-11-25T18:00:00-03:00') });
+        outra = await abrirAba(s, DONO, { contexto: ctxB });
+        await entrar(outra, DONO, '4321');
+        await esperarTela(outra, ['aplicacao'], 20000);
+        outra.f = await frame(outra);
+        await outra.f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+        await esperarCarga(outra.f);
+        outra.ctx = ctxB;
+      }
+      await f.click('.cg-btn-primario');
+      await f.click('.cg-envio .cg-link');
+      await f.fill('#cg-texto', textoColado('padrao'));
+      await f.click('button:has-text("Ler o texto")');
+      await f.waitForSelector('.cg-previa-ok', { timeout: 10000 });
+      const previa = (await f.textContent('.cg-previa-ok')).replace(/\s+/g, ' ');
+      afirmar(/47 cargas lidas/.test(previa) && /emitida em 25\/11\/2026 08:48:58/.test(previa), 'previa: ' + previa);
+      await f.waitForFunction(() => !document.getElementById('cg-salvar').disabled, null, { timeout: 5000 });
+      // 403-lento: o Google leva 9 s para devolver a pagina da gravacao. Antes, aos 6 s, vinha o "Continuar", que
+      // reenviava o POST no meio da gravacao: a pagina voltava com "A gravacao ainda esta sendo feita" e a tela velha.
+      if (modo === '403-lento') await contexto.addCookies([{ name: 'gas_atraso_post', value: '9000', url: s.url }]);
+      await f.click('#cg-salvar');
+      if (modo === '403-lento') {
+        await aba.page.waitForTimeout(7000);
+        const janela = await f.evaluate(() => ({ aberta: !document.getElementById('janela').classList.contains('oculto'), titulo: document.getElementById('janela-titulo').textContent,
+          recado: (document.getElementById('recado') || {}).textContent || '' })).catch(() => ({ navegando: true }));
+        afirmar(janela.navegando || (!(janela.aberta && /Continuar/.test(janela.titulo)) && /Google está demorando/.test(janela.recado)), 'sem o Continuar no meio da gravacao: ' + JSON.stringify(janela));
+        await contexto.clearCookies({ name: 'gas_atraso_post' });
+      }
+      if (barrado) { await aba.page.waitForTimeout(500); await esperarTela(aba, ['aplicacao'], 30000); f = await frame(aba); await esperarCarga(f); }
+      await f.waitForFunction(() => { const t = document.querySelector('.cg-hero-titulo'); return t && /47 cargas/.test(t.textContent); }, null, { timeout: 20000 });
+      const recado = await f.evaluate(() => (document.getElementById('recado') || {}).textContent || '');
+      afirmar(/Situação de carga salva|47 cargas/.test(recado), 'recado: ' + recado);
+      if (barrado) afirmar(s.registro.filter((r) => r.tipo === 'doPost' && /acao=enviarSituacaoCarga/.test(r.corpo)).length === 1, 'gravou pela pagina, uma vez');
+      // o mesmo relatorio de novo: o Salvar fica apagado e DIZ por que (antes: clicar "nao fazia nada")
+      await f.click('.cg-btn-primario');
+      await f.click('.cg-envio .cg-link');
+      await f.fill('#cg-texto', textoColado('abas'));
+      await f.click('button:has-text("Ler o texto")');
+      await f.waitForSelector('.cg-previa-ok', { timeout: 10000 });
+      const motivo = await f.evaluate(() => ({ off: document.getElementById('cg-salvar').disabled, txt: document.getElementById('cg-velha').textContent }));
+      afirmar(motivo.off && /igual ou mais velha/.test(motivo.txt), 'o motivo do Salvar apagado: ' + JSON.stringify(motivo));
+      await f.evaluate(() => fecharJanela());
+      if (outra) {
+        // o ao vivo pergunta de 12 em 12 s (o relogio do navegador e falso: anda na mao)
+        for (let i = 0; i < 6; i++) {
+          await outra.ctx.clock.runFor(13000);
+          if (await outra.f.evaluate(() => { const t = document.querySelector('.cg-hero-titulo'); return !!(t && /47 cargas/.test(t.textContent)); })) break;
+        }
+        await outra.f.waitForFunction(() => { const t = document.querySelector('.cg-hero-titulo'); return t && /47 cargas/.test(t.textContent); }, null, { timeout: 15000 });
+        await outra.ctx.close();
+        // F5: continua la
+        await aba.page.reload({ waitUntil: 'domcontentloaded' });
+        await esperarTela(aba, ['aplicacao', 'entrar'], 20000);
+        f = await frame(aba);
+        await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+        await f.waitForFunction(() => { const t = document.querySelector('.cg-hero-titulo'); return t && /47 cargas/.test(t.textContent); }, null, { timeout: 20000 });
+      }
+      afirmar(!aba.erros.filter((e) => !/HTTP 403/.test(e)).length, 'erros: ' + aba.erros.join(' | '));
+      await contexto.close(); await s.fechar();
+    });
+  }
 
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);

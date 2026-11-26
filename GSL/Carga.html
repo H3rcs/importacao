@@ -321,34 +321,68 @@ function cgMontarLinha(r, m, pg, lh, nPag, saida) {
  * as 12 ultimas palavras sao as celulas (X, - ou a/b), antes delas o BOX e o veiculo.
  */
 const CG_VEICULOS = /(?:^|\s)((?:BI-?TRUCK|TRUCK|TOCO|MEDIO|MÉDIO|VUC|CARRETA|LEVE|VAN|FIORINO|UTILITARIO|3\/4|TRUCADO|SEMI-?LEVE)(?:\s*-\s*DEP|\s+\d{3,4})?)$/i;
+/*
+ * TEXTO COLADO (27/11: tolerante). A pessoa abre o PDF, Ctrl+A, Ctrl+C e cola. Cada visor copia de um jeito:
+ * o pdftotext -layout deixa a carga numa linha so; o visor de PDF do Chrome (e o do Stimulsoft, no navegador)
+ * costuma dar um pedaco por linha, as vezes separado por tabulacao, com o cabecalho repetido a cada pagina.
+ * Por isso a leitura nao depende da linha: o texto vira uma fila de palavras, e cada numero de carga (5 a 10
+ * digitos) seguido — em ate 40 palavras — de 12 celulas seguidas (X, -, a/b) e uma carga: o que fica entre o
+ * numero e as celulas e o "*" (24 horas), o nome, o veiculo e o box (o ultimo numero). Numero de carga sem as
+ * 12 celulas vira um problema com o motivo (aparece na previa).
+ */
+const CG_CELULA_TXT = /^(X|x|-|–|—|\d+\/\d+)$/;
 function cgLerTexto(texto) {
-  const saida = { titulo: '', emitidoEm: cgDataHoraDoTexto(texto), depositos: CG_DEPS_PADRAO.map((id) => ({ id: id, nome: CG_DEPS_NOMES[id] })),
-    cargas: [], problemas: [], avisos: [], paginas: 0, reconhecido: /SITUA/i.test(texto) };
+  const bruto = String(texto || '');
+  const saida = { titulo: '', emitidoEm: cgDataHoraDoTexto(bruto), depositos: CG_DEPS_PADRAO.map((id) => ({ id: id, nome: CG_DEPS_NOMES[id] })),
+    cargas: [], problemas: [], avisos: [], paginas: 0, reconhecido: /SITUA/i.test(bruto), numeros: 0 };
   const n = CG_DEPS_PADRAO.length * 2;
   const vistas = {};
-  String(texto || '').split(/\r?\n/).forEach((linha) => {
-    const m = /^\s*(\d{4,10})\s*(\*?)\s+(.*)$/.exec(linha);
-    if (!m) return;
-    const pal = m[3].trim().split(/\s+/);
-    const cel = [];
-    while (pal.length && cel.length < n && /^(X|x|-|–|\d+\/\d+)$/.test(pal[pal.length - 1])) cel.unshift(pal.pop());
-    if (cel.length !== n) { saida.problemas.push({ pagina: 0, nro: m[1], texto: linha.trim(), motivo: 'esperava ' + n + ' células e li ' + cel.length }); return; }
-    let estrela = !!m[2];
-    let resto = pal.join(' ');
-    if (/^\*\s*/.test(resto)) { estrela = true; resto = resto.replace(/^\*\s*/, ''); }
+  const pal = bruto.replace(/[   ]/g, ' ').split(/\s+/).filter(Boolean);
+  const ehNro = (t) => /^\d{5,10}$/.test(t);
+  let i = 0;
+  while (i < pal.length) {
+    if (!ehNro(pal[i])) { i++; continue; }
+    const nro = pal[i];
+    saida.numeros++;
+    // as 12 celulas seguidas mais perto do numero (sem passar por outro numero de carga)
+    let ini = -1;
+    for (let j = i + 1; j < Math.min(pal.length, i + 41); j++) {
+      if (ehNro(pal[j])) break;            // outro numero de carga antes das celulas: as desta nao vieram
+      let k = 0;
+      while (k < n && CG_CELULA_TXT.test(pal[j + k] || '')) k++;
+      if (k === n) { ini = j; break; }
+      if (k > 0) j += k - 1;
+    }
+    if (ini < 0) {
+      saida.problemas.push({ pagina: 0, nro: nro, texto: pal.slice(i, i + 18).join(' '), motivo: 'não achei as ' + n + ' células (separação e conferência dos 6 depósitos) depois do número' });
+      i++; continue;
+    }
+    const meio = pal.slice(i + 1, ini), cel = pal.slice(ini, ini + n);
+    i = ini + n;
+    let estrela = false;
+    while (meio.length && /^\*+$/.test(meio[0])) { estrela = true; meio.shift(); }
+    if (meio.length && /^\*/.test(meio[0])) { estrela = true; meio[0] = meio[0].replace(/^\*+/, ''); }
+    let resto = meio.join(' ');
     let box = '';
     const mb = /\s(\d{1,3})$/.exec(' ' + resto);
     if (mb) { box = mb[1]; resto = resto.slice(0, resto.length - mb[0].length + 1).trim(); }
     let veiculo = '';
     const mv = CG_VEICULOS.exec(resto);
     if (mv) { veiculo = mv[1].trim(); resto = resto.slice(0, mv.index).trim(); }
-    if (vistas[m[1]]) return;
-    vistas[m[1]] = true;
-    const c = { nro: m[1], nome: resto, veiculo: veiculo, box: box, h24: estrela, estrela: estrela, amarelo: false, d: {}, pagina: 0, bruto: linha.trim() };
-    CG_DEPS_PADRAO.forEach((id, i) => { c.d[id] = [cgCelulaTexto(cel[i * 2]), cgCelulaTexto(cel[i * 2 + 1])]; });
+    if (vistas[nro]) continue;                    // a mesma carga de novo (cabecalho/pagina repetidos)
+    vistas[nro] = true;
+    const c = { nro: nro, nome: resto, veiculo: veiculo, box: box, h24: estrela, estrela: estrela, amarelo: false, d: {}, pagina: 0,
+      bruto: [nro].concat(estrela ? ['*'] : [], meio, cel).join(' ') };
+    CG_DEPS_PADRAO.forEach((id, q) => { c.d[id] = [cgCelulaTexto(cel[q * 2]), cgCelulaTexto(cel[q * 2 + 1])]; });
     saida.cargas.push(c);
-  });
+  }
   if (!saida.emitidoEm) saida.avisos.push('Não achei a data e a hora de emissão no texto. Informe abaixo.');
+  if (!saida.cargas.length) {
+    saida.avisos.push(bruto.trim()
+      ? (saida.numeros ? 'Achei ' + saida.numeros + ' números de carga, mas nenhum com as 12 células: confira se copiou o relatório inteiro (Ctrl+A dentro do PDF aberto).'
+        : 'O texto colado não tem números de carga. Abra o PDF da "Situação de Expedição das Cargas em Processo", clique dentro dele, Ctrl+A, Ctrl+C e cole de novo.')
+      : 'A caixa está vazia: cole o texto do relatório (Ctrl+V).');
+  }
   return saida;
 }
 
@@ -1834,11 +1868,13 @@ function cgConferirEmissao() {
   const v = cgEmitidoDaJanela(), s = CG.dados && CG.dados.snapshot;
   const velha = !!(s && v && cgMinDe(v) <= cgMinDe(s.emitido));
   const aviso = el('cg-velha');
-  if (aviso) {
-    aviso.classList.toggle('oculto', !velha);
-    aviso.textContent = velha ? 'Esta situação é de ' + cgDataBr(v) + ', igual ou mais velha que a que está no GSL (' + cgDataBr(s.emitido) + '). Envie um PDF mais novo.' : '';
-  }
-  b.disabled = !r.cargas.length || !v || velha;
+  // 27/11: o botao Salvar apagado sempre diz por que (antes, sem a data, o clique "nao fazia nada").
+  const motivo = !r.cargas.length ? 'Nenhuma carga lida: não há o que salvar. Confira o arquivo ou o texto colado.'
+    : !v ? 'Falta a data e a hora de emissão do relatório (não veio no texto): preencha "Emitida em" para poder salvar.'
+    : velha ? 'Esta situação é de ' + cgDataBr(v) + ', igual ou mais velha que a que está no GSL (' + cgDataBr(s.emitido) + '). Envie um relatório mais novo.' : '';
+  if (aviso) { aviso.classList.toggle('oculto', !motivo); aviso.textContent = motivo; }
+  b.disabled = !!motivo;
+  b.title = motivo;
 }
 function cgSalvarLeitura() {
   const r = CG.leitura;
@@ -1848,7 +1884,16 @@ function cgSalvarLeitura() {
     depositos: r.depositos.map((d) => ({ id: d.id, nome: d.nome })),
     naoLidas: r.problemas.filter((x) => !x.parcial).length,
     cargas: r.cargas.map((c) => ({ nro: c.nro, nome: c.nome, veiculo: c.veiculo, box: c.box, h24: !!c.h24, d: c.d }))
-  }, 'Situação de carga salva').catch(() => {});
+  }, 'Situação de carga salva').catch((e) => {
+    // 27/11: a recusa fica na janela (o aviso que some em 7 s passava despercebido: "nao aconteceu nada")
+    const p = el('cg-previa');
+    if (!p || el('janela').classList.contains('oculto')) return;
+    const velho = p.querySelector('.cg-erro-envio'); if (velho) velho.remove();
+    const x = document.createElement('p');
+    x.className = 'cg-erro cg-erro-envio'; x.setAttribute('role', 'alert');
+    x.textContent = 'A situação NÃO foi salva: ' + explicarErro(e);
+    p.insertBefore(x, p.firstChild);
+  });
 }
 
 

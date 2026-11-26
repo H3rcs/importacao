@@ -5336,9 +5336,10 @@ async function rodar() {
       /^Reservado/.test(doca(cd.bx.reservado).st) && /previsto/.test(doca(cd.bx.reservado).faixa), 'situacao das docas ' + JSON.stringify([doca(cd.bx.ocupado), doca(cd.bx.reservado)]));
     // os boxes das lojas: reservados, com as cargas da loja que o relatorio poe no box 1 (sem registro)
     afirmar(/Reservado\s*Loja Feira de Santana/.test(doca(1).reserva) && /Loja Feira de Santana/.test(doca(2).reserva) && /Loja Vitória da Conquista/.test(doca(3).reserva) &&
-      doca(1).cargas.indexOf('762882') !== -1 && doca(3).cargas.indexOf('763384') !== -1, 'lojas ' + JSON.stringify([doca(1), doca(3)]).slice(0, 400));
+      doca(1).cargas.length === 7 && doca(3).cargas.indexOf('763384') !== -1 && await f.evaluate(() => CG.dados.patio.mapa[0].itens.some((x) => x.n === '763341' && x.virtual && x.loja === 'Feira de Santana')) &&
+      /^\+\d+$/.test(await f.textContent('.cg-sb-doca[data-box="1"] .cg-sb-mais')), 'lojas ' + JSON.stringify([doca(1), doca(3)]).slice(0, 400));
     const alQ = await f.evaluate(() => cgAlertasPatio().map((a) => a.tipo + ':' + a.carga).join(' '));
-    afirmar(!/prontaSemBox:762882|boxDiferente:7628|prontaSemBox:763341/.test(alQ) && !(await f.evaluate(() => CG.dados.patio.semRegistro.some((x) => x.n === '762882'))), 'sem avisos para as da loja: ' + alQ);
+    afirmar(!/prontaSemBox:763341|boxDiferente:763341|prontaSemBox:763356/.test(alQ) && !(await f.evaluate(() => CG.dados.patio.semRegistro.some((x) => x.n === '763341'))), 'sem avisos para as da loja: ' + alQ);
     // tocar na doca: o painel com as cargas e as acoes; "Chegou" muda a doca na hora
     await f.click('.cg-sb-doca[data-box="' + cd.bx.reservado + '"] .cg-sb-alvo');
     await f.waitForSelector('#janela:not(.oculto) .cg-doca-painel', { timeout: 5000 });

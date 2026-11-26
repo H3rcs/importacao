@@ -5055,7 +5055,8 @@ async function rodar() {
     const eq = (await f.textContent('.cg-equilibrio')).replace(/\s+/g, ' ');
     afirmar(/Equilíbrio entre depósitos · CD/.test(eq) && /(Equilibrado|Atenção|Desequilibrado)/.test(eq) && /mais atrasado/.test(eq), 'equilibrio: ' + eq.slice(0, 200));
     afirmar(await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-tipo="PALETEIRA"] .cg-equip').length) === 12 &&
-      await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-tipo="CHECKOUT"] .cg-equip').length) === 12, '12 paleteiras e 12 check-outs desenhados');
+      await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-pool="CHECKOUT_MIUDEZA"] .cg-equip').length) === 8 &&
+      await f.evaluate(() => document.querySelectorAll('.cg-equip-pool[data-pool="CHECKOUT_NOBRE"] .cg-equip').length) === 10, '12 paleteiras, 8 check-outs da Miudeza e 10 do Nobre desenhados');
     await foto(aba, 'carga-desktop-painel');
     // supervisao: as quatro colunas e o pool
     await f.click('.cg-aba[data-aba="supervisao"]');
@@ -5230,7 +5231,7 @@ async function rodar() {
     mover(umA(), 'NOBRE', 'SEPARADOR', 2); mover(umB(), 'NOBRE', 'SEPARADOR', 0, 5); mover(umA(), 'NOBRE', 'SEPARADOR', 1, 3);
     dono('equipamentoCarga', { tipo: 'PALETEIRA', numero: 4, estado: 'MANUTENCAO', obs: 'roda' });
     dono('equipamentoCarga', { tipo: 'PALETEIRA', numero: 9, estado: 'MANUTENCAO', obs: 'garfo' });
-    dono('equipamentoCarga', { tipo: 'CHECKOUT', numero: 2, estado: 'MANUTENCAO', obs: 'leitor' });
+    dono('equipamentoCarga', { tipo: 'CHECKOUT', dep: 'NOBRE', numero: 2, estado: 'MANUTENCAO', obs: 'leitor' });
     const faltou = umB();
     dono('presencaCarga', { pessoa: faltou, falta: true });
     // sequencia: a 5a carga para o topo e a de 24 h para o topo
@@ -5289,7 +5290,7 @@ async function rodar() {
     await f.waitForFunction(() => CG.dados && CG.dados.patio && CG.dados.patio.contagem.carregadasHoje === 1, null, { timeout: 15000 });
     // as abas novas
     const abas = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-aba')).map((b) => b.dataset.aba).join());
-    afirmar(abas === 'cargas,sequencia,geral,todos,supervisao,GRANDEZA,MIUDEZA,BLOCADO,PESAVEIS,NOBRE,NOBRE_GRANDEZA,boxes,equipe,turnos,historico', 'abas: ' + abas);
+    afirmar(abas === 'cargas,sequencia,geral,todos,supervisao,GRANDEZA,MIUDEZA,BLOCADO,PESAVEIS,NOBRE,NOBRE_GRANDEZA,boxes,equipe,escala,turnos,historico', 'abas: ' + abas);
     // SEQUENCIA: a fila reorganizada, conferida pela situacao
     await f.click('.cg-aba[data-aba="sequencia"]');
     let ordem = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-seq-item')).map((x) => x.dataset.n));

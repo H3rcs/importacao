@@ -1767,6 +1767,7 @@ function cgDuracaoTxt_(min) { min = Math.round(min); return min < 60 ? min + ' m
 function cgPatioDaTela_(cargas) {
   const p = cgPatio_(cgCarregamentos_(), cgBoxesGravados_(), cargas || [], cgNBoxes_(), cgPermanenciaMin_(), cgAgoraIso_());
   p.situacoes = cgSituacoesBox_();
+  p.situacoesCat = p.situacoes.map(cgCategoriaObs_);
   p.tipos = CG_TIPOS_VEICULO;
   return p;
 }
@@ -2597,7 +2598,7 @@ function acaoDesfazerAutoCarga(usuario, params) {
     atualizar('CARGA_ALOCACOES', a.id, { DESFEITA_EM: cgAgoraIso_(), DESFEITA_POR: cgTexto_(usuario.nome || usuario.email, 80) }, usuario.email);
   });
   esquecerLeituras();
-  return { ok: true, equipe: cgEquipe_(), g: cgGeracao_(),
+  return { ok: true, equipe: cgEquipe_(), automaticas: cgAutoDaTela_(cgAgoraIso_()), g: cgGeracao_(),
     recado: tipo === 'ENTRADA' ? n + (n === 1 ? ' pessoa voltou' : ' pessoas voltaram') + ' para os disponíveis.' : n + (n === 1 ? ' pessoa voltou' : ' pessoas voltaram') + ' para onde estava.' };
 }
 /* As automaticas de hoje e de ontem (a nota da tela). */
@@ -2706,7 +2707,8 @@ function acaoCadastroCarga(usuario, params) {
     if (!lista.length) throw new Error('A lista de observações não pode ficar vazia.');
     const unicas = lista.filter(function (x, i) { return lista.map(cgObsNorm_).indexOf(cgObsNorm_(x)) === i; });
     comTrava(function () { cgSalvarParametro_('CARGA_SITUACOES_BOX', unicas.join('; '), quem); });
-    return { ok: true, recado: unicas.length + ' observações na lista.', invalidarTudo: true };
+    esquecerLeituras();
+    return { ok: true, recado: unicas.length + ' observações na lista.', patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(), invalidarTudo: true };
   }
   if (op === 'excluir') {
     const id = String(p.id || '');

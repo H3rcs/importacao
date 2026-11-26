@@ -45,6 +45,8 @@
  * LIVRE (no pool), em USO num desses quatro depositos, ou em MANUTENCAO. CARRINHOS: 35, da Miudeza.
  * As duas quantidades mudam na tela (quem edita) e ficam gravadas.
  */
+const BUILD_CARGA = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
+
 const CG_DEPOSITOS = [
   { id: 'GRANDEZA',       nome: 'Grandeza',       equip: 'PALETEIRA', grupo: 'GNPB' },
   { id: 'MIUDEZA',        nome: 'Miudeza',        equip: 'CARRINHO' },

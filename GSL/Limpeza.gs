@@ -18,7 +18,7 @@
  * primeira abertura depois da atualizacao (Instalacao.gs).
  */
 
-const BUILD_LIMPEZA = '2026.10.09';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_LIMPEZA = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
 const LP_ORIGENS = ['Vistoria setorial', 'Ronda do supervisor', 'Auditoria mensal',
                     'Ocorrência do turno', 'Reclamação'];
 const LP_CRITICIDADES = ['Alta', 'Média', 'Baixa'];

@@ -24,7 +24,7 @@ const APP = {
    * arquivosForaDaVersao_ (cada arquivo com o carimbo da entrega em que
    * mudou por ultimo).
    */
-  build: '2026.10.21'
+  build: '2026.11.26'
 };
 
 /*
@@ -44,21 +44,23 @@ const APP = {
  *   2026.10.21  = ferias com programacao, acoes so para os citados, relatorios nas cores da Bartofil, planilha do aprendiz
  */
 function arquivosForaDaVersao_() {
-  const LIMPEZA = '2026.10.09', PEDIDO_19 = '2026.10.19', PEDIDO_20 = '2026.10.20', ENTREGA = APP.build;
+  // Entrega de 26/11: todos os .gs com carimbo mudaram nesta entrega.
+  const ENTREGA = APP.build;
   const carimbos = {
-    'Acoes.gs':     [ENTREGA,   typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
-    'Estoque.gs':   [PEDIDO_20, typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
-    'Limpeza.gs':   [LIMPEZA,   typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
-    'Emails.gs':    [PEDIDO_19, typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
-    'Instalacao.gs':[ENTREGA,   typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
-    'Filiais.gs':   [PEDIDO_19, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
-    'Aprendiz.gs':  [ENTREGA,   typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
-    'Permissoes.gs':[PEDIDO_19, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
-    'Auth.gs':      [PEDIDO_19, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
-    'Banco.gs':     [PEDIDO_19, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO],
-    'Quadro.gs':    [ENTREGA,   typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
-    'Calendario.gs':[PEDIDO_19, typeof BUILD_CALENDARIO === 'undefined' ? '' : BUILD_CALENDARIO],
-    'Config.gs':    [PEDIDO_19, typeof BUILD_CONFIG === 'undefined' ? '' : BUILD_CONFIG]
+    'Acoes.gs':     [ENTREGA, typeof BUILD_ACOES === 'undefined' ? '' : BUILD_ACOES],
+    'Estoque.gs':   [ENTREGA, typeof BUILD_ESTOQUE === 'undefined' ? '' : BUILD_ESTOQUE],
+    'Limpeza.gs':   [ENTREGA, typeof BUILD_LIMPEZA === 'undefined' ? '' : BUILD_LIMPEZA],
+    'Emails.gs':    [ENTREGA, typeof BUILD_EMAILS === 'undefined' ? '' : BUILD_EMAILS],
+    'Instalacao.gs':[ENTREGA, typeof BUILD_INSTALACAO === 'undefined' ? '' : BUILD_INSTALACAO],
+    'Filiais.gs':   [ENTREGA, typeof BUILD_FILIAIS === 'undefined' ? '' : BUILD_FILIAIS],
+    'Aprendiz.gs':  [ENTREGA, typeof BUILD_APRENDIZ === 'undefined' ? '' : BUILD_APRENDIZ],
+    'Permissoes.gs':[ENTREGA, typeof BUILD_PERMISSOES === 'undefined' ? '' : BUILD_PERMISSOES],
+    'Auth.gs':      [ENTREGA, typeof BUILD_AUTH === 'undefined' ? '' : BUILD_AUTH],
+    'Banco.gs':     [ENTREGA, typeof BUILD_BANCO === 'undefined' ? '' : BUILD_BANCO],
+    'Quadro.gs':    [ENTREGA, typeof BUILD_QUADRO === 'undefined' ? '' : BUILD_QUADRO],
+    'Calendario.gs':[ENTREGA, typeof BUILD_CALENDARIO === 'undefined' ? '' : BUILD_CALENDARIO],
+    'Config.gs':    [ENTREGA, typeof BUILD_CONFIG === 'undefined' ? '' : BUILD_CONFIG],
+    'Carga.gs':     [ENTREGA, typeof BUILD_CARGA === 'undefined' ? '' : BUILD_CARGA]
   };
   return Object.keys(carimbos).filter(function (k) { return carimbos[k][1] !== carimbos[k][0]; });
 }

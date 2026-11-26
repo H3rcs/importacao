@@ -42,7 +42,7 @@
  * as telas do modulo em que a pessoa entrou. Um modulo sem nenhuma tela
  * liberada simplesmente nao aparece.
  */
-const BUILD_PERMISSOES = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_PERMISSOES = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const MODULOS = [
   /* Situacao de Carga (25/11): o relatorio de expedicao virando indicadores, equipe e equipamentos ao vivo — Carga.gs e Carga.html. */

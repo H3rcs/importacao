@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`; os de 21/10, no pedido de 21/10 e no `GSL-21-10.zip`. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`; os de 21/10, no pedido de 21/10 e no `GSL-21-10.zip`. **A entrega de 26/11 (GSL 4.3) traz o projeto inteiro no `GSL-4.3-26-11.zip`** — veja a seção dela, logo abaixo. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -35,6 +35,68 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Entrega de 26/11 (GSL 4.3: acessos em 3 faixas, pasta compartilhada, Plano de Ação novo, Situação de Carga, visual novo)
+
+**Pacote:** o `GSL-4.3-26-11.zip` tem o projeto inteiro (pasta `GSL/` para colar no Apps Script, a pasta `GSL-Local/` já montada, as ferramentas e os testes). Nesta entrega **quase todos os arquivos mudaram**: cole todos os `.gs` e `.html` da pasta `GSL/` por cima dos atuais e crie os novos: `Carga.gs`, `Carga.html`, `CargaEstilo.html` e `PlanoEstilo.html` (no Apps Script: **+ › Script** para o `.gs` e **+ › HTML** para os `.html`, com o nome sem a extensão). Depois: **Implantar › Gerenciar implantações › editar › Nova versão**.
+
+**Banco:** sobe sozinho da 8.11 para a **8.15** na primeira abertura, sem apagar nada:
+- 8.12: matriz de acesso em 3 faixas (`PERFIS.TELA_<menu>` = OCULTO/VER/EDITAR, `ACESSOS.AJUSTES`, `ATIVIDADES.ENTREGUE_POR`);
+- 8.13: situações e parecer no Plano de Ação (`ACOES.PRIORIDADE`, `PARECER`, `TRATATIVA`, `AUTOR`, `DESTINATARIO`, `LEGENDAS`…);
+- 8.14: Situação de Carga (`CARGA_SNAPSHOTS`, `CARGA_EQUIPE`, `CARGA_EQUIPAMENTOS`);
+- 8.15: Situação de Carga, fase 2 (`CARGA_SEQUENCIA`, `CARGA_PRESENCA`, `CARGA_PASSAGEM`, `CARGA_BOXES`, `CARGA_CARREGAMENTO`, `CARGA_EQUIPE.RUA`).
+
+Se aparecer a faixa **"Atualização incompleta do GSL"**, ela diz qual arquivo ficou para trás (todos têm o carimbo `2026.11.26`).
+
+### Perfis de acesso: Oculto, Ver, Ver e editar (8.12)
+- Em **Pessoas e acessos › Níveis de acesso**, cada menu tem uma de três faixas por nível: **Oculto** (o menu não existe para a pessoa: sem cartão, sem link, sem dado), **Ver** (abre e lê tudo, exporta; nenhum botão de gravar, e o servidor recusa qualquer gravação) e **Ver e editar**.
+- Cada pessoa pode ter um **ajuste por menu** por cima do nível dela.
+- Quem decide, nesta ordem: o painel na filial (Desativado/Não usar some para todos; Oculto só o administrador vê) → o ajuste da pessoa → a faixa do nível. A única trava: no nível ADMIN, **Pessoas e acessos** é sempre "Ver e editar" (ninguém se tranca do lado de fora).
+- Toda ação do sistema diz de qual menu é; o servidor confere a faixa antes de qualquer coisa. Um teste passa por todas as ações e todas as faixas.
+- Regra nova: **ninguém valida a própria entrega**.
+- O banco antigo é convertido sozinho (tela liberada + permissão que gravava = Ver e editar; liberada sem permissão = Ver; não liberada = Oculto). Menu novo ganha o padrão de cada nível: a **Situação de Carga** entra como Ver e editar para GERENTE e COORDENADOR e Ver para CONSULTA.
+- Para confirmar: o coordenador precisa de "Ver e editar" no Plano de Ação para concluir as ações dele; "Ver" na Assiduidade mostra nomes e fichas.
+
+### GSL na pasta compartilhada (GSL-Local)
+- A pasta `GSL-Local/` abre o GSL direto do servidor de arquivos da Bartofil (`\\servidor\GSL\GSL.html`, no Chrome), sem programa instalado. As telas rodam no computador; os dados, os e-mails, as planilhas e as fotos continuam no Google, pela mesma implantação.
+- **Configurar uma vez:**
+  1. No Apps Script, **Implantar › Gerenciar implantações › editar**: "Executar como: eu" e **"Quem pode acessar: Qualquer pessoa"** (a pasta local não carrega a conta Google). A entrada continua sendo e-mail e PIN.
+  2. Copie o endereço `/exec` da implantação para o `gsl-config.js` da pasta (ou monte a pasta com `node ferramentas/montar-local.js --url https://script.google.com/macros/s/SEU_ID/exec`).
+  3. Copie a pasta `GSL-Local` inteira para a pasta compartilhada.
+- **Atualizar:** a cada entrega, monte a pasta de novo e copie por cima (o `gsl-config.js` é preservado). Se a pasta ficar de outra versão, o GSL avisa.
+- Segurança com o endereço aberto: só as portas da API entram sem sessão (entrada, sonda); o resto exige a sessão do PIN. **PIN errado:** 5 erros travam 10 minutos e, a partir de 26/11, **20 erros no dia travam a entrada daquele e-mail até o dia seguinte** (o administrador destrava zerando o PIN; fica no LOG).
+- Ainda falta testar no Google de verdade: o acesso entre a pasta e o `/exec` e os gatilhos agendados com a implantação aberta.
+
+### Entrada só com o usuário
+Na tela de entrada basta digitar o usuário (`joao.silva`); o `@bartofil.com.br` fica fixo no campo e o servidor completa. Quem digitar o e-mail inteiro (outro domínio, conta do administrador) entra como antes.
+
+### Plano de Ação: situações e parecer do gerente (8.13)
+O Plano de Ação (Calendário e Limpeza) segue o modelo do "Relatório de Ocorrências e Ações". Quem tem "Ver e editar" registra uma **situação**: título, prioridade (**Alta, Média, Normal**), descrição com negrito, itálico, sublinhado, destaque e listas, fotos com legenda e o gerente que vai decidir. O gerente recebe um e-mail e dá o **parecer**:
+- **Tratar / Incluir ação:** como será tratado, responsáveis e prazo; a situação vira ação, com comentários, @menções e conclusão com foto, como antes;
+- **Outro momento:** com data para rever;
+- **Nada a fazer.**
+
+A tela tem o placar (Total, Tratar/Ação, Outro momento, Sem ação, Pendente), filtros por parecer e situação, busca e cartões numerados com a grade de fotos. O botão **Relatório** gera o PDF A4 no layout Bartofil. A situação aparece para quem registrou, para o gerente, para os responsáveis e para quem foi marcado. A **ação direta** (reuniões de turno) continua. As ações que já existiam viram "Tratar", com os mesmos responsáveis, prazo e histórico, e continuam visíveis para as mesmas pessoas. Na Limpeza, a criticidade virou a prioridade (Baixa = Normal).
+
+### Situação de Carga (8.14 e 8.15)
+Módulo novo, o primeiro do menu. Quem tem "Ver e editar" envia o PDF **"Situação de Expedição das Cargas em Processo"** várias vezes por dia: o GSL lê o arquivo no próprio navegador (cargas, depósitos, separação e conferência, as cargas de **24 h** pelo "*" e pela faixa amarela, a hora da emissão), mostra uma prévia e guarda cada envio. Envio repetido ou mais velho que o último é recusado; o último pode ser desfeito. As células a/b do relatório são **lotes** (6/9 = 6 de 9 lotes prontos).
+- **Cargas:** uma linha por carga; o "-" (depósito sem lote naquela carga) fica apagado e não entra em conta nenhuma; o depósito **gargalo** de cada carga fica marcado; a carga só está pronta quando todos os depósitos que têm lote nela terminam.
+- **Painel do CD** e **Todos os depósitos:** os seis depósitos (Grandeza, Miudeza, Blocado, Pesáveis, Nobre, Nobre Grandeza) com %, lotes que faltam, ritmo (lotes/h), previsão, pessoas e equipamentos; **Equilíbrio entre depósitos** (Equilibrado / Atenção / Desequilibrado, com sugestão de quem mover) e as **cargas travadas** (um depósito pronto e outro atrás).
+- **Supervisão G · NG · P · B:** Grandeza, Nobre Grandeza, Pesáveis e Blocado lado a lado (a mesma supervisão), com o pool de **12 paleteiras**.
+- **Equipe:** as pessoas vêm do Quadro do CD e são arrastadas (ou tocadas, no celular) para cada depósito e função. Os **turnos pelo horário** (padrão A 06:50–16:14, B 16:04–01:01, C 23:00–07:00, editáveis) mostram primeiro quem está em serviço; na sobreposição, as duas equipes. **Faltou:** a pessoa fica vermelha e não pode ser alocada até o fim do turno dela.
+- **Paleteiras e check-outs** seguem as pessoas: cada separador da supervisão G·NG·P·B usa uma das 12 paleteiras e cada conferente usa um check-out (padrão 12, pool do CD); falta de equipamento aparece como "faltam N". A **Miudeza** conta os **35 carrinhos**. Manutenção é marcada à mão. As quantidades se editam na tela.
+- **Nobre (flowrack):** o prédio com térreo e 1º ao 4º andar, as ruas de cada andar (6 por andar, ajustável) e as pessoas por andar ou rua.
+- **Sequência:** a fila de trabalho do supervisor (arrastar, ou ⤒ ↑ ↓ no celular), gravada para todos e conferida com o PDF: em curso, deveria ter começado, fora de sequência, 24 h fora do topo. Cargas novas entram no fim; um botão traz as 24 h para o topo.
+- **Boxes e pátio:** o controle das docas **dentro do GSL**, no lugar da planilha do carregamento: 26 boxes (ajustável), o veículo desenhado por tipo com a marca Bartofil (leve, VUC, 3/4, toco, truck, carreta), motorista, situação (a mesma lista da planilha), chegada, **Chegou / Carregando / Carregada**, bloqueio de box e avisos cruzados com o PDF (carga pronta sem veículo, veículo encostado com carga longe de pronta, box diferente do relatório, prioridade com problema, veículo encostado além do limite de 120 min). "Importar da planilha antiga" lê uma vez o estado atual (nunca grava na planilha).
+- **Passagem de turno:** na sobreposição, o resumo (cargas abertas com as 24 h primeiro, gargalos, alocação, manutenção, faltas); quem sai confirma e quem entra marca **Ciente**.
+- **Histórico:** abrir qualquer situação já lançada (só leitura) e comparar dois envios.
+- **Modo TV** passa pelas telas sozinho; tudo atualiza para todos em cerca de 12 s. Se um dia ficar lento, a parte "ao vivo" está isolada para trocar por Firebase sem mexer no resto (sinal de que é hora: as telas demorando visivelmente para mostrar o que outro arrastou, ou o Google recusando chamadas por excesso).
+- Os limites do equilíbrio, o peso das cargas de 24 h, os turnos, o limite no box e as cargas "em curso" ficam em **Configuração › Outros parâmetros** ou na própria tela (Turnos › Ajustes).
+- Na versão da pasta compartilhada, o leitor de PDF vai junto, na pasta `vendor/`.
+- **A confirmar:** quantos check-outs (12?) e se é um pool do CD ou um por depósito; se os conferentes da Miudeza usam check-out; os horários definitivos dos turnos; quantas ruas tem cada andar do flowrack. A escala de café ainda não entrou.
+
+### Visual novo
+Saíram as estrelas, a nebulosa e o rosa. Entrou o azul Bartofil: barra lateral em degradê azul-marinho, faixa azul no topo de cada tela, cartões brancos, títulos em Poppins e texto em Inter, tarja verde e amarela da Bartofil, ícones desenhados no menu, tabelas com cabeçalho fixo e a Configuração, Pessoas e acessos, Filiais e painéis e Relatos de erro no padrão de sistema corporativo. Tema escuro em azul-noite. Nenhuma função, dado ou permissão mudou.
 
 ## Pedido de 21/10 (férias com programação, ações só para os citados, relatórios Bartofil, planilha do aprendiz)
 
@@ -668,12 +730,15 @@ Os testes rodam o GSL num emulador do Apps Script. Nos de tela, a página roda d
 
 ```
 node testes/checar-htmlservice.js     # nenhum // ou /* que o Google apagaria
-node testes/seguranca.js              # funções internas fechadas ao console
+node testes/seguranca.js              # funções internas fechadas ao console, PIN (janela de 10 min e teto do dia), entrada só com o usuário
 node testes/assiduidade.js            # datas repetidas e contas erradas (9 casos)
 node testes/atividades.js             # calendário, Central, avisos, rotinas que acertam o calendário (34 casos)
-node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, ADMIN, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias, painel desativado, fotos HEIC, marcar pessoa, excluir item do estoque, programação das férias, ações só para os citados, planilha do aprendiz (100 casos)
-node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias das tabelas no cache, colagem pela metade, um arquivo da entrega anterior por vez (23 casos)
-node testes/e2e.js                    # entrada, PIN, 403, várias contas, telas, Período, painéis, Jovem Aprendiz, canal barrado, sessão, bolinha, Quadro do CD, Férias, barra lateral, rotinas, selo e marcação nos comentários, HEIC, painel desativado, fotos pela reserva, excluir item do estoque, férias com programação, relatórios Bartofil (100 cenários)
+node testes/paineis.js                # Nobreaks, Limpeza, Estoque, Filiais, Configuração, PIN, Jovem Aprendiz, bolinha, Quadro do CD, Férias, fotos HEIC, marcar pessoa, ações só para os citados, situações e parecer do Plano de Ação (105 casos)
+node testes/perfis.js                 # as 3 faixas menu por menu e ação por ação, ajustes por pessoa, migração do banco antigo (15 casos)
+node testes/api.js                    # a API da versão local (GSL-Local) e a montagem da pasta (10 casos)
+node testes/carga.js                  # Situação de Carga: leitor do PDF real, contas por depósito, equilíbrio, equipe, paleteiras e check-outs, turnos e faltas, sequência, histórico, boxes, passagem, migração (30 casos)
+node testes/desempenho.js             # sessão que sobrevive ao cache, gravar pela página, cópias no cache, colagem pela metade (23 casos)
+node testes/e2e.js                    # todas as telas num Chromium de verdade, inclusive a versão local, o Plano de Ação novo e a Situação de Carga (117 cenários)
 ```
 
 O `e2e.js` precisa do Playwright com Chromium. Rode tudo antes de publicar: é o que impede o erro da foto de voltar.

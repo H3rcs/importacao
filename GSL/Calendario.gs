@@ -20,7 +20,7 @@
  * Foi isso que na planilha exigia formula e coluna auxiliar.
  */
 
-const BUILD_CALENDARIO = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_CALENDARIO = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const STATUS = {
   PENDENTE: 'Pendente', AGUARDANDO: 'Aguard. valid.', APROVADA: 'Aprovada',

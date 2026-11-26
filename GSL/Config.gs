@@ -6,7 +6,7 @@
  * pelo Auth.gs (dadosPessoas em Codigo.gs).
  */
 
-const BUILD_CONFIG = '2026.10.19';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_CONFIG = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 /*
  * CONFIGURAÇÃO — reorganizada.

@@ -1132,7 +1132,7 @@ async function entrarNoSistema(ev) {
  * PRAZO DO ENTRAR (27/11). 20 s sem resposta do Google: a tela para de esperar (o botao volta), explica
  * e o proximo clique vai pela pagina (POST no /exec), que nao depende do google.script.run.
  */
-const ENTRAR_PRAZO_MS = 20000;
+let ENTRAR_PRAZO_MS = 20000;      // let: o teste encurta
 let ENTRAR_PELA_PAGINA = false, ENTRAR_TENTATIVAS = 0;
 function prazoDoEntrar(tentativa) {
   return new Promise((ok, erro) => setTimeout(() => {

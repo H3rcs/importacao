@@ -138,6 +138,7 @@ async function abrirAba(s, conta, extras) {
   if (extras && extras.bloqueio403) cookies.push({ name: 'gas_403', value: extras.bloqueio403 === 'perm' ? 'perm' : '1', url: s.url });
   if (extras && extras.atraso) cookies.push({ name: 'gas_atraso', value: String(extras.atraso), url: s.url });
   if (extras && extras.atrasoPost) cookies.push({ name: 'gas_atraso_post', value: String(extras.atrasoPost), url: s.url });
+  if (extras && extras.falha) cookies.push({ name: 'gas_falha', value: extras.falha, url: s.url });
   await contexto.addCookies(cookies);
   const page = await contexto.newPage();
   const erros = [];
@@ -5909,6 +5910,209 @@ async function rodar() {
       await contexto.close(); await s.fechar();
     });
   }
+
+  /* ------------------------------------------------------------------ */
+  /* 27/11 — DESEMPENHO: pagina em partes, nova tentativa, prazo, leitor  */
+  /* de PDF do projeto, medidor e modo leve automatico                    */
+  /* ------------------------------------------------------------------ */
+
+  await cenario('pagina em partes: a entrada chega sem Paineis/Aprendiz/Carga, os modulos vem enquanto se digita o PIN, e as telas deles abrem', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const aba = await abrirAba(s, DONO);
+    let f = await frame(aba);
+    const partes = await f.evaluate(() => (CARGA_INICIAL.modulosAParte || []).join());
+    afirmar(partes === 'paineis,aprendiz,carga', 'pagina sem os modulos: ' + partes);
+    const tamGet = s.contexto('').doGet({ parameter: {} }).getContent().length;
+    // enquanto a pessoa digita: a sonda passou e os tres modulos chegam por tras (postos na pagina pela tela, nao vindos no HTML)
+    await f.waitForFunction(() => typeof BUILD_PAINEIS === 'string' && typeof BUILD_CARGA_TELA === 'string' && typeof BUILD_APRENDIZ_TELA === 'string', null, { timeout: 15000 });
+    afirmar(await f.evaluate(() => document.querySelectorAll('script[data-modulo]').length) === 4, 'os modulos vieram depois (4 scripts: Paineis, Aprendiz e os dois da Carga)');
+    const antes = { tam: tamGet };
+    afirmar(s.registro.filter((r) => r.tipo === 'run' && r.fn === 'carregarModulo').length === 3, 'tres modulos: ' + s.registro.filter((r) => r.tipo === 'run').map((r) => r.fn).join());
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    f = await frame(aba);
+    await f.evaluate(() => abrir('estoque'));
+    await f.waitForFunction(() => /Estoque/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    afirmar(!(await f.$('#aviso-versao')), 'sem a faixa de versao: ' + await texto(aba, 'aviso-versao'));
+    console.log('        pagina do GET: ' + Math.round(antes.tam / 1024) + ' KB de HTML (os modulos: ' +
+      Math.round((['Paineis', 'Aprendiz', 'Carga', 'CargaEstilo'].reduce((t, n) => t + require('fs').statSync(path.join(PASTA, n + '.html')).size, 0)) / 1024) + ' KB, vem depois)');
+    // F5 com a sessao, direto numa tela de modulo (Quadro do CD): espera o modulo e abre
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarTela(aba, ['aplicacao', 'entrar'], 20000);
+    f = await frame(aba);
+    await f.evaluate(() => abrir('nobreaks'));
+    await f.waitForFunction(() => /Nobreaks/i.test(document.getElementById('titulo-pagina').textContent) && document.querySelector('#pagina') && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('conversa com o Google: a tela que falha uma vez (HTTP 500) tenta de novo sozinha; o modulo que falha tambem; o medidor conta a nova tentativa', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const aba = await abrirAba(s, DONO, { falha: 'carregarModulo:500:1' });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.waitForFunction(() => typeof BUILD_PAINEIS === 'string', null, { timeout: 15000 });
+    await aba.contexto.addCookies([{ name: 'gas_falha', value: 'carregarTela:500:1', url: s.url }]);
+    await f.evaluate(() => { esquecerTelas(); abrir('acoes'); });
+    await f.waitForFunction(() => /Plano de A/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    afirmar(!(await f.$('#pagina .erro-caixa')), 'sem caixa de erro');
+    const m = await f.evaluate(() => DSP.fila.filter((x) => x.k === 'run' && (x.n === 'carregarTela' || x.n === 'carregarModulo') && x.rt > 0).map((x) => x.n + ':' + x.rt + ':' + x.ok));
+    afirmar(m.indexOf('carregarTela:1:1') !== -1 && m.indexOf('carregarModulo:1:1') !== -1, 'medidor viu as novas tentativas: ' + m.join());
+    afirmar(s.registro.filter((r) => r.tipo === 'falha').length === 2, 'duas falhas no servidor');
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('entrar com o Google mudo: depois do prazo o botao volta com o aviso, o segundo clique vai pela pagina e entra', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    criarPin(s, GERAL, COORD, '1234');
+    const aba = await abrirAba(s, GERAL);
+    const f = await frame(aba);
+    await f.waitForFunction(() => SONDA === 'ok', null, { timeout: 10000 });
+    await f.evaluate(() => { ENTRAR_PRAZO_MS = 2500; });
+    await aba.contexto.addCookies([{ name: 'gas_atraso', value: '15000', url: s.url }]);
+    await f.fill('#entrar-email', COORD);
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    await f.waitForFunction(() => /Google está demorando/.test(document.getElementById('entrar-msg').textContent) && !document.getElementById('entrar-botao').disabled, null, { timeout: 8000 });
+    await f.fill('#entrar-pin', '1234');
+    await f.click('#entrar-botao');
+    afirmar(await esperarTela(aba, ['aplicacao', 'falha'], 20000) === 'aplicacao', 'o segundo clique entrou');
+    afirmar(s.registro.some((r) => r.tipo === 'doPost' && /email=/.test(r.corpo)), 'foi pela pagina');
+    await aba.contexto.clearCookies({ name: 'gas_atraso' });
+    // a pagina que veio pela reserva sem o computador estar barrado: a sonda confere logo e o caminho rapido volta
+    const f2 = await frame(aba);
+    await f2.waitForFunction(() => CANAL_BARRADO === false && SONDA === 'ok', null, { timeout: 25000 });
+    await aba.contexto.close(); await s.fechar();
+  });
+
+  await cenario('leitor de PDF do projeto: sem a cdnjs, o pdf.js vem do servidor, le o PDF real e fica guardado no navegador (a segunda vez nem pergunta)', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const contexto = await navegador.newContext({ viewport: { width: 1280, height: 900 } });
+    await contexto.clock.install({ time: new Date('2026-11-25T18:00:00-03:00') });
+    let cdn = 0;
+    await contexto.route(/cdnjs\.cloudflare\.com/, (rota) => { cdn++; rota.abort(); });
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    let f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    await enviarPdfPelaTela(f, PDF_REAL, 47);
+    const origem1 = await f.evaluate(() => DSP.fila.filter((x) => x.k === 'pdf').map((x) => x.n).join());
+    afirmar(origem1 === 'leitor:servidor' && cdn === 0 && await f.evaluate(() => !!localStorage.getItem('gsl_pdfjs_3.11.174')), 'do servidor: ' + origem1 + ' cdn=' + cdn);
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarTela(aba, ['aplicacao', 'entrar'], 20000);
+    f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    await f.click('.cg-btn-primario');
+    await f.waitForFunction(() => typeof pdfjsLib !== 'undefined', null, { timeout: 15000 });
+    const origem2 = await f.evaluate(() => DSP.fila.filter((x) => x.k === 'pdf').map((x) => x.n).join());
+    afirmar(/leitor:navegador/.test(origem2) && cdn === 0, 'da copia do navegador: ' + origem2);
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await contexto.close(); await s.fechar();
+  });
+
+  await cenario('leitor de PDF que nao abre (servidor e cdnjs fora): o erro explica Ctrl+A / Ctrl+C / Ctrl+V e o botao abre a caixa do texto', async () => {
+    const s = await subir({ agora: '2026-11-25T18:00:00-03:00' }); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const contexto = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+    await contexto.clock.install({ time: new Date('2026-11-25T18:00:00-03:00') });
+    await contexto.route(/cdnjs\.cloudflare\.com/, (rota) => rota.abort());
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'cargas'; abrir('carga'); });
+    await esperarCarga(f);
+    await contexto.addCookies([{ name: 'gas_falha', value: 'executarAcao:500', url: s.url }]);
+    await f.click('.cg-btn-primario');
+    await f.setInputFiles('#cg-arquivo', PDF_REAL);
+    await f.waitForSelector('.cg-erro-leitor', { timeout: 20000 });
+    const t = (await f.textContent('.cg-erro-leitor')).replace(/\s+/g, ' ');
+    afirmar(/Ctrl\s*\+\s*A/.test(t) && /Ctrl\s*\+\s*C/.test(t) && /Ctrl\s*\+\s*V/.test(t) && /servidor do GSL/.test(t) && /cdnjs/.test(t), 'explicacao: ' + t);
+    await f.click('.cg-erro-leitor .botao');
+    afirmar(await f.evaluate(() => document.activeElement && document.activeElement.id === 'cg-texto'), 'a caixa do texto abriu com o foco');
+    await semRolagemLateral(f, 'erro do leitor no celular');
+    await foto(aba, 'carga-celular-leitor-pdf-falhou');
+    await contexto.close(); await s.fechar();
+  });
+
+  await cenario('medidor de desempenho: as paginas mandam as medicoes; o administrador ve o painel (marcos, computador, erros, dias) e exporta; o gerente nao ve', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    criarPin(s, GERAL, GERENTE, '5555');
+    // o gerente usa um pouco (as medicoes dele vao para o servidor)
+    const g = await abrirAba(s, GERAL);
+    await entrar(g, GERENTE, '5555');
+    await esperarTela(g, ['aplicacao']);
+    const fg = await frame(g);
+    await fg.evaluate(() => abrir('acoes'));
+    await fg.waitForFunction(() => !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    await fg.evaluate(() => { gravarLocal(CHAVE_MAQ_NOME, 'Cloud expedição'); DSP.maq = null; enviarMedicoes(true); });
+    await fg.waitForFunction(() => !DSP.indo && !DSP.fila.length, null, { timeout: 10000 });
+    await fg.evaluate(() => { ABA_CFG = 'sistema'; abrir('config'); });
+    await fg.waitForFunction(() => /Configura/.test(document.getElementById('titulo-pagina').textContent) && !/Carregando/.test(document.getElementById('pagina').textContent), null, { timeout: 15000 });
+    afirmar(!(await fg.$('.dsp-cartao')), 'o gerente nao ve o painel');
+    // o administrador
+    const contexto = await navegador.newContext({ acceptDownloads: true, viewport: { width: 1280, height: 900 } });
+    const a = await abrirAba(s, DONO, { contexto });
+    await entrar(a, DONO, '4321');
+    await esperarTela(a, ['aplicacao']);
+    const fa = await frame(a);
+    await fa.evaluate(() => { ABA_CFG = 'sistema'; abrir('config'); });
+    await fa.waitForSelector('#dsp-painel .dsp-tabela', { timeout: 15000 });
+    const painel = (await fa.textContent('#dsp-painel')).replace(/\s+/g, ' ');
+    afirmar(/Abrir a página até a entrada aparecer/.test(painel) && /Entrar: do clique em Entrar ao menu/.test(painel) && /Abrir uma tela/.test(painel) &&
+      /Cloud expedição/.test(painel) && /Como ler estes números/.test(painel), 'painel: ' + painel.slice(0, 600));
+    const [baixado] = await Promise.all([a.page.waitForEvent('download', { timeout: 15000 }), fa.click('#dsp-painel .botao:has-text("Exportar")')]);
+    const csv = require('fs').readFileSync(await baixado.path(), 'utf8');
+    afirmar(/^﻿quando;quem;computador;descricao;tipo;nome/.test(csv) && /joao\.lima/.test(csv) && /carregarTela/.test(csv), 'csv: ' + csv.slice(0, 200));
+    await fa.fill('#dsp-nome-maquina', 'Escritório gerência');
+    await fa.press('#dsp-nome-maquina', 'Tab');
+    afirmar(await fa.evaluate(() => localStorage.getItem('gsl_maquina_nome')) === 'Escritório gerência', 'nome deste computador');
+    await foto(a, 'config-desempenho');
+    await a.page.setViewportSize({ width: 390, height: 844 });
+    await semRolagemLateral(fa, 'painel de desempenho no celular');
+    afirmar(!a.erros.length && !g.erros.length, 'erros: ' + a.erros.concat(g.erros).join(' | '));
+    await contexto.close(); await g.contexto.close(); await s.fechar();
+  });
+
+  await cenario('modo leve automatico: computador sem placa de video (Microsoft Basic Render Driver) liga sozinho, sem sombra e sem animacao; a escolha da pessoa vale depois', async () => {
+    const s = await subir(); instalarComPessoas(s);
+    pelaPorta(s, DONO, DONO, '4321');
+    const contexto = await navegador.newContext({ viewport: { width: 1280, height: 900 } });
+    await contexto.addInitScript(() => {
+      // um navegador "de verdade" (sem webdriver) num computador de area de trabalho remota
+      Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false });
+      const orig = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function (p) { return p === 0x9246 ? 'ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0)' : orig.call(this, p); };
+    });
+    const aba = await abrirAba(s, DONO, { contexto });
+    let f = await frame(aba);
+    await f.waitForFunction(() => document.documentElement.classList.contains('modo-leve'), null, { timeout: 10000 });
+    afirmar(/Basic Render/.test(await f.evaluate(() => MOTIVO_LEVE + ' ' + localStorage.getItem('gsl_placa_video'))), 'o motivo: ' + await f.evaluate(() => MOTIVO_LEVE));
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const estilo = await f.evaluate(() => { const c = document.querySelector('.holocard') || document.querySelector('.cartao'); const cs = getComputedStyle(c);
+      const lat = getComputedStyle(document.querySelector('.lateral'));
+      return { sombra: cs.boxShadow, anim: cs.animationName, trans: cs.transitionDuration, fundo: lat.backgroundImage }; });
+    afirmar(estilo.sombra === 'none' && estilo.anim === 'none' && /^0s/.test(estilo.trans) && estilo.fundo === 'none', 'modo leve de verdade: ' + JSON.stringify(estilo));
+    afirmar(await f.evaluate(() => DSP.fila.some((x) => x.k === 'leve' && x.n === 'ligado')), 'o medidor anotou o modo leve');
+    // a pessoa desliga: vale nas proximas aberturas, mesmo sem placa de video
+    await f.click('#modo-leve-alternar');
+    await aba.page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarTela(aba, ['aplicacao', 'entrar'], 20000);
+    f = await frame(aba);
+    await aba.page.waitForTimeout(1200);
+    afirmar(!(await f.evaluate(() => document.documentElement.classList.contains('modo-leve'))), 'a escolha da pessoa vale');
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await contexto.close(); await s.fechar();
+  });
 
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);

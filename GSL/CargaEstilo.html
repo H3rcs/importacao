@@ -1101,7 +1101,14 @@ select.cg-ctl-cel.sel-nao { color: var(--cg-tinta-2); }
 .cg-sb-titulo { font: 800 clamp(17px, 2.1vw, 34px)/1.1 'Poppins', 'Inter', sans-serif !important; color: #1a1f8c !important; letter-spacing: .005em; text-transform: uppercase; }
 [data-tema="escuro"] .cg-sb-titulo { color: #c3c9ff !important; }
 .cg-sb-rolo { overflow-x: auto; overflow-y: hidden; max-width: 100%; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
-.cg-sb-fila { display: grid; grid-template-columns: repeat(var(--cg-sb-n, 26), minmax(46px, 1fr)); min-width: min-content; border-left: 1px solid #000; }
+.cg-sb-fila { display: grid; grid-template-columns: repeat(var(--cg-sb-n, 26), minmax(36px, 1fr)); min-width: min-content; border-left: 1px solid #000; }
+@media (max-width: 1700px) {
+  .cg-sb-num { font-size: 21px !important; }
+  .cg-sb-c b { font-size: 12px; }
+  .cg-sb-st .cg-sb-vert { font-size: 15px; }
+  .cg-sb-faixa .cg-sb-vert { font-size: 11.5px; }
+}
+.cg-sb-legenda .cg-sb-dica::before { display: none; }
 .cg-sb-doca { position: relative; min-width: 0; border-right: 1px solid #000; }
 .cg-sb-alvo { display: flex; flex-direction: column; height: 100%; cursor: pointer; }
 .cg-sb-alvo:focus-visible { outline: 3px solid var(--cg-amarelo); outline-offset: -3px; position: relative; z-index: 2; }
@@ -1240,6 +1247,10 @@ html.cg-tv .cg-sb-c b { font-size: 15px; }
   .cg-box-nav-dir { flex: 1 1 100%; }
   .cg-sb-fila { grid-template-columns: repeat(var(--cg-sb-n, 26), minmax(58px, 1fr)); }
   .cg-sb { padding: 12px 10px; }
+  .cg-sb-patio { height: 176px; }
+  .cg-sb-alto { height: 70px; }
+  .cg-sb-st { height: 112px; }
+  .cg-sb-cargas { min-height: 96px; }
   .cg-sb-logo-bau { width: 84px; height: 38px; }
   .cg-sb-logo-cab { width: 30px; height: 45px; }
   .cg-sb-logo-roda { left: 12px; bottom: 1px; width: 12px; height: 12px; }

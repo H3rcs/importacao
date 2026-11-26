@@ -5325,23 +5325,45 @@ async function rodar() {
     await f.click('.cg-opcao.faltou');
     await f.waitForSelector('.cg-pool .cg-boneco.faltou[data-k="' + k2 + '"]', { timeout: 8000 });
     afirmar(cd.ler().faltas.filter((x) => x.ativa).length === 2, 'falta gravada');
-    // BOXES E PATIO
+    // BOXES E PATIO: o quadro como a aba "Situacao dos BOXs" (padrao) — uma fila de docas, 26 a 1
     await f.click('.cg-aba[data-aba="boxes"]');
+    const fila = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-sb-fila > .cg-sb-doca')).map((x) => ({ n: Number(x.dataset.box), st: x.querySelector('.cg-sb-st').textContent.trim(),
+      faixa: x.querySelector('.cg-sb-faixa').className, num: x.querySelector('.cg-sb-num').textContent.trim(), cargas: Array.from(x.querySelectorAll('.cg-sb-c')).map((c) => c.dataset.n),
+      reserva: (x.querySelector('.cg-sb-reserva') || {}).textContent || '', top: Math.round(x.getBoundingClientRect().top) })));
+    afirmar(fila.length === 26 && fila.map((x) => x.n).join() === Array.from({ length: 26 }, (_, i) => 26 - i).join() && fila.every((x) => x.top === fila[0].top && String(x.n) === x.num), 'fila 26->1 numa linha: ' + fila.map((x) => x.n));
+    const doca = (n) => fila.find((x) => x.n === n);
+    afirmar(/^Livre/.test(doca(26).st) && /^Ocupado/.test(doca(cd.bx.ocupado).st) && /v-t/.test(doca(cd.bx.ocupado).faixa) && /^Carregando/.test(doca(cd.bx.carregando).st) &&
+      /^Reservado/.test(doca(cd.bx.reservado).st) && /previsto/.test(doca(cd.bx.reservado).faixa), 'situacao das docas ' + JSON.stringify([doca(cd.bx.ocupado), doca(cd.bx.reservado)]));
+    // os boxes das lojas: reservados, com as cargas da loja que o relatorio poe no box 1 (sem registro)
+    afirmar(/Reservado\s*Loja Feira de Santana/.test(doca(1).reserva) && /Loja Feira de Santana/.test(doca(2).reserva) && /Loja Vitória da Conquista/.test(doca(3).reserva) &&
+      doca(1).cargas.indexOf('762882') !== -1 && doca(3).cargas.indexOf('763384') !== -1, 'lojas ' + JSON.stringify([doca(1), doca(3)]).slice(0, 400));
+    const alQ = await f.evaluate(() => cgAlertasPatio().map((a) => a.tipo + ':' + a.carga).join(' '));
+    afirmar(!/prontaSemBox:762882|boxDiferente:7628|prontaSemBox:763341/.test(alQ) && !(await f.evaluate(() => CG.dados.patio.semRegistro.some((x) => x.n === '762882'))), 'sem avisos para as da loja: ' + alQ);
+    // tocar na doca: o painel com as cargas e as acoes; "Chegou" muda a doca na hora
+    await f.click('.cg-sb-doca[data-box="' + cd.bx.reservado + '"] .cg-sb-alvo');
+    await f.waitForSelector('#janela:not(.oculto) .cg-doca-painel', { timeout: 5000 });
+    afirmar(/Reservado/.test(await f.textContent('.cg-doca-painel .cg-dp-est')) && await f.$('.cg-doca-painel .cg-doca-acoes button:has-text("Chegou")'), 'painel da doca');
+    await foto(aba, 'carga3-desktop-boxes-doca');
+    await f.click('.cg-doca-painel .cg-doca-acoes button:has-text("Chegou")');
+    await f.waitForFunction((b) => /Ocupado/.test(document.querySelector('.cg-sb-doca[data-box="' + b + '"] .cg-sb-st').textContent) && /Ocupado/.test(document.querySelector('.cg-doca-painel .cg-dp-est').textContent), cd.bx.reservado, { timeout: 8000 });
+    await f.evaluate(() => fecharJanela());
+    // a vista Detalhes: os cartoes das docas (a vista antiga)
+    await f.click('.cg-box-nav .cg-chip[data-vista="detalhes"]');
     const docas = await f.evaluate(() => { const o = {}; document.querySelectorAll('.cg-doca').forEach((x) => { o[x.dataset.box] = x.querySelector('.cg-doca-est').textContent; }); return o; });
     const B = cd.bx;
-    afirmar(Object.keys(docas).length === 26 && docas[B.carregando] === 'Carregando' && docas[B.ocupado] === 'Ocupado' && docas[B.reservado] === 'Reservado' && docas[B.carreta] === 'Ocupado' &&
+    afirmar(Object.keys(docas).length === 26 && docas[B.carregando] === 'Carregando' && docas[B.ocupado] === 'Ocupado' && docas[B.reservado] === 'Ocupado' && docas[B.carreta] === 'Ocupado' &&
       docas[25] === 'Bloqueado' && docas[B.carregada] === 'Livre', 'docas: ' + JSON.stringify(docas) + ' ' + JSON.stringify(B));
     afirmar(await f.evaluate((b) => document.querySelectorAll('.cg-doca[data-box="' + b + '"] .cg-veic').length, B.carreta) === 1, 'carreta desenhada');
     const al = await f.evaluate(() => cgAlertasPatio().map((a) => a.texto).join(' | '));
-    afirmar(new RegExp('Box ' + B.ocupado + ': veículo da carga .* encostado há 2 h').test(al) && /MARCOU E NAO VEIO/.test(al), 'alertas do patio: ' + al.slice(0, 400));
-    // arrastar o veiculo da fila para o box 9 e marcar "Chegou" no box 12
-    // o arrasto do Playwright nao rola a pagina no meio: a janela alta deixa a fila e o box 9 na tela
-    await aba.page.setViewportSize({ width: 1440, height: 2600 });
-    await f.dragAndDrop('.cg-carreg[data-id="' + cd.c4 + '"]', '.cg-doca[data-box="9"]');
-    await f.waitForFunction(() => document.querySelector('.cg-doca[data-box="9"] .cg-doca-est').textContent === 'Reservado' && !CG.pendentes, null, { timeout: 8000 });
+    afirmar(!/encostado há/.test(al) && /MARCOU E NAO VEIO/.test(al) && !/encostado há|há \d+ h/.test(await f.textContent('.cg-docas')), 'alertas do patio (sem o tempo encostado): ' + al.slice(0, 400));
+    // arrastar o veiculo da fila (patio) para a doca 9 do quadro
+    // o arrasto do Playwright nao rola a pagina no meio: a janela alta deixa a fila e a doca 9 na tela
+    await f.click('.cg-box-nav .cg-chip[data-vista="mapa"]');
+    await aba.page.setViewportSize({ width: 1440, height: 2000 });
+    await f.dragAndDrop('.cg-carreg[data-id="' + cd.c4 + '"]', '.cg-sb-doca[data-box="9"] .cg-sb-num');
+    await f.waitForFunction(() => /Reservado/.test(document.querySelector('.cg-sb-doca[data-box="9"] .cg-sb-st').textContent) && !CG.pendentes, null, { timeout: 8000 });
     afirmar(cd.ler().patio.mapa[8].itens[0].id === cd.c4, 'box 9 no servidor');
-    await f.click('.cg-doca[data-box="' + B.reservado + '"] .cg-doca-acoes button:has-text("Chegou")');
-    await f.waitForFunction((b) => document.querySelector('.cg-doca[data-box="' + b + '"] .cg-doca-est').textContent === 'Ocupado', B.reservado, { timeout: 8000 });
+    await f.click('.cg-box-nav .cg-chip[data-vista="detalhes"]');
     // registrar pelo formulario (numero curto do relatorio + tipo pelo desenho)
     await aba.page.setViewportSize({ width: 1440, height: 1000 });
     await f.click('.cg-patio-botoes .cg-btn-primario');
@@ -5429,11 +5451,11 @@ async function rodar() {
     // B: registra uma carga no box 4 pelo formulario; A ve o box reservado
     await B.f.evaluate(() => cgIrAba('boxes'));
     await A.f.evaluate(() => cgIrAba('boxes'));
-    await B.f.click('.cg-doca[data-box="4"] .cg-doca-num');
+    await B.f.click('.cg-sb-doca[data-box="4"] .cg-sb-alvo');
     await B.f.click('.cg-opcao:has-text("Registrar carga neste box")');
     await B.f.fill('#cgf-carga', '003');
     await B.f.click('#cgf-salvar');
-    await A.f.waitForFunction(() => { const d = document.querySelector('.cg-doca[data-box="4"]'); return d && /763003/.test(d.textContent) && /Reservado/.test(d.textContent); }, null, { timeout: 15000 });
+    await A.f.waitForFunction(() => { const d = document.querySelector('.cg-sb-doca[data-box="4"]'); return d && d.querySelector('.cg-sb-c[data-n="763003"]') && /Reservado/.test(d.textContent); }, null, { timeout: 15000 });
     // A: passagem A -> B confirmada; B marca ciente; A ve "ciente"
     await A.f.evaluate(() => cgIrAba('turnos'));
     await B.f.evaluate(() => cgIrAba('turnos'));
@@ -5510,8 +5532,12 @@ async function rodar() {
     for (let i = 0; i < 30; i++) {
       const d = {};
       DEPS3.forEach((id, j) => { d[id] = (i + j) % 4 === 0 ? ['-', '-'] : [(i * 3 + j) % 10 === 0 ? 'X' : ((i + j) % 9) + '/9', (i + j) % 5 + '/9']; });
-      cargas.push({ nro: String(900100 + i), nome: 'ROTA TESTE ' + (i + 1), veiculo: ['TRUCK', 'TOCO', 'VUC 2700', 'CARRETA', '3/4'][i % 5], box: String((i % 24) + 1), h24: i === 4 || i === 11, d });
+      cargas.push({ nro: String(900100 + i), nome: 'ROTA TESTE ' + (i + 1), veiculo: ['TRUCK', 'TOCO', 'VUC 2700', 'CARRETA', '3/4'][i % 5], box: String((i % 23) + 4), h24: i === 4 || i === 11, d });
     }
+    // as cargas das lojas: o relatorio ja as poe nos boxes da loja (1 e 2: Feira de Santana; 3: Vitoria da Conquista), sem veiculo
+    cargas.push({ nro: '900130', nome: '900131/900132/900133', veiculo: '', box: '1', h24: false, d: { GRANDEZA: ['X', 'X'], MIUDEZA: ['-', '-'], BLOCADO: ['-', '-'], PESAVEIS: ['-', '-'], NOBRE: ['-', '-'], NOBRE_GRANDEZA: ['-', '-'] } });
+    cargas.push({ nro: '900134', nome: '900135/900136', veiculo: '', box: '1', h24: false, d: { GRANDEZA: ['-', '-'], MIUDEZA: ['2/4', '0/4'], BLOCADO: ['-', '-'], PESAVEIS: ['-', '-'], NOBRE: ['-', '-'], NOBRE_GRANDEZA: ['-', '-'] } });
+    cargas.push({ nro: '900137', nome: 'C87-W-XX-VDC/RETIRA-OO-OOO-PRI', veiculo: '', box: '3', h24: false, d: { GRANDEZA: ['-', '-'], MIUDEZA: ['0/1', '0/1'], BLOCADO: ['-', '-'], PESAVEIS: ['-', '-'], NOBRE: ['0/1', '0/1'], NOBRE_GRANDEZA: ['-', '-'] } });
     dono('enviarSituacaoCarga', { emitidoEm: '2026-12-01T07:20:00', arquivo: 'situacao-0720.pdf', paginas: 2, depositos: DEPS3.map((id) => ({ id })), cargas });
     // o patio pela grade (como a planilha antiga): 6 linhas, uma ja carregada
     dono('carregamentoLoteCarga', { linhas: [
@@ -5527,7 +5553,7 @@ async function rodar() {
   let SRV3 = null;
   function srv3() { const c = SRV3.contexto(DONO); c._porta = true; return c; }      // um contexto novo a cada leitura (sem o cache da execucao)
   async function fotosDaFase3(aba, f, prefixo, celular) {
-    const vistas = [['equipe'], ['escala'], ['boxes', 'controle'], ['boxes', 'mapa'], ['boxes', 'cadastros'], ['boxes', 'patio'], ['NOBRE'], ['geral']];
+    const vistas = [['equipe'], ['escala'], ['boxes', 'controle'], ['boxes', 'mapa'], ['boxes', 'cadastros'], ['boxes', 'detalhes'], ['NOBRE'], ['geral']];
     for (const [id, vista] of vistas) {
       await f.evaluate((x) => { if (x[1]) { CG.boxVista = x[1]; } cgIrAba(x[0]); window.scrollTo(0, 0); }, [id, vista || '']);
       await aba.page.waitForTimeout(250);
@@ -5607,7 +5633,7 @@ async function rodar() {
     const kpis = (await f.textContent('.cg-box-resumo')).replace(/\s+/g, ' ');
     afirmar(/6\s*total de caminhões/.test(kpis) && /1\s*caminhões carregados/.test(kpis) && /6\s*total de cargas/.test(kpis) && /1\s*cargas carregadas/.test(kpis) &&
       /2\s*boxes ocupados/.test(kpis) && /2\s*Truck/.test(kpis), 'resumo: ' + kpis);
-    afirmar(await f.$$eval('.cg-ctl thead th', (t) => t.map((x) => x.textContent.trim()).join('|')) === 'CARGA|COMPLEMENTO|PRIORIDADE|BOX|CARRO|DESCRIÇÃO|MOTORISTA|CARREGADA?|OBSERVAÇÃO|HORÁRIO CHEGADA', 'colunas');
+    afirmar(await f.$$eval('.cg-ctl thead th:not(.cg-ctl-pega)', (t) => t.map((x) => x.textContent.trim()).join('|')) === 'CARGA|COMPLEMENTO|PRIORIDADE|BOX|CARRO|DESCRIÇÃO|MOTORISTA|CARREGADA?|OBSERVAÇÃO|HORÁRIO CHEGADA', 'colunas');
     afirmar(await f.$$eval('.cg-ctl tbody tr:not(.cg-ctl-nova)', (t) => t.length) === 6, 'seis linhas');
     const idDe = (n) => ler().patio && srv3().cgCarregamentos_().find((x) => x.n === n).id;
     // editar uma celula: o box da 900104 vai para o 11 (Tab salva)
@@ -5654,12 +5680,19 @@ async function rodar() {
     await f.evaluate(() => { cgCtlEstado().ordem = ''; cgDesenhar(); });
     await f.waitForFunction(() => document.querySelectorAll('.cg-ctl tbody tr:not(.cg-ctl-nova)').length === 9, null, { timeout: 5000 });
     await foto(aba, 'carga3-desktop-boxes-controle-editado');
+    // arrastar uma linha da grade (pela alca) para a doca 20 da fila de cima
+    await aba.page.setViewportSize({ width: 1440, height: 2000 });
+    await f.evaluate(() => window.scrollTo(0, 0));
+    await f.dragAndDrop('.cg-ctl tr[data-id="' + id103 + '"] .cg-ctl-pega span', '.cg-sb-mini-cartao .cg-sb-doca[data-box="20"] .cg-sb-num');
+    await f.waitForFunction((id) => !CG.pendentes && cgLinhasControle().find((x) => x.id === id).box === 20, id103, { timeout: 8000 });
+    afirmar(srv3().cgCarregamentos_().find((x) => x.n === '900103').box === 20, 'grade -> doca 20 no servidor');
+    await aba.page.setViewportSize({ width: 1440, height: 1000 });
     // Excel e CSV
     const [xl] = await Promise.all([aba.page.waitForEvent('download'), f.click('.cg-box-nav-dir button:has-text("Excel")')]);
     afirmar(xl.suggestedFilename() === 'controle-boxes-2026-12-01.xlsx', 'xlsx: ' + xl.suggestedFilename());
     const [csv] = await Promise.all([aba.page.waitForEvent('download'), f.click('.cg-box-nav-dir button:has-text("CSV")')]);
     const txt = require('fs').readFileSync(await csv.path(), 'utf8');
-    afirmar(/^﻿CARGA;COMPLEMENTO;PRIORIDADE;BOX;CARRO;DESCRIÇÃO;MOTORISTA;CARREGADA\?;OBSERVAÇÃO;HORÁRIO CHEGADA\r\n/.test(txt) && txt.split('\r\n').length === 10 && /900103;COMPL\. TESTE;;;TST7G77;/.test(txt), 'csv: ' + txt.slice(0, 300));
+    afirmar(/^﻿CARGA;COMPLEMENTO;PRIORIDADE;BOX;CARRO;DESCRIÇÃO;MOTORISTA;CARREGADA\?;OBSERVAÇÃO;HORÁRIO CHEGADA\r\n/.test(txt) && txt.split('\r\n').length === 10 && /900103;COMPL\. TESTE;;20;TST7G77;/.test(txt), 'csv: ' + txt.slice(0, 300));
     // imprimir: o relatorio com o resumo, o quadro dos boxes e a grade
     const [rel] = await Promise.all([aba.page.context().waitForEvent('page'), f.click('.cg-box-nav-dir button:has-text("Imprimir")')]);
     await rel.waitForLoadState();
@@ -5667,9 +5700,27 @@ async function rodar() {
     afirmar(/Controle dos boxes/.test(relTxt) && /Situação dos BOXs/.test(relTxt) && /Total de caminhões/.test(relTxt) && /900112/.test(relTxt), 'relatorio: ' + relTxt.slice(0, 200));
     if (process.env.GSL_FOTOS) await rel.screenshot({ path: path.join(process.env.GSL_FOTOS, 'carga3-impressao-controle.png'), fullPage: true });
     await rel.close();
-    // Situacao dos BOXs: os 26 boxes
+    // Situacao dos BOXs: a fila das 26 docas (26 a 1), as da loja nos boxes 1 e 3
     await f.click('.cg-box-nav .cg-chip[data-vista="mapa"]');
-    afirmar(await f.$$eval('.cg-mbox', (l) => l.length) === 26 && /Carregando/.test(await f.textContent('.cg-mbox:nth-child(5)')), 'quadro dos boxes');
+    const q3 = await f.evaluate(() => ({ n: document.querySelectorAll('.cg-sb-fila > .cg-sb-doca').length, primeira: document.querySelector('.cg-sb-fila > .cg-sb-doca').dataset.box,
+      d5: document.querySelector('.cg-sb-doca[data-box="5"] .cg-sb-st').textContent, d1: Array.from(document.querySelectorAll('.cg-sb-doca[data-box="1"] .cg-sb-c')).map((c) => c.dataset.n).join(),
+      d3: document.querySelector('.cg-sb-doca[data-box="3"]').textContent.replace(/\s+/g, ' ') }));
+    afirmar(q3.n === 26 && q3.primeira === '26' && /Carregando/.test(q3.d5) && q3.d1 === '900130,900134' && /Loja Vitória da Conquista/.test(q3.d3), 'quadro dos boxes ' + JSON.stringify(q3));
+    await f.click('.cg-sb-doca[data-box="1"] .cg-sb-alvo');
+    await f.waitForSelector('#janela:not(.oculto) .cg-doca-painel', { timeout: 5000 });
+    afirmar(/Reservado · Loja Feira de Santana/.test(await f.textContent('.cg-doca-painel')) && await f.$$eval('.cg-doca-painel .cg-doca-carga.loja', (l) => l.length) === 2, 'painel da doca da loja');
+    await foto(aba, 'carga3-desktop-boxes-doca-loja');
+    await f.evaluate(() => fecharJanela());
+    await f.click('.cg-sb-doca[data-box="5"] .cg-sb-alvo');
+    await f.waitForSelector('#janela:not(.oculto) .cg-doca-painel', { timeout: 5000 });
+    await foto(aba, 'carga3-desktop-boxes-doca');
+    await f.evaluate(() => fecharJanela());
+    // imprimir so o quadro (A4 deitado, as cores da planilha)
+    const [relQ] = await Promise.all([aba.page.context().waitForEvent('page'), f.click('.cg-sb .cg-link:has-text("Imprimir o quadro")')]);
+    await relQ.waitForLoadState();
+    afirmar(await relQ.$$eval('table.sbq tr.nm td', (l) => l.map((x) => x.textContent).join()) === Array.from({ length: 26 }, (_, i) => 26 - i).join() && /BOX DE CARREGAMENTO/.test(await relQ.textContent('body')), 'impressao do quadro');
+    if (process.env.GSL_FOTOS) await relQ.screenshot({ path: path.join(process.env.GSL_FOTOS, 'carga3-impressao-quadro.png'), fullPage: true });
+    await relQ.close();
     // fotos: claro, escuro, celular e TV
     await fotosDaFase3(aba, f, 'carga3-desktop');
     await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
@@ -5683,8 +5734,15 @@ async function rodar() {
     await aba.page.waitForTimeout(300);
     await foto(aba, 'carga3-tv-escala');
     await f.evaluate(() => { CG.boxVista = 'mapa'; cgIrAba('boxes'); });
+    const tv = await f.evaluate(() => { const l = Array.from(document.querySelectorAll('.cg-sb-fila > .cg-sb-doca')).map((x) => x.getBoundingClientRect()); const r = document.querySelector('.cg-sb-rolo');
+      return { mesmaLinha: l.every((b) => Math.round(b.top) === Math.round(l[0].top)), cabe: r.scrollWidth <= r.clientWidth + 1, larg: Math.round(l[0].width) }; });
+    afirmar(tv.mesmaLinha && tv.cabe && tv.larg >= 50, 'TV: as 26 docas numa linha, sem rolar ' + JSON.stringify(tv));
     await foto(aba, 'carga3-tv-boxes-mapa');
-    await f.evaluate(() => cgModoTv());
+    await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
+    await foto(aba, 'carga3-tv-boxes-mapa-escuro');
+    await f.evaluate(() => { CG.boxVista = 'controle'; cgDesenhar(); });
+    await foto(aba, 'carga3-tv-boxes-controle-escuro');
+    await f.evaluate(() => { aplicarTema('claro'); CG.boxVista = 'mapa'; cgModoTv(); });
     afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
     await contexto.close();
     // quem so ve: sem caixas, botoes de subturno, Desfazer, "Alocar pela funcao", celulas editaveis nem formularios
@@ -5702,10 +5760,12 @@ async function rodar() {
       cgIrAba('equipe'); r.desfazer = document.querySelectorAll('.cg-auto button').length; r.botoes = document.querySelectorAll('.cg-quadro-botoes button:not([onclick*="escala"])').length;
       CG.boxVista = 'controle'; cgIrAba('boxes'); r.celulas = document.querySelectorAll('.cg-ctl-cel').length; r.linhas = document.querySelectorAll('.cg-ctl tbody tr').length;
       CG.boxVista = 'cadastros'; cgDesenhar(); r.forms = document.querySelectorAll('.cg-cad-form, .cg-cad textarea, .cg-cad-x').length;
-      CG.boxVista = 'mapa'; cgDesenhar(); r.mbotoes = document.querySelectorAll('button.cg-mbox').length;
+      CG.boxVista = 'mapa'; cgDesenhar(); r.mbotoes = document.querySelectorAll('.cg-sb [draggable="true"], .cg-sb .cg-btn-primario, .cg-sb-mini-cartao').length;
+      cgPainelDoca(5); r.docas = document.querySelectorAll('.cg-sb-fila > .cg-sb-doca').length; r.painel = !!document.querySelector('#janela:not(.oculto) .cg-doca-painel');
+      r.mbotoes += document.querySelectorAll('.cg-doca-painel .cg-doca-acoes, .cg-doca-painel .cg-opcao').length; fecharJanela();
       return r;
     });
-    afirmar(!so.caixas && !so.seg && !so.alocar && !so.desfazer && !so.botoes && !so.celulas && so.linhas === 9 && !so.forms && !so.mbotoes, 'so ver: ' + JSON.stringify(so));
+    afirmar(!so.caixas && !so.seg && !so.alocar && !so.desfazer && !so.botoes && !so.celulas && so.linhas === 9 && !so.forms && !so.mbotoes && so.docas === 26 && so.painel, 'so ver: ' + JSON.stringify(so));
     afirmar(!abaC.erros.length, 'erros (consulta): ' + abaC.erros.join(' | '));
     await ctxC.close(); await s.fechar();
   });

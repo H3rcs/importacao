@@ -1,6 +1,6 @@
 # GSL 4.2.2 — o que mudou e como publicar
 
-O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`; os de 21/10, no pedido de 21/10 e no `GSL-21-10.zip`. **A entrega de 26/11 (GSL 4.3) traz o projeto inteiro no `GSL-4.3-26-11.zip`** — veja a seção dela, logo abaixo. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
+O código-fonte está na pasta `GSL/`. O `GSL-v4.2.2.zip` tem o projeto inteiro até o pedido de 13/10. Os arquivos que mudaram em 14/10 estão listados no pedido de 14/10 e foram enviados à parte, no `GSL-ferias-14-10-v2.zip` (a aba Férias refeita; substitui o `GSL-ferias-14-10.zip`). Os de 19/10 estão no pedido de 19/10 e no `GSL-19-10.zip`; os de 20/10, no pedido de 20/10 e no `GSL-20-10.zip`; os de 21/10, no pedido de 21/10 e no `GSL-21-10.zip`. **A entrega de 26/11 (GSL 4.3) traz o projeto inteiro no `GSL-4.3-26-11.zip`** — veja a seção dela, logo abaixo. **A entrega de 27/11** (desempenho, login, leitor de PDF, envio da situação de carga) vai por cima dela: a seção dela, logo abaixo, lista os arquivos para colar. A `4.2.2` parte da `4.2.1` que você enviou. Ela corrige o que impedia o sistema de abrir e tudo o que duas rodadas de revisão completa encontraram:
 - 1ª rodada: 57 achados; 55 confirmados e corrigidos.
 - 2ª rodada (sobre as próprias correções e sobre os painéis): 39 achados; 37 confirmados e corrigidos.
 
@@ -35,6 +35,60 @@ Havia ainda outras quatro coisas que prendiam a pessoa na entrada, principalment
   - **Exportar Excel** gera um `.xlsx` com duas abas: Leituras e Resumo por nobreak.
   - **Exportar PDF** abre o relatório pronto (A4 deitado) e a janela de impressão. Escolha "Salvar como PDF". O relatório exporta o que está filtrado na tela. Se nada abrir, libere pop-ups para o site.
 - **Trocar PIN:** botão **Trocar PIN**, abaixo do seu nome no menu lateral. Pede o PIN atual e o novo duas vezes. Quem esqueceu o PIN pede ao administrador: **Pessoas e acessos › Zerar PIN**.
+
+## Entrega de 27/11 (desempenho, login, leitor de PDF, envio da situação de carga)
+
+Esta entrega vai **por cima da de 26/11** (GSL 4.3). O banco não muda (continua na 8.16) e nenhum dado é mexido.
+
+### O que você vai notar
+- **Enviar a situação de carga "não fazia nada" — corrigido.** Eram três problemas juntos:
+  1. **Texto colado do visor de PDF do Chrome** (Ctrl+A, Ctrl+C no PDF aberto no navegador): o visor entrega cada pedaço da linha numa linha separada, e o GSL só entendia o texto no formato de uma linha por carga. Ele lia **0 cargas** e o botão **Salvar** ficava apagado, sem dizer por quê. Agora o GSL lê os dois formatos e, se algum número de carga não for lido, diz qual e o motivo.
+  2. **Salvar apagado sem explicação** (relatório sem a data de emissão, igual ou mais velho que o último, nenhuma carga): agora o motivo aparece embaixo do botão.
+  3. **Computador que barra o Google** (o envio vai "pela página"): aos 6 s aparecia um "Continuar" que mandava o mesmo envio de novo no meio da gravação, e a tela voltava com a situação de antes. Agora a tela só avisa que o Google está demorando, e o servidor, se receber o mesmo envio repetido, espera o primeiro terminar. Se o envio for recusado, aparece uma janela **"A situação de carga NÃO foi salva"** com o motivo (antes era um aviso que sumia em 7 s).
+- **Leitor de PDF dentro do GSL.** O leitor de PDF (pdf.js) agora vem do próprio projeto do Apps Script (arquivos `LeitorPdf` e `LeitorPdfTrabalhador`), sem depender de um site de fora (cdnjs), que alguns computadores da rede bloqueavam. Na primeira vez ele fica guardado no navegador; nas seguintes abre na hora. Se mesmo assim não abrir, a tela explica o caminho do texto colado (Ctrl+A, Ctrl+C, Ctrl+V) com um botão que já abre a caixa.
+- **Entrada mais confiável ("problema de conexão com o Google").**
+  - Se a conexão com o Google piscar (rede instável, Google ocupado), o Entrar **tenta de novo sozinho**, com uma pequena espera, sem pedir outro clique.
+  - Se o computador barra a conversa com o Google, a entrada já vai **pela página** (recarrega com o menu), sem esperar.
+  - O botão nunca fica preso em "Entrando…" ou "Abrindo…": com **20 s** sem resposta do Google, ele volta com o aviso, e o próximo clique vai pela página, que não depende dessa conversa. O mesmo vale para o **F5** e o "Continuar como…".
+- **Página mais leve na abertura.** A tela de entrada chega sem os módulos pesados (Painéis, Jovem Aprendiz e Situação de Carga); eles vêm por trás enquanto a pessoa digita o PIN. Abrir uma tela que falhou por rede **tenta de novo sozinho**; nenhuma tela fica parada em "Carregando…" para sempre.
+- **Modo leve automático.** Em computador sem placa de vídeo (área de trabalho remota, "cloud"), o GSL liga sozinho o **modo leve** (sem sombras, desfoques e animações). O botão ⚡ do menu liga e desliga; a escolha da pessoa vale nas próximas aberturas.
+- **Aquecimento de 5 em 5 minutos.** O servidor "acorda" a cada 5 min das 5h às 21h, para quem chega não pegar o Google frio. Não precisa fazer nada: o gatilho antigo (de 15 em 15) passa sozinho para 5 em 5 na primeira vez que rodar. Liga e desliga no painel Desempenho.
+- **Situação de Carga: alocação em lote.** Na Equipe, arrastar várias pessoas e marcar faltas só muda a tela; a barra mostra as alterações pendentes com **Salvar** (grava tudo de uma vez) e **Descartar**. Se outra pessoa mudou alguém no meio, o GSL avisa e reaplica a sua edição por cima. Sair da tela com alterações pendentes pergunta antes.
+- **Situação de Carga: saiu a aba "Escala 5x2".** A regra da escala continua igual (subturnos, folgas, disponíveis, alocação automática). Os subturnos (A1/A2, C1/C2) agora se marcam na **Equipe**, pelo botão **Subturnos** (em lote) ou pelo menu de cada pessoa.
+
+### Painel de Desempenho (só o administrador)
+**Configuração › Sistema › Desempenho.** Cada computador mede o que a pessoa sente (abrir a página, entrar, abrir telas, gravar, desenhar a tela) e manda para o servidor; nada de dado das telas, só nomes de tela, tempos e a descrição do computador. Como ler:
+- **p50** é o tempo normal (metade das vezes foi mais rápido); **p90** é o "dia ruim" (9 de cada 10 vezes); **Pior** é a vez mais lenta.
+- **Servidor** é quanto do tempo foi o Apps Script trabalhando. O resto (p50 menos servidor) é o caminho: internet, Google e o computador.
+- **Por computador:** dê um nome a cada computador no campo "Nome deste computador" (ex.: "Cloud expedição 2"). Abrir a página lento **só em alguns** computadores = o computador ou a rede dele; lento **em todos** = o Google (veja se o aquecimento está ligado).
+- **Falhas** e **Pela página** altos num computador = o Google recusando a conversa ali (normalmente várias contas Google no mesmo navegador): use um perfil do Chrome só com a conta @bartofil.com.br.
+- **Desenhar a tela** alto = computador sem placa de vídeo (o modo leve ajuda).
+- **Últimos erros** (6 h) e **Por dia** (14 dias) mostram quando e onde. **Exportar** baixa tudo numa planilha CSV.
+
+### Arquivos para colar no Apps Script
+Abra o projeto do GSL no Apps Script e, da pasta `GSL/`:
+
+**Substituir** (abra o arquivo no Apps Script, apague todo o conteúdo e cole o novo):
+- `App.html`
+- `Banco.gs`
+- `Carga.gs`
+- `Carga.html`
+- `CargaEstilo.html`
+- `Codigo.gs`
+- `Emails.gs`
+- `Estilo.html`
+- `Index.html`
+
+**Criar novos** (no Apps Script: **+ › Script** para o `.gs` e **+ › HTML** para os `.html`; digite o nome exatamente assim, sem a extensão, e cole o conteúdo):
+- `Desempenho` (Script) — conteúdo de `Desempenho.gs`
+- `LeitorPdf` (HTML) — conteúdo de `LeitorPdf.html`
+- `LeitorPdfTrabalhador` (HTML) — conteúdo de `LeitorPdfTrabalhador.html`
+
+Os arquivos `LeitorPdf` e `LeitorPdfTrabalhador` são grandes (uma linha comprida de letras e números: é o leitor de PDF comprimido). Cole inteiros.
+
+Depois: **Implantar › Gerenciar implantações › editar (lápis) › Versão: Nova versão › Implantar**, mantendo **"Executar como: Eu"** e **"Quem pode acessar: Qualquer pessoa em Bartofil"**. O endereço `/exec` continua o mesmo.
+
+Se aparecer a faixa **"Atualização incompleta do GSL"**, ela diz qual arquivo ficou para trás (os desta entrega têm o carimbo `2026.11.27`; os outros continuam com `2026.11.26`). A faixa também avisa se `LeitorPdf` ou `LeitorPdfTrabalhador` faltarem ou estiverem com outro nome.
 
 ## Entrega de 26/11 (GSL 4.3: acessos em 3 faixas, pasta compartilhada, Plano de Ação novo, Situação de Carga, visual novo)
 

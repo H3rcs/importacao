@@ -1,0 +1,929 @@
+/**
+ * BANCO
+ *
+ * Camada unica de acesso a dados. Nenhum outro arquivo conhece
+ * SpreadsheetApp. Se um dia o banco virar Firestore ou Cloud SQL,
+ * so este arquivo muda.
+ *
+ * Regras que este arquivo garante:
+ *   - todo registro tem ID proprio, que nunca muda quando a aba e reordenada
+ *   - exclusao e logica (coluna EXCLUIDO), entao nada some do historico
+ *   - escrita concorrente e serializada por LockService
+ *   - leitura e uma viagem por aba, nunca celula a celula
+ */
+
+/*
+ * As propriedades sao lidas dezenas de vezes por requisicao (ID_BANCO,
+ * EMAIL_ADMIN, VERSAO_ESQUEMA...) e cada leitura e uma chamada de servico.
+ * Uma leitura so por execucao, guardada aqui.
+ */
+var _props = null;
+const BUILD_BANCO = '2026.11.27';   // carimbo da entrega — ver APP.build no Codigo.gs
+
+function prop(chave, padrao) {
+  // 4.2.2: as propriedades guardam o SEGREDO_PIN e os IDs do banco. Sem esta
+  // trava, qualquer conta da empresa lia tudo pelo console com
+  // google.script.run.prop('SEGREDO_PIN') — ver exigirPorta_.
+  exigirPorta_();
+  if (!_props) _props = PropertiesService.getScriptProperties().getProperties();
+  const v = _props[chave];
+  return (v === null || v === undefined || v === '') ? padrao : v;
+}
+
+/** Quem grava propriedade tem que derrubar esta copia. */
+function esquecerProps() { _props = null; }
+
+/* ------------------------------------------------------------------ */
+/* CACHE DE TEXTO GRANDE                                               */
+/*                                                                     */
+/* O CacheService recusa qualquer valor acima de 100 KB, e recusa em    */
+/* silencio: a gravacao "funciona" e a leitura seguinte volta vazia. O  */
+/* payload de uma tela cheia passa disso com facilidade. Aqui o texto e */
+/* fatiado em pedacos de 90 KB e remontado na leitura.                  */
+/* ------------------------------------------------------------------ */
+
+const FATIA_CACHE = 90 * 1024;
+
+function gravarTextoCache(chave, texto, segundos) {
+  exigirPorta_();
+  try {
+    const cache = CacheService.getScriptCache();
+    const pedacos = [];
+    for (let i = 0; i < texto.length; i += FATIA_CACHE) {
+      pedacos.push(texto.substring(i, i + FATIA_CACHE));
+    }
+    if (pedacos.length > 20) return false;   // grande demais: nao vale cachear
+
+    const mapa = { };
+    mapa[chave] = String(pedacos.length);
+    pedacos.forEach(function (p, i) { mapa[chave + ':' + i] = p; });
+    cache.putAll(mapa, segundos || 120);
+    return true;
+  } catch (e) { return false; }
+}
+
+function lerTextoCache(chave) {
+  exigirPorta_();           // o cache de telas guarda dados de todo mundo
+  try {
+    const cache = CacheService.getScriptCache();
+    // 10/10: cabecalho e as duas primeiras fatias numa chamada so (quase toda tela cabe em 1 ou 2).
+    const partes = cache.getAll([chave, chave + ':0', chave + ':1']) || {};
+    const quantos = Number(partes[chave] || 0);
+    if (!quantos) return null;
+    if (quantos > 2) {
+      const nomes = [];
+      for (let i = 2; i < quantos; i++) nomes.push(chave + ':' + i);
+      const resto = cache.getAll(nomes) || {};
+      Object.keys(resto).forEach(function (k) { partes[k] = resto[k]; });
+    }
+
+    let texto = '';
+    for (let i = 0; i < quantos; i++) {
+      const p = partes[chave + ':' + i];
+      if (p === undefined || p === null) return null;   // fatia venceu: descarta tudo
+      texto += p;
+    }
+    return texto;
+  } catch (e) { return null; }
+}
+
+/* ------------------------------------------------------------------ */
+/* GERACAO DOS DADOS                                                   */
+/*                                                                     */
+/* Nao da para apagar chaves de cache que a gente nao consegue listar   */
+/* (sao uma por tela, perfil e parametro). Entao toda chave carrega o   */
+/* numero da geracao: qualquer gravacao no banco avanca o numero e as   */
+/* chaves antigas viram lixo que expira sozinho.                        */
+/* ------------------------------------------------------------------ */
+
+var _geracao = null;
+
+function geracaoDados() {
+  if (_geracao) return _geracao;
+  const cache = CacheService.getScriptCache();
+  let g = lerChaveCache_(cache, 'geracao');
+  // A pre-leitura (preLerCache_) e do comeco do pedido: sem a chave la, confere de novo agora.
+  if (!g && _preCache) g = cache.get('geracao');
+  if (!g) {
+    // A foto das propriedades tambem e do comeco do pedido: uma gravacao publicada nesse meio
+    // tempo voltaria para tras no cache (e a tela velha voltaria a valer).
+    esquecerProps();
+    g = prop('GERACAO_DADOS', '1');
+    cache.put('geracao', g, 21600);
+  } else if (_props && Number(g) > Number(_props.GERACAO_DADOS || 0)) {
+    // A foto das propriedades desta execucao e de ANTES da ultima gravacao: as geracoes das
+    // tabelas tambem mudaram. Sem reler, uma tela nova seria montada com a copia velha de uma tabela.
+    esquecerProps();
+    _geracaoTb = {};
+  }
+  _geracao = g;
+  return g;
+}
+
+function avancarGeracao() {
+  exigirPorta_();
+  return publicarNumeros_({ GERACAO_DADOS: String(Number(geracaoDados() || 1) + 1) }).GERACAO_DADOS;
+}
+
+/*
+ * PUBLICAR GERACOES (10/10, revisao). Cada numero sai como o MAIOR entre o
+ * calculado e o publicado agora + 1. Quem calculou com uma foto velha das
+ * propriedades (outra execucao publicou no meio: "Atualizar dados", uma
+ * gravacao fora da trava) nao repete o numero dela — repetir faria valer de
+ * novo uma tela ou copia montada com o dado de antes.
+ */
+function publicarNumeros_(mapa) {
+  const props = PropertiesService.getScriptProperties();
+  let atuais = {};
+  try { atuais = props.getProperties() || {}; } catch (e) { atuais = {}; }
+  const saida = {};
+  Object.keys(mapa).forEach(function (k) {
+    saida[k] = String(Math.max(Number(mapa[k]) || 1, (Number(atuais[k]) || 0) + 1));
+  });
+  props.setProperties(saida);
+  if (saida.GERACAO_DADOS) CacheService.getScriptCache().put('geracao', saida.GERACAO_DADOS, 21600);
+  esquecerProps();
+  Object.keys(saida).forEach(function (k) {
+    if (k === 'GERACAO_DADOS') _geracao = saida[k];
+    else _geracaoTb[k] = saida[k];
+  });
+  return saida;
+}
+
+/* ------------------------------------------------------------------ */
+/* GERACAO POR TABELA                                                  */
+/*                                                                     */
+/* A geracao global aposenta as TELAS ja montadas — e certo que ela     */
+/* avance a cada gravacao, porque qualquer tela pode mostrar o que      */
+/* mudou. Mas ela tambem estava na chave do cache das TABELAS: salvar   */
+/* um setor jogava fora a copia de FATO_ASSIDUIDADE (5 mil linhas) e a  */
+/* proxima abertura relia a planilha inteira sem nenhuma necessidade.   */
+/* Cada tabela passa a ter a sua propria geracao.                       */
+/* ------------------------------------------------------------------ */
+
+var _geracaoTb = {};
+
+function geracaoTabela(tabela) {
+  const k = chaveGeracaoTabela(tabela);
+  if (_geracaoTb[k]) return _geracaoTb[k];
+  const g = String(prop(k, '1'));
+  _geracaoTb[k] = g;
+  return g;
+}
+
+/* GER_TB_ATIVIDADES (Feira e tabelas globais) · GER_TB_SSA_ATIVIDADES (outra filial) */
+function chaveGeracaoTabela(tabela) {
+  return 'GER_TB_' + espacoDaTabela(tabela).replace(/\|/g, '_') + tabela;
+}
+
+/*
+ * PERFORMANCE
+ * Cada openById e cada getDataRange sao uma viagem de rede. Numa unica
+ * abertura de tela o mesmo banco era aberto varias vezes e a mesma tabela
+ * lida mais de uma vez. Estes dois caches valem SO durante a execucao
+ * corrente (o Apps Script recria o ambiente a cada chamada), entao nao ha
+ * risco de servir dado velho entre requisicoes.
+ */
+let _bancos = {};      // id da planilha -> Spreadsheet (so nesta execucao)
+var _dspLeituras = 0;  // 27/11: abas lidas da planilha nesta execucao (o medidor de desempenho, Desempenho.gs)
+let _tabelas = {};
+
+/*
+ * UM BANCO POR FILIAL.
+ *
+ * A planilha GSL_BANCO original continua sendo o banco MESTRE: guarda
+ * quem entra (ACESSOS, PERFIS), o cadastro de FILIAIS e o LOG — e
+ * continua guardando os dados de Feira de Santana, exatamente onde
+ * sempre estiveram. Cada filial nova ganha uma planilha propria, com as
+ * mesmas tabelas de dados. Quem decide qual planilha abrir e a tabela:
+ * as globais vao sempre ao mestre; as demais vao ao banco da filial em
+ * uso nesta requisicao (Filiais.gs).
+ */
+function abrirBanco(tabela) {
+  exigirPorta_();
+  const id = tabela ? idBancoDaTabela(tabela) : idBancoDaFilial();
+  if (!id) throw new Error('O banco ainda não foi instalado.');
+  if (_bancos[id]) return _bancos[id];
+  _bancos[id] = SpreadsheetApp.openById(id);
+  return _bancos[id];
+}
+
+function abrirBancoMestre() { return abrirBanco('FILIAIS'); }
+
+function esquecerLeituras() {
+  _tabelas = {};
+  _comCacheMemo = {};
+  _preCache = null;
+  // O mapa turno -> coordenador e derivado da EQUIPE: se a tabela foi
+  // relida, ele tambem tem que cair, senao continuava valendo o mapa
+  // montado antes da gravacao dentro da mesma requisicao.
+  if (typeof _equipeMemo !== 'undefined') _equipeMemo = null;
+  if (typeof _digitosMat !== 'undefined') _digitosMat = null;   // RH_DIGITOS_MATRICULA e da filial
+}
+
+var _abasMemo = {};   // banco|tabela -> Sheet (so nesta execucao): cada getSheetByName e uma ida ao Google
+function abaDe(tabela) {
+  const k = (tabela ? idBancoDaTabela(tabela) : '') + '|' + tabela;
+  if (_abasMemo[k]) return _abasMemo[k];
+  const aba = abrirBanco(tabela).getSheetByName(tabela);
+  if (!aba) throw new Error('A tabela ' + tabela + ' nao existe. Rode sincronizarEsquema().');
+  _abasMemo[k] = aba;
+  return aba;
+}
+
+/* ------------------------------------------------------------------ */
+/* LEITURA                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Devolve os registros vivos de uma tabela como lista de objetos.
+ * incluirExcluidos: true traz tambem os apagados (usado em auditoria).
+ */
+/*
+ * Tabelas que valem guardar entre execucoes. Sao as lidas em quase toda
+ * tela; as demais nao pagam o custo de serializar.
+ */
+const TABELAS_CACHEAVEIS = {
+  ATIVIDADES: 1, COLABORADORES: 1, SETORES: 1, ROTINAS: 1, PARAMETROS: 1,
+  DE_PARA: 1, FATO_ASSIDUIDADE: 1, AGR_COLAB: 1, PERFIS: 1, FILIAIS: 1,
+  // 10/10: as tabelas dos modulos. Cada gravacao de qualquer pessoa fazia a tela seguinte de
+  // TODO mundo reler estas abas da planilha (a parte mais cara de abrir uma tela).
+  ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
+  LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1,
+  // Situacao de Carga (25/11): a geracao de cada uma e o que a tela ao vivo pergunta (acaoGeracaoCarga)
+  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1,
+  CARGA_SEQUENCIA: 1, CARGA_PRESENCA: 1, CARGA_PASSAGEM: 1, CARGA_BOXES: 1, CARGA_CARREGAMENTO: 1,   // 8.15
+  CARGA_PESSOAS: 1, CARGA_ALOCACOES: 1, CARGA_CADASTRO: 1   // 8.16
+};
+/*
+ * Estas so valem do cache FORA da trava. Dentro dela (ler, conferir e gravar:
+ * saldo do estoque, leitura repetida do nobreak, situacao da acao) a leitura
+ * e sempre da planilha — a conferencia tem que ver o dado exato.
+ */
+const CACHE_SO_FORA_DA_TRAVA = {
+  // COLABORADORES: a importacao do RH confere "quem ja existe" dentro da trava (sem isso, uma
+  // importacao morta no meio deixava a copia velha e a seguinte inseria as mesmas matriculas de novo).
+  COLABORADORES: 1,
+  ACOES: 1, COMENTARIOS: 1, NB_EQUIPAMENTOS: 1, NB_LEITURAS: 1, EST_ITENS: 1, EST_MOVIMENTOS: 1,
+  LP_EST_ITENS: 1, LP_EST_MOVIMENTOS: 1, LP_ZONAS: 1, ARQUIVOS_RH: 1, PAINEL: 1, FEEDBACK: 1,
+  // Situacao de Carga (25/11): a geracao de cada uma e o que a tela ao vivo pergunta (acaoGeracaoCarga)
+  CARGA_SNAPSHOTS: 1, CARGA_EQUIPE: 1, CARGA_EQUIPAMENTOS: 1,
+  CARGA_SEQUENCIA: 1, CARGA_PRESENCA: 1, CARGA_PASSAGEM: 1, CARGA_BOXES: 1, CARGA_CARREGAMENTO: 1,   // 8.15
+  CARGA_PESSOAS: 1, CARGA_ALOCACOES: 1, CARGA_CADASTRO: 1   // 8.16
+};
+
+function listar(tabela, incluirExcluidos) {
+  const chave = espacoDaTabela(tabela) + tabela + (incluirExcluidos ? ':todos' : '');
+  if (_tabelas[chave]) return _tabelas[chave];
+
+  /*
+   * CACHE DE TABELA ENTRE EXECUCOES.
+   *
+   * Ler uma aba e a operacao mais cara do sistema: e uma viagem de rede
+   * cujo custo cresce com o numero de linhas. Guardando o resultado ja
+   * montado, uma tela que nao encontrou payload pronto ainda evita as
+   * leituras de planilha. A geracao na chave garante que qualquer
+   * gravacao aposenta a copia na hora.
+   */
+  const cacheavel = !!TABELAS_CACHEAVEIS[tabela] && !incluirExcluidos &&
+    !(_travaAberta > 0 && CACHE_SO_FORA_DA_TRAVA[tabela]);
+  const chaveCache = cacheavel ? ('tb|' + geracaoTabela(tabela) + '|' + espacoDaTabela(tabela) + tabela) : '';
+
+  if (cacheavel) {
+    const guardado = lerTextoCache(chaveCache);
+    if (guardado) {
+      try {
+        const lista = JSON.parse(guardado);
+        _tabelas[chave] = lista;
+        return lista;
+      } catch (e) { /* copia corrompida: le da planilha */ }
+    }
+  }
+
+  /*
+   * getDataRange() percorre tudo que a aba ja teve, inclusive linhas
+   * vazias que so ficaram formatadas. Pedindo o retangulo exato, a
+   * leitura encolhe junto com os dados de verdade.
+   */
+  _dspLeituras++;
+  const aba = abaDe(tabela);
+  const ultimaLinha = aba.getLastRow();
+  const ultimaColuna = aba.getLastColumn();
+  // Tabela vazia tambem entra na memoria da execucao: sem isso, cada
+  // chamada seguinte reabria a aba so para descobrir de novo que nao ha
+  // nada nela (acontece o tempo todo em ARQUIVOS_RH e PAINEL). 10/10: e no
+  // cache entre execucoes tambem — cada tela relia as tabelas vazias.
+  const vazia = function () {
+    _tabelas[chave] = [];
+    if (cacheavel && !_travaAberta) gravarTextoCache(chaveCache, '[]', CACHE_SEGUNDOS);
+    return _tabelas[chave];
+  };
+  if (ultimaLinha < 2 || ultimaColuna < 1) return vazia();
+  const valores = aba.getRange(1, 1, ultimaLinha, ultimaColuna).getValues();
+  if (valores.length < 2) return vazia();
+
+  const colunas = valores[0].map(function (c) { return String(c).trim().toUpperCase(); });
+  const registros = [];
+
+  for (let i = 1; i < valores.length; i++) {
+    const linha = valores[i];
+    if (linha.every(function (c) { return c === '' || c === null; })) continue;
+
+    const r = { _linha: i + 1 };
+    colunas.forEach(function (coluna, c) { if (coluna) r[coluna] = linha[c]; });
+
+    if (!incluirExcluidos && marcado(r.EXCLUIDO)) continue;
+    registros.push(r);
+  }
+  _tabelas[chave] = registros;
+
+  /*
+   * So guarda se tudo for texto ou numero. Uma celula que volte como Date
+   * viraria string na ida e volta pelo JSON, e o codigo que espera Date
+   * quebraria em silencio — o tipo de defeito que so aparece semanas
+   * depois. Na duvida, nao guarda.
+   */
+  // Dentro da trava nao grava copia: a geracao nova so e publicada depois que a planilha
+  // tem a linha (ver comTrava), e ate la uma copia ficaria com o numero errado.
+  if (cacheavel && !_travaAberta && registros.length && semObjetos(registros)) {
+    gravarTextoCache(chaveCache, JSON.stringify(registros), CACHE_SEGUNDOS);
+  }
+  return registros;
+}
+
+/** true se nenhum valor for objeto (Date, por exemplo). Confere TODAS as linhas (10/10). */
+function semObjetos(registros) {
+  const amostra = registros.length;
+  for (let i = 0; i < amostra; i++) {
+    const r = registros[i];
+    const chaves = Object.keys(r);
+    for (let c = 0; c < chaves.length; c++) {
+      const v = r[chaves[c]];
+      if (v !== null && typeof v === 'object') return false;
+    }
+  }
+  return true;
+}
+
+function obter(tabela, id) {
+  const encontrados = listar(tabela).filter(function (r) { return String(r.ID) === String(id); });
+  return encontrados.length ? encontrados[0] : null;
+}
+
+/** Localiza a linha fisica de um ID. Uma leitura da coluna ID, so. */
+function linhaDoId(aba, id) {
+  const colunas = aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
+    .map(function (c) { return String(c).trim().toUpperCase(); });
+  const colId = colunas.indexOf('ID');
+  if (colId === -1) throw new Error('A tabela não tem coluna ID.');
+
+  /*
+   * A PRIMEIRA linha VIVA com o ID (4.2.2). Versoes antigas chegaram a gravar
+   * a mesma atividade duas vezes: a escrita de uma em uma ia para a primeira
+   * copia e a de lote (atualizarVarios) para a ultima — cada uma mexia numa.
+   * Agora as duas acertam a mesma. Copia excluida so vale se for a unica.
+   */
+  const n = Math.max(1, aba.getLastRow() - 1);
+  const ids = aba.getRange(2, colId + 1, n, 1).getValues();
+  const colExc = colunas.indexOf('EXCLUIDO');
+  const exc = colExc === -1 ? null : aba.getRange(2, colExc + 1, n, 1).getValues();
+  let excluida = -1;
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) !== String(id)) continue;
+    if (!exc || !marcado(exc[i][0])) return { linha: i + 2, colunas: colunas };
+    if (excluida === -1) excluida = i;
+  }
+  if (excluida !== -1) return { linha: excluida + 2, colunas: colunas };
+  throw new Error('Registro ' + id + ' nao encontrado em ' + aba.getName() + '.');
+}
+
+/* ------------------------------------------------------------------ */
+/* ESCRITA                                                             */
+/* ------------------------------------------------------------------ */
+
+function inserir(tabela, campos, quem) {
+  return comTrava(function () {
+    const aba = abaDe(tabela);
+    const colunas = aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
+      .map(function (c) { return String(c).trim().toUpperCase(); });
+
+    const registro = {};
+    Object.keys(campos).forEach(function (k) { registro[k.toUpperCase()] = campos[k]; });
+
+    registro.ID = registro.ID || gerarId(tabela);
+    registro.CRIADO_EM = agoraTexto();
+    registro.CRIADO_POR = quem;
+    registro.ATUALIZADO_EM = registro.CRIADO_EM;
+    registro.ATUALIZADO_POR = quem;
+    registro.EXCLUIDO = 'NAO';
+
+    const linha = colunas.map(function (c) { return registro[c] === undefined ? '' : registro[c]; });
+    aba.appendRow(linha);
+
+    limparCache(tabela);
+    registrarLog(quem, 'INSERIR', tabela, registro.ID, resumirCampos(campos));
+    return registro.ID;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* ESCRITA EM LOTE                                                     */
+/*                                                                     */
+/* Um `inserir()` custa: trava + leitura do cabecalho + appendRow +     */
+/* troca de geracao (escrita de propriedade) + log. Chamado dentro de   */
+/* um laco — 68 vezes na instalacao, 200 vezes na importacao da folha,  */
+/* 30 vezes ao encerrar um mes — isso vira centenas de idas ao Google e */
+/* e o que faz a importacao chegar perto do limite de 6 minutos.        */
+/* Estas duas funcoes fazem o mesmo trabalho com UMA leitura e UMA      */
+/* escrita, seja para 5 linhas ou para 5 mil.                           */
+/* ------------------------------------------------------------------ */
+
+/** Insere varios registros de uma vez. Devolve os IDs, na ordem. */
+function inserirVarios(tabela, registros, quem) {
+  if (!registros || !registros.length) return [];
+  return comTrava(function () {
+    const aba = abaDe(tabela);
+    const colunas = aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
+      .map(function (c) { return String(c).trim().toUpperCase(); });
+
+    const agora = agoraTexto();
+    const ids = [];
+    const bloco = registros.map(function (campos) {
+      const r = {};
+      Object.keys(campos).forEach(function (k) { r[k.toUpperCase()] = campos[k]; });
+      r.ID = r.ID || gerarId(tabela);
+      r.CRIADO_EM = agora;  r.CRIADO_POR = quem;
+      r.ATUALIZADO_EM = agora;  r.ATUALIZADO_POR = quem;
+      r.EXCLUIDO = 'NAO';
+      ids.push(r.ID);
+      return colunas.map(function (c) { return r[c] === undefined ? '' : r[c]; });
+    });
+
+    // A aba nasce com um numero fixo de linhas; escrever alem disso da
+    // "linhas fora dos limites". Cria o que faltar antes de gravar.
+    const primeira = aba.getLastRow() + 1;
+    const necessarias = primeira + bloco.length - 1;
+    if (aba.getMaxRows() < necessarias) {
+      aba.insertRowsAfter(aba.getMaxRows(), necessarias - aba.getMaxRows());
+    }
+    aba.getRange(primeira, 1, bloco.length, colunas.length).setValues(bloco);
+
+    limparCache(tabela);
+    registrarLog(quem, 'INSERIR LOTE', tabela, ids.length + ' registros', '');
+    return ids;
+  });
+}
+
+/**
+ * Atualiza varios registros de uma vez.
+ * mudancas: [{ id: 'ATV-...', campos: { STATUS: 'Cancelada' } }, ...]
+ * linha (opcional): a linha fisica lida DENTRO da mesma trava. Vale so se
+ * ainda tiver o mesmo ID e nao estiver excluida; senao, a primeira viva do ID.
+ */
+function atualizarVarios(tabela, mudancas, quem) {
+  if (!mudancas || !mudancas.length) return { ok: true, alterados: 0 };
+  return comTrava(function () {
+    const aba = abaDe(tabela);
+    const ultima = aba.getLastRow(), nCol = aba.getLastColumn();
+    if (ultima < 2) return { ok: true, alterados: 0 };
+
+    const valores = aba.getRange(1, 1, ultima, nCol).getValues();
+    const colunas = valores[0].map(function (c) { return String(c).trim().toUpperCase(); });
+    const colId = colunas.indexOf('ID');
+    if (colId === -1) throw new Error('A tabela ' + tabela + ' nao tem coluna ID.');
+
+    // Indice ID -> linha, montado uma vez. Antes cada atualizar() varria a
+    // coluna ID inteira de novo, uma vez por registro.
+    // A primeira linha VIVA de cada ID — a mesma que o linhaDoId acha.
+    const colExc = colunas.indexOf('EXCLUIDO');
+    const linhaDe = {};
+    for (let i = 1; i < valores.length; i++) {
+      const k = String(valores[i][colId]);
+      if (linhaDe[k] === undefined && !(colExc !== -1 && marcado(valores[i][colExc]))) linhaDe[k] = i;
+    }
+
+    const posQuando = colunas.indexOf('ATUALIZADO_EM');
+    const posQuem = colunas.indexOf('ATUALIZADO_POR');
+    const agora = agoraTexto();
+
+    let menor = valores.length, maior = 0, n = 0;
+    mudancas.forEach(function (m) {
+      // ID gravado em dobro por versao antiga: a linha fisica acerta a copia certa (a outra fica como esta).
+      const fisica = m.linha ? Number(m.linha) - 1 : -1;
+      const i = (fisica >= 1 && fisica < valores.length && String(valores[fisica][colId]) === String(m.id) &&
+                 !(colExc !== -1 && marcado(valores[fisica][colExc]))) ? fisica : linhaDe[String(m.id)];
+      if (i === undefined) return;
+      Object.keys(m.campos).forEach(function (k) {
+        const pos = colunas.indexOf(k.toUpperCase());
+        if (pos !== -1) valores[i][pos] = m.campos[k];
+      });
+      if (posQuando !== -1) valores[i][posQuando] = agora;
+      if (posQuem !== -1) valores[i][posQuem] = quem;
+      if (i < menor) menor = i;
+      if (i > maior) maior = i;
+      n++;
+    });
+    if (!n) return { ok: true, alterados: 0 };
+
+    // Escreve so o bloco que contem as linhas mexidas.
+    aba.getRange(menor + 1, 1, maior - menor + 1, nCol)
+       .setValues(valores.slice(menor, maior + 1));
+
+    limparCache(tabela);
+    registrarLog(quem, 'ATUALIZAR LOTE', tabela, n + ' registros', '');
+    return { ok: true, alterados: n };
+  });
+}
+
+/** Atualiza so as colunas enviadas, numa unica escrita por bloco contiguo. */
+function atualizar(tabela, id, campos, quem) {
+  return comTrava(function () {
+    const aba = abaDe(tabela);
+    const alvo = linhaDoId(aba, id);
+    const valores = aba.getRange(alvo.linha, 1, 1, alvo.colunas.length).getValues()[0];
+
+    Object.keys(campos).forEach(function (k) {
+      const pos = alvo.colunas.indexOf(k.toUpperCase());
+      if (pos !== -1) valores[pos] = campos[k];
+    });
+
+    const posQuando = alvo.colunas.indexOf('ATUALIZADO_EM');
+    const posQuem = alvo.colunas.indexOf('ATUALIZADO_POR');
+    if (posQuando !== -1) valores[posQuando] = agoraTexto();
+    if (posQuem !== -1) valores[posQuem] = quem;
+
+    aba.getRange(alvo.linha, 1, 1, valores.length).setValues([valores]);
+
+    limparCache(tabela);
+    registrarLog(quem, 'ATUALIZAR', tabela, id, resumirCampos(campos));
+    return { ok: true, id: id };
+  });
+}
+
+/** Exclusao logica: o registro sai das listas, mas continua no banco. */
+function excluir(tabela, id, quem) {
+  return comTrava(function () {
+    const aba = abaDe(tabela);
+    const alvo = linhaDoId(aba, id);
+    const pos = alvo.colunas.indexOf('EXCLUIDO');
+    if (pos === -1) throw new Error('A tabela ' + tabela + ' nao permite exclusao.');
+
+    // Eram duas escritas de celula (EXCLUIDO e ATUALIZADO_POR). Uma linha
+    // inteira numa unica viagem custa o mesmo que uma celula.
+    const linha = aba.getRange(alvo.linha, 1, 1, alvo.colunas.length).getValues()[0];
+    linha[pos] = 'SIM';
+    const posQuem = alvo.colunas.indexOf('ATUALIZADO_POR');
+    if (posQuem !== -1) linha[posQuem] = quem;
+    const posQuando = alvo.colunas.indexOf('ATUALIZADO_EM');
+    if (posQuando !== -1) linha[posQuando] = agoraTexto();
+    aba.getRange(alvo.linha, 1, 1, linha.length).setValues([linha]);
+
+    limparCache(tabela);
+    registrarLog(quem, 'EXCLUIR', tabela, id, '');
+    return { ok: true, id: id };
+  });
+}
+
+/*
+ * Serializa escritas concorrentes: dois coordenadores salvando junto nao se
+ * atropelam.
+ *
+ * REENTRANTE. Quem precisa "ler, conferir e gravar" (saldo do estoque,
+ * leitura do nobreak, geracao do mes) abre a trava por fora e chama
+ * inserir/atualizar por dentro — sem isto, a conferencia ficava fora da
+ * trava e duas pessoas passavam juntas pela mesma checagem. Dentro de uma
+ * trava ja aberta, comTrava so executa.
+ */
+var _travaAberta = 0;
+/*
+ * 10/10 — A GERACAO NOVA SO SAI DEPOIS QUE A PLANILHA TEM A LINHA. Antes a
+ * geracao era publicada no meio da trava, antes do flush: quem lesse a
+ * planilha nesse instante guardava o dado de ANTES com o numero NOVO, e a
+ * tela velha ficava valendo ate o cache vencer ("comentei e nao aparece").
+ * Dentro da trava a geracao nova vale so na memoria desta execucao; no fim,
+ * flush, uma escrita de propriedades so e a chave 'geracao'.
+ */
+var _geracoesPendentes = null;
+var _removerDepois = null;       // copias derivadas (acessos/perfis/filiais) a apagar depois do flush
+var _inicioDaExecucao = Date.now();   // o Apps Script carrega os arquivos a cada execucao
+function publicarGeracoes_() {
+  const remover = _removerDepois;
+  if (remover && remover.length) {
+    // PRIMEIRO as copias derivadas: se a escrita das propriedades falhar, ninguem fica com a copia velha.
+    CacheService.getScriptCache().removeAll(remover);
+    _removerDepois = null;
+  }
+  const mapa = _geracoesPendentes;
+  if (!mapa) return;
+  // Falha passageira das propriedades: mais uma tentativa. Falhou de novo, sobe (ver comTrava).
+  try { publicarNumeros_(mapa); }
+  catch (e) { Utilities.sleep(300); publicarNumeros_(mapa); }
+  _geracoesPendentes = null;
+}
+
+function comTrava(funcao, espera) {
+  if (_travaAberta > 0) {
+    _travaAberta++;
+    try { return funcao(); } finally { _travaAberta--; }
+  }
+  const trava = LockService.getScriptLock();
+  if (!trava.tryLock(espera || 20000)) {
+    throw new Error('O sistema está ocupado gravando outra alteração. Tente de novo em instantes.');
+  }
+  _travaAberta = 1;
+  /*
+   * Quem esperou a trava pode ter ficado para tras: outra execucao gravou
+   * enquanto esta esperava. Tudo que foi memorizado ANTES (propriedades,
+   * geracoes, tabelas lidas) cai aqui — o listar() de dentro da trava
+   * enxerga a geracao atual e, portanto, o dado atual.
+   */
+  esquecerProps();
+  _geracao = null;
+  _geracaoTb = {};
+  _geracoesPendentes = null; _removerDepois = null;
+  esquecerLeituras();
+  try {
+    return funcao();
+  } finally {
+    _travaAberta = 0;
+    // Grava o que ficou pendente ANTES de soltar a trava (recomendacao da
+    // documentacao do LockService): sem isso, quem pega a trava em seguida
+    // pode ler a planilha sem a linha que acabou de ser gravada.
+    try { SpreadsheetApp.flush(); } catch (e) {}
+    try { publicarGeracoes_(); }
+    catch (e) {
+      // As geracoes novas nao sairam: esta execucao nao guarda mais tela nem copia com numeros
+      // que ninguem conhece (a gravacao esta na planilha; as telas se acertam na proxima gravacao).
+      _geracoesPendentes = null; _removerDepois = null;
+      _geracao = null; _geracaoTb = {}; esquecerProps(); esquecerLeituras();
+      console.error('GSL: geracoes nao publicadas depois da gravacao: ' + ((e && e.message) || e));
+    }
+    trava.releaseLock();
+  }
+}
+
+/*
+ * LOG EM LOTE.
+ *
+ * Cada appendRow no LOG e uma escrita de rede inteira — ela dobrava o
+ * tempo de toda gravacao do sistema, so para registrar auditoria. Agora
+ * as linhas ficam num balde no cache e descem juntas a cada LOTE_LOG
+ * eventos, numa unica escrita.
+ */
+const LOTE_LOG = 10;
+const CHAVE_LOG = 'log_pendente';
+
+function registrarLog(quem, acao, tabela, registro, detalhe) {
+  exigirPorta_();
+  try {
+    const cache = CacheService.getScriptCache();
+    const balde = JSON.parse(cache.get(CHAVE_LOG) || '[]');
+    balde.push([agoraTexto(), quem, acao, tabela, registro, detalhe || '']);
+
+    if (balde.length >= LOTE_LOG) {
+      cache.remove(CHAVE_LOG);
+      const aba = abaDe('LOG');   // era abaDe('LOG') duas vezes na mesma linha
+      aba.getRange(aba.getLastRow() + 1, 1, balde.length, 6).setValues(balde);
+    } else {
+      cache.put(CHAVE_LOG, JSON.stringify(balde), 21600);  // 6 h, o maximo
+    }
+  } catch (e) { /* log nunca derruba a operacao */ }
+}
+
+/** Esvazia o balde na hora. Chamado pelo gatilho diario e ao sair do ar. */
+function descarregarLog() {
+  exigirPorta_();
+  const cache = CacheService.getScriptCache();
+  const balde = JSON.parse(cache.get(CHAVE_LOG) || '[]');
+  if (!balde.length) return { ok: true, linhas: 0 };
+  cache.remove(CHAVE_LOG);
+  const aba = abaDe('LOG');
+  aba.getRange(aba.getLastRow() + 1, 1, balde.length, 6).setValues(balde);
+  return { ok: true, linhas: balde.length };
+}
+
+function resumirCampos(campos) {
+  return Object.keys(campos).map(function (k) {
+    return k + '=' + String(campos[k]).substring(0, 40);
+  }).join('; ').substring(0, 400);
+}
+
+/* ------------------------------------------------------------------ */
+/* PLANILHA EXTERNA (RH) - somente leitura                             */
+/* ------------------------------------------------------------------ */
+
+function lerPlanilhaExterna(chaveProp, nomeAba) {
+  exigirPorta_();
+  const id = prop(chaveProp, '');
+  if (!id) throw new Error('A planilha externa (' + chaveProp + ') ainda nao foi vinculada.');
+  const aba = SpreadsheetApp.openById(id).getSheetByName(nomeAba);
+  if (!aba) throw new Error('A aba "' + nomeAba + '" nao existe na planilha vinculada.');
+  return aba.getDataRange().getValues();
+}
+
+function abasDaPlanilhaExterna(chaveProp) {
+  exigirPorta_();
+  const id = prop(chaveProp, '');
+  if (!id) return [];
+  return SpreadsheetApp.openById(id).getSheets().map(function (s) { return s.getName(); });
+}
+
+/* ------------------------------------------------------------------ */
+/* UTILITARIOS                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * ID legivel e ordenavel por criacao: ATV-M4K2P1-7X3
+ *
+ * O sufixo era so aleatorio. Gravando 200 colaboradores no mesmo
+ * milissegundo (o que a importacao faz), a chance de dois IDs iguais
+ * passava de 40%. O contador da execucao garante unicidade dentro do
+ * lote; o tempo e o acaso cuidam do resto entre execucoes.
+ */
+var _seqId = 0;
+
+function gerarId(tabela) {
+  const prefixo = tabela.substring(0, 3).toUpperCase();
+  const tempo = Date.now().toString(36).toUpperCase();
+  const conta = (_seqId++).toString(36).toUpperCase();
+  const sorte = Math.floor(Math.random() * 1296).toString(36).toUpperCase();
+  return prefixo + '-' + tempo + '-' + conta + sorte;
+}
+
+function marcado(valor) {
+  if (valor === true) return true;
+  const v = String(valor == null ? '' : valor).toUpperCase().trim();
+  return ['SIM', 'S', 'X', 'V', 'TRUE', 'VERDADEIRO', '1'].indexOf(v) !== -1;
+}
+
+/* Datas e fuso ficam no Datas.gs — ver o porque do cuidado com o carimbo. */
+
+/* --- Cache: guarda resultado calculado, nunca a tabela crua --------- */
+
+/*
+ * 10/10: 30 min (era 5). Toda gravacao feita PELO SISTEMA aposenta a copia na
+ * hora (geracao); o prazo so pesa para o que for digitado direto na planilha
+ * do banco — para isso, o botao "Atualizar dados".
+ */
+const CACHE_SEGUNDOS = 1800;
+const CHAVES_CACHE = ['perfis', 'acessos', 'filiais'];
+/*
+ * Quem entra e o que cada nivel pode: 5 min, como antes. Desativar alguem (ou
+ * tirar uma permissao) direto na planilha vale em no maximo 5 min para quem ja
+ * esta dentro — pelo sistema, vale na hora.
+ */
+const CACHE_SEGUNDOS_POR_CHAVE = { acessos: 300, perfis: 300 };
+
+/*
+ * Cada tabela derruba SO o cache que depende dela. Antes, salvar uma
+ * atividade apagava tambem 'perfis' e 'acessos': a proxima tela de
+ * qualquer pessoa tinha que remontar a matriz de permissoes inteira.
+ */
+const CACHE_POR_TABELA = {
+  ACESSOS: ['acessos'],
+  FILIAIS: ['filiais'],
+  PERFIS: ['perfis']
+  // As outras tabelas nao alimentam copia derivada (so acessos, perfis e filiais passam pelo
+  // comCache): as antigas chaves 'calendario' e 'assiduidade' eram um removeAll por gravacao a toa.
+};
+
+/*
+ * MEMORIA DA EXECUCAO (10/10). As telas do Plano de Acao, da Limpeza e de
+ * Pessoas liam a mesma chave 'perfis' do cache mais de 30 vezes por pedido;
+ * e todo pedido lia sessao, pessoas, perfis, filiais e geracao uma a uma.
+ */
+var _comCacheMemo = {};   // chave -> texto JSON
+var _preCache = null;     // o que a pre-leitura trouxe: chave -> valor ou null
+/* Uma chamada so para o que TODO pedido le: a sessao, as pessoas, os perfis, as filiais e a geracao. */
+function preLerCache_(token) {
+  if (_preCache) return _preCache;
+  const chaves = ['acessos', 'perfis', 'filiais', 'geracao'];
+  if (token) chaves.unshift('sess_' + token, 'sessfim_' + token);
+  let r = {};
+  try { r = CacheService.getScriptCache().getAll(chaves) || {}; } catch (e) { r = {}; }
+  _preCache = {};
+  chaves.forEach(function (k) { _preCache[k] = (r[k] === undefined) ? null : r[k]; });
+  return _preCache;
+}
+function lerChaveCache_(cache, chave) {
+  if (_preCache && Object.prototype.hasOwnProperty.call(_preCache, chave)) return _preCache[chave];
+  return cache.get(chave);
+}
+
+function comCache(chaveBase, funcao) {
+  // A leitura do cache tem a mesma trava da leitura da planilha: antes um
+  // cache quente devolvia acessos, perfis e filiais a quem chamasse pelo
+  // console (e qualquer chave do cache, inclusive a do codigo de acesso).
+  exigirPorta_();
+  const chave = chaveNoEspaco(chaveBase);
+  if (_comCacheMemo[chave] !== undefined) {
+    try { return JSON.parse(_comCacheMemo[chave]); } catch (e) { /* recalcula */ }
+  }
+  const cache = CacheService.getScriptCache();
+  // Gravada nesta trava: a copia do cache e de antes (so sai depois do flush) — recalcula.
+  const vaiSair = !!(_removerDepois && _removerDepois.indexOf(chave) !== -1);
+  const guardado = vaiSair ? null : lerChaveCache_(cache, chave);
+  if (guardado) {
+    try { const v = JSON.parse(guardado); _comCacheMemo[chave] = guardado; return v; } catch (e) { /* recalcula */ }
+  }
+  const resultado = funcao();
+  try {
+    const texto = JSON.stringify(resultado);
+    _comCacheMemo[chave] = texto;
+    // Dentro da trava nao: a copia seria apagada depois do flush (ver publicarGeracoes_).
+    if (texto.length < 95000 && !_travaAberta) cache.put(chave, texto, CACHE_SEGUNDOS_POR_CHAVE[chaveBase] || CACHE_SEGUNDOS);
+  } catch (e) { /* grande demais, segue sem cache */ }
+  return resultado;
+}
+
+/**
+ * Sem argumento, apaga tudo (usado na instalacao e no botao "Atualizar
+ * dados"). Com o nome da tabela, apaga so o que aquela tabela alimenta.
+ */
+/*
+ * Sem argumento, apaga tudo (instalacao, botao "Atualizar dados").
+ * Com o nome da tabela, apaga so o que aquela tabela alimenta.
+ *
+ * A geracao (que aposenta as telas ja montadas) so avanca quando a
+ * gravacao mexe em algo que as telas mostram. Antes ela avancava sempre,
+ * entao cancelar UMA atividade obrigava o servidor a remontar todas as
+ * telas do zero — era isso que travava os botoes do calendario.
+ */
+function limparCache(tabela) {
+  exigirPorta_();
+  esquecerLeituras();
+  const cache = CacheService.getScriptCache();
+
+  if (!tabela) {
+    // Limpeza total (instalacao, botao "Atualizar dados"): tudo avanca,
+    // mas numa UNICA escrita de propriedades em vez de uma por tabela.
+    if (CHAVES_CACHE.length) cache.removeAll(CHAVES_CACHE.map(chaveNoEspaco));
+    const mapa = {};
+    Object.keys(TABELAS_CACHEAVEIS).forEach(function (t) {
+      const gt = String(Number(geracaoTabela(t) || 1) + 1);
+      const k = chaveGeracaoTabela(t);
+      mapa[k] = gt;
+      _geracaoTb[k] = gt;
+    });
+    mapa.GERACAO_DADOS = String(Number(geracaoDados() || 1) + 1);
+    publicarNumeros_(mapa);
+    return;
+  }
+
+  const nome = String(tabela).toUpperCase();
+  const chaves = CACHE_POR_TABELA[nome] || [];
+  // LOG nao aparece em tela nenhuma: nao precisa aposentar nada.
+  if (nome === 'LOG') return;
+
+  /*
+   * Dentro da trava: a geracao nova vale JA nesta execucao (memoria), mas so
+   * e publicada no fim da trava, DEPOIS do flush (ver publicarGeracoes_) —
+   * uma escrita de propriedades por trava, e ninguem le a geracao nova antes
+   * de a planilha ter a linha.
+   */
+  if (_travaAberta > 0) {
+    _geracoesPendentes = _geracoesPendentes || {};
+    if (chaves.length) _removerDepois = (_removerDepois || []).concat(chaves.map(chaveNoEspaco));
+    if (TABELAS_CACHEAVEIS[nome]) {
+      const kt = chaveGeracaoTabela(nome);
+      if (!_geracoesPendentes[kt]) {
+        const gt0 = String(Number(geracaoTabela(nome) || 1) + 1);
+        _geracoesPendentes[kt] = gt0;
+        _geracaoTb[kt] = gt0;
+      }
+    }
+    if (!_geracoesPendentes.GERACAO_DADOS) {
+      const gg0 = String(Number(geracaoDados() || 1) + 1);
+      _geracoesPendentes.GERACAO_DADOS = gg0;
+      _geracao = gg0;
+    }
+    /*
+     * Execucao longa (importacao do RH, geracao do mes): o Apps Script mata a
+     * execucao aos 6 min SEM rodar o finally da trava. Depois de 1 min, cada
+     * gravacao ja sai publicada (flush e numero novo), como era antes do 10/10.
+     */
+    if (Date.now() - _inicioDaExecucao > 60000) {
+      try { SpreadsheetApp.flush(); publicarGeracoes_(); } catch (e) { /* o fim da trava tenta de novo */ }
+    }
+    return;
+  }
+  if (chaves.length) cache.removeAll(chaves.map(chaveNoEspaco));
+
+  /*
+   * Antes, esta linha era `avancarGeracao()` sozinha — e a geracao global
+   * estava na chave de TODAS as tabelas. Salvar um setor obrigava a
+   * releitura de ATIVIDADES, FATO_ASSIDUIDADE, AGR_COLAB e PERFIS na
+   * abertura seguinte. Agora so a tabela que mudou perde a copia; as
+   * telas continuam sendo aposentadas (elas podem mostrar o que mudou).
+   * As duas gravacoes de propriedade viram uma.
+   */
+  const mapa = {};
+  if (TABELAS_CACHEAVEIS[nome]) {
+    const gt = String(Number(geracaoTabela(nome) || 1) + 1);
+    const k = chaveGeracaoTabela(nome);
+    mapa[k] = gt;
+    _geracaoTb[k] = gt;
+  }
+  mapa.GERACAO_DADOS = String(Number(geracaoDados() || 1) + 1);
+  publicarNumeros_(mapa);
+}

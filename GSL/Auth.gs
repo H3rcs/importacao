@@ -320,7 +320,8 @@ function ajustesDoPedido_(atuais, pedido) {
  */
 function acaoSalvarUsuario(usuario, params) {
   const campos = {
-    EMAIL: String(params.email || '').toLowerCase().trim(),
+    // 25/11: igual a entrada — "joao.silva" (ou "joao.silva@") vira joao.silva@bartofil.com.br
+    EMAIL: completarEmail_(params.email),
     NOME: String(params.nome || '').trim(),
     PAPEL: String(params.papel || '').trim(),
     PERFIL: String(params.perfil || '').toUpperCase().trim(),
@@ -328,7 +329,7 @@ function acaoSalvarUsuario(usuario, params) {
     FILIAIS: String(params.filiais || '').toUpperCase().replace(/\s+/g, ''),
     ATIVO: params.ativo === false ? 'NAO' : 'SIM'
   };
-  if (!campos.EMAIL || campos.EMAIL.indexOf('@') === -1) throw new Error('Informe um e-mail válido.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(campos.EMAIL)) throw new Error('Informe um e-mail válido.');
   if (!campos.NOME) throw new Error('Informe o nome da pessoa — é ele que aparece no sistema.');
   if (!campos.PERFIL || campos.PERFIL === PERFIL_PADRAO_NOVO_USUARIO) throw new Error('Escolha o nível de acesso.');
   campos.SITUACAO = campos.ATIVO === 'SIM' ? 'ATIVO' : 'INATIVO';
@@ -792,7 +793,11 @@ function registroDeAcesso_(email) {
   })[0] || null;
 }
 
-function chaveErrosDia_(email) { return 'PIN_ERROS_DIA_' + email.replace(/[^a-z0-9]/g, '_'); }
+/* Chave por e-mail sem colisao: "ana.silva" e "ana_silva" nao dividem o contador. */
+function chavePinDe_(email) {
+  return String(email || '').replace(/[^a-z0-9]/g, function (c) { return '_' + c.charCodeAt(0).toString(16); });
+}
+function chaveErrosDia_(email) { return 'PIN_ERROS_DIA_' + chavePinDe_(email); }
 function hojePin_() { return Utilities.formatDate(new Date(), fuso(), 'yyyy-MM-dd'); }
 function errosPinHoje_(email) {
   try {
@@ -800,22 +805,31 @@ function errosPinHoje_(email) {
     return v && v.d === hojePin_() ? Number(v.n || 0) : 0;
   } catch (e) { return 0; }
 }
+/*
+ * Conta o erro sob a trava do script: varios pedidos errados ao mesmo tempo
+ * (ataque em paralelo) nao leem o mesmo numero e contam todos. Sem a trava
+ * em 3 s, conta assim mesmo (melhor contar do que travar a entrada).
+ */
 function contarErroPin_(email) {
-  const cache = CacheService.getScriptCache();
-  const k = 'pinerro_' + email.replace(/[^a-z0-9]/g, '_');
-  const n = Number(cache.get(k) || 0) + 1;
-  cache.put(k, String(n), PIN_BLOQUEIO_SEG);
-  try {
-    const dia = errosPinHoje_(email) + 1;
-    PropertiesService.getScriptProperties().setProperty(chaveErrosDia_(email), JSON.stringify({ d: hojePin_(), n: dia }));
-    if (dia === PIN_ERROS_DIA) registrarLog('sistema', 'BLOQUEIO', 'PIN', email, PIN_ERROS_DIA + ' PINs errados hoje: entrada travada ate amanha (o administrador destrava zerando o PIN)');
-  } catch (e) {}
-  return n;
+  const contar = function () {
+    const cache = CacheService.getScriptCache();
+    const k = 'pinerro_' + chavePinDe_(email);
+    const n = Number(cache.get(k) || 0) + 1;
+    cache.put(k, String(n), PIN_BLOQUEIO_SEG);
+    try {
+      const dia = errosPinHoje_(email) + 1;
+      PropertiesService.getScriptProperties().setProperty(chaveErrosDia_(email), JSON.stringify({ d: hojePin_(), n: dia }));
+      if (dia === PIN_ERROS_DIA) registrarLog('sistema', 'BLOQUEIO', 'PIN', email, PIN_ERROS_DIA + ' PINs errados hoje: entrada travada ate amanha (o administrador destrava zerando o PIN)');
+    } catch (e) {}
+    return n;
+  };
+  // comTrava (Banco.gs) e reentrante: se quem chamou ja esta na trava, conta ali mesmo.
+  try { return comTrava(contar, 3000); } catch (e) { return contar(); }
 }
 /* '' = livre; 'JANELA' = 5 erros nos ultimos 10 min; 'DIA' = o teto do dia. */
 function pinBloqueado_(email) {
   if (errosPinHoje_(email) >= PIN_ERROS_DIA) return 'DIA';
-  return Number(CacheService.getScriptCache().get('pinerro_' + email.replace(/[^a-z0-9]/g, '_')) || 0) >= PIN_TENTATIVAS ? 'JANELA' : '';
+  return Number(CacheService.getScriptCache().get('pinerro_' + chavePinDe_(email)) || 0) >= PIN_TENTATIVAS ? 'JANELA' : '';
 }
 function avisoPinBloqueado_(motivo) {
   return motivo === 'DIA'
@@ -823,7 +837,7 @@ function avisoPinBloqueado_(motivo) {
     : 'PIN errado muitas vezes. Espere 10 minutos ou peça ao administrador para zerar o seu PIN.';
 }
 function zerarErrosPin_(email) {
-  try { CacheService.getScriptCache().remove('pinerro_' + email.replace(/[^a-z0-9]/g, '_')); } catch (e) {}
+  try { CacheService.getScriptCache().remove('pinerro_' + chavePinDe_(email)); } catch (e) {}
   try {
     const props = PropertiesService.getScriptProperties();
     if (props.getProperty(chaveErrosDia_(email))) props.deleteProperty(chaveErrosDia_(email));

@@ -1526,7 +1526,7 @@ function cgRuasFlowrack_(texto) {
 /* PARAMETROS DA CARGA (tela, para quem edita)                         */
 /* ------------------------------------------------------------------ */
 
-/* params: { turnos: { A, B, C }, boxes, permanencia, ruas, emCurso } — so o que vier. */
+/* params: { turnos: { A, B, C }, boxes, ordemBoxes, permanencia, ruas, emCurso } — so o que vier. */
 function acaoParametrosCarga(usuario, params) {
   const p = params || {};
   const gravar = [];
@@ -1542,6 +1542,12 @@ function acaoParametrosCarga(usuario, params) {
     const n = cgInteiro_(p.boxes, 1, 99, 0);
     if (!n) throw new Error('Quantidade de boxes: de 1 a 99.');
     gravar.push(['CARGA_BOXES', String(n)]);
+  }
+  if (p.ordemBoxes != null && p.ordemBoxes !== '') {
+    const n = p.boxes != null && p.boxes !== '' ? cgInteiro_(p.boxes, 1, 99, 0) : cgNBoxes_();
+    const o = cgLerOrdemBoxes_(p.ordemBoxes, n);
+    if (!o) throw new Error('Ordem dos boxes: números de 1 a ' + n + ' sem repetir, da esquerda para a direita, com faixas (ex.: 26-1 ou 1-10, 12).');
+    gravar.push(['CARGA_BOXES_ORDEM', String(p.ordemBoxes).replace(/\s+/g, ' ').trim()]);
   }
   if (p.ruas != null && p.ruas !== '') {
     const r = cgRuasFlowrack_(String(p.ruas));
@@ -1605,6 +1611,33 @@ function cgCategoriaObs_(obs) {
   return cat;
 }
 function cgNBoxes_() { return cgInteiro_(parametro('CARGA_BOXES', ''), 1, 99, 26); }
+/*
+ * A ORDEM DOS BOXES NA FILA, como as docas estao no CD (a aba "Situacao dos BOXs" da planilha antiga: da
+ * esquerda para a direita 26, 25 ... 2, 1). Texto com numeros e faixas: "26-1", "1-10, 12".
+ * Devolve a lista (so boxes de 1 a n, sem repetir) ou null se o texto nao serve.
+ */
+const CG_BOXES_ORDEM_PADRAO = '26-1';
+function cgLerOrdemBoxes_(texto, n) {
+  const partes = String(texto || '').split(/[,;\s]+/).filter(Boolean);
+  if (!partes.length) return null;
+  const saida = [];
+  for (let i = 0; i < partes.length; i++) {
+    const m = /^(\d{1,2})(?:[-–](\d{1,2}))?$/.exec(partes[i]);
+    if (!m) return null;
+    const a = +m[1], b = m[2] ? +m[2] : a, passo = b >= a ? 1 : -1;
+    for (let x = a; ; x += passo) { if (x < 1 || x > n || saida.indexOf(x) !== -1) return null; saida.push(x); if (x === b) break; }
+  }
+  return saida;
+}
+function cgOrdemBoxes_() {
+  const n = cgNBoxes_();
+  const lido = cgLerOrdemBoxes_(parametro('CARGA_BOXES_ORDEM', '') || CG_BOXES_ORDEM_PADRAO, 99);
+  const ordem = (lido || []).filter(function (x) { return x <= n; });
+  if (ordem.length) return ordem;
+  const tudo = [];
+  for (let i = n; i >= 1; i--) tudo.push(i);
+  return tudo;
+}
 function cgPermanenciaMin_() { return cgInteiro_(parametro('CARGA_BOX_PERMANENCIA_MIN', ''), 10, 1440, 120); }
 /* A lista de situacoes (parametro, uma por linha ou separadas por ;) mais as que os botoes usam. */
 function cgSituacoesBox_() {
@@ -1768,6 +1801,7 @@ function cgPatioDaTela_(cargas) {
   const p = cgPatio_(cgCarregamentos_(), cgBoxesGravados_(), cargas || [], cgNBoxes_(), cgPermanenciaMin_(), cgAgoraIso_());
   p.situacoes = cgSituacoesBox_();
   p.situacoesCat = p.situacoes.map(cgCategoriaObs_);
+  p.ordem = cgOrdemBoxes_();
   p.tipos = CG_TIPOS_VEICULO;
   return p;
 }

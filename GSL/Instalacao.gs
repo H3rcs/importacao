@@ -605,6 +605,7 @@ const PARAMETROS_NOVOS = [
   ['CARGA_TURNO_C', 'Situação de Carga: horário do Turno C (3º turno), como 23:00-07:00 (passa da meia-noite)', '23:00-07:00'],
   ['CARGA_TURNO_ADM', 'Situação de Carga: horário ADM (Recebimento do Turno A e equipe ADM, segunda a sexta), como 08:00-17:48', '08:00-17:48'],
   ['CARGA_BOXES', 'Situação de Carga: quantos boxes (docas) o CD tem', '26'],
+  ['CARGA_BOXES_ORDEM', 'Situação de Carga: a ordem das docas na fila, da esquerda para a direita, como no CD (ex.: 26-1)', '26-1'],
   ['CARGA_BOX_PERMANENCIA_MIN', 'Situação de Carga: minutos que um veículo pode ficar encostado no box antes do alerta', '120'],
   ['CARGA_SITUACOES_BOX', 'Situação de Carga: as situações do carregamento (separadas por ponto e vírgula)', CG_SITUACOES_PADRAO_TXT],
   ['CARGA_FLOWRACK_RUAS', 'Situação de Carga: ruas de cada andar do flowrack do Nobre (um número para todos, ou térreo,1º,2º,3º,4º como 6,6,6,6,6)', '6'],

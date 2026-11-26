@@ -858,6 +858,8 @@ const ACOES = {
 
   // situacao de carga (25/11 — Carga.gs). geracaoCarga e a pergunta barata da tela ao vivo (so le tres numeros).
   geracaoCarga:        { tela: 'carga', leitura: true, funcao: 'acaoGeracaoCarga' },
+  // 27/11: o leitor de PDF (pdf.js) que mora no projeto (LeitorPdf*.html), no lugar da cdnjs barrada pela rede.
+  leitorPdf:           { tela: 'carga', leitura: true, funcao: 'acaoLeitorPdf' },
   enviarSituacaoCarga: { tela: 'carga', funcao: 'acaoEnviarSituacaoCarga' },
   excluirSituacaoCarga:{ tela: 'carga', funcao: 'acaoExcluirSituacaoCarga' },
   moverPessoaCarga:    { tela: 'carga', funcao: 'acaoMoverPessoaCarga' },

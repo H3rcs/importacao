@@ -45,7 +45,7 @@
  * LIVRE (no pool), em USO num desses quatro depositos, ou em MANUTENCAO. CARRINHOS: 35, da Miudeza.
  * As duas quantidades mudam na tela (quem edita) e ficam gravadas.
  */
-const BUILD_CARGA = '2026.11.26';   // carimbo da entrega — ver APP.build no Codigo.gs
+const BUILD_CARGA = '2026.11.27';   // carimbo da entrega — ver APP.build no Codigo.gs
 
 const CG_DEPOSITOS = [
   { id: 'GRANDEZA',       nome: 'Grandeza',       equip: 'PALETEIRA', grupo: 'GNPB' },
@@ -518,6 +518,34 @@ function cgGeracao_() {
 function acaoGeracaoCarga(usuario) {
   cgAutoTurno_();          // a alocacao automatica da entrada/saida do turno (rapida quando ja foi feita)
   return { ok: true, g: cgGeracao_() };
+}
+
+/*
+ * LEITOR DE PDF DENTRO DO PROJETO (27/11). A rede da Bartofil (ou o proxy do servidor em nuvem)
+ * barrava a cdnjs: "Nao consegui carregar o leitor de PDF". O pdf.js agora mora nos arquivos
+ * LeitorPdf.html (pdf.min.js) e LeitorPdfTrabalhador.html (o "trabalhador"), comprimidos (gzip) em
+ * base64url — so letras, numeros, - e _: o HtmlService nao apaga nem troca nada (ver
+ * ferramentas/embutir-pdfjs.js). A tela pede um por vez (qual: 'trabalhador' ou 'leitor') quando a
+ * janela "Enviar situacao" abre, descomprime no navegador e guarda neste navegador (a proxima abertura
+ * nem pergunta). Leitura do menu Situacao de Carga: basta Ver.
+ */
+const CG_LEITOR_PDF = { leitor: 'LeitorPdf', trabalhador: 'LeitorPdfTrabalhador' };
+function acaoLeitorPdf(usuario, params) {
+  exigirPorta_();
+  const qual = String((params && params.qual) || 'leitor');
+  const nome = Object.prototype.hasOwnProperty.call(CG_LEITOR_PDF, qual) ? CG_LEITOR_PDF[qual] : '';
+  if (!nome) throw new Error('Pedido inválido para o leitor de PDF.');
+  return cgLeitorPdfDoArquivo_(nome);
+}
+/* { arquivo, versao, carimbo, bytes, sha, b64 } — ou { ok: false } quando o arquivo nao foi colado no projeto. */
+function cgLeitorPdfDoArquivo_(nome) {
+  let texto = '';
+  try { texto = HtmlService.createHtmlOutputFromFile(nome).getContent(); }
+  catch (e) { return { ok: false, erro: 'O arquivo ' + nome + '.html não está no projeto do Apps Script (Atualização incompleta).' }; }
+  const m = /GSL-PDFJS (\S+) (\S+) (\S+) (\d+) (\w+)\s*\n([\s\S]*?)\n\s*FIM/.exec(texto);
+  if (!m) return { ok: false, erro: 'O arquivo ' + nome + '.html está incompleto: cole de novo o arquivo inteiro.' };
+  return { ok: true, arquivo: m[1], versao: m[2], carimbo: m[3], bytes: Number(m[4]), sha: m[5],
+    b64: m[6].replace(/[^A-Za-z0-9_-]/g, '') };
 }
 
 /* ------------------------------------------------------------------ */

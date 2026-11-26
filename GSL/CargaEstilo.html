@@ -485,6 +485,14 @@ html.cg-arrastando-paleteira .cg-pal-zona { border-color: var(--cg-azul-claro); 
 .cg-previa input[type="datetime-local"], .cg-previa textarea { width: 100%; }
 .cg-erro { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(214, 69, 69, .1); color: #b83232; font-size: 13px; font-weight: 500; }
 [data-tema="escuro"] .cg-erro { color: #ffb0b0; }
+/* 27/11: o leitor de PDF nao abriu — o caminho do texto colado explicado ali mesmo */
+.cg-erro-leitor { display: grid; gap: 8px; line-height: 1.55; }
+.cg-erro-leitor p, .cg-erro-leitor ol { margin: 0; }
+.cg-erro-leitor ol { padding-left: 20px; color: var(--tinta, #14152b); font-weight: 400; }
+[data-tema="escuro"] .cg-erro-leitor ol { color: #e6e8f5; }
+.cg-erro-leitor kbd { display: inline-block; padding: 0 5px; border: 1px solid currentColor; border-radius: 4px; font: 600 11px/1.5 Inter, Arial, sans-serif; }
+.cg-erro-leitor .botao { justify-self: start; }
+.cg-erro-leitor small { word-break: break-word; }
 .cg-lendo { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; }
 .cg-gira { width: 18px; height: 18px; border-radius: 50%; border: 3px solid rgba(17, 23, 133, .15); border-top-color: #111785; animation: cg-girar .8s linear infinite; }
 @keyframes cg-girar { to { transform: rotate(360deg); } }

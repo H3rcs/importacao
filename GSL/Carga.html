@@ -434,7 +434,7 @@ function cgFaixasAmarelas(ops, lib, vp) {
  * no computador por 45 min a pergunta para (a sessao acaba como sempre) — menos no Modo TV.
  * Mover pessoa e mudar paleteira sao OTIMISTAS: a tela muda na hora e volta se o servidor recusar.
  */
-const BUILD_CARGA_TELA = '2026.11.26';
+const BUILD_CARGA_TELA = '2026.11.27';
 const CG = {
   aba: lerLocal('gsl_carga_aba') || 'cargas', filtro: 'todas', fDep: '', fBox: '', fVeic: '', fGargalo: '', ordem: 'prioridade', busca: '',
   turno: cgTurnoGuardado(), funcao: '', buscaPessoa: '',
@@ -1467,6 +1467,8 @@ function cgAbrirEnvio() {
     <button type="button" class="cg-link" onclick="cgColarTexto()">O PDF não abre? Cole o texto do relatório</button>
     <div id="cg-previa" class="cg-previa" aria-live="polite"></div>
   </div>`, '<button class="botao secundario" onclick="fecharJanela()">Cancelar</button><button class="botao" id="cg-salvar" disabled onclick="cgSalvarLeitura()">Salvar situação</button>');
+  // 27/11: o leitor ja comeca a vir agora (quando a pessoa escolher o arquivo, ele esta pronto). Falhou: o arquivo escolhido explica.
+  cgCarregarPdfJs().catch(() => {});
 }
 function cgSoltouNaJanela(ev) {
   ev.preventDefault(); ev.currentTarget.classList.remove('sobre');
@@ -1475,14 +1477,24 @@ function cgSoltouNaJanela(ev) {
 }
 function cgColarTexto() {
   const p = el('cg-previa'); if (!p) return;
-  p.innerHTML = `<label class="cg-rotulo" for="cg-texto">Abra o PDF, selecione tudo (Ctrl+A), copie e cole aqui:</label>
+  p.innerHTML = `<label class="cg-rotulo" for="cg-texto">Abra o PDF, clique dentro dele, selecione tudo (Ctrl+A), copie (Ctrl+C) e cole aqui (Ctrl+V):</label>
     <textarea id="cg-texto" rows="7" placeholder="762480 TIM-B-XX-... BI-TRUCK 15 X X X X ..."></textarea>
     <button type="button" class="botao secundario" onclick="cgLerTextoColado()">Ler o texto</button>`;
+  setTimeout(() => { const t = el('cg-texto'); if (t) t.focus(); }, 30);
 }
 function cgLerTextoColado() { const r = cgLerTexto(val('cg-texto')); r.arquivo = 'texto colado'; cgMostrarPrevia(r); }
 
-/* pdf.js: da cdnjs na versao online; da pasta vendor na GSL-Local (o montar-local.js copia os mesmos arquivos). */
+/*
+ * pdf.js (27/11). A rede da Bartofil barrava a cdnjs ("Nao consegui carregar o leitor de PDF"). Agora,
+ * na versao online, o leitor vem DO PROPRIO PROJETO: os arquivos LeitorPdf.html e LeitorPdfTrabalhador.html,
+ * comprimidos, pela acao leitorPdf (google.script.run). A tela descomprime aqui (DecompressionStream) e roda
+ * o codigo nesta pagina; a copia fica guardada neste navegador (a proxima vez nem vai ao servidor). A cdnjs
+ * ficou so de reserva (computador que barra a conversa com o Google). Na GSL-Local: da pasta vendor.
+ * Comeca a carregar quando a janela "Enviar situacao" abre: quando o arquivo e escolhido, ja esta pronto.
+ */
 let CG_PDFJS = null;
+const CG_PDFJS_GUARDADO = 'gsl_pdfjs_' + CG_PDFJS_VERSAO;
+const CG_ERRO_LEITOR = 'Não consegui carregar o leitor de PDF';
 function cgBasePdfJs() {
   return MODO_LOCAL ? 'vendor/pdfjs-' + CG_PDFJS_VERSAO + '/' : 'https:\/\/cdnjs.cloudflare.com\/ajax\/libs\/pdf.js\/' + CG_PDFJS_VERSAO + '\/';
 }
@@ -1491,21 +1503,112 @@ function cgScript(src) {
     const s = document.createElement('script');
     s.src = src; s.async = true;
     s.onload = () => ok();
-    s.onerror = () => falha(new Error('Não consegui carregar o leitor de PDF. Confira a internet ou use "Cole o texto do relatório".'));
+    s.onerror = () => falha(new Error('o endereço ' + src.replace(/^https?:\W+/, '').split('/')[0] + ' não respondeu'));
     document.head.appendChild(s);
   });
+}
+/* Roda o texto de um script nesta pagina (como um script da propria pagina: as globais pdfjsLib e pdfjsWorker ficam). */
+function cgRodarScript(texto) {
+  const s = document.createElement('script');
+  s.textContent = texto;
+  document.head.appendChild(s);
+  s.remove();
+}
+/* base64url (gzip) -> texto. */
+async function cgDescomprimir(b64) {
+  if (typeof DecompressionStream !== 'function') throw new Error('este navegador não descomprime (atualize o Chrome)');
+  let t = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (t.length % 4) t += '=';
+  const bin = atob(t), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+}
+async function cgRodarDoProjeto(par) {
+  cgRodarScript(await cgDescomprimir(par.trabalhador));
+  cgRodarScript(await cgDescomprimir(par.leitor));
+  if (!window.pdfjsLib || !window.pdfjsWorker) throw new Error('o leitor veio incompleto');
+}
+function cgLeitorGuardado() {
+  try { const x = JSON.parse(localStorage.getItem(CG_PDFJS_GUARDADO) || 'null'); return x && x.leitor && x.trabalhador ? x : null; }
+  catch (e) { return null; }
+}
+function cgGuardarLeitor(par) {
+  try {
+    Object.keys(localStorage).forEach((k) => { if (/^gsl_pdfjs_/.test(k) && k !== CG_PDFJS_GUARDADO) localStorage.removeItem(k); });
+    localStorage.setItem(CG_PDFJS_GUARDADO, JSON.stringify(par));
+  } catch (e) { /* sem espaco ou armazenamento barrado: da proxima vez vem do servidor de novo */ }
+}
+async function cgLeitorDoServidor() {
+  const pedir = async (qual) => {
+    const r = await executarAcaoSrv('leitorPdf', { qual: qual });
+    if (!r || r.ok === false || !r.b64) throw new Error((r && r.erro) || 'o servidor não mandou o leitor');
+    if (r.versao && r.versao !== CG_PDFJS_VERSAO) throw new Error('o leitor do projeto é da versão ' + r.versao + ' (Atualização incompleta)');
+    return r.b64;
+  };
+  const par = { trabalhador: await pedir('trabalhador'), leitor: await pedir('leitor') };
+  await cgRodarDoProjeto(par);
+  cgGuardarLeitor(par);
+}
+async function cgCarregarPdfJsAgora() {
+  const t0 = performance.now(), motivos = [];
+  const pronto = (origem) => {
+    // Com o pdfjsWorker nesta pagina, o pdf.js nem procura o arquivo do trabalhador; o endereco fica so por garantia.
+    if (origem === 'pasta' || origem === 'cdn') { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = cgBasePdfJs() + 'pdf.worker.min.js'; } catch (e) {} }
+    if (typeof medirEvento === 'function') medirEvento('pdf', 'leitor:' + origem, performance.now() - t0, true);
+    return window.pdfjsLib;
+  };
+  if (MODO_LOCAL) {
+    // O "trabalhador" roda nesta mesma pagina (o file:// nao abre Worker de outro endereco): o relatorio tem 1 ou 2 paginas.
+    const base = cgBasePdfJs();
+    await cgScript(base + 'pdf.worker.min.js'); await cgScript(base + 'pdf.min.js');
+    if (!window.pdfjsLib) throw new Error(CG_ERRO_LEITOR + ' (a pasta vendor da GSL-Local está incompleta).');
+    return pronto('pasta');
+  }
+  // 1) a copia guardada neste navegador
+  const guardado = cgLeitorGuardado();
+  if (guardado) {
+    try { await cgRodarDoProjeto(guardado); return pronto('navegador'); }
+    catch (e) { try { localStorage.removeItem(CG_PDFJS_GUARDADO); } catch (x) {} motivos.push('cópia guardada: ' + (e.message || e)); }
+  }
+  // 2) o projeto do Apps Script (a conversa com o Google)
+  if (!window.pdfjsLib) {
+    try { await cgLeitorDoServidor(); return pronto('servidor'); }
+    catch (e) { motivos.push('servidor do GSL: ' + ((e && e.message) || e)); }
+  }
+  // 3) a cdnjs, de reserva
+  if (!window.pdfjsLib || !window.pdfjsWorker) {
+    try {
+      const base = cgBasePdfJs();
+      if (!window.pdfjsWorker) await cgScript(base + 'pdf.worker.min.js');
+      if (!window.pdfjsLib) await cgScript(base + 'pdf.min.js');
+      if (window.pdfjsLib) return pronto('cdn');
+    } catch (e) { motivos.push('cdnjs: ' + ((e && e.message) || e)); }
+  }
+  if (window.pdfjsLib && window.pdfjsWorker) return pronto('pagina');
+  if (typeof medirEvento === 'function') medirEvento('pdf', 'leitor:falhou', performance.now() - t0, false, motivos.join(' · '));
+  const e = new Error(CG_ERRO_LEITOR + '.');
+  e.leitor = true; e.motivos = motivos;
+  throw e;
 }
 function cgCarregarPdfJs() {
   if (window.pdfjsLib && window.pdfjsWorker) return Promise.resolve(window.pdfjsLib);
   if (CG_PDFJS) return CG_PDFJS;
-  const base = cgBasePdfJs();
-  // O "trabalhador" do pdf.js roda nesta mesma pagina (a moldura do Google e o file:// nao abrem Worker de outro endereco): o relatorio tem 1 ou 2 paginas.
-  CG_PDFJS = cgScript(base + 'pdf.worker.min.js').then(() => cgScript(base + 'pdf.min.js')).then(() => {
-    if (!window.pdfjsLib) throw new Error('O leitor de PDF não abriu.');
-    try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; } catch (e) {}
-    return window.pdfjsLib;
-  }).catch((e) => { CG_PDFJS = null; throw e; });
+  CG_PDFJS = cgCarregarPdfJsAgora().catch((e) => { CG_PDFJS = null; throw e; });
   return CG_PDFJS;
+}
+/* O leitor nao abriu: o caminho do texto colado, explicado ali mesmo (com o botao que ja abre a caixa). */
+function cgErroDoLeitorHtml(e) {
+  const motivos = (e && e.motivos) || [];
+  return `<div class="cg-erro cg-erro-leitor" role="alert">
+    <p><b>Não consegui abrir o leitor de PDF neste computador.</b> Dá para enviar a situação assim mesmo, pelo texto do relatório:</p>
+    <ol>
+      <li>Abra o PDF da situação de carga (dois cliques no arquivo).</li>
+      <li>Clique dentro do PDF e aperte <kbd>Ctrl</kbd>+<kbd>A</kbd> (seleciona tudo) e depois <kbd>Ctrl</kbd>+<kbd>C</kbd> (copia).</li>
+      <li>Clique no botão abaixo, clique na caixa e aperte <kbd>Ctrl</kbd>+<kbd>V</kbd> (cola). Depois, <b>Ler o texto</b>.</li>
+    </ol>
+    <button type="button" class="botao" onclick="cgColarTexto()">Colar o texto do relatório</button>
+    ${motivos.length ? `<details><summary>Detalhe técnico</summary><small>${esc(motivos.join(' · '))}</small></details>` : ''}
+  </div>`;
 }
 async function cgArquivoEscolhido(arquivo) {
   const p = el('cg-previa');
@@ -1513,8 +1616,10 @@ async function cgArquivoEscolhido(arquivo) {
   if (!/\.pdf$/i.test(arquivo.name || '') && arquivo.type !== 'application/pdf') { p.innerHTML = '<p class="cg-erro">Escolha o PDF da situação de carga.</p>'; return; }
   if (arquivo.size > 20 * 1024 * 1024) { p.innerHTML = '<p class="cg-erro">O arquivo tem mais de 20 MB: não parece a situação de carga.</p>'; return; }
   p.innerHTML = '<p class="cg-lendo"><span class="cg-gira" aria-hidden="true"></span><span>Lendo o PDF…</span></p>';
+  let lib;
+  try { lib = await cgCarregarPdfJs(); }
+  catch (e) { p.innerHTML = cgErroDoLeitorHtml(e); return; }
   try {
-    const lib = await cgCarregarPdfJs();
     const bytes = new Uint8Array(await arquivo.arrayBuffer());
     const doc = await lib.getDocument({ data: bytes, disableFontFace: true, isEvalSupported: false, verbosity: 0 }).promise;
     const paginas = await cgPaginasDoPdf(doc, lib, (n, t) => { const x = p.querySelector('.cg-lendo span:last-child'); if (x) x.textContent = 'Lendo a página ' + n + ' de ' + t + '…'; });

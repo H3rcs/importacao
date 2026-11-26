@@ -1526,7 +1526,7 @@ function cgRuasFlowrack_(texto) {
 /* PARAMETROS DA CARGA (tela, para quem edita)                         */
 /* ------------------------------------------------------------------ */
 
-/* params: { turnos: { A, B, C }, boxes, ordemBoxes, permanencia, ruas, emCurso } — so o que vier. */
+/* params: { turnos: { A, B, C }, boxes, ordemBoxes, lojas, permanencia, ruas, emCurso } — so o que vier. */
 function acaoParametrosCarga(usuario, params) {
   const p = params || {};
   const gravar = [];
@@ -1548,6 +1548,12 @@ function acaoParametrosCarga(usuario, params) {
     const o = cgLerOrdemBoxes_(p.ordemBoxes, n);
     if (!o) throw new Error('Ordem dos boxes: números de 1 a ' + n + ' sem repetir, da esquerda para a direita, com faixas (ex.: 26-1 ou 1-10, 12).');
     gravar.push(['CARGA_BOXES_ORDEM', String(p.ordemBoxes).replace(/\s+/g, ' ').trim()]);
+  }
+  if (p.lojas != null && String(p.lojas).trim() !== '') {
+    const n = p.boxes != null && p.boxes !== '' ? cgInteiro_(p.boxes, 1, 99, 0) : cgNBoxes_();
+    const l = cgLerBoxesLoja_(p.lojas, n);
+    if (!l) throw new Error('Boxes das lojas: box = loja, separados por ponto e vírgula (ex.: 1-2 = Feira de Santana; 3 = Vitória da Conquista), boxes de 1 a ' + n + ', ou "nenhum".');
+    gravar.push(['CARGA_BOXES_LOJA', cgTextoBoxesLoja_(l)]);
   }
   if (p.ruas != null && p.ruas !== '') {
     const r = cgRuasFlowrack_(String(p.ruas));
@@ -1582,8 +1588,9 @@ function acaoParametrosCarga(usuario, params) {
  * · CARREGANDO · CARREGADA (libera o box; a linha fica de historico). CARGA_BOXES: so os boxes bloqueados
  * (ou com observacao); o box sem linha e livre. Cada mudanca muda a geracao: todo mundo ve na hora.
  * Cruzamento com o PDF: carga pronta sem veiculo no box, veiculo no box com a carga longe de pronta,
- * box diferente do relatorio, prioridade com situacao de risco, veiculo no box ha mais de
- * CARGA_BOX_PERMANENCIA_MIN minutos e carga que ja saiu do relatorio sem estar carregada.
+ * box diferente do relatorio, prioridade com situacao de risco, carga de fora num box de loja e carga que ja saiu
+ * do relatorio sem estar carregada. (O alerta de permanencia no box saiu em 26/11; o parametro
+ * CARGA_BOX_PERMANENCIA_MIN fica guardado, sem uso.) Boxes das lojas: CARGA_BOXES_LOJA (cgBoxesLoja_).
  * A planilha antiga so e lida (Importar da planilha antiga, uma vez); o GSL nunca grava nela.
  */
 const CG_OBS_CATEGORIA = {
@@ -1638,7 +1645,51 @@ function cgOrdemBoxes_() {
   for (let i = n; i >= 1; i--) tudo.push(i);
   return tudo;
 }
-function cgPermanenciaMin_() { return cgInteiro_(parametro('CARGA_BOX_PERMANENCIA_MIN', ''), 10, 1440, 120); }
+/*
+ * BOXES RESERVADOS PARA AS LOJAS (pedido da gerencia, 26/11): os boxes 1 e 2 sao das cargas da loja de Feira de
+ * Santana e o 3, das da loja de Vitoria da Conquista. A carga que vem no relatorio com o BOX de uma loja e "da loja":
+ * fica sozinha no box dela (sem registro, sem veiculo) e nao entra nos avisos de "pronta sem veiculo", "sem registro
+ * no patio" nem "box diferente". Texto: "1-2 = Feira de Santana; 3 = Vitoria da Conquista" (ou "nenhum").
+ * Devolve { box: nome } ou null se o texto nao serve.
+ */
+const CG_BOXES_LOJA_PADRAO = '1-2 = Feira de Santana; 3 = Vitória da Conquista';
+function cgLerBoxesLoja_(texto, n) {
+  const t = String(texto == null ? '' : texto).trim();
+  if (/^(nenhum|nenhuma|-)$/i.test(t)) return {};
+  const saida = {};
+  const partes = t.split(/[;\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  if (!partes.length) return null;
+  for (let i = 0; i < partes.length; i++) {
+    const m = /^([\d\s,–-]+?)\s*[=:]\s*(.+)$/.exec(partes[i]);
+    if (!m) return null;
+    const boxes = cgLerOrdemBoxes_(m[1], n);
+    const nome = cgTexto_(m[2], 40).replace(/^loja\s+(d[aeo]s?\s+)?/i, '');
+    if (!boxes || !nome) return null;
+    for (let j = 0; j < boxes.length; j++) { if (saida[boxes[j]]) return null; saida[boxes[j]] = nome; }
+  }
+  return saida;
+}
+/* { 1: 'A', 2: 'A', 3: 'B' } -> "1-2 = A; 3 = B" (faixas seguidas juntas). */
+function cgTextoBoxesLoja_(l) {
+  const porNome = {}, ordem = [];
+  Object.keys(l).map(Number).sort(function (a, b) { return a - b; }).forEach(function (b) {
+    if (!porNome[l[b]]) { porNome[l[b]] = []; ordem.push(l[b]); }
+    porNome[l[b]].push(b);
+  });
+  if (!ordem.length) return 'nenhum';
+  return ordem.map(function (nome) {
+    const faixas = [];
+    porNome[nome].forEach(function (b) { const f = faixas[faixas.length - 1]; if (f && f[1] === b - 1) f[1] = b; else faixas.push([b, b]); });
+    return faixas.map(function (f) { return f[0] === f[1] ? String(f[0]) : f[0] + '-' + f[1]; }).join(', ') + ' = ' + nome;
+  }).join('; ');
+}
+function cgBoxesLoja_() {
+  const n = cgNBoxes_();
+  const lido = cgLerBoxesLoja_(parametro('CARGA_BOXES_LOJA', '') || CG_BOXES_LOJA_PADRAO, 99) || cgLerBoxesLoja_(CG_BOXES_LOJA_PADRAO, 99);
+  const saida = {};
+  Object.keys(lido).forEach(function (b) { if (Number(b) <= n) saida[b] = lido[b]; });
+  return saida;
+}
 /* A lista de situacoes (parametro, uma por linha ou separadas por ;) mais as que os botoes usam. */
 function cgSituacoesBox_() {
   const bruto = String(parametro('CARGA_SITUACOES_BOX', '') || '');
@@ -1714,49 +1765,62 @@ function cgAndamentoCarga_(c) {
 
 /*
  * PURA: o patio. carregamentos (cgCarregamentos_), boxes gravados, cargas do ultimo PDF, n de boxes,
- * limite de permanencia (min) e agora -> { mapa, fila, carregadas, semRegistro, alertas, porCarga, ... }.
+ * boxes das lojas ({ box: nome }, cgBoxesLoja_) e agora -> { mapa, fila, carregadas, semRegistro, alertas, porCarga, lojas, ... }.
+ * A carga da loja (o BOX dela no relatorio e um box de loja) sem registro no patio entra sozinha no box da loja
+ * (item "virtual": sem id, sem veiculo); com registro, vale o registro. O tempo do veiculo encostado nao e mais
+ * mostrado nem gera aviso (26/11): a CHEGADA e o NO_BOX_EM continuam gravados.
  */
-function cgPatio_(carregamentos, gravados, cargas, nBoxes, permanencia, agora) {
+function cgPatio_(carregamentos, gravados, cargas, nBoxes, lojas, agora) {
+  lojas = lojas || {};
   const porN = {};
   cargas.forEach(function (c) { porN[c.n] = c; });
+  const boxDoPdf = function (c) { return c ? Number(String(c.bx || '').replace(/\D+/g, '')) || 0 : 0; };
+  const lojaDe = function (c) { const b = boxDoPdf(c); return b && lojas[b] ? lojas[b] : ''; };
   const minAgora = cgMin_(agora);
   const comAndamento = function (x) {
     const c = porN[x.n];
-    const o = Object.assign({}, x, { pdf: c ? cgAndamentoCarga_(c) : null });
+    const o = Object.assign({}, x, { pdf: c ? cgAndamentoCarga_(c) : null, loja: lojaDe(c) });
     delete o.linha;
-    o.noBoxMin = x.noBox && x.etapa !== 'CARREGADA' ? Math.max(0, minAgora - cgMin_(x.noBox)) : null;
     if (!o.tipo) o.tipo = cgTipoConhecido_(x.veiculo) || (c ? cgTipoConhecido_(c.v) : '') || 'OUTRO';
     return o;
   };
   const abertos = carregamentos.filter(function (x) { return x.etapa !== 'CARREGADA'; }).map(comAndamento);
   const carregadas = carregamentos.filter(function (x) { return x.etapa === 'CARREGADA' && x.carregadaEm && minAgora - cgMin_(x.carregadaEm) <= 24 * 60; })
     .map(comAndamento).sort(function (a, b) { return b.carregadaEm.localeCompare(a.carregadaEm); });
+  const registradas = {};
+  carregamentos.forEach(function (x) { if (x.etapa !== 'CARREGADA' || (x.carregadaEm && minAgora - cgMin_(x.carregadaEm) <= 48 * 60)) registradas[x.n] = x; });
+  // as cargas da loja sem registro: no box da loja, como o relatorio diz
+  const daLoja = cargas.filter(function (c) { return lojaDe(c) && !registradas[c.n] && boxDoPdf(c) <= nBoxes; }).map(function (c) {
+    return { id: '', virtual: true, n: c.n, comp: '', prio: '', box: boxDoPdf(c), veiculo: '', tipo: '', motorista: '', situacao: '', situacaoCat: '',
+      etapa: 'BOX', chegada: '', noBox: '', previsao: '', carregadaEm: '', descricao: '', carregadaPor: '', obs: '', hist: [], por: '', em: '', pdf: cgAndamentoCarga_(c), loja: lojaDe(c) };
+  }).sort(function (a, b) { return a.n.localeCompare(b.n); });
   const mapa = [];
   for (let i = 1; i <= nBoxes; i++) {
     const g = gravados[i] || { estado: 'LIVRE', obs: '' };
-    const itens = abertos.filter(function (x) { return x.box === i; });
+    const itens = abertos.filter(function (x) { return x.box === i; }).concat(daLoja.filter(function (x) { return x.box === i; }));
     let estado = 'LIVRE';
     if (g.estado === 'BLOQUEADO') estado = 'BLOQUEADO';
     else if (itens.some(function (x) { return x.etapa === 'CARREGANDO'; })) estado = 'CARREGANDO';
     else if (itens.some(function (x) { return x.noBox; })) estado = 'OCUPADO';
     else if (itens.length) estado = 'RESERVADO';
     const noBox = itens.filter(function (x) { return x.noBox; }).map(function (x) { return x.noBox; }).sort()[0] || '';
-    mapa.push({ numero: i, estado: estado, obs: g.obs, itens: itens, noBox: noBox, noBoxMin: noBox ? Math.max(0, minAgora - cgMin_(noBox)) : null });
+    mapa.push({ numero: i, estado: estado, obs: g.obs, itens: itens, noBox: noBox, loja: lojas[i] || '' });
   }
   const fila = abertos.filter(function (x) { return !x.box || x.box > nBoxes; }).sort(function (a, b) {
     const ha = (a.pdf && a.pdf.h) || a.prio ? 1 : 0, hb = (b.pdf && b.pdf.h) || b.prio ? 1 : 0;
     return (hb - ha) || ((b.pdf ? b.pdf.pct : -1) - (a.pdf ? a.pdf.pct : -1)) || a.n.localeCompare(b.n);
   });
-  const registradas = {};
-  carregamentos.forEach(function (x) { if (x.etapa !== 'CARREGADA' || (x.carregadaEm && minAgora - cgMin_(x.carregadaEm) <= 48 * 60)) registradas[x.n] = x; });
-  const semRegistro = cargas.filter(function (c) { return !registradas[c.n]; }).map(cgAndamentoCarga_)
+  const semRegistro = cargas.filter(function (c) { return !registradas[c.n] && !lojaDe(c); }).map(cgAndamentoCarga_)
     .sort(function (a, b) { return (b.h - a.h) || ((b.estado === 'pronta') - (a.estado === 'pronta')) || (b.pct - a.pct) || a.n.localeCompare(b.n); });
   const porCarga = {};
-  abertos.concat(carregadas).forEach(function (x) {
+  abertos.concat(carregadas).concat(daLoja).forEach(function (x) {
     if (porCarga[x.n] && porCarga[x.n].etapa !== 'CARREGADA') return;
     porCarga[x.n] = { id: x.id, box: x.box, etapa: x.etapa, situacao: x.situacao, situacaoCat: x.situacaoCat, veiculo: x.veiculo, tipo: x.tipo,
-      chegada: x.chegada, noBox: x.noBox, carregadaEm: x.carregadaEm };
+      chegada: x.chegada, noBox: x.noBox, carregadaEm: x.carregadaEm, loja: x.loja || '', virtual: x.virtual ? 1 : 0 };
   });
+  // a loja de cada carga do relatorio (a tela marca "Loja" na lista, na sequencia e no box)
+  const lojaPorCarga = {};
+  cargas.forEach(function (c) { const l = lojaDe(c); if (l) lojaPorCarga[c.n] = l; });
   // alertas
   const alertas = [];
   abertos.forEach(function (x) {
@@ -1765,16 +1829,16 @@ function cgPatio_(carregamentos, gravados, cargas, nBoxes, permanencia, agora) {
       alertas.push({ tipo: 'boxLonge', grav: 'atencao', box: x.box, carga: x.n, h: p.h,
         texto: 'Box ' + x.box + ': o veículo está encostado e a carga ' + x.n + ' está em ' + Math.round(p.pct) + '%' + (p.gargalo ? ' (gargalo: ' + cgNomeDep_(p.gargalo) + ')' : '') + '.' });
     }
-    if (p && p.bx && x.box && Number(p.bx) !== x.box) {
+    if (p && p.bx && x.box && Number(p.bx) !== x.box && !x.loja) {
       alertas.push({ tipo: 'boxDiferente', grav: 'atencao', box: x.box, carga: x.n, h: p.h, texto: 'Carga ' + x.n + ': box ' + p.bx + ' no relatório e ' + x.box + ' no pátio.' });
     }
     if (((p && p.h) || x.prio) && x.situacaoCat === 'risco') {
       alertas.push({ tipo: 'prioridadeRisco', grav: 'alerta', box: x.box, carga: x.n, h: p ? p.h : 0,
         texto: 'Carga ' + x.n + (p && p.h ? ' (24 h)' : ' (prioridade ' + x.prio + ')') + ': ' + x.situacao + '.' });
     }
-    if (x.noBoxMin != null && x.noBoxMin > permanencia) {
-      alertas.push({ tipo: 'permanencia', grav: 'atencao', box: x.box, carga: x.n, h: p ? p.h : 0, min: x.noBoxMin,
-        texto: 'Box ' + x.box + ': veículo da carga ' + x.n + ' encostado há ' + cgDuracaoTxt_(x.noBoxMin) + ' (limite ' + cgDuracaoTxt_(permanencia) + ').' });
+    if (x.box && lojas[x.box] && !x.loja) {
+      alertas.push({ tipo: 'boxDaLoja', grav: 'atencao', box: x.box, carga: x.n, h: p ? p.h : 0,
+        texto: 'Box ' + x.box + ' é reservado para a Loja ' + lojas[x.box] + ': a carga ' + x.n + ' não é da loja.' });
     }
     if (!p && cargas.length) {
       alertas.push({ tipo: 'foraDoPdf', grav: 'info', box: x.box, carga: x.n, h: 0, texto: 'Carga ' + x.n + ' não está mais na situação de carga: já foi carregada?' });
@@ -1782,7 +1846,7 @@ function cgPatio_(carregamentos, gravados, cargas, nBoxes, permanencia, agora) {
   });
   cargas.forEach(function (c) {
     const a = cgAndamentoCarga_(c);
-    if (a.estado !== 'pronta') return;
+    if (a.estado !== 'pronta' || lojaDe(c)) return;
     const x = porCarga[c.n];
     if (x && (x.etapa === 'CARREGADA' || x.etapa === 'CARREGANDO' || (x.box && x.noBox))) return;
     alertas.push({ tipo: 'prontaSemBox', grav: c.h ? 'alerta' : 'atencao', box: x ? x.box : 0, carga: c.n, h: c.h ? 1 : 0,
@@ -1790,18 +1854,21 @@ function cgPatio_(carregamentos, gravados, cargas, nBoxes, permanencia, agora) {
   });
   const peso = { alerta: 0, atencao: 1, info: 2 };
   alertas.sort(function (a, b) { return (peso[a.grav] - peso[b.grav]) || ((b.h || 0) - (a.h || 0)) || String(a.carga).localeCompare(String(b.carga)); });
-  return { n: nBoxes, permanenciaMin: permanencia, mapa: mapa, fila: fila, carregadas: carregadas.slice(0, 60), semRegistro: semRegistro.slice(0, 200),
-    alertas: alertas.slice(0, 120), porCarga: porCarga,
+  return { n: nBoxes, mapa: mapa, fila: fila, carregadas: carregadas.slice(0, 60), semRegistro: semRegistro.slice(0, 200),
+    alertas: alertas.slice(0, 120), porCarga: porCarga, lojaPorCarga: lojaPorCarga,
+    lojas: Object.keys(lojas).map(Number).sort(function (a, b) { return a - b; }).map(function (b) { return { box: b, nome: lojas[b] }; }),
     contagem: { livres: mapa.filter(function (b) { return b.estado === 'LIVRE'; }).length, reservados: mapa.filter(function (b) { return b.estado === 'RESERVADO'; }).length,
       ocupados: mapa.filter(function (b) { return b.estado === 'OCUPADO' || b.estado === 'CARREGANDO'; }).length,
       bloqueados: mapa.filter(function (b) { return b.estado === 'BLOQUEADO'; }).length, fila: fila.length, carregadasHoje: carregadas.length } };
 }
-function cgDuracaoTxt_(min) { min = Math.round(min); return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + ('0' + (min % 60)).slice(-2) : ''); }
 function cgPatioDaTela_(cargas) {
-  const p = cgPatio_(cgCarregamentos_(), cgBoxesGravados_(), cargas || [], cgNBoxes_(), cgPermanenciaMin_(), cgAgoraIso_());
+  const lojas = cgBoxesLoja_();
+  const p = cgPatio_(cgCarregamentos_(), cgBoxesGravados_(), cargas || [], cgNBoxes_(), lojas, cgAgoraIso_());
+  p.lojasTexto = cgTextoBoxesLoja_(lojas);
   p.situacoes = cgSituacoesBox_();
   p.situacoesCat = p.situacoes.map(cgCategoriaObs_);
   p.ordem = cgOrdemBoxes_();
+  p.ordemTexto = String(parametro('CARGA_BOXES_ORDEM', '') || CG_BOXES_ORDEM_PADRAO);
   p.tipos = CG_TIPOS_VEICULO;
   return p;
 }

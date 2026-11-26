@@ -208,5 +208,11 @@ ok(!certo.ok && /travada até amanhã/.test(certo.erro), '20 PINs errados no dia
 novaExecucao(m, PASTA, { contaGoogle: DONO }, { apagarComentarios: 'nenhum' }).zerarErrosPin_(DONO);
 const depois = JSON.parse(run(ATACANTE, 'entrar', DONO, '4321', '', '', '').valor);
 ok(depois.ok, 'zerar os erros (o administrador zerando o PIN) destrava');
+// revisao de 26/11: e-mails parecidos nao dividem o contador de PIN; cadastro so com o usuario completa o dominio
+const ex = novaExecucao(m, PASTA, { contaGoogle: DONO }, { apagarComentarios: 'nenhum' });
+ok(ex.chavePinDe_('ana.silva@bartofil.com.br') !== ex.chavePinDe_('ana_silva@bartofil.com.br'), '"ana.silva" e "ana_silva" tem contadores de PIN separados');
+ex._porta = true;
+ex.acaoSalvarUsuario({ email: DONO, perfil: 'ADMIN', permissoes: ex.permissoesDe('ADMIN') }, { email: 'novo.colega', nome: 'Novo Colega', perfil: 'CONSULTA', filiais: '*' });
+ok(!!ex.registroDeAcesso_('novo.colega@bartofil.com.br'), 'cadastro com "novo.colega" grava novo.colega@bartofil.com.br');
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo ok'));
 process.exit(falhas ? 1 : 0);

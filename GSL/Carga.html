@@ -732,7 +732,6 @@ function cgCorpoHtml() {
   if (CG.aba === 'sequencia') return cgSequenciaHtml();
   if (CG.aba === 'todos') return cgTodosHtml();
   if (CG.aba === 'boxes') return cgBoxesHtml();
-  if (CG.aba === 'escala') return cgEscalaHtml();
   if (CG.aba === 'turnos') return cgTurnosHtml();
   if (CG.aba === 'cargas') return CG.dados.snapshot ? cgTabelaHtml() + cgCargasTravadasHtml() : cgSemSnapshotHtml();
   if (CG.aba !== 'geral') return cgDepositoHtml(CG.aba);
@@ -1238,7 +1237,7 @@ function cgEquipeHtml() {
     <div class="cg-quadro-principal">
       <div class="cg-quadro-topo"><span><b class="cg-num">${total}</b> ${total === 1 ? 'pessoa alocada' : 'pessoas alocadas'}${turnos.length ? ' · ' + turnos.map(esc).join(', ') : ''}${cgFaltasAtivas().length ? ` · <b class="cg-txt-alerta">${cgFaltasAtivas().length} ${cgFaltasAtivas().length === 1 ? 'falta' : 'faltas'} hoje</b>` : ''}</span>
         <span class="cg-quadro-botoes">${d.podeEditar ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgAlocarPelaFuncao()">Alocar pela função</button>' : ''}
-        <button type="button" class="cg-btn cg-btn-claro" onclick="cgIrAba('escala')">Escala 5x2</button>
+        <button type="button" class="cg-btn cg-btn-claro" onclick="cgAbrirSubturnos()">Subturnos (escala 5x2)</button>
         ${d.podeEditar && total ? '<button type="button" class="cg-btn cg-btn-claro" onclick="cgLimparAlocacao()">Limpar alocação do turno</button>' : ''}</span></div>
       ${cgAutoNotaHtml()}
       ${cgEquipamentosResumoHtml()}
@@ -1250,8 +1249,25 @@ function cgEquipeHtml() {
           <div class="cg-zonas${dep.andares ? ' predio' : ''}">${cgZonas(dep).map((z) => cgZonaHtml(z, true)).join('')}</div>
         </section>`;
       }).join('')}</div>
+      ${cgSubturnosNaEquipeHtml()}
     </div>
   </div>`;
+}
+/*
+ * 27/11: a aba "Escala 5x2" saiu da tela (pedido do gerente). A regra da escala continua (subturnos, folgas,
+ * quem esta disponivel na Equipe, a alocacao automatica); marcar os subturnos A1/A2 e C1/C2 passou para
+ * aqui, na Equipe, num bloco que abre e fecha (e no menu de cada pessoa, como antes).
+ */
+function cgSubturnosNaEquipeHtml() {
+  const sem = cgPessoasAtivas().filter((p) => cgRegimeCli(p).aDefinir).length;
+  return `<details class="cg-sub-equipe" id="cg-sub-equipe"${CG.subAberto ? ' open' : ''} ontoggle="if (CG.subAberto !== this.open) { CG.subAberto = this.open; cgDesenhar(); }">
+    <summary><b>Subturnos da escala 5x2</b> (A1/A2 · C1/C2)${sem ? ` <span class="cg-aba-marca" title="${sem} sem subturno">${sem}<span class="sr"> sem subturno</span></span>` : ' <small>todos definidos</small>'}</summary>
+    ${CG.subAberto ? cgSubturnosHtml() : ''}
+  </details>`;
+}
+function cgAbrirSubturnos() {
+  CG.subAberto = true; cgDesenhar();
+  const x = el('cg-sub-equipe'); if (x && x.scrollIntoView) x.scrollIntoView({ block: 'start' });
 }
 function cgLimparAlocacao() {
   const eq = CG.dados.equipe || [], ta = cgTurnoAgoraCli();
@@ -1910,7 +1926,7 @@ function cgAbas() {
   const d = CG.dados || {}, deps = (d.depositos || []).map((x) => [x.id, x.nome]);
   if (CG.hist) return [['cargas', 'Cargas'], ['geral', 'Painel do CD'], ['todos', 'Todos os depósitos']].concat(deps).concat([['historico', 'Histórico']]);
   return [['cargas', 'Cargas'], ['sequencia', 'Sequência'], ['geral', 'Painel do CD'], ['todos', 'Todos os depósitos'], ['supervisao', 'Supervisão G · NG · P · B']]
-    .concat(deps).concat([['boxes', 'Boxes e pátio'], ['equipe', 'Equipe'], ['escala', 'Escala 5x2'], ['turnos', 'Turnos'], ['historico', 'Histórico']]);
+    .concat(deps).concat([['boxes', 'Boxes e pátio'], ['equipe', 'Equipe'], ['turnos', 'Turnos'], ['historico', 'Histórico']]);
 }
 /* O numero pequeno da aba (o que pede atencao), sempre com o texto: a cor nunca e a unica pista. */
 function cgMarcaDaAba(id) {
@@ -1921,7 +1937,7 @@ function cgMarcaDaAba(id) {
   if (id === 'boxes' && d.patio) { n = cgAlertasPatio().filter((a) => a.grav !== 'info').length; t = 'alertas do pátio'; }
   if (id === 'turnos') { const p = cgPassagemPendente(); if (p) { n = 1; t = p.texto; } }
   if (id === 'equipe') { n = cgFaltasAtivas().length; t = 'faltas hoje'; }
-  if (id === 'escala') { n = cgPessoasAtivas().filter((p) => cgRegimeCli(p).aDefinir).length; t = 'sem subturno (A1/A2 · C1/C2)'; }
+
   return n ? ` <span class="cg-aba-marca" title="${esc(n + ' ' + t)}">${n}<span class="sr"> ${esc(t)}</span></span>` : '';
 }
 

@@ -485,6 +485,10 @@ html.cg-arrastando-paleteira .cg-pal-zona { border-color: var(--cg-azul-claro); 
 .cg-previa input[type="datetime-local"], .cg-previa textarea { width: 100%; }
 .cg-erro { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(214, 69, 69, .1); color: #b83232; font-size: 13px; font-weight: 500; }
 [data-tema="escuro"] .cg-erro { color: #ffb0b0; }
+/* 27/11: os subturnos (A1/A2 · C1/C2) dentro da Equipe (a aba Escala 5x2 saiu) */
+.cg-sub-equipe { margin-top: 14px; }
+.cg-sub-equipe > summary { cursor: pointer; padding: 10px 12px; border-radius: 12px; background: var(--cg-cartao); border: 1px solid var(--cg-linha); }
+.cg-sub-equipe[open] > summary { margin-bottom: 10px; }
 /* 27/11: a edicao da alocacao (arrastar varias pessoas e salvar de uma vez) */
 .cg-edicao { position: sticky; top: 0; z-index: 30; margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: #fff8d6; border: 2px solid var(--cg-amarelo, #fbb917); color: #3b2f00; }
 [data-tema="escuro"] .cg-edicao { background: #3a3000; color: #fff4c2; }

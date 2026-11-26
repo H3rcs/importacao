@@ -5133,24 +5133,57 @@ async function rodar() {
     const B = await abrirCarga(GERENTE, GERENTE, '5555', true);
     const zonaG = '.cg-quadro-dep .cg-zona[data-dep="GRANDEZA"][data-papel="SEPARADOR"]';
     await A.f.waitForSelector('.cg-pool .cg-boneco', { timeout: 10000 }).catch(async () => { throw new Error('pool vazio: ' + (await A.f.evaluate(() => (document.getElementById('cg-corpo') || document.body).innerText.slice(0, 400)))); });
+    // 27/11 — EDICAO: os arrastos so mudam a tela de quem arrasta; nada vai ao servidor ate o Salvar (uma chamada so).
+    const chamadasDe = (lado, acao) => lado.f.evaluate((a) => DSP.fila.filter((x) => x.k === 'run' && x.x === a).length, acao);
+    await A.f.evaluate(() => { window.enviarMedicoes = () => {}; DSP.fila = []; });       // as medicoes ficam na fila para contar
+    await B.f.evaluate(() => { window.enviarMedicoes = () => {}; DSP.fila = []; });
     const k = await A.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
     await A.f.dragAndDrop('.cg-pool .cg-boneco[data-k="' + k + '"]', zonaG);
     await A.f.waitForSelector(zonaG + ' .cg-boneco[data-k="' + k + '"]', { timeout: 5000 });
+    const k3 = await A.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
+    await A.f.click('.cg-pool .cg-boneco[data-k="' + k3 + '"]');
+    await A.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Pesáveis")) .cg-opcao:has-text("Separador")');
+    await A.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="PESAVEIS"][data-papel="SEPARADOR"] .cg-boneco[data-k="' + k3 + '"]', { timeout: 5000 });
+    afirmar(/2 alterações pendentes/.test(await A.f.textContent('.cg-edicao')), 'barra da edicao: ' + await A.f.textContent('.cg-edicao'));
+    const naoFoi = JSON.parse(s.chamar(DONO, 'carregarTela', { t: (await A.f.evaluate(() => TOKEN)), f: 'FSA' }, 'carga', {}).valor).dados;
+    afirmar(!naoFoi.equipe.length && !(await chamadasDe(A, 'moverPessoaCarga')) && !(await chamadasDe(A, 'edicaoEquipeCarga')), 'nada foi ao servidor antes do Salvar');
+    afirmar(!(await B.f.$(zonaG + ' .cg-boneco[data-k="' + k + '"]')), 'o outro navegador ainda nao ve');
+    // sair da tela com alteracoes pendentes pergunta (aqui: "Cancelar" — fica na tela, com as alteracoes)
+    let perguntas = 0;
+    A.aba.page.on('dialog', (d) => { perguntas++; d.dismiss().catch(() => {}); });
+    await A.f.evaluate(() => abrir('modulos'));
+    afirmar(perguntas === 1 && await A.f.evaluate(() => paginaAtual === 'carga' && CG.edicao.ops.length === 2), 'perguntou antes de sair e ficou');
+    await A.f.click('#cg-salvar-edicao');
+    await A.f.waitForFunction(() => !document.querySelector('.cg-edicao'), null, { timeout: 10000 });
+    afirmar(await chamadasDe(A, 'edicaoEquipeCarga') === 1, 'uma chamada no Salvar');
     await B.f.waitForSelector(zonaG + ' .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
+    await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="PESAVEIS"] .cg-boneco[data-k="' + k3 + '"]', { timeout: 15000 });
     afirmar(!(await B.f.$('.cg-pool .cg-boneco[data-k="' + k + '"]')), 'saiu dos disponiveis no outro navegador');
-    // B move pelo toque para o 3o andar do Nobre
+    // B move pelo toque para o 3o andar do Nobre e salva
     const k2 = await B.f.evaluate(() => document.querySelector('.cg-pool .cg-boneco').dataset.k);
     await B.f.click('.cg-pool .cg-boneco[data-k="' + k2 + '"]');
     await B.f.waitForSelector('.cg-mover', { timeout: 5000 });
     await B.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Nobre")) .cg-opcao:has-text("3º andar")');
     const zonaN3 = '.cg-quadro-dep .cg-zona[data-dep="NOBRE"][data-andar="3"]';
     await B.f.waitForSelector(zonaN3 + ' .cg-boneco[data-k="' + k2 + '"]', { timeout: 5000 });
+    await B.f.click('#cg-salvar-edicao');
     await A.f.waitForSelector(zonaN3 + ' .cg-boneco[data-k="' + k2 + '"]', { timeout: 15000 });
     // A: a mesma pessoa nao fica em dois lugares (move a primeira para conferente da Blocado)
     await A.f.click(zonaG + ' .cg-boneco[data-k="' + k + '"]');
     await A.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Blocado")) .cg-opcao:has-text("Conferente")');
+    await A.f.click('#cg-salvar-edicao');
     await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="BLOCADO"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k + '"]', { timeout: 15000 });
     afirmar(!(await B.f.$(zonaG + ' .cg-boneco[data-k="' + k + '"]')), 'nao ficou na Grandeza');
+    // os dois mexendo na mesma pessoa: A edita (sem salvar), B tira e salva; A recebe o aviso e as alteracoes dele continuam por cima
+    await A.f.click('.cg-quadro-dep .cg-zona[data-dep="PESAVEIS"] .cg-boneco[data-k="' + k3 + '"]');
+    await A.f.click('.cg-mover-dep:has(.cg-mover-nome:text-is("Miudeza")) .cg-opcao:has-text("Conferente")');
+    await B.f.click('.cg-quadro-dep .cg-zona[data-dep="PESAVEIS"] .cg-boneco[data-k="' + k3 + '"]');
+    await B.f.click('.cg-mover .cg-opcao.tirar');
+    await B.f.click('#cg-salvar-edicao');
+    await A.f.waitForFunction(() => /Alguém alterou a alocação enquanto você editava/.test((document.querySelector('.cg-edicao') || {}).textContent || ''), null, { timeout: 15000 });
+    afirmar(!!(await A.f.$('.cg-quadro-dep .cg-zona[data-dep="MIUDEZA"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k3 + '"]')), 'a alteracao de A continua na tela');
+    await A.f.click('#cg-salvar-edicao');
+    await B.f.waitForSelector('.cg-quadro-dep .cg-zona[data-dep="MIUDEZA"][data-papel="CONFERENTE"] .cg-boneco[data-k="' + k3 + '"]', { timeout: 15000 });
     await foto(A.aba, 'carga-desktop-equipe');
     // paleteira (8.15): o uso vem dos separadores; A manda a 1 para a manutencao (Painel do CD) e B ve na Supervisao
     await A.f.click('.cg-aba[data-aba="geral"]');
@@ -5163,7 +5196,7 @@ async function rodar() {
     const servidor = JSON.parse(s.chamar(DONO, 'carregarTela', { t: (await A.f.evaluate(() => TOKEN)), f: 'FSA' }, 'carga', {}).valor).dados;
     const p1 = servidor.equipamentos.find((e) => e.tipo === 'PALETEIRA' && e.numero === 1);
     afirmar(p1.estado === 'MANUTENCAO' && p1.obs === 'roda', 'paleteira no servidor: ' + JSON.stringify(p1));
-    afirmar(servidor.equipe.length === 2 && servidor.equipe.filter((p) => p.k === k).length === 1, 'equipe no servidor: ' + JSON.stringify(servidor.equipe));
+    afirmar(servidor.equipe.length === 3 && servidor.equipe.filter((p) => p.k === k).length === 1, 'equipe no servidor: ' + JSON.stringify(servidor.equipe));
     await foto(B.aba, 'carga-desktop-supervisao-ao-vivo');
     const medidas = await A.f.evaluate(() => CG_VIVO.medidas.slice());
     console.log('        geracao pelo navegador (emulador): ' + medidas.length + ' perguntas, mediana ' + medidas.sort((a, b) => a - b)[Math.floor(medidas.length / 2)] + ' ms');
@@ -5300,7 +5333,7 @@ async function rodar() {
     await f.waitForFunction(() => CG.dados && CG.dados.patio && CG.dados.patio.contagem.carregadasHoje === 1, null, { timeout: 15000 });
     // as abas novas
     const abas = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-aba')).map((b) => b.dataset.aba).join());
-    afirmar(abas === 'cargas,sequencia,geral,todos,supervisao,GRANDEZA,MIUDEZA,BLOCADO,PESAVEIS,NOBRE,NOBRE_GRANDEZA,boxes,equipe,escala,turnos,historico', 'abas: ' + abas);
+    afirmar(abas === 'cargas,sequencia,geral,todos,supervisao,GRANDEZA,MIUDEZA,BLOCADO,PESAVEIS,NOBRE,NOBRE_GRANDEZA,boxes,equipe,turnos,historico', 'abas: ' + abas);
     // SEQUENCIA: a fila reorganizada, conferida pela situacao
     await f.click('.cg-aba[data-aba="sequencia"]');
     let ordem = await f.evaluate(() => Array.from(document.querySelectorAll('.cg-seq-item')).map((x) => x.dataset.n));
@@ -5321,6 +5354,10 @@ async function rodar() {
     await f.waitForSelector('.cg-todos-col[data-dep="BLOCADO"] .cg-boneco[data-k="' + k + '"]', { timeout: 8000 }).catch(async (e) => {
       throw new Error(e.message.split('\n')[0] + ' | ' + JSON.stringify(await f.evaluate((x) => ({ eq: CG.dados.equipe.filter((p) => p.k === x), recado: (document.getElementById('recado') || {}).textContent, erros: 0 }), k)) + ' ' + aba.erros.join(' | '));
     });
+    // 27/11: a edicao — o arrasto so muda a tela; o Salvar grava
+    afirmar(/1 alteração pendente/.test(await f.textContent('.cg-edicao')), 'pendente antes do Salvar');
+    await f.click('#cg-salvar-edicao');
+    await f.waitForFunction(() => !document.querySelector('.cg-edicao') && !CG.pendentes, null, { timeout: 10000 });
     afirmar(cd.ler().equipe.find((x) => x.k === k).dep === 'BLOCADO', 'gravou na Blocado');
     // paleteiras: 12 com 2 em manutencao = 10 para 12 separadores (o que chegou por ultimo fica sem)
     const alertaPal = await f.textContent('.cg-eq-tiras');
@@ -5334,6 +5371,9 @@ async function rodar() {
     await f.click('.cg-todos-col[data-dep="GRANDEZA"] .cg-boneco[data-k="' + k2 + '"]');
     await f.click('.cg-opcao.faltou');
     await f.waitForSelector('.cg-pool .cg-boneco.faltou[data-k="' + k2 + '"]', { timeout: 8000 });
+    afirmar(cd.ler().faltas.filter((x) => x.ativa).length === 1, 'a falta so vai no Salvar (27/11: edicao)');
+    await f.click('#cg-salvar-edicao');
+    await f.waitForFunction(() => !document.querySelector('.cg-edicao') && !CG.pendentes, null, { timeout: 10000 });
     afirmar(cd.ler().faltas.filter((x) => x.ativa).length === 2, 'falta gravada');
     // BOXES E PATIO: o quadro como a aba "Situacao dos BOXs" (padrao) — uma fila de docas, 26 a 1
     await f.click('.cg-aba[data-aba="boxes"]');
@@ -5564,7 +5604,7 @@ async function rodar() {
   let SRV3 = null;
   function srv3() { const c = SRV3.contexto(DONO); c._porta = true; return c; }      // um contexto novo a cada leitura (sem o cache da execucao)
   async function fotosDaFase3(aba, f, prefixo, celular) {
-    const vistas = [['equipe'], ['escala'], ['boxes', 'controle'], ['boxes', 'mapa'], ['boxes', 'cadastros'], ['boxes', 'detalhes'], ['NOBRE'], ['geral']];
+    const vistas = [['equipe'], ['boxes', 'controle'], ['boxes', 'mapa'], ['boxes', 'cadastros'], ['boxes', 'detalhes'], ['NOBRE'], ['geral']];
     for (const [id, vista] of vistas) {
       await f.evaluate((x) => { if (x[1]) { CG.boxVista = x[1]; } cgIrAba(x[0]); window.scrollTo(0, 0); }, [id, vista || '']);
       await aba.page.waitForTimeout(250);
@@ -5614,6 +5654,8 @@ async function rodar() {
     await f.click('.cg-pool .cg-boneco[data-k="' + aux.k + '"]');
     await f.evaluate(() => document.querySelectorAll('.cg-mover-dep')[0].querySelector('.cg-opcao').click());
     await f.waitForSelector('.cg-zona .cg-boneco[data-k="' + aux.k + '"] .cg-boneco-fun', { timeout: 10000 });
+    await f.click('#cg-salvar-edicao');                                  // 27/11: a edicao grava no Salvar
+    await f.waitForFunction(() => !document.querySelector('.cg-edicao') && !CG.pendentes, null, { timeout: 10000 });
     d = ler();
     afirmar(d.equipe.some((x) => x.k === aux.k && x.dep === 'GRANDEZA' && x.papel === 'SEPARADOR'), 'auxiliar na Grandeza');
     // o menu da pessoa mostra a escala e troca o subturno
@@ -5621,12 +5663,12 @@ async function rodar() {
     await f.click('.cg-zona .cg-boneco[data-k="' + umA1.k + '"]');
     afirmar(/Escala: Turno A1 · folga domingo e segunda · em serviço agora/.test((await f.textContent('.cg-mover-escala')).replace(/\s+/g, ' ')), 'escala no menu');
     await f.click('#janela-rodape .botao:has-text("Cancelar")');
-    // ESCALA 5x2
-    await f.evaluate(() => cgIrAba('escala'));
-    const esc = await f.evaluate(() => ({ tabs: document.querySelectorAll('.cg-esc-tab').length, check: Array.from(document.querySelectorAll('.cg-esc-check-dep')).map((x) => x.querySelectorAll('tbody tr').length),
-      titulos: Array.from(document.querySelectorAll('.cg-esc-check-dep h4')).map((h) => h.textContent.replace(/\s+/g, ' ').trim()) }));
-    afirmar(esc.tabs >= 5 && esc.check.join() === '7,7' && /Check-outs da Miudeza 8 funcionando de 8/.test(esc.titulos[0]) && /Check-outs do Nobre 10 funcionando de 10/.test(esc.titulos[1]), 'escala: ' + JSON.stringify(esc));
-    await foto(aba, 'carga3-desktop-escala');
+    // 27/11: a aba Escala 5x2 saiu (pedido do gerente); os subturnos se marcam na Equipe
+    afirmar(!(await f.$('.cg-aba[data-aba="escala"]')), 'sem a aba Escala 5x2');
+    await f.evaluate(() => { cgIrAba('equipe'); });
+    await f.click('.cg-quadro-botoes button:has-text("Subturnos")');
+    await f.waitForSelector('#cg-sub-equipe[open] .cg-sub-lista li', { timeout: 5000 });
+    await foto(aba, 'carga3-desktop-equipe-subturnos');
     // um a um: o primeiro da lista vai para o A2 (toque); de novo tira
     const k1 = await f.$eval('.cg-sub-lista li input[type="checkbox"]', (i) => i.id.slice(7));
     await f.click('.cg-sub-lista li:first-child .cg-seg-btn:has-text("A2")');
@@ -5741,9 +5783,9 @@ async function rodar() {
     await f.evaluate(() => { aplicarTema('claro'); cgDesenhar(); });
     await fotosDaFase3(aba, f, 'carga3-celular', true);
     await aba.page.setViewportSize({ width: 1920, height: 1080 });
-    await f.evaluate(() => { cgIrAba('escala'); cgModoTv(); });
+    await f.evaluate(() => { cgIrAba('equipe'); cgModoTv(); });
     await aba.page.waitForTimeout(300);
-    await foto(aba, 'carga3-tv-escala');
+    await foto(aba, 'carga3-tv-equipe');
     await f.evaluate(() => { CG.boxVista = 'mapa'; cgIrAba('boxes'); });
     const tv = await f.evaluate(() => { const l = Array.from(document.querySelectorAll('.cg-sb-fila > .cg-sb-doca')).map((x) => x.getBoundingClientRect()); const r = document.querySelector('.cg-sb-rolo');
       return { mesmaLinha: l.every((b) => Math.round(b.top) === Math.round(l[0].top)), cabe: r.scrollWidth <= r.clientWidth + 1, larg: Math.round(l[0].width) }; });
@@ -5763,12 +5805,12 @@ async function rodar() {
     await entrar(abaC, CONSULTA, '7777', true);
     await esperarTela(abaC, ['aplicacao']);
     const fc = await frame(abaC);
-    await fc.evaluate(() => { CG.aba = 'escala'; abrir('carga'); });
+    await fc.evaluate(() => { CG.aba = 'equipe'; CG.subAberto = true; abrir('carga'); });
     await esperarCarga(fc);
     const so = await fc.evaluate(() => {
       const r = { caixas: document.querySelectorAll('.cg-sub-lista input').length, seg: document.querySelectorAll('.cg-seg-btn:not([disabled])').length,
         alocar: document.querySelectorAll('.cg-esc-acoes').length };
-      cgIrAba('equipe'); r.desfazer = document.querySelectorAll('.cg-auto button').length; r.botoes = document.querySelectorAll('.cg-quadro-botoes button:not([onclick*="escala"])').length;
+      cgIrAba('equipe'); r.desfazer = document.querySelectorAll('.cg-auto button').length; r.botoes = document.querySelectorAll('.cg-quadro-botoes button:not([onclick*="Subturnos"])').length;
       CG.boxVista = 'controle'; cgIrAba('boxes'); r.celulas = document.querySelectorAll('.cg-ctl-cel').length; r.linhas = document.querySelectorAll('.cg-ctl tbody tr').length;
       CG.boxVista = 'cadastros'; cgDesenhar(); r.forms = document.querySelectorAll('.cg-cad-form, .cg-cad textarea, .cg-cad-x').length;
       CG.boxVista = 'mapa'; cgDesenhar(); r.mbotoes = document.querySelectorAll('.cg-sb [draggable="true"], .cg-sb .cg-btn-primario, .cg-sb-mini-cartao').length;

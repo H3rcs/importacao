@@ -3069,7 +3069,7 @@ async function cgCtlSalvarLote(linhas, aplicar) {
 function cgMapaBoxesHtml() {
   const P = CG.dados.patio, pode = CG.dados.podeEditar && !CG.hist;
   return `<section class="cg-cartao cg-mapa-cartao"><header class="cg-cartao-cab"><h3>Situação dos BOXs</h3>
-      <span class="cg-patio-botoes"><span class="cg-selo neutro">${P.contagem.livres} livres · ${P.contagem.ocupados} com veículo</span><button type="button" class="cg-link" onclick="cgImprimirBoxes('mapa')">Imprimir o quadro</button></span></header>
+      <span class="cg-mapa-botoes"><span class="cg-selo neutro">${P.contagem.livres} livres · ${P.contagem.ocupados} com veículo</span><button type="button" class="cg-link" onclick="cgImprimirBoxes('mapa')">Imprimir o quadro</button></span></header>
     <div class="cg-mapa-boxes" role="list">${P.mapa.map((b) => {
       const rot = 'Box ' + b.numero + ': ' + CG_BOX_EST[b.estado] + (b.itens.length ? ', carga ' + b.itens.map((i) => i.n).join(', ') : '') + (b.obs ? ' (' + b.obs + ')' : '');
       const corpo = `<b class="cg-num cg-mbox-n">${b.numero}</b><span class="cg-mbox-est">${esc(CG_BOX_EST[b.estado])}</span>

@@ -1948,6 +1948,15 @@ function cgAplicarLinha_(atual, p, ctx, parcial) {
   }
   if (carregar === true && etapaAntes !== 'CARREGADA') { campos.ETAPA = 'CARREGADA'; campos.CARREGADA_EM = agora; campos.CARREGADA_POR = ctx.quem; textos.push('carregada'); }
   if (carregar === false && etapaAntes === 'CARREGADA') { campos.ETAPA = box ? 'BOX' : 'FILA'; campos.CARREGADA_EM = ''; campos.CARREGADA_POR = ''; textos.push('reabriu'); }
+  // como na planilha antiga (e no importar): OBSERVACAO "JA NO BOX" ou "CARREGANDO" com box = o veiculo esta no box
+  const sitFinal = campos.SITUACAO !== undefined ? campos.SITUACAO : (atual ? atual.situacao : '');
+  const boxFinal = campos.BOX !== undefined ? (Number(campos.BOX) || 0) : box;
+  if ((campos.SITUACAO !== undefined || campos.BOX !== undefined) && boxFinal && (campos.ETAPA || etapaAntes) !== 'CARREGADA' &&
+      ['JA NO BOX', 'CARREGANDO'].indexOf(cgObsNorm_(sitFinal)) !== -1) {
+    if (!(atual && atual.chegada) && !campos.CHEGADA) campos.CHEGADA = agora;
+    if (!(atual && atual.noBox) && !campos.NO_BOX_EM) campos.NO_BOX_EM = campos.CHEGADA || agora;
+    if (cgObsNorm_(sitFinal) === 'CARREGANDO') campos.ETAPA = 'CARREGANDO';
+  }
   if (campos.SITUACAO !== undefined && atual && campos.SITUACAO !== atual.situacao && campos.SITUACAO) textos.push(campos.SITUACAO);
   if (atual) {
     if (!Object.keys(campos).length) return { id: atual.id, recado: 'Carga ' + atual.n + ': nada mudou.' };
@@ -2531,6 +2540,8 @@ function cgAutoTurno_() {
 }
 function cgEntradaAuto_(c, agora, turnos) {
   const q = cgPessoasDoQuadro_();
+  // sem a lista do Quadro (fonte nao ligada, planilha fora do ar) nao registra: tenta de novo na proxima pergunta
+  if (!(q.pessoas || []).length) return;
   const subturnos = cgSubturnos_(), adm = cgHorarioAdm_();
   const faltou = {};
   cgFaltas_(turnos, agora).forEach(function (f) { faltou[f.k] = true; });

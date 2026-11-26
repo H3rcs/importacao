@@ -5455,6 +5455,261 @@ async function rodar() {
     await A.contexto.close(); await B.contexto.close(); await C.contexto.close(); await s.fechar();
   });
 
+  /*
+   * SITUACAO DE CARGA, FASE 3 (8.16). Terca-feira 01/12/2026, 07:40: o Turno A entrou (06:50) e o C saiu (07:00).
+   * O Quadro com as funcoes do mapa da gerencia ("Separador nobre", "Sep. grandeza I", "Conf. miudeza II"...),
+   * metade do A no A1 (trabalha terca) e metade no A2 (folga terca); o C da noite alocado a mao.
+   * Ao abrir a tela, a alocacao automatica poe o A1 nos depositos da funcao e libera o C. Depois: desfazer,
+   * "Alocar pela funcao", um auxiliar na separacao, a aba Escala 5x2 (subturno um a um e em lote) e os Boxes
+   * (grade Controle: editar, colar do Excel, linha nova, motorista do cadastro, CARREGADA?, Excel/CSV,
+   * impressao, Situacao dos BOXs). Fotos claro/escuro, computador/celular e TV; quem so ve nao mexe.
+   */
+  const AGORA_F3 = '2026-12-01T07:40:00-03:00';
+  function ajustarQuadro5x2(abas) {
+    const g = abas.GERAL, iCab = g.findIndex((l) => l && l[0] === 'EQUIPE'), iFun = 3;
+    const SEP = ['SEPARADOR NOBRE', 'SEP. GRANDEZA I', 'SEP. MIUDEZA I', 'SEP. BLOCADO', 'SEPARADOR PESÁVEIS'], CONF = ['CONF. NOBRE', 'CONF. MIUDEZA II', 'CONF. GRANDEZA II'];
+    let ns = 0, nc = 0, nr = 0;
+    for (let i = iCab + 1; i < g.length; i++) {
+      const l = g[i];
+      if (!l || !l[iFun]) continue;
+      if (l[iFun] === 'SEPARADOR') l[iFun] = SEP[ns++ % SEP.length];
+      else if (l[iFun] === 'CONFERENTE') l[iFun] = CONF[nc++ % CONF.length];
+      else if (l[iFun] === 'REPOSITOR' && nr++ < 2) l[iFun] = 'REC. MERCADORIA';
+    }
+  }
+  function quadro5x2(s) {
+    const { abas } = require('./dados-quadro.js')(s.mundo.DataDoScript, new Date(Date.parse(AGORA_F3)));
+    ajustarQuadro5x2(abas);
+    const pl = s.mundo.novaPlanilha('BI Quadro CD Feira');
+    const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+    Object.keys(abas).forEach((nome, i) => {
+      const a = i === 0 ? pl.abas[0] : new Aba(pl, nome, 1000, 26);
+      if (i === 0) a.nome = nome; else pl.abas.push(a);
+      abas[nome].forEach((linha, l) => { if (linha) a.dados[l] = linha.slice(); });
+    });
+    return 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit';
+  }
+  function montarCdFase3(s) {
+    const dono = pelaPorta(s, DONO, DONO, '4321');
+    dono('salvarFonteQuadro', { link: quadro5x2(s) });
+    const ctx = s.contexto(DONO); ctx._porta = true;
+    const pessoas = ctx.cgPessoasDoQuadro_().pessoas.filter((p) => p.situacao === 'ATIVO');
+    const doTurno = (t) => pessoas.filter((p) => ctx.cgTurnoDaEquipe_(p.equipe) === t);
+    const A = doTurno('A').filter((p) => !ctx.cgEhRecebimento_(p.funcao)), C = doTurno('C');
+    const A1 = A.filter((p, i) => i % 2 === 0), A2 = A.filter((p, i) => i % 2 === 1);
+    dono('subturnoCarga', { pessoas: A1, subturno: 'A1' });
+    dono('subturnoCarga', { pessoas: A2, subturno: 'A2' });
+    dono('subturnoCarga', { pessoas: C.filter((p, i) => i % 2), subturno: 'C1' });
+    dono('subturnoCarga', { pessoas: C.filter((p, i) => !(i % 2)), subturno: 'C2' });
+    // a noite: 4 do C2 (segunda trabalha) ficaram alocados — a saida das 07:00 libera
+    const noite = C.filter((p, i) => !(i % 2) && ctx.cgZonaDaFuncao_(p.funcao) && ctx.cgZonaDaFuncao_(p.funcao).dep).slice(0, 4);
+    noite.forEach((p) => { const z = ctx.cgZonaDaFuncao_(p.funcao); dono('moverPessoaCarga', { pessoa: p, destino: { dep: z.dep, papel: z.papel, andar: z.dep === 'NOBRE' && z.papel === 'SEPARADOR' ? 1 : '' } }); });
+    // a situacao de carga das 07:20 (30 cargas de teste)
+    const DEPS3 = ['GRANDEZA', 'MIUDEZA', 'BLOCADO', 'PESAVEIS', 'NOBRE', 'NOBRE_GRANDEZA'];
+    const cargas = [];
+    for (let i = 0; i < 30; i++) {
+      const d = {};
+      DEPS3.forEach((id, j) => { d[id] = (i + j) % 4 === 0 ? ['-', '-'] : [(i * 3 + j) % 10 === 0 ? 'X' : ((i + j) % 9) + '/9', (i + j) % 5 + '/9']; });
+      cargas.push({ nro: String(900100 + i), nome: 'ROTA TESTE ' + (i + 1), veiculo: ['TRUCK', 'TOCO', 'VUC 2700', 'CARRETA', '3/4'][i % 5], box: String((i % 24) + 1), h24: i === 4 || i === 11, d });
+    }
+    dono('enviarSituacaoCarga', { emitidoEm: '2026-12-01T07:20:00', arquivo: 'situacao-0720.pdf', paginas: 2, depositos: DEPS3.map((id) => ({ id })), cargas });
+    // o patio pela grade (como a planilha antiga): 6 linhas, uma ja carregada
+    dono('carregamentoLoteCarga', { linhas: [
+      { carga: '100', box: '3', veiculo: '46115', motorista: 'MOTORISTA TESTE UM', situacao: 'JÁ NO BOX', previsao: '06:30', descricao: 'FPI-D TESTE' },
+      { carga: '101', box: '5', veiculo: '46116', motorista: 'MOTORISTA TESTE DOIS', situacao: 'CARREGANDO', previsao: '06:45' },
+      { carga: '102', box: '8', veiculo: '46117', situacao: 'MOTORISTA A CAMINHO', previsao: '08:10', prioridade: '1' },
+      { carga: '103', situacao: 'MARCOU E NAO VEIO', previsao: '07:00', complemento: 'COMPL. TESTE' },
+      { carga: '104', box: '12', veiculo: '46118', previsao: '09:00' },
+      { carga: '105', box: '14', veiculo: '46119', carregada: 'SIM', previsao: '05:30' }
+    ] });
+    return { dono, ctx, A1, A2, C, noite };
+  }
+  let SRV3 = null;
+  function srv3() { const c = SRV3.contexto(DONO); c._porta = true; return c; }      // um contexto novo a cada leitura (sem o cache da execucao)
+  async function fotosDaFase3(aba, f, prefixo, celular) {
+    const vistas = [['equipe'], ['escala'], ['boxes', 'controle'], ['boxes', 'mapa'], ['boxes', 'cadastros'], ['boxes', 'patio'], ['NOBRE'], ['geral']];
+    for (const [id, vista] of vistas) {
+      await f.evaluate((x) => { if (x[1]) { CG.boxVista = x[1]; } cgIrAba(x[0]); window.scrollTo(0, 0); }, [id, vista || '']);
+      await aba.page.waitForTimeout(250);
+      if (celular) await semRolagemLateral(f, prefixo + ' ' + id + (vista ? '-' + vista : ''));
+      await foto(aba, prefixo + '-' + id.toLowerCase() + (vista ? '-' + vista : ''), celular ? 3600 : 4200);
+    }
+  }
+
+  await cenario('situacao de carga fase 3: escala 5x2, alocacao automatica e desfazer, alocar pela funcao, subturnos, check-outs por deposito, grade Controle (editar, colar, cadastro, exportar, imprimir) — telas e fotos', async () => {
+    const s = await subir({ agora: AGORA_F3 }); instalarComPessoas(s);
+    cadastrar(s, CONSULTA, 'Carla Dias', 'CONSULTA', '', 'Consulta');
+    const cd = montarCdFase3(s);
+    SRV3 = s;
+    const ler = telaCargaServidor(s, DONO, DONO, '4321');
+    const contexto = await navegador.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+    await contexto.clock.install({ time: new Date(AGORA_F3) });
+    const aba = await abrirAba(s, DONO, { contexto });
+    await entrar(aba, DONO, '4321');
+    await esperarTela(aba, ['aplicacao']);
+    const f = await frame(aba);
+    await f.evaluate(() => { CG.aba = 'equipe'; abrir('carga'); });
+    await esperarCarga(f);
+    // a alocacao automatica: o A1 foi para os depositos da funcao; o A2 (folga terca) ficou; o C saiu
+    let d = ler();
+    const mapeados = cd.A1.filter((p) => { const z = cd.ctx.cgZonaDaFuncao_(p.funcao); return z && z.dep; });
+    afirmar(d.equipe.length === mapeados.length && d.equipe.every((x) => cd.A1.some((p) => p.k === x.k)), 'automatica: ' + d.equipe.length + ' de ' + mapeados.length);
+    const notas = (await f.textContent('.cg-autos')).replace(/\s+/g, ' ');
+    afirmar(/Alocação automática do Turno A às 07:40: \d+ pessoas foram para o depósito da função \(\d+ de folga na escala 5x2/.test(notas) && /Fim do Turno C: 4 pessoas liberadas/.test(notas), 'notas: ' + notas);
+    const folga = (await f.textContent('.cg-pool-folga')).replace(/\s+/g, ' ');
+    afirmar(new RegExp('Folga hoje \\(5x2\\): ' + cd.A2.length).test(folga), 'folga: ' + folga + ' A2 ' + cd.A2.length);
+    afirmar(await f.$$eval('.cg-pool-grupo h4', (h) => h.map((x) => x.textContent.replace(/\s+\d+$/, '').trim()).join('|')) !== '', 'grupos dos disponiveis');
+    await foto(aba, 'carga3-desktop-equipe-automatica');
+    // desfazer a automatica (confirma): o A1 volta para os disponiveis
+    await f.click('.cg-auto:has-text("Alocação automática") button:has-text("Desfazer")');
+    await f.click('#janela-rodape .botao:has-text("Desfazer")');
+    await f.waitForFunction(() => !CG.pendentes && (CG.dados.equipe || []).length === 0 && document.querySelector('.cg-auto.desfeita'), null, { timeout: 10000 });
+    afirmar(ler().equipe.length === 0, 'desfeita no servidor');
+    // alocar pela funcao: de novo, pelo botao
+    await f.click('.cg-quadro-botoes button:has-text("Alocar pela função")');
+    afirmar(new RegExp('Vão ' + mapeados.length + ' pessoas').test(await f.textContent('#janela')), 'confirmacao do lote');
+    await f.click('#janela-rodape .botao:has-text("Alocar")');
+    await f.waitForFunction((n) => !CG.pendentes && (CG.dados.equipe || []).length === n, mapeados.length, { timeout: 10000 });
+    d = ler();
+    afirmar(d.equipe.length === mapeados.length, 'pela funcao no servidor: ' + d.equipe.length);
+    // um auxiliar (sem deposito na funcao) vai para a separacao da Grandeza pelo menu: o chip mostra a funcao de origem
+    const aux = cd.A1.find((p) => /AUXILIAR/.test(p.funcao));
+    await f.click('.cg-pool .cg-boneco[data-k="' + aux.k + '"]');
+    await f.evaluate(() => document.querySelectorAll('.cg-mover-dep')[0].querySelector('.cg-opcao').click());
+    await f.waitForSelector('.cg-zona .cg-boneco[data-k="' + aux.k + '"] .cg-boneco-fun', { timeout: 10000 });
+    d = ler();
+    afirmar(d.equipe.some((x) => x.k === aux.k && x.dep === 'GRANDEZA' && x.papel === 'SEPARADOR'), 'auxiliar na Grandeza');
+    // o menu da pessoa mostra a escala e troca o subturno
+    const umA1 = cd.A1.find((p) => d.equipe.some((x) => x.k === p.k));
+    await f.click('.cg-zona .cg-boneco[data-k="' + umA1.k + '"]');
+    afirmar(/Escala: Turno A1 · folga domingo e segunda · em serviço agora/.test((await f.textContent('.cg-mover-escala')).replace(/\s+/g, ' ')), 'escala no menu');
+    await f.click('#janela-rodape .botao:has-text("Cancelar")');
+    // ESCALA 5x2
+    await f.evaluate(() => cgIrAba('escala'));
+    const esc = await f.evaluate(() => ({ tabs: document.querySelectorAll('.cg-esc-tab').length, check: Array.from(document.querySelectorAll('.cg-esc-check-dep')).map((x) => x.querySelectorAll('tbody tr').length),
+      titulos: Array.from(document.querySelectorAll('.cg-esc-check-dep h4')).map((h) => h.textContent.replace(/\s+/g, ' ').trim()) }));
+    afirmar(esc.tabs >= 5 && esc.check.join() === '7,7' && /Check-outs da Miudeza 8 funcionando de 8/.test(esc.titulos[0]) && /Check-outs do Nobre 10 funcionando de 10/.test(esc.titulos[1]), 'escala: ' + JSON.stringify(esc));
+    await foto(aba, 'carga3-desktop-escala');
+    // um a um: o primeiro da lista vai para o A2 (toque); de novo tira
+    const k1 = await f.$eval('.cg-sub-lista li input[type="checkbox"]', (i) => i.id.slice(7));
+    await f.click('.cg-sub-lista li:first-child .cg-seg-btn:has-text("A2")');
+    await f.waitForFunction((k) => !CG.pendentes && CG.dados.subturnos[k] === 'A2', k1, { timeout: 8000 });
+    afirmar(ler().subturnos[k1] === 'A2', 'subturno no servidor');
+    // em lote: Turno C, duas caixas, "→ C1"
+    await f.click('.cg-subturnos .cg-chip:has-text("Turno C")');
+    const ks = await f.$$eval('.cg-sub-lista li input[type="checkbox"]', (l) => l.slice(0, 2).map((i) => i.id.slice(7)));
+    for (const k of ks) await f.check('#cg-sub-' + k);
+    await f.click('.cg-sub-lote .cg-btn:has-text("→ C1")');
+    await f.waitForFunction((x) => !CG.pendentes && x.every((k) => CG.dados.subturnos[k] === 'C1'), ks, { timeout: 8000 });
+    afirmar(ks.every((k) => ler().subturnos[k] === 'C1'), 'lote no servidor');
+    // BOXES: o resumo e a grade Controle
+    await f.evaluate(() => { CG.boxVista = 'controle'; cgIrAba('boxes'); });
+    const kpis = (await f.textContent('.cg-box-resumo')).replace(/\s+/g, ' ');
+    afirmar(/6\s*total de caminhões/.test(kpis) && /1\s*caminhões carregados/.test(kpis) && /6\s*total de cargas/.test(kpis) && /1\s*cargas carregadas/.test(kpis) &&
+      /2\s*boxes ocupados/.test(kpis) && /2\s*Truck/.test(kpis), 'resumo: ' + kpis);
+    afirmar(await f.$$eval('.cg-ctl thead th', (t) => t.map((x) => x.textContent.trim()).join('|')) === 'CARGA|COMPLEMENTO|PRIORIDADE|BOX|CARRO|DESCRIÇÃO|MOTORISTA|CARREGADA?|OBSERVAÇÃO|HORÁRIO CHEGADA', 'colunas');
+    afirmar(await f.$$eval('.cg-ctl tbody tr:not(.cg-ctl-nova)', (t) => t.length) === 6, 'seis linhas');
+    const idDe = (n) => ler().patio && srv3().cgCarregamentos_().find((x) => x.n === n).id;
+    // editar uma celula: o box da 900104 vai para o 11 (Tab salva)
+    const id104 = idDe('900104');
+    await f.fill('#ctl-' + id104 + '-box', '11');
+    await f.press('#ctl-' + id104 + '-box', 'Tab');
+    await f.waitForFunction((id) => !CG.pendentes && cgLinhasControle().find((x) => x.id === id).box === 11, id104, { timeout: 8000 });
+    afirmar(srv3().cgCarregamentos_().find((x) => x.n === '900104').box === 11, 'box 11 no servidor');
+    // colar do Excel (duas linhas, colunas CARGA COMPLEMENTO PRIORIDADE BOX) na linha nova
+    await f.evaluate(() => { const dt = new DataTransfer(); dt.setData('text/plain', '900110\t\t2\t15\r\n900111\tCOMPL\t\t16\r\n');
+      document.getElementById('ctl-novo-carga').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); });
+    await f.waitForFunction(() => !CG.pendentes && cgLinhasControle().length === 8, null, { timeout: 8000 });
+    const c110 = srv3().cgCarregamentos_().find((x) => x.n === '900110'), c111 = srv3().cgCarregamentos_().find((x) => x.n === '900111');
+    afirmar(c110 && c110.box === 15 && c110.prio === '2' && c111 && c111.box === 16 && c111.comp === 'COMPL' && c110.descricao === 'ROTA TESTE 11', 'colado: ' + JSON.stringify([c110 && c110.box, c111 && c111.box]));
+    // a linha nova: carga e box, Enter cria
+    await f.fill('#ctl-novo-carga', '112');
+    await f.fill('#ctl-novo-box', '17');
+    await f.press('#ctl-novo-box', 'Enter');
+    await f.waitForFunction(() => !CG.pendentes && cgLinhasControle().some((x) => x.n === '900112' && x.box === 17), null, { timeout: 8000 });
+    // cadastro: motorista com placa; na grade, o nome completa e a placa vai para o CARRO vazio
+    await f.click('.cg-box-nav .cg-chip[data-vista="cadastros"]');
+    await f.fill('#cgc-m-codigo', '900777'); await f.fill('#cgc-m-nome', 'Motorista Teste Sete'); await f.fill('#cgc-m-placa', 'TST7G77');
+    await f.click('.cg-cad-form button[type="submit"]');
+    await f.waitForFunction(() => !CG.pendentes && (CG.dados.cadastro.motoristas || []).some((m) => m.placa === 'TST7G77'), null, { timeout: 8000 });
+    await foto(aba, 'carga3-desktop-boxes-cadastros-novo');
+    await f.click('.cg-box-nav .cg-chip[data-vista="controle"]');
+    const id103 = idDe('900103');
+    await f.fill('#ctl-' + id103 + '-motorista', 'motorista teste sete');
+    await f.press('#ctl-' + id103 + '-motorista', 'Tab');
+    await f.waitForFunction((id) => !CG.pendentes && cgLinhasControle().find((x) => x.id === id).veiculo === 'TST7G77', id103, { timeout: 8000 });
+    const c103 = srv3().cgCarregamentos_().find((x) => x.n === '900103');
+    afirmar(c103.motorista === '900777 - MOTORISTA TESTE SETE (TST7G77)' && c103.veiculo === 'TST7G77', 'motorista do cadastro: ' + c103.motorista + ' / ' + c103.veiculo);
+    // CARREGADA? = SIM libera o box
+    await f.selectOption('#ctl-' + id104 + '-carregada', 'SIM');
+    await f.waitForFunction((id) => !CG.pendentes && cgLinhasControle().find((x) => x.id === id).etapa === 'CARREGADA', id104, { timeout: 8000 });
+    afirmar(srv3().cgCarregamentos_().find((x) => x.n === '900104').etapa === 'CARREGADA', 'carregada no servidor');
+    // ordenar pelo BOX (decrescente na 2a vez) e filtrar
+    await f.click('.cg-ctl-ord:has-text("BOX")'); await f.click('.cg-ctl-ord:has-text("BOX")');
+    const boxes = await f.$$eval('.cg-ctl tbody tr:not(.cg-ctl-nova) input[data-col="box"]', (l) => l.map((i) => i.value).filter(Boolean).map(Number));
+    afirmar(boxes.every((b, i) => !i || boxes[i - 1] >= b), 'ordem do box: ' + boxes);
+    await f.fill('#cg-ctl-busca', 'TST7G77');
+    await f.waitForFunction(() => document.querySelectorAll('.cg-ctl tbody tr:not(.cg-ctl-nova)').length === 1, null, { timeout: 5000 });
+    await f.fill('#cg-ctl-busca', '');
+    await f.evaluate(() => { cgCtlEstado().ordem = ''; cgDesenhar(); });
+    await f.waitForFunction(() => document.querySelectorAll('.cg-ctl tbody tr:not(.cg-ctl-nova)').length === 9, null, { timeout: 5000 });
+    await foto(aba, 'carga3-desktop-boxes-controle-editado');
+    // Excel e CSV
+    const [xl] = await Promise.all([aba.page.waitForEvent('download'), f.click('.cg-box-nav-dir button:has-text("Excel")')]);
+    afirmar(xl.suggestedFilename() === 'controle-boxes-2026-12-01.xlsx', 'xlsx: ' + xl.suggestedFilename());
+    const [csv] = await Promise.all([aba.page.waitForEvent('download'), f.click('.cg-box-nav-dir button:has-text("CSV")')]);
+    const txt = require('fs').readFileSync(await csv.path(), 'utf8');
+    afirmar(/^﻿CARGA;COMPLEMENTO;PRIORIDADE;BOX;CARRO;DESCRIÇÃO;MOTORISTA;CARREGADA\?;OBSERVAÇÃO;HORÁRIO CHEGADA\r\n/.test(txt) && txt.split('\r\n').length === 10 && /900103;COMPL\. TESTE;;;TST7G77;/.test(txt), 'csv: ' + txt.slice(0, 300));
+    // imprimir: o relatorio com o resumo, o quadro dos boxes e a grade
+    const [rel] = await Promise.all([aba.page.context().waitForEvent('page'), f.click('.cg-box-nav-dir button:has-text("Imprimir")')]);
+    await rel.waitForLoadState();
+    const relTxt = (await rel.textContent('body')).replace(/\s+/g, ' ');
+    afirmar(/Controle dos boxes/.test(relTxt) && /Situação dos BOXs/.test(relTxt) && /Total de caminhões/.test(relTxt) && /900112/.test(relTxt), 'relatorio: ' + relTxt.slice(0, 200));
+    if (process.env.GSL_FOTOS) await rel.screenshot({ path: path.join(process.env.GSL_FOTOS, 'carga3-impressao-controle.png'), fullPage: true });
+    await rel.close();
+    // Situacao dos BOXs: os 26 boxes
+    await f.click('.cg-box-nav .cg-chip[data-vista="mapa"]');
+    afirmar(await f.$$eval('.cg-mbox', (l) => l.length) === 26 && /Carregando/.test(await f.textContent('.cg-mbox:nth-child(5)')), 'quadro dos boxes');
+    // fotos: claro, escuro, celular e TV
+    await fotosDaFase3(aba, f, 'carga3-desktop');
+    await f.evaluate(() => { aplicarTema('escuro'); cgDesenhar(); });
+    await fotosDaFase3(aba, f, 'carga3-desktop-escuro');
+    await aba.page.setViewportSize({ width: 390, height: 844 });
+    await fotosDaFase3(aba, f, 'carga3-celular-escuro', true);
+    await f.evaluate(() => { aplicarTema('claro'); cgDesenhar(); });
+    await fotosDaFase3(aba, f, 'carga3-celular', true);
+    await aba.page.setViewportSize({ width: 1920, height: 1080 });
+    await f.evaluate(() => { cgIrAba('escala'); cgModoTv(); });
+    await aba.page.waitForTimeout(300);
+    await foto(aba, 'carga3-tv-escala');
+    await f.evaluate(() => { CG.boxVista = 'mapa'; cgIrAba('boxes'); });
+    await foto(aba, 'carga3-tv-boxes-mapa');
+    await f.evaluate(() => cgModoTv());
+    afirmar(!aba.erros.length, 'erros: ' + aba.erros.join(' | '));
+    await contexto.close();
+    // quem so ve: sem caixas, botoes de subturno, Desfazer, "Alocar pela funcao", celulas editaveis nem formularios
+    const ctxC = await navegador.newContext({ viewport: { width: 1440, height: 1000 } });
+    await ctxC.clock.install({ time: new Date(AGORA_F3) });
+    const abaC = await abrirAba(s, CONSULTA, { contexto: ctxC });
+    await entrar(abaC, CONSULTA, '7777', true);
+    await esperarTela(abaC, ['aplicacao']);
+    const fc = await frame(abaC);
+    await fc.evaluate(() => { CG.aba = 'escala'; abrir('carga'); });
+    await esperarCarga(fc);
+    const so = await fc.evaluate(() => {
+      const r = { caixas: document.querySelectorAll('.cg-sub-lista input').length, seg: document.querySelectorAll('.cg-seg-btn:not([disabled])').length,
+        alocar: document.querySelectorAll('.cg-esc-acoes').length };
+      cgIrAba('equipe'); r.desfazer = document.querySelectorAll('.cg-auto button').length; r.botoes = document.querySelectorAll('.cg-quadro-botoes button:not([onclick*="escala"])').length;
+      CG.boxVista = 'controle'; cgIrAba('boxes'); r.celulas = document.querySelectorAll('.cg-ctl-cel').length; r.linhas = document.querySelectorAll('.cg-ctl tbody tr').length;
+      CG.boxVista = 'cadastros'; cgDesenhar(); r.forms = document.querySelectorAll('.cg-cad-form, .cg-cad textarea, .cg-cad-x').length;
+      CG.boxVista = 'mapa'; cgDesenhar(); r.mbotoes = document.querySelectorAll('button.cg-mbox').length;
+      return r;
+    });
+    afirmar(!so.caixas && !so.seg && !so.alocar && !so.desfazer && !so.botoes && !so.celulas && so.linhas === 9 && !so.forms && !so.mbotoes, 'so ver: ' + JSON.stringify(so));
+    afirmar(!abaC.erros.length, 'erros (consulta): ' + abaC.erros.join(' | '));
+    await ctxC.close(); await s.fechar();
+  });
+
   await navegador.close();
   const falhas = resultados.filter((r) => !r.ok);
   console.log('\n' + (resultados.length - falhas.length) + '/' + resultados.length + ' cenarios ok');

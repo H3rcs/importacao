@@ -986,6 +986,259 @@ async function rodar() {
     afirmar(ctx(m).parametro('CARGA_FLOWRACK_RUAS', '') === '7', 'iguais viram um numero so');
   });
 
+  console.log('\nFase 3 (8.16):');
+
+  /* O Quadro de teste com as funcoes como no mapa da gerencia: "Separador nobre", "Sep. grandeza I", "Conf. miudeza II"... e o Recebimento. */
+  function ligarQuadro5x2(m, s) {
+    const { abas } = require('./dados-quadro.js')(m.DataDoScript, new Date(Date.parse(AGORA)));
+    const g = abas.GERAL;
+    const iCab = g.findIndex((l) => l && l[0] === 'EQUIPE'), iFun = 3;   // EQUIPE · COD · PROD · DESCRICAO (a funcao) · RH · STATUS
+    const SEP = ['SEPARADOR NOBRE', 'SEP. GRANDEZA I', 'SEP. MIUDEZA I'], CONF = ['CONF. NOBRE', 'CONF. MIUDEZA II', 'CONF. GRANDEZA II'];
+    let ns = 0, nc = 0, nr = 0;
+    for (let i = iCab + 1; i < g.length; i++) {
+      const l = g[i];
+      if (!l || !l[iFun]) continue;
+      if (l[iFun] === 'SEPARADOR') l[iFun] = SEP[ns++ % 3];
+      else if (l[iFun] === 'CONFERENTE') l[iFun] = CONF[nc++ % 3];
+      else if (l[iFun] === 'REPOSITOR' && nr++ < 2) l[iFun] = 'REC. MERCADORIA';
+    }
+    acao(m, s, 'salvarFonteQuadro', { link: planilhaAntiga(m, 'BI Quadro CD Feira', abas) });
+    m.cache.clear();
+  }
+  const quando = (iso) => { m0.desvioRelogio = Date.parse(iso) - Date.now(); };
+  let m0 = null;
+
+  await caso('escala 5x2: A1/A2 e C1/C2 pelo dia da semana (segunda só A2/C2, terça só A1/C1, quarta a sábado os dois), B e ADM de segunda a sexta, o C que passa da meia-noite é do dia em que começou', () => {
+    const m = mundo(); const c = ctx(m);
+    const t = c.cgTurnos_(), adm = c.cgHorarioAdm_();
+    const reg = (equipe, sub, funcao) => c.cgRegime_({ k: 'C1', equipe, funcao: funcao || 'SEPARADOR NOBRE' }, sub ? { C1: sub } : {});
+    const est = (r, iso) => c.cgSituacaoNaEscala_(r, iso, t, adm).estado;
+    // 23/11/2026 e segunda; 28/11 sabado; 29/11 domingo
+    const casos = [
+      ['1° TURNO', 'A1', '2026-11-23T10:00:00', 'folga'], ['1° TURNO', 'A2', '2026-11-23T10:00:00', 'servico'],
+      ['1° TURNO', 'A1', '2026-11-24T10:00:00', 'servico'], ['1° TURNO', 'A2', '2026-11-24T10:00:00', 'folga'],
+      ['1° TURNO', 'A1', '2026-11-28T10:00:00', 'servico'], ['1° TURNO', 'A2', '2026-11-28T10:00:00', 'servico'], ['1° TURNO', 'A1', '2026-11-29T10:00:00', 'folga'],
+      ['1° TURNO', 'A2', '2026-11-23T18:00:00', 'fora'], ['1° TURNO', '', '2026-11-23T10:00:00', 'servico'],
+      ['3° TURNO', 'C2', '2026-11-23T23:30:00', 'servico'], ['3° TURNO', 'C1', '2026-11-23T23:30:00', 'folga'],
+      ['3° TURNO', 'C1', '2026-11-24T02:00:00', 'folga'], ['3° TURNO', 'C2', '2026-11-24T02:00:00', 'servico'],
+      ['3° TURNO', 'C1', '2026-11-24T23:30:00', 'servico'], ['3° TURNO', 'C2', '2026-11-24T23:30:00', 'folga'],
+      ['3° TURNO', 'C1', '2026-11-29T02:00:00', 'servico'], ['3° TURNO', 'C1', '2026-11-29T23:30:00', 'folga'],
+      ['2° TURNO', '', '2026-11-27T20:00:00', 'servico'], ['2° TURNO', '', '2026-11-28T20:00:00', 'folga'], ['2° TURNO', '', '2026-11-28T00:30:00', 'servico'],
+      ['ADM', '', '2026-11-23T10:00:00', 'servico'], ['ADM', '', '2026-11-28T10:00:00', 'folga'], ['ADM', '', '2026-11-23T20:00:00', 'fora']
+    ];
+    casos.forEach(([eq, sub, iso, quer]) => { const v = est(reg(eq, sub), iso); afirmar(v === quer, eq + ' ' + (sub || '-') + ' ' + iso + ': ' + v + ' (esperava ' + quer + ')'); });
+    // o Recebimento do Turno A e horario ADM (segunda a sexta), sem subturno
+    const rec = reg('1° TURNO', 'A1', 'Rec. mercadoria');
+    afirmar(rec.turno === 'ADM' && rec.recebimento && est(rec, '2026-11-28T10:00:00') === 'folga' && est(rec, '2026-11-23T09:00:00') === 'servico', 'recebimento ' + JSON.stringify(rec));
+    afirmar(c.cgRegime_({ k: 'x', equipe: '1º TURNO', funcao: 'DESCARREGADOR' }, {}).turno === 'ADM' && reg('1° TURNO', '').aDefinir && reg('2° TURNO', 'A1').grade === 'B', 'descarregador, a definir, B sem subturno');
+    // funcao -> deposito e papel
+    const z = (f) => { const r = c.cgZonaDaFuncao_(f); return r ? r.dep + '/' + r.papel : '-'; };
+    const mapa = { 'Separador nobre': 'NOBRE/SEPARADOR', 'Sep. grandeza I': 'GRANDEZA/SEPARADOR', 'SEP. MIUDEZA I': 'MIUDEZA/SEPARADOR', 'Conf. nobre': 'NOBRE/CONFERENTE',
+      'Conf. miudeza II': 'MIUDEZA/CONFERENTE', 'CONF. GRANDEZA II': 'GRANDEZA/CONFERENTE', 'Separador Nobre Grandeza': 'NOBRE_GRANDEZA/SEPARADOR', 'Conferente pesáveis': 'PESAVEIS/CONFERENTE',
+      'SEPARADOR': '/SEPARADOR', 'Aux. expedição I': '-', 'Controle expedição': '-', 'Central miudeza': '-', 'Sup. carregamento': '-', 'Montador de carga I': '-' };
+    Object.keys(mapa).forEach((f) => afirmar(z(f) === mapa[f], f + ' -> ' + z(f)));
+    afirmar(c.cgHorarioAdm_().texto === '08:00–17:48', 'ADM padrao');
+  });
+
+  await caso('subturnos: marcar A1/A2 e C1/C2 em lote (só do turno certo; o Recebimento e o B recusam), trocar, limpar; a disponibilidade por depósito agora e nos próximos turnos', () => {
+    const m = mundo(); m0 = m; const s = entrar(m, GERENTE, '5555');
+    ligarQuadro5x2(m, s);
+    let d = tela(m, s);
+    const A = d.pessoas.filter((p) => p.equipe === '1° TURNO' && !/REC/.test(p.funcao)), C = d.pessoas.filter((p) => p.equipe === '3° TURNO'), B = d.pessoas.filter((p) => p.equipe === '2° TURNO');
+    let r = acao(m, s, 'subturnoCarga', { pessoas: A.slice(0, 10), subturno: 'A1' });
+    afirmar(/10 pessoas no A1/.test(r.recado) && Object.keys(r.subturnos).length === 10, r.recado);
+    acao(m, s, 'subturnoCarga', { pessoas: A.slice(10, 20), subturno: 'A2' });
+    acao(m, s, 'subturnoCarga', { pessoas: C.filter((x, i) => i % 2), subturno: 'C1' });
+    acao(m, s, 'subturnoCarga', { pessoas: C.filter((x, i) => !(i % 2)), subturno: 'C2' });
+    afirmar(/A1 é só do Turno A/.test(erroDe(() => acao(m, s, 'subturnoCarga', { pessoas: [B[0]], subturno: 'A1' }))), 'B recusa');
+    const rec = d.pessoas.find((p) => /REC/.test(p.funcao));
+    afirmar(/Recebimento: horário ADM/.test(erroDe(() => acao(m, s, 'subturnoCarga', { pessoas: [rec], subturno: 'A2' }))), 'recebimento recusa');
+    afirmar(/A1, A2, C1 ou C2/.test(erroDe(() => acao(m, s, 'subturnoCarga', { pessoas: [A[0]], subturno: 'B1' }))), 'subturno invalido');
+    r = acao(m, s, 'subturnoCarga', { pessoas: [A[0]], subturno: 'A2' });
+    afirmar(r.subturnos[A[0].k] === 'A2' && ctx(m).listar('CARGA_PESSOAS').filter((x) => x.PESSOA === A[0].k).length === 1, 'trocou sem duplicar');
+    r = acao(m, s, 'subturnoCarga', { pessoas: [A[1]], subturno: '' });
+    afirmar(!r.subturnos[A[1].k], 'limpou');
+    d = tela(m, s);
+    afirmar(d.subturnos[A[0].k] === 'A2' && d.turnoAdm.texto === '08:00–17:48', 'na tela');
+    // disponibilidade pura: quarta 18:00 (so o B em servico), os proximos turnos C (23:00) e A (06:50 de quinta)
+    const c = ctx(m);
+    const disp = c.cgDisponibilidade_(d.pessoas, d.subturnos, [{ k: B.find((x) => /^SEP/.test(x.funcao) && x.situacao === 'ATIVO').k }], c.cgTurnos_(), c.cgHorarioAdm_(), '2026-11-25T18:00:00');
+    const zb = Object.keys(disp.zonas).filter((k) => /SEPARADOR/.test(k)).reduce((t, k) => t + disp.zonas[k].servico, 0);
+    const bSep = B.filter((x) => /^SEP/.test(x.funcao) && x.situacao === 'ATIVO').length;
+    afirmar(zb === bSep - 1 && Object.keys(disp.zonas).reduce((t, k) => t + disp.zonas[k].falta, 0) === 1, 'separadores do B agora (menos a falta): ' + zb + ' de ' + bSep);
+    afirmar(disp.proximos.map((x) => x.turno + '@' + x.inicio).join() === 'C@2026-11-25T23:00,A@2026-11-26T06:50,B@2026-11-26T16:04', 'proximos ' + disp.proximos.map((x) => x.turno + '@' + x.inicio));
+    const cSep = C.filter((x) => /^SEP/.test(x.funcao) && x.situacao === 'ATIVO').length;
+    afirmar(Object.keys(disp.proximos[0].zonas).filter((k) => /SEPARADOR/.test(k)).reduce((t, k) => t + disp.proximos[0].zonas[k], 0) === cSep, 'quarta a noite: C1 + C2');
+    // segunda: so o C2 trabalha
+    const seg = c.cgDisponibilidade_(d.pessoas, d.subturnos, [], c.cgTurnos_(), c.cgHorarioAdm_(), '2026-11-23T18:00:00');
+    const c2 = C.filter((x, i) => !(i % 2) && /^(SEP|CONF)/.test(x.funcao) && x.situacao === 'ATIVO').length;
+    const nSegC = Object.keys(seg.proximos[0].zonas).reduce((t, k) => t + seg.proximos[0].zonas[k], 0);
+    afirmar(seg.proximos[0].turno === 'C' && nSegC === c2, 'segunda a noite so o C2: ' + nSegC + ' de ' + c2);
+    afirmar(disp.mapeamento.some((x) => x.funcao === 'SEPARADOR NOBRE' && x.dep === 'NOBRE' && x.papel === 'SEPARADOR') && disp.mapeamento.some((x) => !x.papel), 'mapeamento visivel');
+  });
+
+  await caso('alocação automática: na entrada do turno os separadores e conferentes vão para o depósito da função (menos folga 5x2 e falta; quem já está alocado fica); na saída, quem saiu é liberado; uma vez só; desfazer', () => {
+    const m = mundo(); m0 = m; let s = entrar(m, GERENTE, '5555');
+    ligarQuadro5x2(m, s);
+    let d = tela(m, s);               // quarta 18:00: entra o B (16:04) e sai o A (16:14)
+    const B = d.pessoas.filter((p) => p.equipe === '2° TURNO' && p.situacao === 'ATIVO');
+    const mapeados = B.filter((p) => /^(SEP|CONF)/.test(p.funcao));
+    afirmar(d.equipe.length === mapeados.length && d.equipe.every((x) => x.equipe === '2° TURNO'), 'o B inteiro alocado: ' + d.equipe.length + ' de ' + mapeados.length);
+    const nob = d.equipe.filter((x) => x.dep === 'NOBRE' && x.papel === 'SEPARADOR');
+    afirmar(nob.length && nob.every((x) => x.andar >= 0) && Math.max.apply(null, [0, 1, 2, 3, 4].map((a) => nob.filter((x) => x.andar === a).length)) - Math.min.apply(null, [0, 1, 2, 3, 4].map((a) => nob.filter((x) => x.andar === a).length)) <= 1, 'Nobre: pelos andares');
+    afirmar(d.equipe.find((x) => /GRANDEZA/.test(x.funcao) && /^SEP/.test(x.funcao)).dep === 'GRANDEZA', 'grandeza');
+    const auto = d.automaticas.find((a) => a.tipo === 'ENTRADA' && a.turno === 'B');
+    afirmar(auto && auto.qtd === mapeados.length && auto.dia === '2026-11-25', 'registro ' + JSON.stringify(d.automaticas));
+    ctx(m).descarregarLog();
+    afirmar(ctx(m).listar('LOG').some((l) => l.TABELA === 'CARGA_ALOCACOES'), 'no LOG');
+    // de novo: nao duplica (nem pela pergunta ao vivo)
+    acao(m, s, 'geracaoCarga', {}); m.cache.clear(); d = tela(m, s);
+    afirmar(ctx(m).listar('CARGA_ALOCACOES').filter((x) => x.TIPO === 'ENTRADA' && x.TURNO === 'B').length === 1 && d.equipe.length === mapeados.length, 'uma vez so');
+    // o movimento a mao depois fica; desfazer tira so quem continua onde a automatica pos
+    const um = d.equipe.find((x) => x.dep === 'GRANDEZA');
+    acao(m, s, 'moverPessoaCarga', { pessoa: d.pessoas.find((p) => p.k === um.k), destino: { dep: 'BLOCADO', papel: 'SEPARADOR' } });
+    let r = acao(m, s, 'desfazerAutoCarga', { id: auto.id });
+    afirmar(r.equipe.length === 1 && r.equipe[0].k === um.k && r.equipe[0].dep === 'BLOCADO', 'desfez e o movido a mao ficou ' + JSON.stringify(r.equipe.slice(0, 2)));
+    afirmar(/Já foi desfeita/.test(erroDe(() => acao(m, s, 'desfazerAutoCarga', { id: auto.id }))), 'desfazer duas vezes');
+    // segunda-feira: C1 folga, so o C2 entra; quem faltou nao entra
+    const C = d.pessoas.filter((p) => p.equipe === '3° TURNO' && p.situacao === 'ATIVO');
+    acao(m, s, 'subturnoCarga', { pessoas: C.filter((x, i) => i % 2), subturno: 'C1' });
+    acao(m, s, 'subturnoCarga', { pessoas: C.filter((x, i) => !(i % 2)), subturno: 'C2' });
+    const c2 = C.filter((x, i) => !(i % 2) && /^(SEP|CONF)/.test(x.funcao));
+    m.desvioRelogio = Date.parse('2026-11-30T22:30:00-03:00') - Date.now(); s = entrar(m, GERENTE, '5555');
+    acao(m, s, 'presencaCarga', { pessoa: c2[0], falta: true });
+    m.desvioRelogio = Date.parse('2026-11-30T23:05:00-03:00') - Date.now(); s = entrar(m, GERENTE, '5555'); m.cache.clear();
+    d = tela(m, s);
+    const doC = d.equipe.filter((x) => x.equipe === '3° TURNO');
+    afirmar(doC.length === c2.length - 1 && doC.every((x) => c2.some((p) => p.k === x.k)) && !doC.some((x) => x.k === c2[0].k), 'segunda: so o C2, sem a falta: ' + doC.length + ' de ' + c2.length);
+    const autoC = d.automaticas.find((a) => a.tipo === 'ENTRADA' && a.turno === 'C' && a.dia === '2026-11-30');
+    afirmar(autoC && autoC.puladas.folga === C.filter((x, i) => i % 2 && /^(SEP|CONF)/.test(x.funcao)).length && autoC.puladas.falta === 1, 'puladas ' + JSON.stringify(autoC && autoC.puladas));
+    // terca 01:30: o B (01:01) saiu — quem e do B sai da alocacao; desfazer devolve
+    const bAntes = d.equipe.filter((x) => x.equipe === '2° TURNO').length;
+    m.desvioRelogio = Date.parse('2026-12-01T01:30:00-03:00') - Date.now(); s = entrar(m, GERENTE, '5555'); m.cache.clear();
+    d = tela(m, s);
+    const saida = d.automaticas.find((a) => a.tipo === 'SAIDA' && a.turno === 'B' && a.dia === '2026-11-30');
+    afirmar(saida && saida.qtd === bAntes && !d.equipe.some((x) => x.equipe === '2° TURNO') && d.equipe.some((x) => x.equipe === '3° TURNO'), 'saida do B ' + JSON.stringify(saida) + ' antes ' + bAntes);
+    if (bAntes) {
+      r = acao(m, s, 'desfazerAutoCarga', { id: saida.id });
+      afirmar(r.equipe.filter((x) => x.equipe === '2° TURNO').length === bAntes, 'desfazer a saida devolve');
+    }
+  });
+
+  await caso('alocar em lote ("Alocar pela função") e qualquer pessoa do CD (carregamento, aux. expedição) pode ir para a separação; ela consome paleteira como qualquer separador', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    ligarQuadro(m, s);
+    const p = tela(m, s).pessoas;
+    const aux = p.filter((x) => /AUXILIAR/.test(x.funcao)).slice(0, 2), sep = p.filter((x) => x.funcao === 'SEPARADOR').slice(0, 2);
+    let r = acao(m, s, 'alocarLoteCarga', { itens: aux.map((x) => ({ pessoa: x, destino: { dep: 'GRANDEZA', papel: 'SEPARADOR' } })).concat(
+      [{ pessoa: sep[0], destino: { dep: 'NOBRE', papel: 'SEPARADOR' } }, { pessoa: sep[1], destino: { dep: 'NOBRE', papel: 'SEPARADOR', andar: 2 } }]) });
+    afirmar(/3 pessoas alocadas; 1 não: .*escolha o andar/.test(r.recado), r.recado);
+    afirmar(r.equipe.filter((x) => x.dep === 'GRANDEZA' && /AUXILIAR/.test(x.funcao)).length === 2, 'aux. na separacao, com a funcao de origem');
+    const c = ctx(m).cgConsumoEquip_(ctx(m).cgEquipe_(), ctx(m).cgEquipamentos_());
+    afirmar(c.PALETEIRA.pessoas === 2, 'consome paleteira');
+    r = acao(m, s, 'alocarLoteCarga', { itens: [{ pessoa: aux[0], destino: { dep: 'MIUDEZA', papel: 'SEPARADOR' } }] });
+    afirmar(/0 pessoas alocadas; 1 não: .*já alocado/.test(r.recado), r.recado);
+  });
+
+  await caso('grade "Controle" (as colunas da planilha): colar várias linhas (número curto, box, carro, descrição, motorista, carregada, observação, horário), uma linha com erro não derruba as outras, editar uma célula, colar de novo não duplica', () => {
+    const m = mundo(); const s = entrar(m, COORD, '1234');
+    acao(m, s, 'enviarSituacaoCarga', envio('2026-11-25T15:00:00', { '900001': { nome: 'ROTA NORTE TESTE', d: { GRANDEZA: ['0/10', '0/10'] } }, '900002': { GRANDEZA: ['X', 'X'] },
+      '900003': { GRANDEZA: ['3/10', '0/10'] } }));
+    let r = acao(m, s, 'carregamentoLoteCarga', { linhas: [
+      { carga: '001', box: '5', veiculo: '46115', motorista: 'MOTORISTA TESTE A', carregada: 'NÃO', situacao: 'motorista a caminho', previsao: '17:30' },
+      { carga: '900002', box: '7', veiculo: '46116', descricao: 'FPI-D-TESTE', carregada: 'SIM', situacao: 'JÁ NO BOX' },
+      { carga: '900003', box: '99' },
+      { carga: '777' }
+    ] });
+    afirmar(/2 linhas salvas, 2 com erro/.test(r.recado) && r.resultados[2].erro === 'Box de 1 a 26.' && /termina em 777/.test(r.resultados[3].erro), r.recado + ' ' + JSON.stringify(r.resultados));
+    const por = () => { const o = {}; ctx(m).cgCarregamentos_().forEach((x) => { o[x.n] = x; }); return o; };
+    let x = por();
+    afirmar(x['900001'].box === 5 && x['900001'].veiculo === '46115' && x['900001'].descricao === 'ROTA NORTE TESTE' && x['900001'].previsao === '17:30' && x['900001'].situacao === 'MOTORISTA A CAMINHO' && x['900001'].etapa === 'BOX',
+      'linha 1 (descricao do relatorio) ' + JSON.stringify(x['900001']).slice(0, 300));
+    afirmar(x['900002'].etapa === 'CARREGADA' && x['900002'].descricao === 'FPI-D-TESTE' && x['900002'].carregadaPor === COORD, 'linha 2 carregada');
+    // editar uma celula (so ela muda)
+    r = acao(m, s, 'carregamentoLoteCarga', { linhas: [{ id: x['900001'].id, motorista: 'MOTORISTA TESTE B' }] });
+    x = por();
+    afirmar(r.recado === 'Salvo.' && x['900001'].motorista === 'MOTORISTA TESTE B' && x['900001'].box === 5 && x['900001'].veiculo === '46115', 'celula ' + JSON.stringify(x['900001']).slice(0, 200));
+    // colar a mesma carga de novo: atualiza a linha aberta; "NÃO" reabre a carregada
+    r = acao(m, s, 'carregamentoLoteCarga', { linhas: [{ carga: '900001', box: '6' }, { id: x['900002'].id, carregada: 'NÃO' }] });
+    x = por();
+    afirmar(ctx(m).cgCarregamentos_().filter((y) => y.n === '900001').length === 1 && x['900001'].box === 6 && x['900002'].etapa === 'BOX', 'upsert e reabrir ' + JSON.stringify(r.resultados));
+    afirmar(/não existe mais/.test(acao(m, s, 'carregamentoLoteCarga', { linhas: [{ id: 'nada', box: 1 }] }).resultados[0].erro), 'id sumido');
+    afirmar(/No máximo 300/.test(erroDe(() => acao(m, s, 'carregamentoLoteCarga', { linhas: Array.from({ length: 301 }, () => ({ carga: '1' })) }))), 'limite');
+    afirmar(x['900001'].hist.map((h) => h[2]).join(' | ') === 'registrou no box 5 | editou | editou · box 6', 'historico ' + x['900001'].hist.map((h) => h[2]).join(' | '));
+  });
+
+  await caso('cadastros do pátio: motoristas (código, nome, placa), destinos, horários e observações; repetido recusado; a aba Cadastro da planilha antiga lida pelo conteúdo e importada junto (nunca grava nela)', () => {
+    const m = mundo(); const s = entrar(m, GERENTE, '5555');
+    let r = acao(m, s, 'cadastroCarga', { op: 'salvar', tipo: 'MOTORISTA', codigo: '900111', valor: 'Motorista Teste Um', placa: 'tst1a23' });
+    afirmar(r.cadastro.motoristas[0].nome === 'MOTORISTA TESTE UM' && r.cadastro.motoristas[0].placa === 'TST1A23' && r.cadastro.motoristas[0].codigo === '900111', 'motorista');
+    afirmar(/já está no cadastro/.test(erroDe(() => acao(m, s, 'cadastroCarga', { op: 'salvar', tipo: 'MOTORISTA', valor: 'motorista teste um' }))), 'repetido');
+    acao(m, s, 'cadastroCarga', { op: 'salvar', tipo: 'DESTINO', valor: 'fpi-d-teste' });
+    r = acao(m, s, 'cadastroCarga', { op: 'salvar', tipo: 'HORARIO', valor: '5:30' });
+    afirmar(r.cadastro.horarios[0].valor === '05:30' && r.cadastro.destinos[0].valor === 'FPI-D-TESTE', 'horario e destino');
+    afirmar(/escreva como 05:30/.test(erroDe(() => acao(m, s, 'cadastroCarga', { op: 'salvar', tipo: 'HORARIO', valor: 'cedo' }))), 'horario invalido');
+    r = acao(m, s, 'cadastroCarga', { op: 'excluir', id: r.cadastro.horarios[0].id });
+    afirmar(!r.cadastro.horarios.length, 'excluiu');
+    r = acao(m, s, 'cadastroCarga', { op: 'situacoes', lista: 'JÁ NO BOX; carregando; Já no box; AGUARDANDO NOTA' });
+    afirmar(ctx(m).cgSituacoesBox_().join('|') === 'JÁ NO BOX|CARREGANDO|AGUARDANDO NOTA|CARRO NO PATIO|MARCOU E NAO VEIO', 'situacoes ' + ctx(m).cgSituacoesBox_().join('|'));
+    const c = ctx(m);
+    const lm = c.cgLerMotorista_('144001 - MOTORISTA TESTE DOIS (ABC1D23)');
+    afirmar(lm.codigo === '144001' && lm.nome === 'MOTORISTA TESTE DOIS' && lm.placa === 'ABC1D23' && c.cgLerMotorista_('SO O NOME').nome === 'SO O NOME', 'ler motorista');
+    const cad = c.cgInterpretarCadastro_([
+      ['', 'ROTA TESTE A', 'AMANHA CEDO', '0.0208333333333333'],
+      ['900201 - MOTORISTA TESTE TRES (TST3C33)', 'ROTA TESTE B', 'JÁ NO BOX', '0.0833333333333333'],
+      ['900202 - MOTORISTA TESTE QUATRO', 'ROTA TESTE C', 'NOVA SITUACAO', '0.645833333333333']
+    ]);
+    afirmar(cad.motoristas.length === 2 && cad.motoristas[1].placa === '' && cad.destinos.join() === 'ROTA TESTE A,ROTA TESTE B,ROTA TESTE C' && cad.horarios.join() === '00:30,02:00,15:30' &&
+      cad.situacoes.join() === 'AMANHA CEDO,JÁ NO BOX,NOVA SITUACAO', 'cadastro lido ' + JSON.stringify(cad));
+    // importar da planilha antiga com a aba Cadastro
+    const pl = m.novaPlanilha('Controle de Boxes (teste)');
+    const Aba = Object.getPrototypeOf(pl.abas[0]).constructor;
+    pl.abas[0].nome = 'Controle';
+    [['CARGA', 'COMPLEMENTO', 'PRIORIDADE', 'BOX', 'CARRO', 'DESCRIÇÃO', 'MOTORISTA', 'CARREGADA?', 'OBSERVAÇÃO', '', 'HORÁRIO CHEGADA'],
+      ['900301', '', '', '4', '46200', 'ROTA TESTE A', '900201 - MOTORISTA TESTE TRES (TST3C33)', '', 'NOVA SITUACAO', '', '02:00']].forEach((l, i) => { pl.abas[0].dados[i] = l; });
+    const cadAba = new Aba(pl, 'Cadastro', 100, 10); pl.abas.push(cadAba);
+    [['', 'ROTA TESTE A', 'AMANHA CEDO', '00:30'], ['900201 - MOTORISTA TESTE TRES (TST3C33)', 'ROTA TESTE B', 'NOVA SITUACAO', '02:00'], ['900202 - MOTORISTA TESTE QUATRO', 'FPI-D-TESTE', 'JÁ NO BOX', '15:30']]
+      .forEach((l, i) => { cadAba.dados[i] = l; });
+    const antes = JSON.stringify(pl.abas.map((a) => a.dados));
+    r = acao(m, s, 'importarBoxesCarga', { link: 'https://docs.google.com/spreadsheets/d/' + pl.id + '/edit' });
+    afirmar(/1 carga importada/.test(r.recado) && /itens no cadastro/.test(r.recado), r.recado);
+    const cg = c.cgCadastro_();
+    afirmar(cg.motoristas.length === 3 && cg.destinos.length === 3 && cg.horarios.map((h) => h.valor).join() === '00:30,02:00,15:30', 'importou o cadastro (sem repetir o destino ja cadastrado) ' + JSON.stringify(cg).slice(0, 300));
+    afirmar(c.cgSituacoesBox_().indexOf('NOVA SITUACAO') !== -1, 'a observacao nova entrou na lista');
+    const x = c.cgCarregamentos_().find((y) => y.n === '900301');
+    afirmar(x && x.descricao === 'ROTA TESTE A' && x.previsao === '02:00' && x.veiculo === '46200' && x.situacao === 'NOVA SITUACAO' && /MOTORISTA TESTE TRES/.test(x.motorista), 'linha importada ' + JSON.stringify(x).slice(0, 300));
+    afirmar(JSON.stringify(pl.abas.map((a) => a.dados)) === antes, 'a planilha nao foi tocada');
+  });
+
+  await caso('migração 8.15 → 8.16: o check-out do CD inteiro sai, entram os da Miudeza (8) e do Nobre (10); as tabelas novas; o painel da carga desligado pelo administrador não volta a ligar', () => {
+    const m = mundo(); const c = ctx(m);
+    const banco = m.planilhas.get(c.prop('ID_BANCO', ''));
+    ['CARGA_PESSOAS', 'CARGA_ALOCACOES', 'CARGA_CADASTRO'].forEach((t) => { banco.abas = banco.abas.filter((a) => a.nome !== t); });
+    const abaEq = banco.abas.find((a) => a.nome === 'CARGA_EQUIPAMENTOS');
+    const cab = abaEq.dados[0];
+    abaEq.dados = abaEq.dados.filter((l, i) => !i || (l && l[cab.indexOf('TIPO')] !== 'CHECKOUT'));
+    m.cache.clear();
+    ctx(m).inserirVarios('CARGA_EQUIPAMENTOS', Array.from({ length: 12 }, (x, i) => ({ TIPO: 'CHECKOUT', DEPOSITO: '', NUMERO: String(i + 1), ESTADO: i === 2 ? 'MANUTENCAO' : 'LIVRE' })), 'teste');
+    const adm = entrar(m, DONO, '4321');
+    acao(m, adm, 'alterarPainel', { codigo: adm.f, painel: 'carga', estado: 'DESATIVADO' });
+    m.props.script.VERSAO_ESQUEMA = '8.13';          // como se a 8.14 ainda estivesse pendente
+    m.cache.clear();
+    entrar(m, DONO, '4321');
+    afirmar(m.props.script.VERSAO_ESQUEMA === '8.16', 'versao ' + m.props.script.VERSAO_ESQUEMA);
+    const chk = ctx(m).cgEquipamentos_().filter((e) => e.tipo === 'CHECKOUT');
+    afirmar(chk.length === 18 && chk.filter((e) => e.dep === 'MIUDEZA').length === 8 && chk.filter((e) => e.dep === 'NOBRE').length === 10 && !chk.some((e) => !e.dep), 'check-outs ' + chk.length);
+    afirmar(ctx(m).listar('CARGA_EQUIPAMENTOS').filter((r) => r.TIPO === 'CHECKOUT' && !r.DEPOSITO).length === 0, 'o do CD inteiro saiu');
+    ['CARGA_PESSOAS', 'CARGA_ALOCACOES', 'CARGA_CADASTRO'].forEach((t) => afirmar(banco.abas.some((a) => a.nome === t), 'tabela ' + t));
+    afirmar(banco.abas.find((a) => a.nome === 'CARGA_CARREGAMENTO').dados[0].indexOf('DESCRICAO') !== -1, 'coluna DESCRICAO');
+    const f = ctx(m).listar('FILIAIS').find((x) => x.PRINCIPAL === 'SIM');
+    afirmar(JSON.parse(f.PAINEIS).carga === 'DESATIVADO', 'o painel desligado ficou desligado: ' + f.PAINEIS);
+    // de novo: nada muda
+    m.cache.clear(); m.props.script.VERSAO_ESQUEMA = '8.15'; entrar(m, DONO, '4321');
+    afirmar(ctx(m).cgEquipamentos_().filter((e) => e.tipo === 'CHECKOUT').length === 18, 'idempotente');
+  });
+
   const falhas = resultados.filter((x) => !x).length;
   console.log('\n' + (resultados.length - falhas) + '/' + resultados.length + ' casos ok');
   process.exit(falhas ? 1 : 0);

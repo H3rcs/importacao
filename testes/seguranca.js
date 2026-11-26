@@ -119,6 +119,12 @@ const bloqueadas = [
   ['acaoPassagemCarga', FALSO, { op: 'confirmar', sai: 'A', entra: 'B' }],
   ['acaoParametrosCarga', FALSO, { boxes: 30 }],
   ['migrarCarga815_'], ['cgLerPlanilhaBoxes_', LINK_APZ.split('/')[5]], ['cgPatioDaTela_', []], ['cgSalvarParametro_', 'CARGA_BOXES', '1', 'x'],
+  // 8.16: Situacao de Carga fase 3 — subturno 5x2, alocacao automatica e em lote, grade Controle e cadastros do patio
+  ['acaoSubturnoCarga', FALSO, { pessoas: [{ k: 'C123', nome: 'x', equipe: '1° TURNO' }], subturno: 'A1' }],
+  ['acaoDesfazerAutoCarga', FALSO, { id: 'x' }], ['acaoAlocarLoteCarga', FALSO, { itens: [] }],
+  ['acaoCarregamentoLoteCarga', FALSO, { linhas: [{ carga: '762480', box: 1 }] }],
+  ['acaoCadastroCarga', FALSO, { op: 'salvar', tipo: 'DESTINO', valor: 'x' }],
+  ['cgAutoTurno_'], ['cgEntradaAuto_', 'A', '2026-11-25', []], ['cgSaidaAuto_', 'A', '2026-11-25'], ['migrarCheckoutsPorDeposito_'],
   ['cgMesclarSequencia_', [], '2026-11-25T08:00:00', 'x'], ['cgFaltas_', [], '2026-11-25T08:00:00', true]
 ];
 const emailsAntesDosAtaques = m.emails.length;

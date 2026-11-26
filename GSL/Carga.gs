@@ -2039,7 +2039,14 @@ function acaoImportarBoxesCarga(usuario, params) {
   let novos = 0, pulados = 0, cadNovos = 0;
   comTrava(function () {
     const agora = cgAgoraIso_();
-    const cargas = cgCargasDoUltimo_(), nBoxes = cgNBoxes_(), lista = cgSituacoesBox_();
+    const cargas = cgCargasDoUltimo_(), nBoxes = cgNBoxes_();
+    // a aba Cadastro: as observacoes dela se juntam a lista antes (as linhas do Controle usam a lista)
+    const cad = lido.cadastro || { motoristas: [], destinos: [], horarios: [], situacoes: [] };
+    let lista = cgSituacoesBox_();
+    const mais = (cad.situacoes || []).filter(function (x, i, t) {
+      return !lista.some(function (y) { return cgObsNorm_(y) === cgObsNorm_(x); }) && t.findIndex(function (y) { return cgObsNorm_(y) === cgObsNorm_(x); }) === i;
+    });
+    if (mais.length) { lista = lista.concat(mais); cgSalvarParametro_('CARGA_SITUACOES_BOX', lista.join('; '), quem); }
     const abertas = {};
     cgCarregamentos_().forEach(function (x) { if (x.etapa !== 'CARREGADA') abertas[x.n] = true; });
     const boxDoQuadro = {};
@@ -2078,8 +2085,7 @@ function acaoImportarBoxesCarga(usuario, params) {
         HISTORICO: cgHist_(null, nomeQuem, 'importou do quadro dos boxes da planilha antiga', agora) });
     });
     if (linhas.length) inserirVarios('CARGA_CARREGAMENTO', linhas, quem);
-    // a aba Cadastro: motoristas, destinos e horarios entram (o que ja existe fica); as observacoes se juntam a lista
-    const cad = lido.cadastro || { motoristas: [], destinos: [], horarios: [], situacoes: [] };
+    // a aba Cadastro: motoristas, destinos e horarios entram (o que ja existe fica)
     const tem = {};
     listar('CARGA_CADASTRO').forEach(function (r) { tem[String(r.TIPO) + '|' + cgNorm_(r.VALOR)] = true; });
     const novosCad = [];
@@ -2089,9 +2095,6 @@ function acaoImportarBoxesCarga(usuario, params) {
     cad.horarios.forEach(function (v) { add('HORARIO', { VALOR: v, CODIGO: '', PLACA: '' }); });
     if (novosCad.length) inserirVarios('CARGA_CADASTRO', novosCad, quem);
     cadNovos = novosCad.length;
-    const sit = cgSituacoesBox_();
-    const mais = (cad.situacoes || []).filter(function (x) { return !sit.some(function (y) { return cgObsNorm_(y) === cgObsNorm_(x); }); });
-    if (mais.length) cgSalvarParametro_('CARGA_SITUACOES_BOX', sit.concat(mais).join('; '), quem);
   });
   esquecerLeituras();
   return { ok: true, patio: cgPatioDaTela_(cgCargasDoUltimo_()), g: cgGeracao_(),
@@ -2610,11 +2613,12 @@ function cgAutoDaTela_(agoraIso) {
  */
 function acaoAlocarLoteCarga(usuario, params) {
   const itens = (params && params.itens) || [];
-  if (!Array.isArray(itens) || !itens.length) throw new Error('Ninguém para alocar.');
-  if (itens.length > 300) throw new Error('No máximo 300 pessoas de uma vez.');
   let feitas = 0;
   const erros = [];
+  exigirPorta_();             // quem chama de fora e barrado antes de ver as mensagens abaixo
   comTrava(function () {
+    if (!Array.isArray(itens) || !itens.length) throw new Error('Ninguém para alocar.');
+    if (itens.length > 300) throw new Error('No máximo 300 pessoas de uma vez.');
     const agora = cgAgoraIso_(), turnos = cgTurnos_();
     const faltou = {};
     cgFaltas_(turnos, agora).forEach(function (f) { faltou[f.k] = true; });
@@ -2764,7 +2768,7 @@ function cgInterpretarCadastro_(valores) {
     } else if (conta(function (v) { const c = cgCategoriaObs_(v); return c && c !== 'outra'; }) >= 0.4) {
       col.forEach(function (v) { if (!/^OBSERVA/i.test(cgNorm_(v))) saida.situacoes.push(cgTexto_(v, 40).toUpperCase()); });
     } else if (conta(function (v) { return /[A-Za-z]/.test(v); }) >= 0.6) {
-      col.forEach(function (v) { if (!/^(DESCRI|DESTINO|ROTA)/i.test(cgNorm_(v))) saida.destinos.push(cgTexto_(v, 80).toUpperCase()); });
+      col.forEach(function (v) { if (!/^(DESCRICAO|DESTINOS?|ROTAS?)$/.test(cgNorm_(v))) saida.destinos.push(cgTexto_(v, 80).toUpperCase()); });
     }
   }
   return saida;
